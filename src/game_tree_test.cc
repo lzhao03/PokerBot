@@ -140,8 +140,8 @@ void CheckRaiseAndFold(GameTree* tree) {
   Expect(folded.player_to_act() == -1, "fold clears player to act");
   Expect(folded.history().actions_size() == 2, "fold is recorded");
   Expect(tree->is_terminal(folded), "fold is terminal");
-  Expect(tree->get_utility(folded, Hand(), Hand()) == folded.pot(),
-         "fold utility pays player A when player B folds");
+  Expect(tree->get_utility(folded, Hand(), Hand()) == 2,
+         "fold utility is net chips for player A");
 }
 
 void CheckLegalActions(GameTree* tree) {
@@ -159,8 +159,8 @@ void CheckShowdownUtility(GameTree* tree) {
   Hand player_b = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
 
   Expect(tree->is_terminal(showdown), "closed river action is terminal");
-  Expect(tree->get_utility(showdown, player_a, player_b) == 20,
-         "showdown utility pays pot to winning player A");
+  Expect(tree->get_utility(showdown, player_a, player_b) == 10,
+         "showdown utility is net chips for player A");
 }
 
 void CheckChanceAdvancesStreet(GameTree* tree) {

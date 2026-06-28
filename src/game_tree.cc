@@ -283,14 +283,16 @@ BoardState GameTree::apply_action(const BoardState& state, const Action& action)
 }
 
 double GameTree::get_utility(const BoardState& state, const Hand& player_a_hand, const Hand& player_b_hand) {
+  double player_a_contribution = Contribution(state, 0);
+
   // If a player has folded, return the appropriate utility
   if (state.folded_player() >= 0) {
     if (state.folded_player() == 0) {
       // Player A folded, they lose their contribution to the pot
-      return -state.player_contribution(0);
+      return -player_a_contribution;
     } else {
-      // Player B folded, Player A wins the pot
-      return state.pot();
+      // Player B folded, Player A wins the pot net of chips already committed
+      return state.pot() - player_a_contribution;
     }
   }
   
@@ -308,13 +310,13 @@ double GameTree::get_utility(const BoardState& state, const Hand& player_a_hand,
     
     if (comparison > 0) {
       // Player A wins
-      return state.pot();
+      return state.pot() - player_a_contribution;
     } else if (comparison < 0) {
       // Player B wins
-      return -state.player_contribution(0);
+      return -player_a_contribution;
     } else {
       // Tie, split the pot
-      return 0.0;
+      return (state.pot() / 2.0) - player_a_contribution;
     }
   } catch (const std::exception& e) {
     std::cerr << "Error evaluating hands: " << e.what() << std::endl;
