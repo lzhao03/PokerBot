@@ -1,0 +1,126 @@
+load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
+load("@protobuf//bazel:proto_library.bzl", "proto_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+
+proto_library(
+    name = "poker",
+    srcs = ["poker.proto"],
+    visibility = ["//visibility:public"],
+)
+
+cc_proto_library(
+    name = "poker_cc_proto",
+    deps = [":poker"],
+)
+
+cc_library(
+    name = "hand_evaluator",
+    srcs = ["hand_evaluator.cc"],
+    hdrs = ["hand_evaluator.h"],
+    deps = [
+        ":poker_cc_proto",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "game_tree",
+    srcs = ["game_tree.cc"],
+    hdrs = ["game_tree.h"],
+    deps = [
+        ":poker_cc_proto",
+        ":hand_evaluator",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "game_tree_test",
+    srcs = ["game_tree_test.cc"],
+    deps = [
+        ":game_tree",
+    ],
+)
+
+cc_library(
+    name = "strategy",
+    srcs = ["strategy.cc"],
+    hdrs = ["strategy.h"],
+    deps = [
+        ":poker_cc_proto",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "info_set",
+    srcs = ["info_set.cc"],
+    hdrs = ["info_set.h"],
+    deps = [
+        ":poker_cc_proto",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "hand_range",
+    srcs = ["hand_range.cc"],
+    hdrs = ["hand_range.h"],
+    deps = [
+        ":poker_cc_proto",
+        ":hand_evaluator",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "utility_calculator",
+    srcs = ["utility_calculator.cc"],
+    hdrs = ["utility_calculator.h"],
+    deps = [
+        ":poker_cc_proto",
+        ":hand_evaluator",
+        ":hand_range",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "cfr_solver",
+    srcs = ["cfr_solver.cc"],
+    hdrs = ["cfr_solver.h"],
+    deps = [
+        ":poker_cc_proto",
+        ":hand_evaluator",
+        ":game_tree",
+        ":strategy",
+        ":info_set",
+        ":hand_range",
+        ":utility_calculator",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "cfr_solver_test",
+    srcs = ["cfr_solver_test.cc"],
+    deps = [
+        ":cfr_solver",
+    ],
+)
+
+cc_binary(
+    name = "poker_solver",
+    srcs = ["main.cc"],
+    deps = [
+        ":poker_cc_proto",
+        ":hand_evaluator",
+        ":game_tree",
+        ":strategy",
+        ":info_set",
+        ":hand_range",
+        ":utility_calculator",
+        ":cfr_solver",
+        "@protobuf//:protobuf",
+    ],
+)

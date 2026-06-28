@@ -1,0 +1,19 @@
+# For target (your binaries/libraries)
+build --cxxopt="-std=c++17"
+
+# For host (the C++ code in your dependencies, e.g. plugins, cc_toolchains)
+build --host_cxxopt="-std=c++17"
+
+# (Optional) warnings as errors everywhere
+build --cxxopt="-Wall" 
+build --cxxopt="-Werror"
+build --host_cxxopt="-Wall"
+build --host_cxxopt="-Werror"
+
+# Optimize on the 'opt' config
+build:opt --cxxopt="-O3"
+build:opt --host_cxxopt="-O3"
+
+# Make 'opt' the default
+build --config=opt
+

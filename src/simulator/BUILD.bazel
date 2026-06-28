@@ -1,0 +1,25 @@
+load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+cc_proto_library(
+    name = "poker_cc_proto",
+    deps = ["//src:poker"],
+)
+
+cc_library(
+    name = "simulator",
+    srcs = ["simulator.cc"],
+    hdrs = ["simulator.h"],
+    deps = [
+        ":poker_cc_proto",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "simulator_test",
+    srcs = ["simulator_test.cc"],
+    deps = [
+        ":simulator",
+    ],
+)

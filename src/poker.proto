@@ -1,0 +1,76 @@
+// poker.proto
+syntax = "proto3";
+
+package poker;
+
+message PokerConfig {
+  repeated double bet_sizes = 1;
+  int32 starting_stack_size = 2;
+  int32 max_depth = 3;
+  bool enable_logging = 4;
+}
+
+enum Suit {
+  UNKNOWN_SUIT = 0;
+  HEARTS = 1;
+  DIAMONDS = 2;
+  CLUBS = 3;
+  SPADES = 4;
+}
+
+enum Street {
+  PREFLOP = 0;
+  FLOP = 1;
+  TURN = 2;
+  RIVER = 3;
+}
+
+enum ActionType {
+  NO_ACTION = 0;
+  BET = 1;
+  FOLD = 2;
+  CALL = 3;
+  RAISE = 4;
+  CHECK = 5;
+  ALL_IN = 6;
+}
+
+message Action {
+  ActionType action = 1;
+  float amount = 2;
+}
+
+message ActionHistory {
+  repeated Action actions = 1;
+}
+
+message BoardState {
+  int32 stack_a = 1;
+  int32 stack_b = 2;
+  int32 pot = 3;
+  repeated Card cards = 4;
+  ActionHistory history = 5;
+  Street street = 6;
+  bool all_in = 7;
+  int32 folded_player = 8;  // -1 if no player has folded
+  repeated double player_contribution = 9;  // Amount each player has contributed to the pot
+  int32 player_to_act = 10;  // Player ID whose turn it is to act
+}
+
+message Card {
+  int32 rank = 1;  // Rank from 1 (Ace) to 13 (King).
+  Suit suit = 2;
+}
+
+message Hand {
+  repeated Card cards = 1;
+}
+
+message PokerHandPolicy {
+  repeated double action_policy = 1;
+  repeated Hand hands = 2;
+}
+
+message PokerRange {
+  repeated double distribution = 1;
+}
