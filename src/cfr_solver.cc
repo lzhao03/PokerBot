@@ -68,6 +68,12 @@ int CardsForNextStreet(Street street) {
   }
 }
 
+int ActionKey(const Action& action) {
+  // ponytail: amounts are whole chips today; use a structured key if fractional chips matter.
+  return static_cast<int>(action.action()) * 1000000 +
+         static_cast<int>(std::lround(action.amount()));
+}
+
 Hand DealHand(std::vector<Card>* deck) {
   if (deck->size() < 2) {
     throw std::runtime_error("Not enough cards to deal a hand");
@@ -203,7 +209,7 @@ double CFRSolver::cfr(GameTree::Node* node,
   
   // For each action, recursively call CFR and compute the expected value
   for (const Action& action : node->legal_actions) {
-    int action_id = static_cast<int>(action.action());
+    int action_id = ActionKey(action);
     
     // Create child node for this action if it doesn't exist
     if (node->children.find(action_id) == node->children.end()) {
@@ -234,7 +240,7 @@ double CFRSolver::cfr(GameTree::Node* node,
     
     // For each action, compute and accumulate the counterfactual regret
     for (const Action& action : node->legal_actions) {
-      int action_id = static_cast<int>(action.action());
+      int action_id = ActionKey(action);
       
       // Compute the regret for this action
       double regret = opponent_reach_prob * (action_values[action_id] - node_value);
@@ -411,7 +417,7 @@ Strategy::ActionProbabilities CFRSolver::get_strategy(
   std::vector<int> action_ids;
   action_ids.reserve(legal_actions.size());
   for (const Action& action : legal_actions) {
-    int action_id = static_cast<int>(action.action());
+    int action_id = ActionKey(action);
     if (regrets.find(action_id) == regrets.end()) {
       regrets[action_id] = 0.0;
     }
