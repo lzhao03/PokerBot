@@ -192,7 +192,8 @@ double CFRSolver::cfr(GameTree::Node* node,
   std::string info_set_key = info_set_abstraction_->state_to_info_set(node->state, player, player_hand);
   
   // Get the current strategy for this information set
-  Strategy::ActionProbabilities strategy = get_strategy(info_set_key);
+  Strategy::ActionProbabilities strategy =
+      get_strategy(info_set_key, node->legal_actions);
   
   // Initialize expected values for each action
   std::unordered_map<int, double> action_values;
@@ -398,46 +399,48 @@ double CFRSolver::get_expected_value(int player_id) const {
   return 0.0;
 }
 
-Strategy::ActionProbabilities CFRSolver::regret_matching(const std::string& info_set_key) {
+Strategy::ActionProbabilities CFRSolver::get_strategy(
+    const std::string& info_set_key,
+    const std::vector<Action>& legal_actions) {
   Strategy::ActionProbabilities strategy;
-  
-  // Get the cumulative regrets for this information set
-  const auto& regrets = cumulative_regrets_[info_set_key];
+  auto& regrets = cumulative_regrets_[info_set_key];
+  if (legal_actions.empty()) {
+    return strategy;
+  }
+
+  std::vector<int> action_ids;
+  action_ids.reserve(legal_actions.size());
+  for (const Action& action : legal_actions) {
+    int action_id = static_cast<int>(action.action());
+    if (regrets.find(action_id) == regrets.end()) {
+      regrets[action_id] = 0.0;
+    }
+    if (std::find(action_ids.begin(), action_ids.end(), action_id) ==
+        action_ids.end()) {
+      action_ids.push_back(action_id);
+    }
+  }
   
   // Compute the sum of positive regrets
   double sum_positive_regrets = 0.0;
-  for (const auto& regret_pair : regrets) {
-    sum_positive_regrets += std::max(0.0, regret_pair.second);
+  for (int action_id : action_ids) {
+    sum_positive_regrets += std::max(0.0, regrets[action_id]);
   }
   
   // If there are positive regrets, use regret matching
   if (sum_positive_regrets > 0.0) {
-    for (const auto& regret_pair : regrets) {
-      strategy[regret_pair.first] = std::max(0.0, regret_pair.second) / sum_positive_regrets;
+    for (int action_id : action_ids) {
+      strategy[action_id] = std::max(0.0, regrets[action_id]) / sum_positive_regrets;
     }
   } else {
     // If all regrets are negative or zero, use a uniform strategy
-    double uniform_prob = 1.0 / regrets.size();
-    for (const auto& regret_pair : regrets) {
-      strategy[regret_pair.first] = uniform_prob;
+    double uniform_prob = 1.0 / action_ids.size();
+    for (int action_id : action_ids) {
+      strategy[action_id] = uniform_prob;
     }
   }
   
   return strategy;
-}
-
-Strategy::ActionProbabilities CFRSolver::get_strategy(const std::string& info_set_key) {
-  // If this is a new information set, initialize it with a uniform strategy
-  if (cumulative_regrets_.find(info_set_key) == cumulative_regrets_.end()) {
-    // Assume there are 3 possible actions (fold, call, bet)
-    // In a real implementation, this would be based on the legal actions
-    cumulative_regrets_[info_set_key][static_cast<int>(ActionType::FOLD)] = 0.0;
-    cumulative_regrets_[info_set_key][static_cast<int>(ActionType::CALL)] = 0.0;
-    cumulative_regrets_[info_set_key][static_cast<int>(ActionType::BET)] = 0.0;
-  }
-  
-  // Use regret matching to compute the current strategy
-  return regret_matching(info_set_key);
 }
 
 void CFRSolver::update_strategy(const std::string& info_set_key, const Strategy::ActionProbabilities& strategy, double reach_prob) {

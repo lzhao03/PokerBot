@@ -60,8 +60,9 @@ private:
   Strategy current_strategy_;
   
   // Helper methods
-  Strategy::ActionProbabilities regret_matching(const std::string& info_set_key);
-  Strategy::ActionProbabilities get_strategy(const std::string& info_set_key);
+  Strategy::ActionProbabilities get_strategy(
+      const std::string& info_set_key,
+      const std::vector<Action>& legal_actions);
   void update_strategy(const std::string& info_set_key, const Strategy::ActionProbabilities& strategy, double reach_prob);
   double chance_sampling_cfr(GameTree::Node* node, const Hand& player_a_hand, const Hand& player_b_hand, std::vector<double>& reach_probabilities, int iteration, int depth, int max_depth);
   double external_sampling_cfr(GameTree::Node* node, const Hand& player_a_hand, const Hand& player_b_hand, std::vector<double>& reach_probabilities, int iteration);
