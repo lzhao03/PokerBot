@@ -167,6 +167,52 @@ void CheckRunUsesConfiguredBlinds() {
          "configured blinds should set the root call amount");
 }
 
+BoardState FoldedState(int folded_player) {
+  BoardState state;
+  state.set_pot(10);
+  state.set_folded_player(folded_player);
+  state.add_player_contribution(5);
+  state.add_player_contribution(5);
+  return state;
+}
+
+void CheckPlayerBRegretsUsePlayerBUtility() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+
+  CFRSolver solver(config);
+  GameTree::Node node;
+  node.state.set_player_to_act(1);
+  node.player_to_act = 1;
+
+  Action player_b_loses = MakeAction(ActionType::FOLD);
+  Action player_b_wins = MakeAction(ActionType::CALL, 1);
+  node.legal_actions.push_back(player_b_loses);
+  node.legal_actions.push_back(player_b_wins);
+
+  GameTree::Node* player_b_loses_child = new GameTree::Node();
+  player_b_loses_child->state = FoldedState(1);
+  player_b_loses_child->is_terminal = true;
+  node.children[TestActionKey(ActionType::FOLD)] = player_b_loses_child;
+
+  GameTree::Node* player_b_wins_child = new GameTree::Node();
+  player_b_wins_child->state = FoldedState(0);
+  player_b_wins_child->is_terminal = true;
+  node.children[TestActionKey(ActionType::CALL, 1)] = player_b_wins_child;
+
+  Hand player_a_hand;
+  Hand player_b_hand;
+  std::vector<double> reach_probabilities = {1.0, 1.0};
+  solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 2);
+  solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 1, 0, 2);
+
+  const Strategy strategy = solver.get_equilibrium_strategy();
+  const auto action_probs = strategy.get_strategy(strategy.get_info_sets()[0]);
+  Expect(action_probs.at(TestActionKey(ActionType::CALL, 1)) >
+             action_probs.at(TestActionKey(ActionType::FOLD)),
+         "player B should prefer the action that lowers player A utility");
+}
+
 }  // namespace
 
 int main() {
@@ -174,6 +220,7 @@ int main() {
   CheckCfrDistinguishesActionAmounts();
   CheckSaveStrategyUsesReadableActions();
   CheckRunUsesConfiguredBlinds();
+  CheckPlayerBRegretsUsePlayerBUtility();
 
   PokerConfig config;
   config.add_bet_sizes(1.0);

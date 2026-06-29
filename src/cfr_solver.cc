@@ -288,8 +288,11 @@ double CFRSolver::cfr(GameTree::Node* node,
     for (const Action& action : node->legal_actions) {
       int action_id = ActionKey(action);
       
-      // Compute the regret for this action
-      double regret = opponent_reach_prob * (action_values[action_id] - node_value);
+      // get_utility returns player A's utility; player B's regret uses the
+      // opposite payoff in this zero-sum game.
+      double utility_sign = player == 0 ? 1.0 : -1.0;
+      double regret =
+          opponent_reach_prob * utility_sign * (action_values[action_id] - node_value);
       
       // Accumulate the regret
       cumulative_regrets_[info_set_key][action_id] += regret;

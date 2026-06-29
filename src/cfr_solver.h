@@ -21,7 +21,7 @@ public:
   void run(int iterations);
   
   // The core CFR algorithm
-  // Returns the expected value of the game for the current player
+  // Returns the expected value of the game for player A.
   double cfr(GameTree::Node* node, 
              const Hand& player_a_hand, 
              const Hand& player_b_hand,
