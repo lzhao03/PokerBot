@@ -176,6 +176,24 @@ BoardState FoldedState(int folded_player) {
   return state;
 }
 
+void CheckTerminalUtilityBeatsDepthLimit() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+
+  CFRSolver solver(config);
+  GameTree::Node node;
+  node.state = FoldedState(1);
+  node.is_terminal = true;
+
+  Hand player_a_hand;
+  Hand player_b_hand;
+  std::vector<double> reach_probabilities = {1.0, 1.0};
+  double value =
+      solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
+
+  Expect(value == 5.0, "terminal utility should be returned at the depth limit");
+}
+
 void CheckPlayerBRegretsUsePlayerBUtility() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -220,6 +238,7 @@ int main() {
   CheckCfrDistinguishesActionAmounts();
   CheckSaveStrategyUsesReadableActions();
   CheckRunUsesConfiguredBlinds();
+  CheckTerminalUtilityBeatsDepthLimit();
   CheckPlayerBRegretsUsePlayerBUtility();
 
   PokerConfig config;

@@ -219,14 +219,14 @@ double CFRSolver::cfr(GameTree::Node* node,
                       int iteration,
                       int depth,
                       int max_depth) {
-  // Check depth limit to prevent infinite recursion
-  if (depth >= max_depth) {
-    return 0.0;
-  }
-  
   // If the node is a terminal node, return the utility
   if (node->is_terminal) {
     return game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
+  }
+
+  // Check depth limit to prevent infinite recursion
+  if (depth >= max_depth) {
+    return 0.0;
   }
   
   // If the node is a chance node, sample an outcome and continue
