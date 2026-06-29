@@ -19,6 +19,22 @@ std::string ActionHistoryKey(const ActionHistory& history) {
   return oss.str();
 }
 
+std::string PublicStateKey(const BoardState& state) {
+  std::ostringstream oss;
+  oss << "S" << static_cast<int>(state.street()) << ":POT" << state.pot()
+      << ":ST" << state.stack_a() << "," << state.stack_b() << ":AI"
+      << state.all_in() << ":F" << state.folded_player() << ":T"
+      << state.player_to_act() << ":C[";
+  for (int i = 0; i < state.player_contribution_size(); ++i) {
+    if (i > 0) {
+      oss << ",";
+    }
+    oss << state.player_contribution(i);
+  }
+  oss << "]";
+  return oss.str();
+}
+
 }  // namespace
 
 std::string InfoSetAbstraction::state_to_info_set(const BoardState& state, int player_id, const Hand& player_hand) const {
@@ -45,6 +61,7 @@ std::string InfoSetAbstraction::state_to_info_set(const BoardState& state, int p
   }
   oss << "]:";
   
+  oss << PublicStateKey(state) << ":";
   oss << "A[" << ActionHistoryKey(state.history()) << "]";
   
   return oss.str();
@@ -112,7 +129,8 @@ bool InfoSetAbstraction::same_info_set(const BoardState& state1, const BoardStat
       return false;
     }
   }
-  return ActionHistoryKey(state1.history()) == ActionHistoryKey(state2.history());
+  return PublicStateKey(state1) == PublicStateKey(state2) &&
+         ActionHistoryKey(state1.history()) == ActionHistoryKey(state2.history());
 }
 
 std::string InfoSetAbstraction::info_set_to_string(const std::string& info_set_key) const {

@@ -75,6 +75,21 @@ int main() {
   poker::Expect(!abstraction.same_info_set(checked, bet, 0),
                 "same_info_set should include action history");
 
+  poker::BoardState small_pot = poker::MakeState();
+  small_pot.set_pot(10);
+  small_pot.set_stack_a(90);
+  small_pot.set_stack_b(90);
+  small_pot.add_player_contribution(5);
+  small_pot.add_player_contribution(5);
+  poker::BoardState large_pot = small_pot;
+  large_pot.set_pot(20);
+  std::string small_pot_key = abstraction.state_to_info_set(small_pot, 0, hand);
+  std::string large_pot_key = abstraction.state_to_info_set(large_pot, 0, hand);
+  poker::Expect(small_pot_key != large_pot_key,
+                "different public pot sizes need different info sets");
+  poker::Expect(!abstraction.same_info_set(small_pot, large_pot, 0),
+                "same_info_set should include public pot size");
+
   poker::InfoSetAbstraction::InfoSetComponents components =
       abstraction.parse_info_set(bet_key);
   poker::Expect(components.betting_history.size() == 1,
