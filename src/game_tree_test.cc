@@ -180,6 +180,27 @@ void CheckAllInAction(GameTree* tree) {
          "all-in records committed chips");
 }
 
+void CheckAllInEquivalentActionsAreDeduped() {
+  PokerConfig open_config;
+  open_config.add_bet_sizes(24.5);
+  GameTree open_tree(open_config);
+
+  std::vector<Action> open_actions = open_tree.get_legal_actions(FlopState());
+  Expect(open_actions.size() == 2, "full-stack bet size should become all-in only");
+  Expect(open_actions[0].action() == ActionType::CHECK, "first open action is check");
+  Expect(open_actions[1].action() == ActionType::ALL_IN, "second open action is all-in");
+
+  PokerConfig raise_config;
+  raise_config.add_bet_sizes(32.7);
+  GameTree raise_tree(raise_config);
+
+  std::vector<Action> raise_actions = raise_tree.get_legal_actions(PreflopState());
+  Expect(raise_actions.size() == 3, "full-stack raise size should become all-in only");
+  Expect(raise_actions[0].action() == ActionType::FOLD, "first facing action is fold");
+  Expect(raise_actions[1].action() == ActionType::CALL, "second facing action is call");
+  Expect(raise_actions[2].action() == ActionType::ALL_IN, "third facing action is all-in");
+}
+
 void CheckShowdownUtility(GameTree* tree) {
   BoardState showdown = ShowdownState();
   Hand player_a = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
@@ -229,6 +250,7 @@ int main() {
   poker::CheckRaiseAndFold(&tree);
   poker::CheckLegalActions(&tree);
   poker::CheckAllInAction(&tree);
+  poker::CheckAllInEquivalentActionsAreDeduped();
   poker::CheckShowdownUtility(&tree);
   poker::CheckChanceAdvancesStreet(&tree);
   return 0;

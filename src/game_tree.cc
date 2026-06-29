@@ -188,7 +188,7 @@ std::vector<Action> GameTree::get_legal_actions(const BoardState& state) const {
     for (int i = 0; i < config_.bet_sizes_size(); ++i) {
       int raise_amount =
           to_call + ConcreteBetAmount(state, config_.bet_sizes(i));
-      if (raise_amount <= stack) {
+      if (raise_amount < stack) {
         Action raise_action;
         raise_action.set_action(ActionType::RAISE);
         raise_action.set_amount(raise_amount);
@@ -206,7 +206,7 @@ std::vector<Action> GameTree::get_legal_actions(const BoardState& state) const {
 
     for (int i = 0; i < config_.bet_sizes_size(); ++i) {
       int bet_amount = ConcreteBetAmount(state, config_.bet_sizes(i));
-      if (bet_amount <= stack) {
+      if (bet_amount < stack) {
         Action bet_action;
         bet_action.set_action(ActionType::BET);
         bet_action.set_amount(bet_amount);
