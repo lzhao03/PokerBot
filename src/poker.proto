@@ -79,3 +79,17 @@ message PokerHandPolicy {
 message PokerRange {
   repeated double distribution = 1;
 }
+
+message StrategyActionSnapshot {
+  int32 action_id = 1;
+  double probability = 2;
+}
+
+message StrategyInfoSetSnapshot {
+  string info_set_key = 1;
+  repeated StrategyActionSnapshot actions = 2;
+}
+
+message StrategySnapshot {
+  repeated StrategyInfoSetSnapshot info_sets = 1;
+}

@@ -4,10 +4,10 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
-#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace poker;
@@ -100,6 +100,29 @@ BoardState InitialRootState(const PokerConfig& config) {
   return state;
 }
 
+void WriteStrategySnapshot(const std::string& path,
+                           const std::string& info_set_key,
+                           const std::vector<std::pair<int, double>>& actions) {
+  StrategySnapshot snapshot;
+  StrategyInfoSetSnapshot* info_set = snapshot.add_info_sets();
+  info_set->set_info_set_key(info_set_key);
+  for (const auto& action_prob : actions) {
+    StrategyActionSnapshot* action = info_set->add_actions();
+    action->set_action_id(action_prob.first);
+    action->set_probability(action_prob.second);
+  }
+
+  std::ofstream file(path, std::ios::binary);
+  Expect(snapshot.SerializeToOstream(&file), "strategy snapshot should write");
+}
+
+StrategySnapshot ReadStrategySnapshot(const std::string& path) {
+  StrategySnapshot snapshot;
+  std::ifstream file(path, std::ios::binary);
+  Expect(snapshot.ParseFromIstream(&file), "strategy snapshot should parse");
+  return snapshot;
+}
+
 void CheckCfrUsesLegalActions() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -173,7 +196,7 @@ void CheckCfrDistinguishesActionAmounts() {
   }
 }
 
-void CheckSaveStrategyUsesReadableActions() {
+void CheckSaveStrategyUsesProtobufSnapshot() {
   PokerConfig config;
   config.set_starting_stack_size(20);
 
@@ -197,17 +220,19 @@ void CheckSaveStrategyUsesReadableActions() {
   solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
 
   const char* test_tmpdir = std::getenv("TEST_TMPDIR");
-  std::string path = std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/strategy.txt";
+  std::string path = std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/strategy.pb";
   solver.save_strategy(path);
-  solver.load_strategy(path);
+  StrategySnapshot snapshot = ReadStrategySnapshot(path);
 
-  std::ifstream file(path);
-  std::string contents((std::istreambuf_iterator<char>(file)),
-                       std::istreambuf_iterator<char>());
-  Expect(contents.find("raise 5 ") != std::string::npos,
-         "saved strategy should use readable action names");
-  Expect(contents.find("4000005") == std::string::npos,
-         "saved strategy should not expose encoded action keys");
+  Expect(snapshot.info_sets_size() == 1, "saved snapshot should include one info set");
+  Expect(snapshot.info_sets(0).actions_size() == 1,
+         "saved snapshot should include one action");
+  Expect(snapshot.info_sets(0).actions(0).action_id() ==
+             TestActionKey(ActionType::RAISE, 5),
+         "saved snapshot should store encoded action id");
+  Expect(std::abs(snapshot.info_sets(0).actions(0).probability() - 1.0) <
+             0.000001,
+         "saved snapshot should store action probability");
 }
 
 void CheckLoadStrategyPopulatesEquilibriumStrategy() {
@@ -217,14 +242,10 @@ void CheckLoadStrategyPopulatesEquilibriumStrategy() {
   CFRSolver solver(config);
   const char* test_tmpdir = std::getenv("TEST_TMPDIR");
   std::string path =
-      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/loaded_strategy.txt";
-  {
-    std::ofstream file(path);
-    file << "loaded_info_set\n";
-    file << "fold 0.25\n";
-    file << "call 3 0.75\n";
-    file << "END_INFO_SET\n";
-  }
+      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/loaded_strategy.pb";
+  WriteStrategySnapshot(path, "loaded_info_set",
+                        {{TestActionKey(ActionType::FOLD), 0.25},
+                         {TestActionKey(ActionType::CALL, 3), 0.75}});
 
   solver.load_strategy(path);
 
@@ -251,13 +272,9 @@ void CheckEvaluateLoadedStrategy() {
 
   const char* test_tmpdir = std::getenv("TEST_TMPDIR");
   std::string path =
-      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/loaded_eval_strategy.txt";
-  {
-    std::ofstream file(path);
-    file << root_info_set << "\n";
-    file << "fold 1\n";
-    file << "END_INFO_SET\n";
-  }
+      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/loaded_eval_strategy.pb";
+  WriteStrategySnapshot(path, root_info_set,
+                        {{TestActionKey(ActionType::FOLD), 1.0}});
 
   CFRSolver solver(config);
   solver.load_strategy(path);
@@ -266,7 +283,7 @@ void CheckEvaluateLoadedStrategy() {
          "evaluated fold strategy should lose the small blind");
 
   std::string saved_path =
-      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/saved_eval_strategy.txt";
+      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/saved_eval_strategy.pb";
   solver.save_strategy(saved_path);
 
   CFRSolver loaded(config);
@@ -288,13 +305,9 @@ void CheckExploitabilityDetectsFoldStrategy() {
 
   const char* test_tmpdir = std::getenv("TEST_TMPDIR");
   std::string path =
-      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/exploitability_strategy.txt";
-  {
-    std::ofstream file(path);
-    file << root_info_set << "\n";
-    file << "fold 1\n";
-    file << "END_INFO_SET\n";
-  }
+      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/exploitability_strategy.pb";
+  WriteStrategySnapshot(path, root_info_set,
+                        {{TestActionKey(ActionType::FOLD), 1.0}});
 
   CFRSolver solver(config);
   solver.load_strategy(path);
@@ -322,14 +335,19 @@ void CheckRunUsesConfiguredBlinds() {
 
   const char* test_tmpdir = std::getenv("TEST_TMPDIR");
   std::string path =
-      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/configured_blinds_strategy.txt";
+      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/configured_blinds_strategy.pb";
   solver.save_strategy(path);
 
-  std::ifstream file(path);
-  std::string contents((std::istreambuf_iterator<char>(file)),
-                       std::istreambuf_iterator<char>());
-  Expect(contents.find("call 3 ") != std::string::npos,
-         "configured blinds should set the root call amount");
+  StrategySnapshot snapshot = ReadStrategySnapshot(path);
+  bool has_call_three = false;
+  for (const StrategyInfoSetSnapshot& info_set : snapshot.info_sets()) {
+    for (const StrategyActionSnapshot& action : info_set.actions()) {
+      if (action.action_id() == TestActionKey(ActionType::CALL, 3)) {
+        has_call_three = true;
+      }
+    }
+  }
+  Expect(has_call_three, "configured blinds should set the root call amount");
 }
 
 void CheckRunUpdatesExpectedValue() {
@@ -840,7 +858,7 @@ void CheckCfrPlusWeightsLaterStrategies() {
 int main() {
   CheckCfrUsesLegalActions();
   CheckCfrDistinguishesActionAmounts();
-  CheckSaveStrategyUsesReadableActions();
+  CheckSaveStrategyUsesProtobufSnapshot();
   CheckLoadStrategyPopulatesEquilibriumStrategy();
   CheckEvaluateLoadedStrategy();
   CheckExploitabilityDetectsFoldStrategy();

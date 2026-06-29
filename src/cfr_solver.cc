@@ -21,50 +21,6 @@ int ActionKey(const Action& action) {
          static_cast<int>(std::lround(action.amount()));
 }
 
-std::string ActionTypeName(ActionType action_type) {
-  switch (action_type) {
-    case ActionType::FOLD:
-      return "fold";
-    case ActionType::CHECK:
-      return "check";
-    case ActionType::CALL:
-      return "call";
-    case ActionType::BET:
-      return "bet";
-    case ActionType::RAISE:
-      return "raise";
-    case ActionType::ALL_IN:
-      return "all_in";
-    default:
-      return "unknown";
-  }
-}
-
-ActionType ActionTypeFromName(const std::string& name) {
-  if (name == "fold") return ActionType::FOLD;
-  if (name == "check") return ActionType::CHECK;
-  if (name == "call") return ActionType::CALL;
-  if (name == "bet") return ActionType::BET;
-  if (name == "raise") return ActionType::RAISE;
-  if (name == "all_in") return ActionType::ALL_IN;
-  return ActionType::NO_ACTION;
-}
-
-std::string ActionKeyToString(int action_key) {
-  ActionType action_type =
-      static_cast<ActionType>(action_key / kActionKeyMultiplier);
-  int amount = action_key % kActionKeyMultiplier;
-  std::string name = ActionTypeName(action_type);
-  if (amount == 0) {
-    return name;
-  }
-  return name + " " + std::to_string(amount);
-}
-
-int ActionKeyFromString(const std::string& name, int amount) {
-  return static_cast<int>(ActionTypeFromName(name)) * kActionKeyMultiplier + amount;
-}
-
 int ChanceSamples(const PokerConfig& config) {
   return std::max(1, config.chance_samples());
 }
@@ -529,83 +485,58 @@ Action CFRSolver::get_best_response_action(GameTree::Node* node,
 }
 
 void CFRSolver::save_strategy(const std::string& filename) const {
-  std::ofstream file(filename);
-  
+  std::ofstream file(filename, std::ios::binary);
+
   if (!file.is_open()) {
     std::cerr << "Failed to open file for writing: " << filename << std::endl;
     return;
   }
-  
-  // Get the equilibrium strategy
+
   Strategy equilibrium_strategy = get_equilibrium_strategy();
-  
-  // Write the strategy to the file
+  StrategySnapshot snapshot;
   for (const std::string& info_set_key : equilibrium_strategy.get_info_sets()) {
-    file << info_set_key << "\n";
-    
-    Strategy::ActionProbabilities action_probs = equilibrium_strategy.get_strategy(info_set_key);
+    StrategyInfoSetSnapshot* info_set = snapshot.add_info_sets();
+    info_set->set_info_set_key(info_set_key);
+
+    Strategy::ActionProbabilities action_probs =
+        equilibrium_strategy.get_strategy(info_set_key);
     for (const auto& action_prob : action_probs) {
-      file << ActionKeyToString(action_prob.first) << " " << action_prob.second << "\n";
+      StrategyActionSnapshot* action = info_set->add_actions();
+      action->set_action_id(action_prob.first);
+      action->set_probability(action_prob.second);
     }
-    
-    file << "END_INFO_SET\n";
   }
-  
-  file.close();
+
+  if (!snapshot.SerializeToOstream(&file)) {
+    std::cerr << "Failed to write strategy snapshot: " << filename << std::endl;
+  }
 }
 
 void CFRSolver::load_strategy(const std::string& filename) {
-  std::ifstream file(filename);
-  
+  std::ifstream file(filename, std::ios::binary);
+
   if (!file.is_open()) {
     std::cerr << "Failed to open file for reading: " << filename << std::endl;
     return;
   }
-  
+
+  StrategySnapshot snapshot;
+  if (!snapshot.ParseFromIstream(&file)) {
+    std::cerr << "Failed to parse strategy snapshot: " << filename << std::endl;
+    return;
+  }
+
   current_strategy_.clear();
   cumulative_strategy_.clear();
-  
-  // Read the strategy from the file
-  std::string line;
-  std::string current_info_set;
-  Strategy::ActionProbabilities current_action_probs;
-  
-  while (std::getline(file, line)) {
-    if (line == "END_INFO_SET") {
-      // End of an information set, update the strategy
-      current_strategy_.update(current_info_set, current_action_probs);
-      cumulative_strategy_[current_info_set] = current_action_probs;
-      current_info_set.clear();
-      current_action_probs.clear();
-    } else if (current_info_set.empty()) {
-      // This is an information set key
-      current_info_set = line;
-    } else {
-      // This is an action probability
-      std::istringstream iss(line);
-      std::string action_name;
-      int amount = 0;
-      
-      if (iss >> action_name) {
-        std::vector<std::string> tokens;
-        std::string token;
-        while (iss >> token) {
-          tokens.push_back(token);
-        }
 
-        if (tokens.size() == 1) {
-          current_action_probs[ActionKeyFromString(action_name, amount)] =
-              std::stod(tokens[0]);
-        } else if (tokens.size() == 2) {
-          amount = std::stoi(tokens[0]);
-          current_action_probs[ActionKeyFromString(action_name, amount)] =
-              std::stod(tokens[1]);
-        }
-      }
+  for (const StrategyInfoSetSnapshot& info_set : snapshot.info_sets()) {
+    Strategy::ActionProbabilities action_probs;
+    for (const StrategyActionSnapshot& action : info_set.actions()) {
+      action_probs[action.action_id()] = action.probability();
     }
+    current_strategy_.update(info_set.info_set_key(), action_probs);
+    cumulative_strategy_[info_set.info_set_key()] = action_probs;
   }
-  
-  file.close();
 }
 
 double CFRSolver::get_expected_value(int player_id) const {
