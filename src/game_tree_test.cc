@@ -156,11 +156,28 @@ void CheckRaiseAndFold(GameTree* tree) {
 
 void CheckLegalActions(GameTree* tree) {
   std::vector<Action> actions = tree->get_legal_actions(PreflopState());
-  Expect(actions.size() == 3, "preflop facing blind has fold/call/raise");
+  Expect(actions.size() == 4, "preflop facing blind has fold/call/raise/all-in");
   Expect(actions[0].action() == ActionType::FOLD, "first legal action is fold");
   Expect(actions[1].action() == ActionType::CALL, "second legal action is call");
   Expect(actions[1].amount() == 1, "call amount is outstanding blind");
   Expect(actions[2].action() == ActionType::RAISE, "third legal action is raise");
+  Expect(actions[3].action() == ActionType::ALL_IN, "fourth legal action is all-in");
+  Expect(actions[3].amount() == 99, "all-in amount is the remaining stack");
+}
+
+void CheckAllInAction(GameTree* tree) {
+  BoardState all_in = tree->apply_action(PreflopState(), MakeAction(ActionType::ALL_IN));
+
+  Expect(all_in.stack_a() == 0, "all-in commits the remaining stack");
+  Expect(all_in.pot() == 102, "all-in adds remaining chips to the pot");
+  Expect(all_in.player_contribution(0) == 100,
+         "all-in updates total player contribution");
+  Expect(all_in.all_in(), "all-in marks the state all-in");
+  Expect(all_in.player_to_act() == 1, "all-in passes action");
+  Expect(all_in.history().actions(0).action() == ActionType::ALL_IN,
+         "all-in is recorded");
+  Expect(all_in.history().actions(0).amount() == 99,
+         "all-in records committed chips");
 }
 
 void CheckShowdownUtility(GameTree* tree) {
@@ -211,6 +228,7 @@ int main() {
   poker::CheckCheckBetCall(&tree);
   poker::CheckRaiseAndFold(&tree);
   poker::CheckLegalActions(&tree);
+  poker::CheckAllInAction(&tree);
   poker::CheckShowdownUtility(&tree);
   poker::CheckChanceAdvancesStreet(&tree);
   return 0;

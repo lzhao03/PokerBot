@@ -67,6 +67,13 @@ int RequestedChips(const Action& action) {
   return static_cast<int>(action.amount());
 }
 
+void AddAllInAction(std::vector<Action>* actions, int amount) {
+  Action all_in_action;
+  all_in_action.set_action(ActionType::ALL_IN);
+  all_in_action.set_amount(amount);
+  actions->push_back(all_in_action);
+}
+
 int CommitChips(BoardState* state, int player, int requested) {
   if (requested <= 0) {
     throw std::invalid_argument("Action amount must be positive");
@@ -158,7 +165,11 @@ std::vector<Action> GameTree::get_legal_actions(const BoardState& state) const {
   int player = get_player_to_act(state);
   
   // If it's a chance node, return empty list (chance actions are handled separately)
-  if (!IsPlayer(player) || GetStack(state, player) <= 0) {
+  if (!IsPlayer(player)) {
+    return actions;
+  }
+  int stack = GetStack(state, player);
+  if (stack <= 0) {
     return actions;
   }
   
@@ -171,18 +182,21 @@ std::vector<Action> GameTree::get_legal_actions(const BoardState& state) const {
 
     Action call_action;
     call_action.set_action(ActionType::CALL);
-    call_action.set_amount(std::min(to_call, GetStack(state, player)));
+    call_action.set_amount(std::min(to_call, stack));
     actions.push_back(call_action);
 
     for (int i = 0; i < config_.bet_sizes_size(); ++i) {
       int raise_amount =
           to_call + ConcreteBetAmount(state, config_.bet_sizes(i));
-      if (raise_amount <= GetStack(state, player)) {
+      if (raise_amount <= stack) {
         Action raise_action;
         raise_action.set_action(ActionType::RAISE);
         raise_action.set_amount(raise_amount);
         actions.push_back(raise_action);
       }
+    }
+    if (stack > to_call) {
+      AddAllInAction(&actions, stack);
     }
   } else {
     Action check_action;
@@ -192,13 +206,14 @@ std::vector<Action> GameTree::get_legal_actions(const BoardState& state) const {
 
     for (int i = 0; i < config_.bet_sizes_size(); ++i) {
       int bet_amount = ConcreteBetAmount(state, config_.bet_sizes(i));
-      if (bet_amount <= GetStack(state, player)) {
+      if (bet_amount <= stack) {
         Action bet_action;
         bet_action.set_action(ActionType::BET);
         bet_action.set_amount(bet_amount);
         actions.push_back(bet_action);
       }
     }
+    AddAllInAction(&actions, stack);
   }
   
   return actions;
@@ -270,6 +285,12 @@ BoardState GameTree::apply_action(const BoardState& state, const Action& action)
         throw std::invalid_argument("Raise must exceed the call amount");
       }
       int committed = CommitChips(&new_state, player, requested);
+      applied.set_amount(committed);
+      new_state.set_player_to_act(opponent);
+      break;
+    }
+    case ActionType::ALL_IN: {
+      int committed = CommitChips(&new_state, player, GetStack(new_state, player));
       applied.set_amount(committed);
       new_state.set_player_to_act(opponent);
       break;
