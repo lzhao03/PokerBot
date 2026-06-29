@@ -82,8 +82,7 @@ CFRSolver::~CFRSolver() {
   delete info_set_abstraction_;
 }
 
-void CFRSolver::run(int iterations) {
-  std::cout << "Preparing game tree..." << std::endl;
+GameTree::Node* CFRSolver::get_or_build_root() {
   const int small_blind = config_.small_blind() > 0 ? config_.small_blind() : 1;
   const int big_blind = config_.big_blind() > 0 ? config_.big_blind() : 2;
   const int starting_stack = config_.starting_stack_size();
@@ -100,10 +99,19 @@ void CFRSolver::run(int iterations) {
   // Add initial player contributions (blinds)
   initial_state.add_player_contribution(small_blind);
   initial_state.add_player_contribution(big_blind);
-  
+
   GameTree::Node* root = game_tree_->get_root();
   if (root == nullptr) {
-    root = game_tree_->build_tree(initial_state);
+    return game_tree_->build_tree(initial_state);
+  }
+  return root;
+}
+
+void CFRSolver::run(int iterations) {
+  std::cout << "Preparing game tree..." << std::endl;
+  bool had_root = game_tree_->get_root() != nullptr;
+  GameTree::Node* root = get_or_build_root();
+  if (!had_root) {
     std::cout << "Game tree built with " << root->legal_actions.size()
               << " legal actions at root" << std::endl;
   } else {
@@ -299,6 +307,69 @@ Strategy CFRSolver::get_equilibrium_strategy() const {
   }
   
   return equilibrium_strategy;
+}
+
+double CFRSolver::evaluate_strategy(const Hand& player_a_hand,
+                                    const Hand& player_b_hand) {
+  Strategy strategy = get_equilibrium_strategy();
+  return evaluate_strategy_node(get_or_build_root(), player_a_hand, player_b_hand,
+                                strategy);
+}
+
+double CFRSolver::evaluate_strategy_node(GameTree::Node* node,
+                                         const Hand& player_a_hand,
+                                         const Hand& player_b_hand,
+                                         const Strategy& strategy) {
+  if (node->is_terminal) {
+    return game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
+  }
+  if (node->is_chance_node) {
+    std::vector<Card> cards =
+        SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
+    GameTree::Node* child_node = game_tree_->create_chance_child_node(node, cards);
+    double value =
+        evaluate_strategy_node(child_node, player_a_hand, player_b_hand, strategy);
+    delete child_node;
+    return value;
+  }
+  if (node->legal_actions.empty()) {
+    return 0.0;
+  }
+
+  int player = node->player_to_act;
+  if (player != 0 && player != 1) {
+    return 0.0;
+  }
+
+  const Hand& player_hand = player == 0 ? player_a_hand : player_b_hand;
+  std::string info_set_key =
+      info_set_abstraction_->state_to_info_set(node->state, player, player_hand);
+
+  std::vector<int> action_ids;
+  action_ids.reserve(node->legal_actions.size());
+  double probability_sum = 0.0;
+  for (const Action& action : node->legal_actions) {
+    int action_id = ActionKey(action);
+    action_ids.push_back(action_id);
+    probability_sum += strategy.get_action_probability(info_set_key, action_id);
+  }
+
+  double value = 0.0;
+  for (size_t i = 0; i < node->legal_actions.size(); ++i) {
+    const Action& action = node->legal_actions[i];
+    int action_id = action_ids[i];
+    double probability = probability_sum > 0.0
+                             ? strategy.get_action_probability(info_set_key, action_id) /
+                                   probability_sum
+                             : 1.0 / node->legal_actions.size();
+    if (node->children.find(action_id) == node->children.end()) {
+      node->children[action_id] = game_tree_->create_child_node(node, action);
+    }
+    value += probability * evaluate_strategy_node(
+                              node->children[action_id], player_a_hand,
+                              player_b_hand, strategy);
+  }
+  return value;
 }
 
 double CFRSolver::calculate_exploitability() const {

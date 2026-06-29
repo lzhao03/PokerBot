@@ -33,6 +33,7 @@ public:
   
   // Get the computed equilibrium strategy
   Strategy get_equilibrium_strategy() const;
+  double evaluate_strategy(const Hand& player_a_hand, const Hand& player_b_hand);
   
   // Calculate the exploitability of the current strategy
   double calculate_exploitability() const;
@@ -64,6 +65,11 @@ private:
   Strategy current_strategy_;
   
   // Helper methods
+  GameTree::Node* get_or_build_root();
+  double evaluate_strategy_node(GameTree::Node* node,
+                                const Hand& player_a_hand,
+                                const Hand& player_b_hand,
+                                const Strategy& strategy);
   Strategy::ActionProbabilities get_strategy(
       const std::string& info_set_key,
       const std::vector<Action>& legal_actions);

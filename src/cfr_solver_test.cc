@@ -46,6 +46,24 @@ Hand MakeHand(int first_rank, Suit first_suit, int second_rank, Suit second_suit
   return hand;
 }
 
+BoardState InitialRootState(const PokerConfig& config) {
+  int small_blind = config.small_blind() > 0 ? config.small_blind() : 1;
+  int big_blind = config.big_blind() > 0 ? config.big_blind() : 2;
+  int starting_stack = config.starting_stack_size();
+
+  BoardState state;
+  state.set_stack_a(starting_stack > small_blind ? starting_stack - small_blind : 0);
+  state.set_stack_b(starting_stack > big_blind ? starting_stack - big_blind : 0);
+  state.set_pot(small_blind + big_blind);
+  state.set_folded_player(-1);
+  state.set_street(Street::PREFLOP);
+  state.set_all_in(false);
+  state.set_player_to_act(0);
+  state.add_player_contribution(small_blind);
+  state.add_player_contribution(big_blind);
+  return state;
+}
+
 void CheckCfrUsesLegalActions() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -183,6 +201,43 @@ void CheckLoadStrategyPopulatesEquilibriumStrategy() {
   Expect(std::abs(action_probs.at(TestActionKey(ActionType::CALL, 3)) - 0.75) <
              0.000001,
          "loaded strategy should keep call probability");
+}
+
+void CheckEvaluateLoadedStrategy() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 13, Suit::SPADES);
+  Hand player_b_hand = MakeHand(12, Suit::HEARTS, 11, Suit::HEARTS);
+  InfoSetAbstraction abstraction;
+  std::string root_info_set =
+      abstraction.state_to_info_set(InitialRootState(config), 0, player_a_hand);
+
+  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
+  std::string path =
+      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/loaded_eval_strategy.txt";
+  {
+    std::ofstream file(path);
+    file << root_info_set << "\n";
+    file << "fold 1\n";
+    file << "END_INFO_SET\n";
+  }
+
+  CFRSolver solver(config);
+  solver.load_strategy(path);
+  double value = solver.evaluate_strategy(player_a_hand, player_b_hand);
+  Expect(std::abs(value + 1.0) < 0.000001,
+         "evaluated fold strategy should lose the small blind");
+
+  std::string saved_path =
+      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/saved_eval_strategy.txt";
+  solver.save_strategy(saved_path);
+
+  CFRSolver loaded(config);
+  loaded.load_strategy(saved_path);
+  double loaded_value = loaded.evaluate_strategy(player_a_hand, player_b_hand);
+  Expect(std::abs(value - loaded_value) < 0.000001,
+         "saved and loaded strategies should evaluate the same");
 }
 
 void CheckRunUsesConfiguredBlinds() {
@@ -424,6 +479,7 @@ int main() {
   CheckCfrDistinguishesActionAmounts();
   CheckSaveStrategyUsesReadableActions();
   CheckLoadStrategyPopulatesEquilibriumStrategy();
+  CheckEvaluateLoadedStrategy();
   CheckRunUsesConfiguredBlinds();
   CheckRunUpdatesExpectedValue();
   CheckTerminalUtilityBeatsDepthLimit();
