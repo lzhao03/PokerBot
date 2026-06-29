@@ -232,8 +232,9 @@ double CFRSolver::cfr(GameTree::Node* node,
       cumulative_regret = std::max(0.0, cumulative_regret + regret);
     }
     
-    // Update the strategy based on the reach probability
-    update_strategy(info_set_key, strategy, reach_probabilities[player]);
+    // CFR+ commonly weights later average-strategy samples more heavily.
+    update_strategy(info_set_key, strategy,
+                    reach_probabilities[player] * (iteration + 1));
   }
   
   return node_value;

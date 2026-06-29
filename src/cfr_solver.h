@@ -21,7 +21,7 @@ public:
   void run(int iterations);
   
   // The core CFR+ algorithm.
-  // This uses CFR+ regret clipping but keeps average strategy accumulation simple.
+  // Uses CFR+ regret clipping and linearly weighted average strategy.
   // Returns the expected value of the game for player A.
   // max_depth <= 0 disables the depth cutoff.
   double cfr(GameTree::Node* node, 

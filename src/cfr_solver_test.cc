@@ -564,6 +564,44 @@ void CheckCfrPlusClipsNegativeRegrets() {
          "positive cumulative regret should remain positive");
 }
 
+void CheckCfrPlusWeightsLaterStrategies() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+
+  CFRSolver solver(config);
+  GameTree::Node node;
+  node.state.set_player_to_act(0);
+  node.state.set_folded_player(-1);
+  node.player_to_act = 0;
+
+  Action player_a_loses = MakeAction(ActionType::FOLD);
+  Action player_a_wins = MakeAction(ActionType::CALL, 1);
+  node.legal_actions.push_back(player_a_loses);
+  node.legal_actions.push_back(player_a_wins);
+
+  GameTree::Node* player_a_loses_child = new GameTree::Node();
+  player_a_loses_child->state = FoldedState(0);
+  player_a_loses_child->is_terminal = true;
+  node.children[TestActionKey(ActionType::FOLD)] = player_a_loses_child;
+
+  GameTree::Node* player_a_wins_child = new GameTree::Node();
+  player_a_wins_child->state = FoldedState(1);
+  player_a_wins_child->is_terminal = true;
+  node.children[TestActionKey(ActionType::CALL, 1)] = player_a_wins_child;
+
+  Hand player_a_hand;
+  Hand player_b_hand;
+  std::vector<double> reach_probabilities = {1.0, 1.0};
+  solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
+  solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 1, 0, 1);
+
+  const Strategy strategy = solver.get_equilibrium_strategy();
+  const auto action_probs = strategy.get_strategy(strategy.get_info_sets()[0]);
+  Expect(std::abs(action_probs.at(TestActionKey(ActionType::CALL, 1)) -
+                  (5.0 / 6.0)) < 0.000001,
+         "CFR+ average strategy should weight later iterations linearly");
+}
+
 }  // namespace
 
 int main() {
@@ -583,6 +621,7 @@ int main() {
   CheckChanceDoesNotConsumeDepth();
   CheckPlayerBRegretsUsePlayerBUtility();
   CheckCfrPlusClipsNegativeRegrets();
+  CheckCfrPlusWeightsLaterStrategies();
 
   PokerConfig config;
   config.add_bet_sizes(1.0);
