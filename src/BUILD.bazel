@@ -24,6 +24,24 @@ cc_library(
 )
 
 cc_library(
+    name = "card_utils",
+    srcs = ["card_utils.cc"],
+    hdrs = ["card_utils.h"],
+    deps = [
+        ":poker_cc_proto",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "card_utils_test",
+    srcs = ["card_utils_test.cc"],
+    deps = [
+        ":card_utils",
+    ],
+)
+
+cc_library(
     name = "game_tree",
     srcs = ["game_tree.cc"],
     hdrs = ["game_tree.h"],
@@ -98,6 +116,7 @@ cc_library(
     srcs = ["cfr_solver.cc"],
     hdrs = ["cfr_solver.h"],
     deps = [
+        ":card_utils",
         ":poker_cc_proto",
         ":hand_evaluator",
         ":game_tree",
