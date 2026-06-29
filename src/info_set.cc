@@ -4,6 +4,22 @@
 
 namespace poker {
 
+namespace {
+
+std::string ActionHistoryKey(const ActionHistory& history) {
+  std::ostringstream oss;
+  for (int i = 0; i < history.actions_size(); ++i) {
+    const Action& action = history.actions(i);
+    if (i > 0) {
+      oss << ",";
+    }
+    oss << static_cast<int>(action.action()) << ":" << action.amount();
+  }
+  return oss.str();
+}
+
+}  // namespace
+
 std::string InfoSetAbstraction::state_to_info_set(const BoardState& state, int player_id, const Hand& player_hand) const {
   std::ostringstream oss;
   
@@ -28,8 +44,7 @@ std::string InfoSetAbstraction::state_to_info_set(const BoardState& state, int p
   }
   oss << "]:";
   
-  // Betting history (placeholder - would need to be extracted from state)
-  oss << "A[]";
+  oss << "A[" << ActionHistoryKey(state.history()) << "]";
   
   return oss.str();
 }
@@ -86,11 +101,17 @@ InfoSetAbstraction::InfoSetComponents InfoSetAbstraction::parse_info_set(const s
 }
 
 bool InfoSetAbstraction::same_info_set(const BoardState& state1, const BoardState& state2, int player_id) const {
-  // In a real implementation, this would check if two states are indistinguishable
-  // from the perspective of the given player
-  
-  // For now, we'll just check if they have the same number of board cards
-  return state1.cards_size() == state2.cards_size();
+  (void)player_id;
+  if (state1.cards_size() != state2.cards_size()) {
+    return false;
+  }
+  for (int i = 0; i < state1.cards_size(); ++i) {
+    if (state1.cards(i).rank() != state2.cards(i).rank() ||
+        state1.cards(i).suit() != state2.cards(i).suit()) {
+      return false;
+    }
+  }
+  return ActionHistoryKey(state1.history()) == ActionHistoryKey(state2.history());
 }
 
 std::string InfoSetAbstraction::info_set_to_string(const std::string& info_set_key) const {
@@ -179,8 +200,23 @@ std::vector<Card> InfoSetAbstraction::string_to_cards(const std::string& cards_s
 }
 
 std::vector<Action> InfoSetAbstraction::string_to_betting_history(const std::string& history_str) const {
-  // This is a placeholder - in a real implementation, this would parse a betting history string
-  return std::vector<Action>();
+  std::vector<Action> actions;
+  std::istringstream iss(history_str);
+  std::string action_str;
+
+  while (std::getline(iss, action_str, ',')) {
+    size_t colon_pos = action_str.find(':');
+    if (colon_pos == std::string::npos) {
+      continue;
+    }
+
+    Action action;
+    action.set_action(static_cast<ActionType>(std::stoi(action_str.substr(0, colon_pos))));
+    action.set_amount(std::stof(action_str.substr(colon_pos + 1)));
+    actions.push_back(action);
+  }
+
+  return actions;
 }
 
 } // namespace poker
