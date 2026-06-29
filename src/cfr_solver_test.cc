@@ -3,7 +3,9 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <iostream>
 #include <iterator>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -351,6 +353,28 @@ void CheckRunTrainsSwappedPrivateHands() {
          "run should train both dealt private-hand perspectives");
 }
 
+void CheckRunLoggingUsesConfig() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+
+  std::ostringstream quiet_output;
+  std::streambuf* original = std::cout.rdbuf(quiet_output.rdbuf());
+  CFRSolver quiet_solver(config);
+  quiet_solver.run(1);
+  std::cout.rdbuf(original);
+  Expect(quiet_output.str().empty(), "run should be quiet by default");
+
+  config.set_enable_logging(true);
+  std::ostringstream logged_output;
+  original = std::cout.rdbuf(logged_output.rdbuf());
+  CFRSolver logged_solver(config);
+  logged_solver.run(1);
+  std::cout.rdbuf(original);
+  Expect(logged_output.str().find("Starting CFR iterations") != std::string::npos,
+         "run should log when enable_logging is set");
+}
+
 BoardState FoldedState(int folded_player) {
   BoardState state;
   state.set_pot(10);
@@ -628,6 +652,7 @@ int main() {
   CheckRunUsesConfiguredBlinds();
   CheckRunUpdatesExpectedValue();
   CheckRunTrainsSwappedPrivateHands();
+  CheckRunLoggingUsesConfig();
   CheckTerminalUtilityBeatsDepthLimit();
   CheckDepthLimitUsesShowdownUtility();
   CheckDepthLimitDoesNotScoreUncalledBet();

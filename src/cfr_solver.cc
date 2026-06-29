@@ -109,19 +109,26 @@ GameTree::Node* CFRSolver::get_or_build_root() {
 }
 
 void CFRSolver::run(int iterations) {
-  std::cout << "Preparing game tree..." << std::endl;
+  const bool log = config_.enable_logging();
+  if (log) {
+    std::cout << "Preparing game tree..." << std::endl;
+  }
   bool had_root = game_tree_->get_root() != nullptr;
   GameTree::Node* root = get_or_build_root();
-  if (!had_root) {
-    std::cout << "Game tree built with " << root->legal_actions.size()
-              << " legal actions at root" << std::endl;
-  } else {
-    std::cout << "Reusing game tree with " << root->legal_actions.size()
-              << " legal actions at root" << std::endl;
+  if (log) {
+    if (!had_root) {
+      std::cout << "Game tree built with " << root->legal_actions.size()
+                << " legal actions at root" << std::endl;
+    } else {
+      std::cout << "Reusing game tree with " << root->legal_actions.size()
+                << " legal actions at root" << std::endl;
+    }
   }
   
   // Run iterations of CFR
-  std::cout << "Starting CFR iterations..." << std::endl;
+  if (log) {
+    std::cout << "Starting CFR iterations..." << std::endl;
+  }
   for (int i = 0; i < iterations; ++i) {
     std::vector<Card> deck = BuildDeck();
     std::shuffle(deck.begin(), deck.end(), rng_);
@@ -129,7 +136,9 @@ void CFRSolver::run(int iterations) {
     Hand player_b_hand = DealHand(&deck);
     
     const int max_depth = config_.max_depth();
-    std::cout << "Iteration " << i+1 << "/" << iterations << std::endl;
+    if (log) {
+      std::cout << "Iteration " << i+1 << "/" << iterations << std::endl;
+    }
     std::vector<double> reach_probabilities(2, 1.0);
     double dealt_value =
         cfr(root, player_a_hand, player_b_hand, reach_probabilities, i, 0, max_depth);
@@ -142,7 +151,9 @@ void CFRSolver::run(int iterations) {
     ++iterations_run_;
   }
   
-  std::cout << "CFR iterations completed" << std::endl;
+  if (log) {
+    std::cout << "CFR iterations completed" << std::endl;
+  }
 }
 
 double CFRSolver::cfr(GameTree::Node* node, 
@@ -258,27 +269,6 @@ double CFRSolver::chance_sampling_cfr(GameTree::Node* node,
                     iteration, depth, max_depth);
   delete child_node;
   return value;
-}
-
-double CFRSolver::external_sampling_cfr(GameTree::Node* node, 
-                      const Hand& player_a_hand, 
-                      const Hand& player_b_hand,
-                      std::vector<double>& reach_probabilities, 
-                      int iteration) {
-  // This is a placeholder for the external sampling CFR variant
-  // In a real implementation, this would sample actions for the opponent
-  return 0.0;
-}
-
-double CFRSolver::outcome_sampling_cfr(GameTree::Node* node, 
-                      const Hand& player_a_hand, 
-                      const Hand& player_b_hand,
-                      std::vector<double>& reach_probabilities, 
-                      double sample_prob, 
-                      int iteration) {
-  // This is a placeholder for the outcome sampling CFR variant
-  // In a real implementation, this would sample a single path through the tree
-  return 0.0;
 }
 
 Strategy CFRSolver::get_equilibrium_strategy() const {

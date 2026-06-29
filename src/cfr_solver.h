@@ -20,7 +20,7 @@ public:
   // Run CFR for a specified number of iterations
   void run(int iterations);
   
-  // The core CFR+ algorithm.
+  // The core chance-sampled CFR+ algorithm.
   // Uses CFR+ regret clipping and linearly weighted average strategy.
   // Returns the expected value of the game for player A.
   // max_depth <= 0 disables the depth cutoff.
@@ -86,8 +86,6 @@ private:
       const std::vector<Action>& legal_actions);
   void update_strategy(const std::string& info_set_key, const Strategy::ActionProbabilities& strategy, double reach_prob);
   double chance_sampling_cfr(GameTree::Node* node, const Hand& player_a_hand, const Hand& player_b_hand, std::vector<double>& reach_probabilities, int iteration, int depth, int max_depth);
-  double external_sampling_cfr(GameTree::Node* node, const Hand& player_a_hand, const Hand& player_b_hand, std::vector<double>& reach_probabilities, int iteration);
-  double outcome_sampling_cfr(GameTree::Node* node, const Hand& player_a_hand, const Hand& player_b_hand, std::vector<double>& reach_probabilities, double sample_prob, int iteration);
 };
 
 } // namespace poker
