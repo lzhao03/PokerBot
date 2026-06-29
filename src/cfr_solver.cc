@@ -128,13 +128,17 @@ void CFRSolver::run(int iterations) {
     Hand player_a_hand = DealHand(&deck);
     Hand player_b_hand = DealHand(&deck);
     
-    // Initialize reach probabilities
-    std::vector<double> reach_probabilities(2, 1.0);
-    
     const int max_depth = config_.max_depth();
     std::cout << "Iteration " << i+1 << "/" << iterations << std::endl;
-    cumulative_root_utility_ +=
+    std::vector<double> reach_probabilities(2, 1.0);
+    double dealt_value =
         cfr(root, player_a_hand, player_b_hand, reach_probabilities, i, 0, max_depth);
+
+    // Train both private-card assignments for the sampled heads-up deal.
+    std::vector<double> swapped_reach_probabilities(2, 1.0);
+    double swapped_value = cfr(root, player_b_hand, player_a_hand,
+                               swapped_reach_probabilities, i, 0, max_depth);
+    cumulative_root_utility_ += (dealt_value + swapped_value) / 2.0;
     ++iterations_run_;
   }
   

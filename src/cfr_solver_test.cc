@@ -338,6 +338,19 @@ void CheckRunUpdatesExpectedValue() {
          "continued EV should stay zero-sum");
 }
 
+void CheckRunTrainsSwappedPrivateHands() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+
+  CFRSolver solver(config);
+  solver.run(1);
+
+  const Strategy strategy = solver.get_equilibrium_strategy();
+  Expect(strategy.get_info_sets().size() == 2,
+         "run should train both dealt private-hand perspectives");
+}
+
 BoardState FoldedState(int folded_player) {
   BoardState state;
   state.set_pot(10);
@@ -614,6 +627,7 @@ int main() {
   CheckExploitabilityZeroSamples();
   CheckRunUsesConfiguredBlinds();
   CheckRunUpdatesExpectedValue();
+  CheckRunTrainsSwappedPrivateHands();
   CheckTerminalUtilityBeatsDepthLimit();
   CheckDepthLimitUsesShowdownUtility();
   CheckDepthLimitDoesNotScoreUncalledBet();
