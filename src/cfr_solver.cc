@@ -417,8 +417,8 @@ void CFRSolver::load_strategy(const std::string& filename) {
     return;
   }
   
-  // Clear the current strategy
   current_strategy_.clear();
+  cumulative_strategy_.clear();
   
   // Read the strategy from the file
   std::string line;
@@ -429,6 +429,7 @@ void CFRSolver::load_strategy(const std::string& filename) {
     if (line == "END_INFO_SET") {
       // End of an information set, update the strategy
       current_strategy_.update(current_info_set, current_action_probs);
+      cumulative_strategy_[current_info_set] = current_action_probs;
       current_info_set.clear();
       current_action_probs.clear();
     } else if (current_info_set.empty()) {

@@ -145,6 +145,35 @@ void CheckSaveStrategyUsesReadableActions() {
          "saved strategy should not expose encoded action keys");
 }
 
+void CheckLoadStrategyPopulatesEquilibriumStrategy() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+
+  CFRSolver solver(config);
+  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
+  std::string path =
+      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/loaded_strategy.txt";
+  {
+    std::ofstream file(path);
+    file << "loaded_info_set\n";
+    file << "fold 0.25\n";
+    file << "call 3 0.75\n";
+    file << "END_INFO_SET\n";
+  }
+
+  solver.load_strategy(path);
+
+  const Strategy strategy = solver.get_equilibrium_strategy();
+  const auto action_probs = strategy.get_strategy("loaded_info_set");
+  Expect(action_probs.size() == 2, "loaded strategy should expose actions");
+  Expect(std::abs(action_probs.at(TestActionKey(ActionType::FOLD)) - 0.25) <
+             0.000001,
+         "loaded strategy should keep fold probability");
+  Expect(std::abs(action_probs.at(TestActionKey(ActionType::CALL, 3)) - 0.75) <
+             0.000001,
+         "loaded strategy should keep call probability");
+}
+
 void CheckRunUsesConfiguredBlinds() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -237,6 +266,7 @@ int main() {
   CheckCfrUsesLegalActions();
   CheckCfrDistinguishesActionAmounts();
   CheckSaveStrategyUsesReadableActions();
+  CheckLoadStrategyPopulatesEquilibriumStrategy();
   CheckRunUsesConfiguredBlinds();
   CheckTerminalUtilityBeatsDepthLimit();
   CheckPlayerBRegretsUsePlayerBUtility();
