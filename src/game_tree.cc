@@ -225,6 +225,7 @@ BoardState GameTree::apply_action(const BoardState& state, const Action& action)
   int opponent = Opponent(player);
   int to_call = OutstandingToCall(new_state, player);
   Action applied = action;
+  applied.set_player(player);
   
   // Handle different action types
   switch (action.action()) {

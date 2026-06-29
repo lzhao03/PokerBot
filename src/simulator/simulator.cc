@@ -56,6 +56,8 @@ bool NoLimitHoldemSimulator::StartNewHand(const Config& cfg, BoardState* state,
   // Record blind actions (as BET for simplicity)
   Action a_sb; a_sb.set_action(ActionType::BET); a_sb.set_amount(sb);
   Action a_bb; a_bb.set_action(ActionType::BET); a_bb.set_amount(bb);
+  a_sb.set_player(0);
+  a_bb.set_player(1);
   *state->mutable_history()->add_actions() = a_sb;
   *state->mutable_history()->add_actions() = a_bb;
 
@@ -128,6 +130,7 @@ bool NoLimitHoldemSimulator::ApplyAction(const Action& action, BoardState* state
   int opp = Opp(p);
 
   Action applied = action;  // we'll clamp/adjust amount
+  applied.set_player(p);
 
   switch (action.action()) {
     case ActionType::FOLD: {

@@ -102,6 +102,7 @@ void CheckCallAndCheck(GameTree* tree) {
   Expect(called.player_to_act() == 1, "call passes action");
   Expect(called.history().actions_size() == 1, "call is recorded");
   Expect(called.history().actions(0).amount() == 1, "call records committed chips");
+  Expect(called.history().actions(0).player() == 0, "call records acting player");
   Expect(!tree->is_betting_round_over(called), "call alone does not close preflop");
 
   BoardState checked = tree->apply_action(called, MakeAction(ActionType::CHECK));

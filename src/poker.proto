@@ -38,6 +38,7 @@ enum ActionType {
 message Action {
   ActionType action = 1;
   float amount = 2;
+  int32 player = 3;
 }
 
 message ActionHistory {

@@ -13,7 +13,8 @@ std::string ActionHistoryKey(const ActionHistory& history) {
     if (i > 0) {
       oss << ",";
     }
-    oss << static_cast<int>(action.action()) << ":" << action.amount();
+    oss << action.player() << ":" << static_cast<int>(action.action()) << ":"
+        << action.amount();
   }
   return oss.str();
 }
@@ -205,14 +206,17 @@ std::vector<Action> InfoSetAbstraction::string_to_betting_history(const std::str
   std::string action_str;
 
   while (std::getline(iss, action_str, ',')) {
-    size_t colon_pos = action_str.find(':');
-    if (colon_pos == std::string::npos) {
+    size_t first_colon = action_str.find(':');
+    size_t second_colon = action_str.find(':', first_colon + 1);
+    if (first_colon == std::string::npos || second_colon == std::string::npos) {
       continue;
     }
 
     Action action;
-    action.set_action(static_cast<ActionType>(std::stoi(action_str.substr(0, colon_pos))));
-    action.set_amount(std::stof(action_str.substr(colon_pos + 1)));
+    action.set_player(std::stoi(action_str.substr(0, first_colon)));
+    action.set_action(static_cast<ActionType>(
+        std::stoi(action_str.substr(first_colon + 1, second_colon - first_colon - 1))));
+    action.set_amount(std::stof(action_str.substr(second_colon + 1)));
     actions.push_back(action);
   }
 

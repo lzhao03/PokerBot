@@ -11,8 +11,9 @@ void Expect(bool condition, const char* message) {
   }
 }
 
-Action MakeAction(ActionType type, float amount = 0.0f) {
+Action MakeAction(int player, ActionType type, float amount = 0.0f) {
   Action action;
+  action.set_player(player);
   action.set_action(type);
   action.set_amount(amount);
   return action;
@@ -52,15 +53,25 @@ int main() {
   poker::Hand hand = poker::MakeHand();
 
   poker::BoardState checked = poker::MakeState();
-  *checked.mutable_history()->add_actions() = poker::MakeAction(poker::ActionType::CHECK);
+  *checked.mutable_history()->add_actions() =
+      poker::MakeAction(0, poker::ActionType::CHECK);
 
   poker::BoardState bet = poker::MakeState();
-  *bet.mutable_history()->add_actions() = poker::MakeAction(poker::ActionType::BET, 5.0f);
+  *bet.mutable_history()->add_actions() =
+      poker::MakeAction(1, poker::ActionType::BET, 5.0f);
+
+  poker::BoardState player_zero_bet = poker::MakeState();
+  *player_zero_bet.mutable_history()->add_actions() =
+      poker::MakeAction(0, poker::ActionType::BET, 5.0f);
 
   std::string checked_key = abstraction.state_to_info_set(checked, 0, hand);
   std::string bet_key = abstraction.state_to_info_set(bet, 0, hand);
+  std::string player_zero_bet_key =
+      abstraction.state_to_info_set(player_zero_bet, 0, hand);
 
   poker::Expect(checked_key != bet_key, "different histories need different info sets");
+  poker::Expect(player_zero_bet_key != bet_key,
+                "same action by different players needs different info sets");
   poker::Expect(!abstraction.same_info_set(checked, bet, 0),
                 "same_info_set should include action history");
 
@@ -72,6 +83,8 @@ int main() {
                 "parsed action type should match");
   poker::Expect(components.betting_history[0].amount() == 5.0f,
                 "parsed amount should match");
+  poker::Expect(components.betting_history[0].player() == 1,
+                "parsed player should match");
 
   return 0;
 }
