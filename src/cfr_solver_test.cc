@@ -10,6 +10,23 @@
 
 using namespace poker;
 
+namespace poker {
+
+class CFRSolverRegretTestPeer {
+ public:
+  static double Regret(const CFRSolver& solver, const std::string& info_set_key,
+                       int action_id) {
+    auto info_set_it = solver.cumulative_regrets_.find(info_set_key);
+    if (info_set_it == solver.cumulative_regrets_.end()) {
+      return 0.0;
+    }
+    auto action_it = info_set_it->second.find(action_id);
+    return action_it == info_set_it->second.end() ? 0.0 : action_it->second;
+  }
+};
+
+}  // namespace poker
+
 namespace {
 
 void Expect(bool condition, const char* message) {
@@ -506,6 +523,47 @@ void CheckPlayerBRegretsUsePlayerBUtility() {
          "player B should prefer the action that lowers player A utility");
 }
 
+void CheckCfrPlusClipsNegativeRegrets() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+
+  CFRSolver solver(config);
+  GameTree::Node node;
+  node.state.set_player_to_act(0);
+  node.state.set_folded_player(-1);
+  node.player_to_act = 0;
+
+  Action player_a_loses = MakeAction(ActionType::FOLD);
+  Action player_a_wins = MakeAction(ActionType::CALL, 1);
+  node.legal_actions.push_back(player_a_loses);
+  node.legal_actions.push_back(player_a_wins);
+
+  GameTree::Node* player_a_loses_child = new GameTree::Node();
+  player_a_loses_child->state = FoldedState(0);
+  player_a_loses_child->is_terminal = true;
+  node.children[TestActionKey(ActionType::FOLD)] = player_a_loses_child;
+
+  GameTree::Node* player_a_wins_child = new GameTree::Node();
+  player_a_wins_child->state = FoldedState(1);
+  player_a_wins_child->is_terminal = true;
+  node.children[TestActionKey(ActionType::CALL, 1)] = player_a_wins_child;
+
+  Hand player_a_hand;
+  Hand player_b_hand;
+  InfoSetAbstraction abstraction;
+  std::string info_set_key =
+      abstraction.state_to_info_set(node.state, 0, player_a_hand);
+  std::vector<double> reach_probabilities = {1.0, 1.0};
+  solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
+
+  Expect(CFRSolverRegretTestPeer::Regret(
+             solver, info_set_key, TestActionKey(ActionType::FOLD)) == 0.0,
+         "CFR+ should clip negative cumulative regrets");
+  Expect(CFRSolverRegretTestPeer::Regret(
+             solver, info_set_key, TestActionKey(ActionType::CALL, 1)) > 0.0,
+         "positive cumulative regret should remain positive");
+}
+
 }  // namespace
 
 int main() {
@@ -524,6 +582,7 @@ int main() {
   CheckZeroMaxDepthDoesNotCutOff();
   CheckChanceDoesNotConsumeDepth();
   CheckPlayerBRegretsUsePlayerBUtility();
+  CheckCfrPlusClipsNegativeRegrets();
 
   PokerConfig config;
   config.add_bet_sizes(1.0);

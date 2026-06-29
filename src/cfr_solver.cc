@@ -227,8 +227,9 @@ double CFRSolver::cfr(GameTree::Node* node,
       double regret =
           opponent_reach_prob * utility_sign * (action_values[action_id] - node_value);
       
-      // Accumulate the regret
-      cumulative_regrets_[info_set_key][action_id] += regret;
+      // CFR+ clips cumulative regrets at zero.
+      double& cumulative_regret = cumulative_regrets_[info_set_key][action_id];
+      cumulative_regret = std::max(0.0, cumulative_regret + regret);
     }
     
     // Update the strategy based on the reach probability

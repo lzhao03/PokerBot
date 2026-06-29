@@ -20,7 +20,8 @@ public:
   // Run CFR for a specified number of iterations
   void run(int iterations);
   
-  // The core CFR algorithm
+  // The core CFR+ algorithm.
+  // This uses CFR+ regret clipping but keeps average strategy accumulation simple.
   // Returns the expected value of the game for player A.
   // max_depth <= 0 disables the depth cutoff.
   double cfr(GameTree::Node* node, 
@@ -50,6 +51,8 @@ public:
   int get_iterations_run() const { return iterations_run_; }
 
 private:
+  friend class CFRSolverRegretTestPeer;
+
   PokerConfig config_;
   GameTree* game_tree_;
   HandEvaluator* hand_evaluator_;
@@ -58,7 +61,7 @@ private:
   double cumulative_root_utility_;
   int iterations_run_;
   
-  // Regret tracking for each information set and action
+  // CFR+ clipped regret tracking for each information set and action.
   std::unordered_map<std::string, std::unordered_map<int, double>> cumulative_regrets_;
   
   // Strategy tracking for each information set and action
