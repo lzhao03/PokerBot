@@ -25,6 +25,23 @@ class CFRSolverRegretTestPeer {
     auto action_it = info_set_it->second.find(action_id);
     return action_it == info_set_it->second.end() ? 0.0 : action_it->second;
   }
+
+  static double EvaluateNode(CFRSolver& solver, GameTree::Node* node,
+                             const Hand& player_a_hand,
+                             const Hand& player_b_hand) {
+    Strategy strategy;
+    return solver.evaluate_strategy_node(node, player_a_hand, player_b_hand,
+                                         strategy);
+  }
+
+  static double BestResponseNode(CFRSolver& solver, GameTree::Node* node,
+                                 const Hand& player_a_hand,
+                                 const Hand& player_b_hand,
+                                 int best_response_player) {
+    Strategy strategy;
+    return solver.best_response_value(node, player_a_hand, player_b_hand,
+                                      strategy, best_response_player);
+  }
 };
 
 }  // namespace poker
@@ -599,6 +616,63 @@ void CheckChanceSamplesVisitMultipleBoards() {
          "configured chance samples should visit more sampled boards");
 }
 
+void CheckEvaluationUsesChanceSamples() {
+  GameTree::Node node;
+  node.is_chance_node = true;
+  node.state.set_pot(20);
+  node.state.set_street(Street::TURN);
+  node.state.set_all_in(true);
+  node.state.set_folded_player(-1);
+  node.state.add_player_contribution(10);
+  node.state.add_player_contribution(10);
+  AddCard(&node.state, 2, Suit::HEARTS);
+  AddCard(&node.state, 7, Suit::DIAMONDS);
+  AddCard(&node.state, 9, Suit::CLUBS);
+  AddCard(&node.state, 11, Suit::SPADES);
+
+  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
+  Hand player_b_hand = MakeHand(10, Suit::HEARTS, 10, Suit::CLUBS);
+
+  PokerConfig one_sample_config;
+  one_sample_config.set_starting_stack_size(10);
+  CFRSolver one_sample_solver(one_sample_config);
+  double first = CFRSolverRegretTestPeer::EvaluateNode(
+      one_sample_solver, &node, player_a_hand, player_b_hand);
+  double second = CFRSolverRegretTestPeer::EvaluateNode(
+      one_sample_solver, &node, player_a_hand, player_b_hand);
+  double third = CFRSolverRegretTestPeer::EvaluateNode(
+      one_sample_solver, &node, player_a_hand, player_b_hand);
+  double expected_average = (first + second + third) / 3.0;
+  Expect(std::abs(first - expected_average) > 0.000001,
+         "chance sample fixture should have varied outcomes");
+
+  PokerConfig three_sample_config;
+  three_sample_config.set_starting_stack_size(10);
+  three_sample_config.set_chance_samples(3);
+  CFRSolver three_sample_solver(three_sample_config);
+  double sampled_average = CFRSolverRegretTestPeer::EvaluateNode(
+      three_sample_solver, &node, player_a_hand, player_b_hand);
+  Expect(std::abs(sampled_average - expected_average) < 0.000001,
+         "strategy evaluation should average configured chance samples");
+
+  CFRSolver one_sample_best_response(one_sample_config);
+  double first_response = CFRSolverRegretTestPeer::BestResponseNode(
+      one_sample_best_response, &node, player_a_hand, player_b_hand, 0);
+  double second_response = CFRSolverRegretTestPeer::BestResponseNode(
+      one_sample_best_response, &node, player_a_hand, player_b_hand, 0);
+  double third_response = CFRSolverRegretTestPeer::BestResponseNode(
+      one_sample_best_response, &node, player_a_hand, player_b_hand, 0);
+  double expected_response_average =
+      (first_response + second_response + third_response) / 3.0;
+
+  CFRSolver three_sample_best_response(three_sample_config);
+  double sampled_response_average = CFRSolverRegretTestPeer::BestResponseNode(
+      three_sample_best_response, &node, player_a_hand, player_b_hand, 0);
+  Expect(std::abs(sampled_response_average - expected_response_average) <
+             0.000001,
+         "best response should average configured chance samples");
+}
+
 void CheckPlayerBRegretsUsePlayerBUtility() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -736,6 +810,7 @@ int main() {
   CheckZeroMaxDepthDoesNotCutOff();
   CheckChanceDoesNotConsumeDepth();
   CheckChanceSamplesVisitMultipleBoards();
+  CheckEvaluationUsesChanceSamples();
   CheckPlayerBRegretsUsePlayerBUtility();
   CheckCfrPlusClipsNegativeRegrets();
   CheckCfrPlusWeightsLaterStrategies();

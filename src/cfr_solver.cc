@@ -329,13 +329,17 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node* node,
     return game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
   }
   if (node->is_chance_node) {
-    std::vector<Card> cards =
-        SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
-    GameTree::Node* child_node = game_tree_->create_chance_child_node(node, cards);
-    double value =
-        evaluate_strategy_node(child_node, player_a_hand, player_b_hand, strategy);
-    delete child_node;
-    return value;
+    double value = 0.0;
+    int samples = ChanceSamples(config_);
+    for (int i = 0; i < samples; ++i) {
+      std::vector<Card> cards =
+          SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
+      GameTree::Node* child_node = game_tree_->create_chance_child_node(node, cards);
+      value +=
+          evaluate_strategy_node(child_node, player_a_hand, player_b_hand, strategy);
+      delete child_node;
+    }
+    return value / samples;
   }
   if (node->legal_actions.empty()) {
     return 0.0;
@@ -388,13 +392,17 @@ double CFRSolver::best_response_value(GameTree::Node* node,
     return best_response_player == 0 ? player_a_value : -player_a_value;
   }
   if (node->is_chance_node) {
-    std::vector<Card> cards =
-        SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
-    GameTree::Node* child_node = game_tree_->create_chance_child_node(node, cards);
-    double value = best_response_value(child_node, player_a_hand, player_b_hand,
-                                       strategy, best_response_player);
-    delete child_node;
-    return value;
+    double value = 0.0;
+    int samples = ChanceSamples(config_);
+    for (int i = 0; i < samples; ++i) {
+      std::vector<Card> cards =
+          SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
+      GameTree::Node* child_node = game_tree_->create_chance_child_node(node, cards);
+      value += best_response_value(child_node, player_a_hand, player_b_hand,
+                                   strategy, best_response_player);
+      delete child_node;
+    }
+    return value / samples;
   }
   if (node->legal_actions.empty()) {
     return 0.0;
