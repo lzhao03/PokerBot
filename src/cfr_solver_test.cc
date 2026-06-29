@@ -213,7 +213,9 @@ void CheckRunUpdatesExpectedValue() {
   config.set_max_depth(1);
 
   CFRSolver solver(config);
+  Expect(solver.get_iterations_run() == 0, "new solver should have no completed iterations");
   solver.run(1);
+  Expect(solver.get_iterations_run() == 1, "run should record completed iterations");
 
   double player_a_ev = solver.get_expected_value(0);
   double player_b_ev = solver.get_expected_value(1);
@@ -221,6 +223,13 @@ void CheckRunUpdatesExpectedValue() {
          "root EV should average completed CFR traversals");
   Expect(std::abs(player_a_ev + player_b_ev) < 0.000001,
          "heads-up EV should be zero-sum");
+
+  solver.run(1);
+  Expect(solver.get_iterations_run() == 2, "repeated run should accumulate iterations");
+  player_a_ev = solver.get_expected_value(0);
+  player_b_ev = solver.get_expected_value(1);
+  Expect(std::abs(player_a_ev + player_b_ev) < 0.000001,
+         "continued EV should stay zero-sum");
 }
 
 BoardState FoldedState(int folded_player) {

@@ -43,6 +43,7 @@ public:
   
   // Get the expected value of the game for a player
   double get_expected_value(int player_id) const;
+  int get_iterations_run() const { return iterations_run_; }
 
 private:
   PokerConfig config_;

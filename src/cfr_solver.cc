@@ -171,8 +171,7 @@ CFRSolver::~CFRSolver() {
 }
 
 void CFRSolver::run(int iterations) {
-  // Initialize the game tree
-  std::cout << "Building game tree..." << std::endl;
+  std::cout << "Preparing game tree..." << std::endl;
   const int small_blind = config_.small_blind() > 0 ? config_.small_blind() : 1;
   const int big_blind = config_.big_blind() > 0 ? config_.big_blind() : 2;
   const int starting_stack = config_.starting_stack_size();
@@ -190,9 +189,15 @@ void CFRSolver::run(int iterations) {
   initial_state.add_player_contribution(small_blind);
   initial_state.add_player_contribution(big_blind);
   
-  GameTree::Node* root = game_tree_->build_tree(initial_state);
-  
-  std::cout << "Game tree built with " << root->legal_actions.size() << " legal actions at root" << std::endl;
+  GameTree::Node* root = game_tree_->get_root();
+  if (root == nullptr) {
+    root = game_tree_->build_tree(initial_state);
+    std::cout << "Game tree built with " << root->legal_actions.size()
+              << " legal actions at root" << std::endl;
+  } else {
+    std::cout << "Reusing game tree with " << root->legal_actions.size()
+              << " legal actions at root" << std::endl;
+  }
   
   // Run iterations of CFR
   std::cout << "Starting CFR iterations..." << std::endl;
