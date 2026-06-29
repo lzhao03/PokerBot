@@ -494,6 +494,36 @@ double CFRSolver::calculate_exploitability(const Hand& player_a_hand,
   return (std::max(0.0, player_a_gap) + std::max(0.0, player_b_gap)) / 2.0;
 }
 
+Action CFRSolver::get_best_response_action(GameTree::Node* node,
+                                           const Hand& player_a_hand,
+                                           const Hand& player_b_hand,
+                                           int best_response_player) {
+  Action no_action;
+  no_action.set_action(ActionType::NO_ACTION);
+  if (node == nullptr || node->is_terminal || node->is_chance_node ||
+      node->legal_actions.empty() || node->player_to_act != best_response_player) {
+    return no_action;
+  }
+
+  Strategy strategy = get_equilibrium_strategy();
+  double best_value = -std::numeric_limits<double>::infinity();
+  Action best_action = no_action;
+  for (const Action& action : node->legal_actions) {
+    int action_id = ActionKey(action);
+    if (node->children.find(action_id) == node->children.end()) {
+      node->children[action_id] = game_tree_->create_child_node(node, action);
+    }
+    double value = best_response_value(node->children[action_id], player_a_hand,
+                                       player_b_hand, strategy,
+                                       best_response_player);
+    if (value > best_value) {
+      best_value = value;
+      best_action = action;
+    }
+  }
+  return best_action;
+}
+
 void CFRSolver::save_strategy(const std::string& filename) const {
   std::ofstream file(filename);
   

@@ -41,6 +41,11 @@ public:
   double calculate_exploitability(int samples);
   double calculate_exploitability(const Hand& player_a_hand,
                                   const Hand& player_b_hand);
+  // Debug helper for inspecting sampled best-response choices.
+  Action get_best_response_action(GameTree::Node* node,
+                                  const Hand& player_a_hand,
+                                  const Hand& player_b_hand,
+                                  int best_response_player);
   
   // Save and load the computed strategy
   void save_strategy(const std::string& filename) const;

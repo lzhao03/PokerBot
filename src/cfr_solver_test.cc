@@ -673,6 +673,46 @@ void CheckEvaluationUsesChanceSamples() {
          "best response should average configured chance samples");
 }
 
+void CheckBestResponseActionSelectsBestLegalAction() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+
+  CFRSolver solver(config);
+  GameTree::Node node;
+  node.state.set_player_to_act(0);
+  node.state.set_folded_player(-1);
+  node.player_to_act = 0;
+
+  Action player_a_loses = MakeAction(ActionType::FOLD);
+  Action player_a_wins = MakeAction(ActionType::CALL, 1);
+  node.legal_actions.push_back(player_a_loses);
+  node.legal_actions.push_back(player_a_wins);
+
+  GameTree::Node* player_a_loses_child = new GameTree::Node();
+  player_a_loses_child->state = FoldedState(0);
+  player_a_loses_child->is_terminal = true;
+  node.children[TestActionKey(ActionType::FOLD)] = player_a_loses_child;
+
+  GameTree::Node* player_a_wins_child = new GameTree::Node();
+  player_a_wins_child->state = FoldedState(1);
+  player_a_wins_child->is_terminal = true;
+  node.children[TestActionKey(ActionType::CALL, 1)] = player_a_wins_child;
+
+  Hand player_a_hand;
+  Hand player_b_hand;
+  Action best_action =
+      solver.get_best_response_action(&node, player_a_hand, player_b_hand, 0);
+  Expect(best_action.action() == ActionType::CALL,
+         "best response should select the highest-value legal action");
+  Expect(best_action.amount() == 1,
+         "best response should preserve selected action amount");
+
+  Action opponent_turn_action =
+      solver.get_best_response_action(&node, player_a_hand, player_b_hand, 1);
+  Expect(opponent_turn_action.action() == ActionType::NO_ACTION,
+         "best response should return no action away from its turn");
+}
+
 void CheckPlayerBRegretsUsePlayerBUtility() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -811,6 +851,7 @@ int main() {
   CheckChanceDoesNotConsumeDepth();
   CheckChanceSamplesVisitMultipleBoards();
   CheckEvaluationUsesChanceSamples();
+  CheckBestResponseActionSelectsBestLegalAction();
   CheckPlayerBRegretsUsePlayerBUtility();
   CheckCfrPlusClipsNegativeRegrets();
   CheckCfrPlusWeightsLaterStrategies();
