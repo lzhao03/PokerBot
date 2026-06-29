@@ -8,6 +8,8 @@ message PokerConfig {
   int32 starting_stack_size = 2;
   int32 max_depth = 3;
   bool enable_logging = 4;
+  int32 small_blind = 5;
+  int32 big_blind = 6;
 }
 
 enum Suit {

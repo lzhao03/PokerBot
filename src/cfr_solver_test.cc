@@ -145,12 +145,35 @@ void CheckSaveStrategyUsesReadableActions() {
          "saved strategy should not expose encoded action keys");
 }
 
+void CheckRunUsesConfiguredBlinds() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_small_blind(2);
+  config.set_big_blind(5);
+  config.set_max_depth(1);
+
+  CFRSolver solver(config);
+  solver.run(1);
+
+  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
+  std::string path =
+      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/configured_blinds_strategy.txt";
+  solver.save_strategy(path);
+
+  std::ifstream file(path);
+  std::string contents((std::istreambuf_iterator<char>(file)),
+                       std::istreambuf_iterator<char>());
+  Expect(contents.find("call 3 ") != std::string::npos,
+         "configured blinds should set the root call amount");
+}
+
 }  // namespace
 
 int main() {
   CheckCfrUsesLegalActions();
   CheckCfrDistinguishesActionAmounts();
   CheckSaveStrategyUsesReadableActions();
+  CheckRunUsesConfiguredBlinds();
 
   PokerConfig config;
   config.add_bet_sizes(1.0);

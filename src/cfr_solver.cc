@@ -171,8 +171,8 @@ CFRSolver::~CFRSolver() {
 void CFRSolver::run(int iterations) {
   // Initialize the game tree
   std::cout << "Building game tree..." << std::endl;
-  const int small_blind = 1;
-  const int big_blind = 2;
+  const int small_blind = config_.small_blind() > 0 ? config_.small_blind() : 1;
+  const int big_blind = config_.big_blind() > 0 ? config_.big_blind() : 2;
   const int starting_stack = config_.starting_stack_size();
 
   BoardState initial_state;

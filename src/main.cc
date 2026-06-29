@@ -53,6 +53,8 @@ int main() {
     config.add_bet_sizes(0.5);
     config.add_bet_sizes(1.0);
     config.set_starting_stack_size(100);
+    config.set_small_blind(1);
+    config.set_big_blind(2);
 
     // Create CFR solver with the configuration
     poker::CFRSolver solver(config);
