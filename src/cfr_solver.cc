@@ -224,14 +224,15 @@ double CFRSolver::cfr(GameTree::Node* node,
     return game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
   }
 
+  // Chance card deals are not player decisions, so they do not consume CFR depth.
+  if (node->is_chance_node) {
+    return chance_sampling_cfr(node, player_a_hand, player_b_hand,
+                               reach_probabilities, iteration, depth, max_depth);
+  }
+
   // Check depth limit to prevent infinite recursion
   if (depth >= max_depth) {
     return 0.0;
-  }
-  
-  // If the node is a chance node, sample an outcome and continue
-  if (node->is_chance_node) {
-    return chance_sampling_cfr(node, player_a_hand, player_b_hand, reach_probabilities, iteration, depth, max_depth);
   }
   
   // Get the player to act at this node
@@ -316,7 +317,7 @@ double CFRSolver::chance_sampling_cfr(GameTree::Node* node,
       SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
   GameTree::Node* child_node = game_tree_->create_chance_child_node(node, cards);
   double value = cfr(child_node, player_a_hand, player_b_hand, reach_probabilities,
-                    iteration, depth + 1, max_depth);
+                    iteration, depth, max_depth);
   delete child_node;
   return value;
 }
