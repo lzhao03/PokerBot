@@ -246,6 +246,9 @@ void CheckDepthLimitUsesShowdownUtility() {
   node.state.set_folded_player(-1);
   node.state.add_player_contribution(10);
   node.state.add_player_contribution(10);
+  node.state.set_player_to_act(1);
+  *node.state.mutable_history()->add_actions() = MakeAction(ActionType::CHECK);
+  *node.state.mutable_history()->add_actions() = MakeAction(ActionType::CHECK);
   AddCard(&node.state, 2, Suit::HEARTS);
   AddCard(&node.state, 7, Suit::DIAMONDS);
   AddCard(&node.state, 9, Suit::CLUBS);
@@ -259,6 +262,34 @@ void CheckDepthLimitUsesShowdownUtility() {
       solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 0);
 
   Expect(value == 10.0, "depth cutoff should use showdown utility when available");
+}
+
+void CheckDepthLimitDoesNotScoreUncalledBet() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+
+  CFRSolver solver(config);
+  GameTree::Node node;
+  node.state.set_pot(15);
+  node.state.set_street(Street::RIVER);
+  node.state.set_all_in(false);
+  node.state.set_folded_player(-1);
+  node.state.add_player_contribution(10);
+  node.state.add_player_contribution(5);
+  node.state.set_player_to_act(1);
+  AddCard(&node.state, 2, Suit::HEARTS);
+  AddCard(&node.state, 7, Suit::DIAMONDS);
+  AddCard(&node.state, 9, Suit::CLUBS);
+  AddCard(&node.state, 11, Suit::SPADES);
+  AddCard(&node.state, 12, Suit::DIAMONDS);
+
+  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
+  Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
+  std::vector<double> reach_probabilities = {1.0, 1.0};
+  double value =
+      solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 0);
+
+  Expect(value == 0.0, "depth cutoff should not score unresolved bets");
 }
 
 void CheckChanceDoesNotConsumeDepth() {
@@ -335,6 +366,7 @@ int main() {
   CheckRunUsesConfiguredBlinds();
   CheckTerminalUtilityBeatsDepthLimit();
   CheckDepthLimitUsesShowdownUtility();
+  CheckDepthLimitDoesNotScoreUncalledBet();
   CheckChanceDoesNotConsumeDepth();
   CheckPlayerBRegretsUsePlayerBUtility();
 
