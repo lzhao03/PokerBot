@@ -11,6 +11,8 @@ namespace poker {
 
 namespace {
 
+constexpr int kActionKeyMultiplier = 1000000;
+
 Card MakeCard(int rank, Suit suit) {
   Card card;
   card.set_rank(rank);
@@ -70,8 +72,52 @@ int CardsForNextStreet(Street street) {
 
 int ActionKey(const Action& action) {
   // ponytail: amounts are whole chips today; use a structured key if fractional chips matter.
-  return static_cast<int>(action.action()) * 1000000 +
+  return static_cast<int>(action.action()) * kActionKeyMultiplier +
          static_cast<int>(std::lround(action.amount()));
+}
+
+std::string ActionTypeName(ActionType action_type) {
+  switch (action_type) {
+    case ActionType::FOLD:
+      return "fold";
+    case ActionType::CHECK:
+      return "check";
+    case ActionType::CALL:
+      return "call";
+    case ActionType::BET:
+      return "bet";
+    case ActionType::RAISE:
+      return "raise";
+    case ActionType::ALL_IN:
+      return "all_in";
+    default:
+      return "unknown";
+  }
+}
+
+ActionType ActionTypeFromName(const std::string& name) {
+  if (name == "fold") return ActionType::FOLD;
+  if (name == "check") return ActionType::CHECK;
+  if (name == "call") return ActionType::CALL;
+  if (name == "bet") return ActionType::BET;
+  if (name == "raise") return ActionType::RAISE;
+  if (name == "all_in") return ActionType::ALL_IN;
+  return ActionType::NO_ACTION;
+}
+
+std::string ActionKeyToString(int action_key) {
+  ActionType action_type =
+      static_cast<ActionType>(action_key / kActionKeyMultiplier);
+  int amount = action_key % kActionKeyMultiplier;
+  std::string name = ActionTypeName(action_type);
+  if (amount == 0) {
+    return name;
+  }
+  return name + " " + std::to_string(amount);
+}
+
+int ActionKeyFromString(const std::string& name, int amount) {
+  return static_cast<int>(ActionTypeFromName(name)) * kActionKeyMultiplier + amount;
 }
 
 Hand DealHand(std::vector<Card>* deck) {
@@ -351,7 +397,7 @@ void CFRSolver::save_strategy(const std::string& filename) const {
     
     Strategy::ActionProbabilities action_probs = equilibrium_strategy.get_strategy(info_set_key);
     for (const auto& action_prob : action_probs) {
-      file << action_prob.first << " " << action_prob.second << "\n";
+      file << ActionKeyToString(action_prob.first) << " " << action_prob.second << "\n";
     }
     
     file << "END_INFO_SET\n";
@@ -380,6 +426,7 @@ void CFRSolver::load_strategy(const std::string& filename) {
     if (line == "END_INFO_SET") {
       // End of an information set, update the strategy
       current_strategy_.update(current_info_set, current_action_probs);
+      current_info_set.clear();
       current_action_probs.clear();
     } else if (current_info_set.empty()) {
       // This is an information set key
@@ -387,11 +434,24 @@ void CFRSolver::load_strategy(const std::string& filename) {
     } else {
       // This is an action probability
       std::istringstream iss(line);
-      int action_id;
-      double probability;
+      std::string action_name;
+      int amount = 0;
       
-      if (iss >> action_id >> probability) {
-        current_action_probs[action_id] = probability;
+      if (iss >> action_name) {
+        std::vector<std::string> tokens;
+        std::string token;
+        while (iss >> token) {
+          tokens.push_back(token);
+        }
+
+        if (tokens.size() == 1) {
+          current_action_probs[ActionKeyFromString(action_name, amount)] =
+              std::stod(tokens[0]);
+        } else if (tokens.size() == 2) {
+          amount = std::stoi(tokens[0]);
+          current_action_probs[ActionKeyFromString(action_name, amount)] =
+              std::stod(tokens[1]);
+        }
       }
     }
   }

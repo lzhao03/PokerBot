@@ -1,7 +1,11 @@
 #include "src/cfr_solver.h"
 
 #include <cmath>
+#include <cstdlib>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 using namespace poker;
@@ -104,11 +108,49 @@ void CheckCfrDistinguishesActionAmounts() {
   }
 }
 
+void CheckSaveStrategyUsesReadableActions() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+
+  CFRSolver solver(config);
+  GameTree::Node node;
+  node.state.set_stack_a(19);
+  node.state.set_stack_b(18);
+  node.state.set_pot(3);
+  node.state.set_street(Street::PREFLOP);
+  node.state.set_all_in(false);
+  node.state.set_folded_player(-1);
+  node.state.add_player_contribution(1);
+  node.state.add_player_contribution(2);
+  node.state.set_player_to_act(0);
+  node.player_to_act = 0;
+  node.legal_actions.push_back(MakeAction(ActionType::RAISE, 5));
+
+  Hand player_a_hand;
+  Hand player_b_hand;
+  std::vector<double> reach_probabilities = {1.0, 1.0};
+  solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
+
+  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
+  std::string path = std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/strategy.txt";
+  solver.save_strategy(path);
+  solver.load_strategy(path);
+
+  std::ifstream file(path);
+  std::string contents((std::istreambuf_iterator<char>(file)),
+                       std::istreambuf_iterator<char>());
+  Expect(contents.find("raise 5 ") != std::string::npos,
+         "saved strategy should use readable action names");
+  Expect(contents.find("4000005") == std::string::npos,
+         "saved strategy should not expose encoded action keys");
+}
+
 }  // namespace
 
 int main() {
   CheckCfrUsesLegalActions();
   CheckCfrDistinguishesActionAmounts();
+  CheckSaveStrategyUsesReadableActions();
 
   PokerConfig config;
   config.add_bet_sizes(1.0);
