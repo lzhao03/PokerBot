@@ -448,13 +448,23 @@ double CFRSolver::best_response_value(GameTree::Node* node,
 }
 
 double CFRSolver::calculate_exploitability() {
-  std::vector<Card> deck = BuildDeck();
-  std::shuffle(deck.begin(), deck.end(), rng_);
-  Hand player_a_hand = DealHand(&deck);
-  Hand player_b_hand = DealHand(&deck);
-  // ponytail: one sampled private deal; average many deals when this metric
-  // needs to be stable enough for reporting.
-  return calculate_exploitability(player_a_hand, player_b_hand);
+  return calculate_exploitability(1);
+}
+
+double CFRSolver::calculate_exploitability(int samples) {
+  if (samples <= 0) {
+    return 0.0;
+  }
+
+  double total = 0.0;
+  for (int i = 0; i < samples; ++i) {
+    std::vector<Card> deck = BuildDeck();
+    std::shuffle(deck.begin(), deck.end(), rng_);
+    Hand player_a_hand = DealHand(&deck);
+    Hand player_b_hand = DealHand(&deck);
+    total += calculate_exploitability(player_a_hand, player_b_hand);
+  }
+  return total / samples;
 }
 
 double CFRSolver::calculate_exploitability(const Hand& player_a_hand,

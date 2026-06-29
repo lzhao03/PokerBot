@@ -267,6 +267,13 @@ void CheckExploitabilityDetectsFoldStrategy() {
   Expect(exploitability > 0.0, "fold-only strategy should be exploitable");
 }
 
+void CheckExploitabilityZeroSamples() {
+  PokerConfig config;
+  CFRSolver solver(config);
+  Expect(solver.calculate_exploitability(0) == 0.0,
+         "zero exploitability samples should return zero");
+}
+
 void CheckRunUsesConfiguredBlinds() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -508,6 +515,7 @@ int main() {
   CheckLoadStrategyPopulatesEquilibriumStrategy();
   CheckEvaluateLoadedStrategy();
   CheckExploitabilityDetectsFoldStrategy();
+  CheckExploitabilityZeroSamples();
   CheckRunUsesConfiguredBlinds();
   CheckRunUpdatesExpectedValue();
   CheckTerminalUtilityBeatsDepthLimit();

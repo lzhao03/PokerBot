@@ -37,6 +37,7 @@ public:
   
   // Calculate sampled exploitability of the current strategy.
   double calculate_exploitability();
+  double calculate_exploitability(int samples);
   double calculate_exploitability(const Hand& player_a_hand,
                                   const Hand& player_b_hand);
   
