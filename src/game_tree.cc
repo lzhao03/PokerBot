@@ -67,11 +67,20 @@ int RequestedChips(const Action& action) {
   return static_cast<int>(action.amount());
 }
 
-void AddAllInAction(std::vector<Action>* actions, int amount) {
-  Action all_in_action;
-  all_in_action.set_action(ActionType::ALL_IN);
-  all_in_action.set_amount(amount);
-  actions->push_back(all_in_action);
+void AddActionIfMissing(std::vector<Action>* actions, ActionType type, int amount) {
+  bool exists =
+      std::any_of(actions->begin(), actions->end(), [&](const Action& action) {
+        return action.action() == type &&
+               static_cast<int>(action.amount()) == amount;
+      });
+  if (exists) {
+    return;
+  }
+
+  Action new_action;
+  new_action.set_action(type);
+  new_action.set_amount(amount);
+  actions->push_back(new_action);
 }
 
 int CommitChips(BoardState* state, int player, int requested) {
@@ -189,14 +198,11 @@ std::vector<Action> GameTree::get_legal_actions(const BoardState& state) const {
       int raise_amount =
           to_call + ConcreteBetAmount(state, config_.bet_sizes(i));
       if (raise_amount < stack) {
-        Action raise_action;
-        raise_action.set_action(ActionType::RAISE);
-        raise_action.set_amount(raise_amount);
-        actions.push_back(raise_action);
+        AddActionIfMissing(&actions, ActionType::RAISE, raise_amount);
       }
     }
     if (stack > to_call) {
-      AddAllInAction(&actions, stack);
+      AddActionIfMissing(&actions, ActionType::ALL_IN, stack);
     }
   } else {
     Action check_action;
@@ -207,13 +213,10 @@ std::vector<Action> GameTree::get_legal_actions(const BoardState& state) const {
     for (int i = 0; i < config_.bet_sizes_size(); ++i) {
       int bet_amount = ConcreteBetAmount(state, config_.bet_sizes(i));
       if (bet_amount < stack) {
-        Action bet_action;
-        bet_action.set_action(ActionType::BET);
-        bet_action.set_amount(bet_amount);
-        actions.push_back(bet_action);
+        AddActionIfMissing(&actions, ActionType::BET, bet_amount);
       }
     }
-    AddAllInAction(&actions, stack);
+    AddActionIfMissing(&actions, ActionType::ALL_IN, stack);
   }
   
   return actions;

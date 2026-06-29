@@ -201,6 +201,23 @@ void CheckAllInEquivalentActionsAreDeduped() {
   Expect(raise_actions[2].action() == ActionType::ALL_IN, "third facing action is all-in");
 }
 
+void CheckDuplicateConcreteBetSizesAreDeduped() {
+  PokerConfig config;
+  config.add_bet_sizes(0.5);
+  config.add_bet_sizes(0.51);
+  GameTree tree(config);
+
+  std::vector<Action> open_actions = tree.get_legal_actions(FlopState());
+  Expect(open_actions.size() == 3, "duplicate concrete bet sizes should collapse");
+  Expect(open_actions[1].action() == ActionType::BET, "open action includes bet");
+  Expect(open_actions[1].amount() == 2, "duplicate bet amount is kept once");
+
+  std::vector<Action> raise_actions = tree.get_legal_actions(PreflopState());
+  Expect(raise_actions.size() == 4, "duplicate concrete raise sizes should collapse");
+  Expect(raise_actions[2].action() == ActionType::RAISE, "facing action includes raise");
+  Expect(raise_actions[2].amount() == 2, "duplicate raise amount is kept once");
+}
+
 void CheckShowdownUtility(GameTree* tree) {
   BoardState showdown = ShowdownState();
   Hand player_a = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
@@ -251,6 +268,7 @@ int main() {
   poker::CheckLegalActions(&tree);
   poker::CheckAllInAction(&tree);
   poker::CheckAllInEquivalentActionsAreDeduped();
+  poker::CheckDuplicateConcreteBetSizesAreDeduped();
   poker::CheckShowdownUtility(&tree);
   poker::CheckChanceAdvancesStreet(&tree);
   return 0;
