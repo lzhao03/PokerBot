@@ -375,6 +375,39 @@ void CheckRunLoggingUsesConfig() {
          "run should log when enable_logging is set");
 }
 
+void CheckRunProducesDeterministicStrategyShape() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+
+  CFRSolver first_solver(config);
+  CFRSolver second_solver(config);
+  first_solver.run(2);
+  second_solver.run(2);
+
+  const Strategy first = first_solver.get_equilibrium_strategy();
+  const Strategy second = second_solver.get_equilibrium_strategy();
+  const auto& first_strategy = first.get_full_strategy();
+  const auto& second_strategy = second.get_full_strategy();
+  Expect(first_strategy.size() == second_strategy.size(),
+         "same config should produce same number of info sets");
+
+  for (const auto& info_set_strategy : first_strategy) {
+    auto second_info_set = second_strategy.find(info_set_strategy.first);
+    Expect(second_info_set != second_strategy.end(),
+           "same config should produce same info set keys");
+    Expect(info_set_strategy.second.size() == second_info_set->second.size(),
+           "same config should produce same action count");
+    for (const auto& action_prob : info_set_strategy.second) {
+      auto second_action = second_info_set->second.find(action_prob.first);
+      Expect(second_action != second_info_set->second.end(),
+             "same config should produce same action keys");
+      Expect(std::abs(action_prob.second - second_action->second) < 0.000001,
+             "same config should produce same action probabilities");
+    }
+  }
+}
+
 BoardState FoldedState(int folded_player) {
   BoardState state;
   state.set_pot(10);
@@ -653,6 +686,7 @@ int main() {
   CheckRunUpdatesExpectedValue();
   CheckRunTrainsSwappedPrivateHands();
   CheckRunLoggingUsesConfig();
+  CheckRunProducesDeterministicStrategyShape();
   CheckTerminalUtilityBeatsDepthLimit();
   CheckDepthLimitUsesShowdownUtility();
   CheckDepthLimitDoesNotScoreUncalledBet();
