@@ -259,7 +259,7 @@ void CheckDepthLimitUsesShowdownUtility() {
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   std::vector<double> reach_probabilities = {1.0, 1.0};
   double value =
-      solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 0);
+      solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
   Expect(value == 10.0, "depth cutoff should use showdown utility when available");
 }
@@ -287,9 +287,45 @@ void CheckDepthLimitDoesNotScoreUncalledBet() {
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   std::vector<double> reach_probabilities = {1.0, 1.0};
   double value =
-      solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 0);
+      solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
   Expect(value == 0.0, "depth cutoff should not score unresolved bets");
+}
+
+void CheckZeroMaxDepthDoesNotCutOff() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+
+  CFRSolver solver(config);
+  GameTree::Node root;
+  root.state.set_player_to_act(0);
+  root.player_to_act = 0;
+  root.legal_actions.push_back(MakeAction(ActionType::CHECK));
+
+  GameTree::Node* first_child = new GameTree::Node();
+  first_child->state.set_player_to_act(1);
+  first_child->player_to_act = 1;
+  first_child->legal_actions.push_back(MakeAction(ActionType::CHECK));
+  root.children[TestActionKey(ActionType::CHECK)] = first_child;
+
+  GameTree::Node* second_child = new GameTree::Node();
+  second_child->state.set_player_to_act(0);
+  second_child->player_to_act = 0;
+  second_child->legal_actions.push_back(MakeAction(ActionType::CHECK));
+  first_child->children[TestActionKey(ActionType::CHECK)] = second_child;
+
+  GameTree::Node* terminal_child = new GameTree::Node();
+  terminal_child->state = FoldedState(1);
+  terminal_child->is_terminal = true;
+  second_child->children[TestActionKey(ActionType::CHECK)] = terminal_child;
+
+  Hand player_a_hand;
+  Hand player_b_hand;
+  std::vector<double> reach_probabilities = {1.0, 1.0};
+  double value =
+      solver.cfr(&root, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 0);
+
+  Expect(value == 5.0, "zero max depth should not cut off CFR traversal");
 }
 
 void CheckChanceDoesNotConsumeDepth() {
@@ -314,7 +350,7 @@ void CheckChanceDoesNotConsumeDepth() {
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   std::vector<double> reach_probabilities = {1.0, 1.0};
   double value =
-      solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 0);
+      solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
   Expect(value == 10.0, "chance nodes should not consume CFR depth");
 }
@@ -367,6 +403,7 @@ int main() {
   CheckTerminalUtilityBeatsDepthLimit();
   CheckDepthLimitUsesShowdownUtility();
   CheckDepthLimitDoesNotScoreUncalledBet();
+  CheckZeroMaxDepthDoesNotCutOff();
   CheckChanceDoesNotConsumeDepth();
   CheckPlayerBRegretsUsePlayerBUtility();
 

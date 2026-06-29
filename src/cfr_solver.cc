@@ -203,8 +203,7 @@ void CFRSolver::run(int iterations) {
     // Initialize reach probabilities
     std::vector<double> reach_probabilities(2, 1.0);
     
-    // Run CFR algorithm with a maximum depth
-    const int max_depth = config_.max_depth() > 0 ? config_.max_depth() : 3;
+    const int max_depth = config_.max_depth();
     std::cout << "Iteration " << i+1 << "/" << iterations << std::endl;
     cfr(root, player_a_hand, player_b_hand, reach_probabilities, i, 0, max_depth);
   }
@@ -231,7 +230,7 @@ double CFRSolver::cfr(GameTree::Node* node,
   }
 
   // Check depth limit to prevent infinite recursion
-  if (depth >= max_depth) {
+  if (max_depth > 0 && depth >= max_depth) {
     if (game_tree_->is_betting_round_over(node->state)) {
       return game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
     }

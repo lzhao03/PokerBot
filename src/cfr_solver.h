@@ -22,13 +22,14 @@ public:
   
   // The core CFR algorithm
   // Returns the expected value of the game for player A.
+  // max_depth <= 0 disables the depth cutoff.
   double cfr(GameTree::Node* node, 
              const Hand& player_a_hand, 
              const Hand& player_b_hand,
              std::vector<double>& reach_probabilities, 
              int iteration,
              int depth = 0,
-             int max_depth = 10);
+             int max_depth = 0);
   
   // Get the computed equilibrium strategy
   Strategy get_equilibrium_strategy() const;
