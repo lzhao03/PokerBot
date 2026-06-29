@@ -180,6 +180,28 @@ void CheckAllInAction(GameTree* tree) {
          "all-in records committed chips");
 }
 
+void CheckShortAllInCallClosesRound(GameTree* tree) {
+  BoardState state = FlopState();
+  state.set_stack_a(5);
+
+  BoardState bet = tree->apply_action(state, MakeAction(ActionType::BET, 10));
+  BoardState called = tree->apply_action(bet, MakeAction(ActionType::CALL));
+
+  Expect(called.stack_a() == 0, "short all-in call commits caller stack");
+  Expect(called.player_contribution(0) == 7,
+         "short all-in call records partial contribution");
+  Expect(called.player_contribution(1) == 12,
+         "bettor keeps larger contribution");
+  Expect(called.all_in(), "short call marks state all-in");
+  Expect(tree->is_betting_round_over(called),
+         "short all-in call closes heads-up betting");
+  Expect(tree->get_player_to_act(called) == -1,
+         "short all-in call leaves no player action");
+
+  GameTree::Node* root = tree->build_tree(called);
+  Expect(root->is_chance_node, "short all-in call can run out the board");
+}
+
 void CheckAllInEquivalentActionsAreDeduped() {
   PokerConfig open_config;
   open_config.add_bet_sizes(24.5);
@@ -267,6 +289,7 @@ int main() {
   poker::CheckRaiseAndFold(&tree);
   poker::CheckLegalActions(&tree);
   poker::CheckAllInAction(&tree);
+  poker::CheckShortAllInCallClosesRound(&tree);
   poker::CheckAllInEquivalentActionsAreDeduped();
   poker::CheckDuplicateConcreteBetSizesAreDeduped();
   poker::CheckShowdownUtility(&tree);

@@ -428,7 +428,8 @@ bool GameTree::is_betting_round_over(const BoardState& state) const {
       OutstandingToCall(state, 0) == 0 && OutstandingToCall(state, 1) == 0;
   if (state.all_in()) {
     int player = state.player_to_act();
-    return calls_matched || !IsPlayer(player) || GetStack(state, player) == 0;
+    return calls_matched || !IsPlayer(player) || GetStack(state, player) == 0 ||
+           OutstandingToCall(state, player) == 0;
   }
   if (state.history().actions_size() == 0 || !calls_matched) {
     return false;
