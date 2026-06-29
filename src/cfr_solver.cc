@@ -232,7 +232,7 @@ double CFRSolver::cfr(GameTree::Node* node,
 
   // Check depth limit to prevent infinite recursion
   if (depth >= max_depth) {
-    return 0.0;
+    return game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
   }
   
   // Get the player to act at this node

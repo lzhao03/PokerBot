@@ -234,6 +234,33 @@ void CheckTerminalUtilityBeatsDepthLimit() {
   Expect(value == 5.0, "terminal utility should be returned at the depth limit");
 }
 
+void CheckDepthLimitUsesShowdownUtility() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+
+  CFRSolver solver(config);
+  GameTree::Node node;
+  node.state.set_pot(20);
+  node.state.set_street(Street::RIVER);
+  node.state.set_all_in(false);
+  node.state.set_folded_player(-1);
+  node.state.add_player_contribution(10);
+  node.state.add_player_contribution(10);
+  AddCard(&node.state, 2, Suit::HEARTS);
+  AddCard(&node.state, 7, Suit::DIAMONDS);
+  AddCard(&node.state, 9, Suit::CLUBS);
+  AddCard(&node.state, 11, Suit::SPADES);
+  AddCard(&node.state, 12, Suit::DIAMONDS);
+
+  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
+  Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
+  std::vector<double> reach_probabilities = {1.0, 1.0};
+  double value =
+      solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 0);
+
+  Expect(value == 10.0, "depth cutoff should use showdown utility when available");
+}
+
 void CheckChanceDoesNotConsumeDepth() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -307,6 +334,7 @@ int main() {
   CheckLoadStrategyPopulatesEquilibriumStrategy();
   CheckRunUsesConfiguredBlinds();
   CheckTerminalUtilityBeatsDepthLimit();
+  CheckDepthLimitUsesShowdownUtility();
   CheckChanceDoesNotConsumeDepth();
   CheckPlayerBRegretsUsePlayerBUtility();
 
