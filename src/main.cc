@@ -72,8 +72,8 @@ int main() {
     std::cout << "Number of information sets: " << equilibrium.get_info_sets().size() << std::endl;
     
     // Save the computed strategy
-    solver.save_strategy("equilibrium_strategy.txt");
-    std::cout << "Strategy saved to equilibrium_strategy.txt" << std::endl;
+    solver.save_strategy("equilibrium_strategy.pb");
+    std::cout << "Strategy saved to equilibrium_strategy.pb" << std::endl;
     
     // Create a board state with some cards
     poker::BoardState state;
