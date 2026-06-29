@@ -35,8 +35,10 @@ public:
   Strategy get_equilibrium_strategy() const;
   double evaluate_strategy(const Hand& player_a_hand, const Hand& player_b_hand);
   
-  // Calculate the exploitability of the current strategy
-  double calculate_exploitability() const;
+  // Calculate sampled exploitability of the current strategy.
+  double calculate_exploitability();
+  double calculate_exploitability(const Hand& player_a_hand,
+                                  const Hand& player_b_hand);
   
   // Save and load the computed strategy
   void save_strategy(const std::string& filename) const;
@@ -70,6 +72,11 @@ private:
                                 const Hand& player_a_hand,
                                 const Hand& player_b_hand,
                                 const Strategy& strategy);
+  double best_response_value(GameTree::Node* node,
+                             const Hand& player_a_hand,
+                             const Hand& player_b_hand,
+                             const Strategy& strategy,
+                             int best_response_player);
   Strategy::ActionProbabilities get_strategy(
       const std::string& info_set_key,
       const std::vector<Action>& legal_actions);

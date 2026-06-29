@@ -5,6 +5,7 @@
 #include <random>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <cmath>
 #include <stdexcept>
 
@@ -372,10 +373,103 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node* node,
   return value;
 }
 
-double CFRSolver::calculate_exploitability() const {
-  // This is a placeholder - in a real implementation, this would compute
-  // the exploitability of the current strategy
-  return 0.0;
+double CFRSolver::best_response_value(GameTree::Node* node,
+                                      const Hand& player_a_hand,
+                                      const Hand& player_b_hand,
+                                      const Strategy& strategy,
+                                      int best_response_player) {
+  if (node->is_terminal) {
+    double player_a_value =
+        game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
+    return best_response_player == 0 ? player_a_value : -player_a_value;
+  }
+  if (node->is_chance_node) {
+    std::vector<Card> cards =
+        SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
+    GameTree::Node* child_node = game_tree_->create_chance_child_node(node, cards);
+    double value = best_response_value(child_node, player_a_hand, player_b_hand,
+                                       strategy, best_response_player);
+    delete child_node;
+    return value;
+  }
+  if (node->legal_actions.empty()) {
+    return 0.0;
+  }
+
+  int player = node->player_to_act;
+  if (player != 0 && player != 1) {
+    return 0.0;
+  }
+
+  const Hand& player_hand = player == 0 ? player_a_hand : player_b_hand;
+  std::string info_set_key =
+      info_set_abstraction_->state_to_info_set(node->state, player, player_hand);
+
+  std::vector<int> action_ids;
+  action_ids.reserve(node->legal_actions.size());
+  double probability_sum = 0.0;
+  for (const Action& action : node->legal_actions) {
+    int action_id = ActionKey(action);
+    action_ids.push_back(action_id);
+    probability_sum += strategy.get_action_probability(info_set_key, action_id);
+  }
+
+  if (player == best_response_player) {
+    double value = -std::numeric_limits<double>::infinity();
+    for (size_t i = 0; i < node->legal_actions.size(); ++i) {
+      const Action& action = node->legal_actions[i];
+      int action_id = action_ids[i];
+      if (node->children.find(action_id) == node->children.end()) {
+        node->children[action_id] = game_tree_->create_child_node(node, action);
+      }
+      value = std::max(value, best_response_value(
+                                  node->children[action_id], player_a_hand,
+                                  player_b_hand, strategy, best_response_player));
+    }
+    return value;
+  }
+
+  double value = 0.0;
+  for (size_t i = 0; i < node->legal_actions.size(); ++i) {
+    const Action& action = node->legal_actions[i];
+    int action_id = action_ids[i];
+    double probability = probability_sum > 0.0
+                             ? strategy.get_action_probability(info_set_key, action_id) /
+                                   probability_sum
+                             : 1.0 / node->legal_actions.size();
+    if (node->children.find(action_id) == node->children.end()) {
+      node->children[action_id] = game_tree_->create_child_node(node, action);
+    }
+    value += probability * best_response_value(
+                               node->children[action_id], player_a_hand,
+                               player_b_hand, strategy, best_response_player);
+  }
+  return value;
+}
+
+double CFRSolver::calculate_exploitability() {
+  std::vector<Card> deck = BuildDeck();
+  std::shuffle(deck.begin(), deck.end(), rng_);
+  Hand player_a_hand = DealHand(&deck);
+  Hand player_b_hand = DealHand(&deck);
+  // ponytail: one sampled private deal; average many deals when this metric
+  // needs to be stable enough for reporting.
+  return calculate_exploitability(player_a_hand, player_b_hand);
+}
+
+double CFRSolver::calculate_exploitability(const Hand& player_a_hand,
+                                           const Hand& player_b_hand) {
+  Strategy strategy = get_equilibrium_strategy();
+  GameTree::Node* root = get_or_build_root();
+  double strategy_player_a_value =
+      evaluate_strategy_node(root, player_a_hand, player_b_hand, strategy);
+  double player_a_gap =
+      best_response_value(root, player_a_hand, player_b_hand, strategy, 0) -
+      strategy_player_a_value;
+  double player_b_gap =
+      best_response_value(root, player_a_hand, player_b_hand, strategy, 1) +
+      strategy_player_a_value;
+  return (std::max(0.0, player_a_gap) + std::max(0.0, player_b_gap)) / 2.0;
 }
 
 void CFRSolver::save_strategy(const std::string& filename) const {

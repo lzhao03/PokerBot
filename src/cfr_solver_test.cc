@@ -240,6 +240,33 @@ void CheckEvaluateLoadedStrategy() {
          "saved and loaded strategies should evaluate the same");
 }
 
+void CheckExploitabilityDetectsFoldStrategy() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 13, Suit::SPADES);
+  Hand player_b_hand = MakeHand(12, Suit::HEARTS, 11, Suit::HEARTS);
+  InfoSetAbstraction abstraction;
+  std::string root_info_set =
+      abstraction.state_to_info_set(InitialRootState(config), 0, player_a_hand);
+
+  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
+  std::string path =
+      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/exploitability_strategy.txt";
+  {
+    std::ofstream file(path);
+    file << root_info_set << "\n";
+    file << "fold 1\n";
+    file << "END_INFO_SET\n";
+  }
+
+  CFRSolver solver(config);
+  solver.load_strategy(path);
+  double exploitability =
+      solver.calculate_exploitability(player_a_hand, player_b_hand);
+  Expect(exploitability > 0.0, "fold-only strategy should be exploitable");
+}
+
 void CheckRunUsesConfiguredBlinds() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -480,6 +507,7 @@ int main() {
   CheckSaveStrategyUsesReadableActions();
   CheckLoadStrategyPopulatesEquilibriumStrategy();
   CheckEvaluateLoadedStrategy();
+  CheckExploitabilityDetectsFoldStrategy();
   CheckRunUsesConfiguredBlinds();
   CheckRunUpdatesExpectedValue();
   CheckTerminalUtilityBeatsDepthLimit();
