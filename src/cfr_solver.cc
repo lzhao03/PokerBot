@@ -159,7 +159,9 @@ CFRSolver::CFRSolver(const PokerConfig& config)
     game_tree_(new GameTree(config)),
     hand_evaluator_(new HandEvaluator()),
     info_set_abstraction_(new InfoSetAbstraction()),
-    rng_(12345) {
+    rng_(12345),
+    cumulative_root_utility_(0.0),
+    iterations_run_(0) {
 }
 
 CFRSolver::~CFRSolver() {
@@ -205,7 +207,9 @@ void CFRSolver::run(int iterations) {
     
     const int max_depth = config_.max_depth();
     std::cout << "Iteration " << i+1 << "/" << iterations << std::endl;
-    cfr(root, player_a_hand, player_b_hand, reach_probabilities, i, 0, max_depth);
+    cumulative_root_utility_ +=
+        cfr(root, player_a_hand, player_b_hand, reach_probabilities, i, 0, max_depth);
+    ++iterations_run_;
   }
   
   std::cout << "CFR iterations completed" << std::endl;
@@ -467,9 +471,11 @@ void CFRSolver::load_strategy(const std::string& filename) {
 }
 
 double CFRSolver::get_expected_value(int player_id) const {
-  // This is a placeholder - in a real implementation, this would compute
-  // the expected value of the game for the given player
-  return 0.0;
+  if (iterations_run_ == 0) {
+    return 0.0;
+  }
+  double player_a_ev = cumulative_root_utility_ / iterations_run_;
+  return player_id == 0 ? player_a_ev : -player_a_ev;
 }
 
 Strategy::ActionProbabilities CFRSolver::get_strategy(

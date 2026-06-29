@@ -207,6 +207,22 @@ void CheckRunUsesConfiguredBlinds() {
          "configured blinds should set the root call amount");
 }
 
+void CheckRunUpdatesExpectedValue() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+
+  CFRSolver solver(config);
+  solver.run(1);
+
+  double player_a_ev = solver.get_expected_value(0);
+  double player_b_ev = solver.get_expected_value(1);
+  Expect(std::abs(player_a_ev + (1.0 / 3.0)) < 0.000001,
+         "root EV should average completed CFR traversals");
+  Expect(std::abs(player_a_ev + player_b_ev) < 0.000001,
+         "heads-up EV should be zero-sum");
+}
+
 BoardState FoldedState(int folded_player) {
   BoardState state;
   state.set_pot(10);
@@ -400,6 +416,7 @@ int main() {
   CheckSaveStrategyUsesReadableActions();
   CheckLoadStrategyPopulatesEquilibriumStrategy();
   CheckRunUsesConfiguredBlinds();
+  CheckRunUpdatesExpectedValue();
   CheckTerminalUtilityBeatsDepthLimit();
   CheckDepthLimitUsesShowdownUtility();
   CheckDepthLimitDoesNotScoreUncalledBet();

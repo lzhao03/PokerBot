@@ -50,6 +50,8 @@ private:
   HandEvaluator* hand_evaluator_;
   InfoSetAbstraction* info_set_abstraction_;
   std::mt19937 rng_;
+  double cumulative_root_utility_;
+  int iterations_run_;
   
   // Regret tracking for each information set and action
   std::unordered_map<std::string, std::unordered_map<int, double>> cumulative_regrets_;
