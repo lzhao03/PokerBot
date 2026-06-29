@@ -411,9 +411,11 @@ bool GameTree::is_betting_round_over(const BoardState& state) const {
   }
   
   const Action& last = state.history().actions(state.history().actions_size() - 1);
-  bool closing_action =
-      last.action() == ActionType::CHECK || last.action() == ActionType::CALL;
-  return closing_action && state.player_to_act() == FirstPlayerForStreet(state);
+  if (last.action() == ActionType::CALL) {
+    return state.history().actions_size() > 1;
+  }
+  return last.action() == ActionType::CHECK &&
+         state.player_to_act() == FirstPlayerForStreet(state);
 }
 
 bool GameTree::is_hand_over(const BoardState& state) const {

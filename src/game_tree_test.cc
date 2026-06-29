@@ -128,6 +128,15 @@ void CheckBetAndCall(GameTree* tree) {
   Expect(tree->is_betting_round_over(called), "bet/call closes postflop");
 }
 
+void CheckCheckBetCall(GameTree* tree) {
+  BoardState checked = tree->apply_action(FlopState(), MakeAction(ActionType::CHECK));
+  BoardState bet = tree->apply_action(checked, MakeAction(ActionType::BET, 5));
+  BoardState called = tree->apply_action(bet, MakeAction(ActionType::CALL));
+
+  Expect(called.player_to_act() == 0, "call after checked bet returns action");
+  Expect(tree->is_betting_round_over(called), "check/bet/call closes postflop");
+}
+
 void CheckRaiseAndFold(GameTree* tree) {
   BoardState raised = tree->apply_action(PreflopState(), MakeAction(ActionType::RAISE, 4));
 
@@ -199,6 +208,7 @@ int main() {
   poker::GameTree tree(config);
   poker::CheckCallAndCheck(&tree);
   poker::CheckBetAndCall(&tree);
+  poker::CheckCheckBetCall(&tree);
   poker::CheckRaiseAndFold(&tree);
   poker::CheckLegalActions(&tree);
   poker::CheckShowdownUtility(&tree);
