@@ -390,6 +390,12 @@ void CheckRunLoggingUsesConfig() {
   std::cout.rdbuf(original);
   Expect(logged_output.str().find("Starting CFR iterations") != std::string::npos,
          "run should log when enable_logging is set");
+  Expect(logged_output.str().find("Iterations run: 1") != std::string::npos,
+         "run should log completed iteration count");
+  Expect(logged_output.str().find("Information sets: 2") != std::string::npos,
+         "run should log trained info set count");
+  Expect(logged_output.str().find("Player A average EV:") != std::string::npos,
+         "run should log average root EV");
 }
 
 void CheckRunProducesDeterministicStrategyShape() {

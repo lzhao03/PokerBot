@@ -157,6 +157,10 @@ void CFRSolver::run(int iterations) {
   
   if (log) {
     std::cout << "CFR iterations completed" << std::endl;
+    std::cout << "Iterations run: " << iterations_run_ << std::endl;
+    std::cout << "Information sets: "
+              << get_equilibrium_strategy().get_info_sets().size() << std::endl;
+    std::cout << "Player A average EV: " << get_expected_value(0) << std::endl;
   }
 }
 
