@@ -556,6 +556,49 @@ void CheckChanceDoesNotConsumeDepth() {
   Expect(value == 10.0, "chance nodes should not consume CFR depth");
 }
 
+void CheckChanceSamplesVisitMultipleBoards() {
+  BoardState state;
+  state.set_stack_a(10);
+  state.set_stack_b(10);
+  state.set_pot(0);
+  state.set_street(Street::PREFLOP);
+  state.set_all_in(false);
+  state.set_folded_player(-1);
+  state.set_player_to_act(-1);
+  state.add_player_contribution(0);
+  state.add_player_contribution(0);
+
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 13, Suit::SPADES);
+  Hand player_b_hand = MakeHand(12, Suit::HEARTS, 11, Suit::HEARTS);
+
+  PokerConfig one_sample_config;
+  one_sample_config.set_starting_stack_size(10);
+  CFRSolver one_sample_solver(one_sample_config);
+  GameTree::Node one_sample_node;
+  one_sample_node.is_chance_node = true;
+  one_sample_node.state = state;
+  std::vector<double> one_sample_reach = {1.0, 1.0};
+  one_sample_solver.cfr(&one_sample_node, player_a_hand, player_b_hand,
+                        one_sample_reach, 0, 0, 1);
+
+  PokerConfig three_sample_config;
+  three_sample_config.set_starting_stack_size(10);
+  three_sample_config.set_chance_samples(3);
+  CFRSolver three_sample_solver(three_sample_config);
+  GameTree::Node three_sample_node;
+  three_sample_node.is_chance_node = true;
+  three_sample_node.state = state;
+  std::vector<double> three_sample_reach = {1.0, 1.0};
+  three_sample_solver.cfr(&three_sample_node, player_a_hand, player_b_hand,
+                          three_sample_reach, 0, 0, 1);
+
+  Expect(one_sample_solver.get_equilibrium_strategy().get_info_sets().size() == 1,
+         "default chance sampling should visit one sampled board");
+  Expect(three_sample_solver.get_equilibrium_strategy().get_info_sets().size() >
+             one_sample_solver.get_equilibrium_strategy().get_info_sets().size(),
+         "configured chance samples should visit more sampled boards");
+}
+
 void CheckPlayerBRegretsUsePlayerBUtility() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -692,6 +735,7 @@ int main() {
   CheckDepthLimitDoesNotScoreUncalledBet();
   CheckZeroMaxDepthDoesNotCutOff();
   CheckChanceDoesNotConsumeDepth();
+  CheckChanceSamplesVisitMultipleBoards();
   CheckPlayerBRegretsUsePlayerBUtility();
   CheckCfrPlusClipsNegativeRegrets();
   CheckCfrPlusWeightsLaterStrategies();

@@ -65,6 +65,10 @@ int ActionKeyFromString(const std::string& name, int amount) {
   return static_cast<int>(ActionTypeFromName(name)) * kActionKeyMultiplier + amount;
 }
 
+int ChanceSamples(const PokerConfig& config) {
+  return std::max(1, config.chance_samples());
+}
+
 }  // namespace
 
 CFRSolver::CFRSolver(const PokerConfig& config)
@@ -262,13 +266,17 @@ double CFRSolver::chance_sampling_cfr(GameTree::Node* node,
                       int iteration,
                       int depth,
                       int max_depth) {
-  std::vector<Card> cards =
-      SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
-  GameTree::Node* child_node = game_tree_->create_chance_child_node(node, cards);
-  double value = cfr(child_node, player_a_hand, player_b_hand, reach_probabilities,
-                    iteration, depth, max_depth);
-  delete child_node;
-  return value;
+  double value = 0.0;
+  int samples = ChanceSamples(config_);
+  for (int i = 0; i < samples; ++i) {
+    std::vector<Card> cards =
+        SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
+    GameTree::Node* child_node = game_tree_->create_chance_child_node(node, cards);
+    value += cfr(child_node, player_a_hand, player_b_hand, reach_probabilities,
+                 iteration, depth, max_depth);
+    delete child_node;
+  }
+  return value / samples;
 }
 
 Strategy CFRSolver::get_equilibrium_strategy() const {
