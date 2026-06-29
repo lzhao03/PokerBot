@@ -11,6 +11,7 @@ message PokerConfig {
   int32 small_blind = 5;
   int32 big_blind = 6;
   int32 chance_samples = 7;
+  int32 max_raises_per_street = 8;
 }
 
 enum Suit {

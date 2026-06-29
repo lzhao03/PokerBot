@@ -240,6 +240,23 @@ void CheckDuplicateConcreteBetSizesAreDeduped() {
   Expect(raise_actions[2].amount() == 2, "duplicate raise amount is kept once");
 }
 
+void CheckMaxRaisesCapsRaiseActions() {
+  PokerConfig config;
+  config.add_bet_sizes(0.5);
+  config.set_max_raises_per_street(1);
+  GameTree tree(config);
+
+  BoardState raised =
+      tree.apply_action(PreflopState(), MakeAction(ActionType::RAISE, 4));
+  std::vector<Action> actions = tree.get_legal_actions(raised);
+
+  Expect(actions.size() == 3, "raise cap should remove regular raise actions");
+  Expect(actions[0].action() == ActionType::FOLD, "capped facing action keeps fold");
+  Expect(actions[1].action() == ActionType::CALL, "capped facing action keeps call");
+  Expect(actions[2].action() == ActionType::ALL_IN,
+         "capped facing action keeps all-in");
+}
+
 void CheckShowdownUtility(GameTree* tree) {
   BoardState showdown = ShowdownState();
   Hand player_a = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
@@ -292,6 +309,7 @@ int main() {
   poker::CheckShortAllInCallClosesRound(&tree);
   poker::CheckAllInEquivalentActionsAreDeduped();
   poker::CheckDuplicateConcreteBetSizesAreDeduped();
+  poker::CheckMaxRaisesCapsRaiseActions();
   poker::CheckShowdownUtility(&tree);
   poker::CheckChanceAdvancesStreet(&tree);
   return 0;
