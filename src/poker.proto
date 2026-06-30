@@ -81,8 +81,9 @@ message PokerRange {
 }
 
 message StrategyActionSnapshot {
-  int32 action_id = 1;
   double probability = 2;
+  Action action = 3;
+  reserved 1;
 }
 
 message StrategyInfoSetSnapshot {

@@ -102,13 +102,13 @@ BoardState InitialRootState(const PokerConfig& config) {
 
 void WriteStrategySnapshot(const std::string& path,
                            const std::string& info_set_key,
-                           const std::vector<std::pair<int, double>>& actions) {
+                           const std::vector<std::pair<Action, double>>& actions) {
   StrategySnapshot snapshot;
   StrategyInfoSetSnapshot* info_set = snapshot.add_info_sets();
   info_set->set_info_set_key(info_set_key);
   for (const auto& action_prob : actions) {
     StrategyActionSnapshot* action = info_set->add_actions();
-    action->set_action_id(action_prob.first);
+    *action->mutable_action() = action_prob.first;
     action->set_probability(action_prob.second);
   }
 
@@ -227,9 +227,11 @@ void CheckSaveStrategyUsesProtobufSnapshot() {
   Expect(snapshot.info_sets_size() == 1, "saved snapshot should include one info set");
   Expect(snapshot.info_sets(0).actions_size() == 1,
          "saved snapshot should include one action");
-  Expect(snapshot.info_sets(0).actions(0).action_id() ==
-             TestActionKey(ActionType::RAISE, 5),
-         "saved snapshot should store encoded action id");
+  Expect(snapshot.info_sets(0).actions(0).action().action() ==
+             ActionType::RAISE,
+         "saved snapshot should store action type");
+  Expect(snapshot.info_sets(0).actions(0).action().amount() == 5,
+         "saved snapshot should store action amount");
   Expect(std::abs(snapshot.info_sets(0).actions(0).probability() - 1.0) <
              0.000001,
          "saved snapshot should store action probability");
@@ -244,8 +246,8 @@ void CheckLoadStrategyPopulatesEquilibriumStrategy() {
   std::string path =
       std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/loaded_strategy.pb";
   WriteStrategySnapshot(path, "loaded_info_set",
-                        {{TestActionKey(ActionType::FOLD), 0.25},
-                         {TestActionKey(ActionType::CALL, 3), 0.75}});
+                        {{MakeAction(ActionType::FOLD), 0.25},
+                         {MakeAction(ActionType::CALL, 3), 0.75}});
 
   solver.load_strategy(path);
 
@@ -274,7 +276,7 @@ void CheckEvaluateLoadedStrategy() {
   std::string path =
       std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/loaded_eval_strategy.pb";
   WriteStrategySnapshot(path, root_info_set,
-                        {{TestActionKey(ActionType::FOLD), 1.0}});
+                        {{MakeAction(ActionType::FOLD), 1.0}});
 
   CFRSolver solver(config);
   solver.load_strategy(path);
@@ -307,7 +309,7 @@ void CheckExploitabilityDetectsFoldStrategy() {
   std::string path =
       std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/exploitability_strategy.pb";
   WriteStrategySnapshot(path, root_info_set,
-                        {{TestActionKey(ActionType::FOLD), 1.0}});
+                        {{MakeAction(ActionType::FOLD), 1.0}});
 
   CFRSolver solver(config);
   solver.load_strategy(path);
@@ -342,7 +344,8 @@ void CheckRunUsesConfiguredBlinds() {
   bool has_call_three = false;
   for (const StrategyInfoSetSnapshot& info_set : snapshot.info_sets()) {
     for (const StrategyActionSnapshot& action : info_set.actions()) {
-      if (action.action_id() == TestActionKey(ActionType::CALL, 3)) {
+      if (action.action().action() == ActionType::CALL &&
+          action.action().amount() == 3) {
         has_call_three = true;
       }
     }

@@ -21,6 +21,13 @@ int ActionKey(const Action& action) {
          static_cast<int>(std::lround(action.amount()));
 }
 
+Action ActionFromKey(int action_key) {
+  Action action;
+  action.set_action(static_cast<ActionType>(action_key / kActionKeyMultiplier));
+  action.set_amount(action_key % kActionKeyMultiplier);
+  return action;
+}
+
 int ChanceSamples(const PokerConfig& config) {
   return std::max(1, config.chance_samples());
 }
@@ -502,7 +509,7 @@ void CFRSolver::save_strategy(const std::string& filename) const {
         equilibrium_strategy.get_strategy(info_set_key);
     for (const auto& action_prob : action_probs) {
       StrategyActionSnapshot* action = info_set->add_actions();
-      action->set_action_id(action_prob.first);
+      *action->mutable_action() = ActionFromKey(action_prob.first);
       action->set_probability(action_prob.second);
     }
   }
@@ -532,7 +539,9 @@ void CFRSolver::load_strategy(const std::string& filename) {
   for (const StrategyInfoSetSnapshot& info_set : snapshot.info_sets()) {
     Strategy::ActionProbabilities action_probs;
     for (const StrategyActionSnapshot& action : info_set.actions()) {
-      action_probs[action.action_id()] = action.probability();
+      if (action.has_action()) {
+        action_probs[ActionKey(action.action())] = action.probability();
+      }
     }
     current_strategy_.update(info_set.info_set_key(), action_probs);
     cumulative_strategy_[info_set.info_set_key()] = action_probs;
