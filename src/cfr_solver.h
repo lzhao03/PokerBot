@@ -12,6 +12,8 @@
 
 namespace poker {
 
+class HandRange;
+
 class CFRSolver {
 public:
   CFRSolver(const PokerConfig& config);
@@ -19,6 +21,8 @@ public:
   
   // Run CFR for a specified number of iterations
   void run(int iterations);
+  void run(int iterations, const HandRange& player_a_range,
+           const HandRange& player_b_range);
   
   // The core chance-sampled CFR+ algorithm.
   // Uses CFR+ regret clipping and linearly weighted average strategy.
@@ -77,6 +81,8 @@ private:
   
   // Helper methods
   GameTree::Node* get_or_build_root();
+  void run_iterations(int iterations, const HandRange* player_a_range,
+                      const HandRange* player_b_range, bool train_swapped);
   double evaluate_strategy_node(GameTree::Node* node,
                                 const Hand& player_a_hand,
                                 const Hand& player_b_hand,

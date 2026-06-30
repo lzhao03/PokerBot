@@ -1,4 +1,5 @@
 #include "src/cfr_solver.h"
+#include "src/hand_range.h"
 
 #include <cmath>
 #include <cstdlib>
@@ -389,6 +390,31 @@ void CheckRunTrainsSwappedPrivateHands() {
   const Strategy strategy = solver.get_equilibrium_strategy();
   Expect(strategy.get_info_sets().size() == 2,
          "run should train both dealt private-hand perspectives");
+}
+
+void CheckRunUsesProvidedPrivateRanges() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
+  HandRange player_a_range;
+  player_a_range.add_hand(player_a_hand, 1.0);
+  HandRange player_b_range;
+  player_b_range.add_hand(player_b_hand, 1.0);
+
+  CFRSolver solver(config);
+  solver.run(1, player_a_range, player_b_range);
+
+  InfoSetAbstraction abstraction;
+  std::string expected_info_set =
+      abstraction.state_to_info_set(InitialRootState(config), 0, player_a_hand);
+  const Strategy strategy = solver.get_equilibrium_strategy();
+  Expect(strategy.has_info_set(expected_info_set),
+         "range run should train the supplied player A private hand");
+  Expect(strategy.get_info_sets().size() == 1,
+         "range run should not swap asymmetric player ranges");
 }
 
 void CheckRunLoggingUsesConfig() {
@@ -869,6 +895,7 @@ int main() {
   CheckRunUsesConfiguredBlinds();
   CheckRunUpdatesExpectedValue();
   CheckRunTrainsSwappedPrivateHands();
+  CheckRunUsesProvidedPrivateRanges();
   CheckRunLoggingUsesConfig();
   CheckRunProducesDeterministicStrategyShape();
   CheckTerminalUtilityBeatsDepthLimit();

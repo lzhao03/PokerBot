@@ -1,5 +1,6 @@
 #include "src/cfr_solver.h"
 #include "src/card_utils.h"
+#include "src/hand_range.h"
 #include <algorithm>
 #include <numeric>
 #include <random>
@@ -26,6 +27,38 @@ Action ActionFromKey(int action_key) {
   action.set_action(static_cast<ActionType>(action_key / kActionKeyMultiplier));
   action.set_amount(action_key % kActionKeyMultiplier);
   return action;
+}
+
+bool HandsOverlap(const Hand& left, const Hand& right) {
+  for (const Card& left_card : left.cards()) {
+    for (const Card& right_card : right.cards()) {
+      if (SameCard(left_card, right_card)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool SampleRangeHands(const HandRange& player_a_range,
+                      const HandRange& player_b_range,
+                      Hand* player_a_hand,
+                      Hand* player_b_hand) {
+  // ponytail: HandRange is 169 hand classes today; use exact combos if overlap-heavy ranges matter.
+  constexpr int kMaxAttempts = 100;
+  for (int i = 0; i < kMaxAttempts; ++i) {
+    std::vector<Hand> player_a_sample = player_a_range.sample(1);
+    std::vector<Hand> player_b_sample = player_b_range.sample(1);
+    if (player_a_sample.empty() || player_b_sample.empty()) {
+      return false;
+    }
+    if (!HandsOverlap(player_a_sample[0], player_b_sample[0])) {
+      *player_a_hand = player_a_sample[0];
+      *player_b_hand = player_b_sample[0];
+      return true;
+    }
+  }
+  return false;
 }
 
 int ChanceSamples(const PokerConfig& config) {
@@ -76,6 +109,17 @@ GameTree::Node* CFRSolver::get_or_build_root() {
 }
 
 void CFRSolver::run(int iterations) {
+  run_iterations(iterations, nullptr, nullptr, true);
+}
+
+void CFRSolver::run(int iterations, const HandRange& player_a_range,
+                    const HandRange& player_b_range) {
+  run_iterations(iterations, &player_a_range, &player_b_range, false);
+}
+
+void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
+                               const HandRange* player_b_range,
+                               bool train_swapped) {
   const bool log = config_.enable_logging();
   if (log) {
     std::cout << "Preparing game tree..." << std::endl;
@@ -97,10 +141,18 @@ void CFRSolver::run(int iterations) {
     std::cout << "Starting CFR iterations..." << std::endl;
   }
   for (int i = 0; i < iterations; ++i) {
-    std::vector<Card> deck = BuildDeck();
-    std::shuffle(deck.begin(), deck.end(), rng_);
-    Hand player_a_hand = DealHand(&deck);
-    Hand player_b_hand = DealHand(&deck);
+    Hand player_a_hand;
+    Hand player_b_hand;
+    if (player_a_range == nullptr || player_b_range == nullptr) {
+      std::vector<Card> deck = BuildDeck();
+      std::shuffle(deck.begin(), deck.end(), rng_);
+      player_a_hand = DealHand(&deck);
+      player_b_hand = DealHand(&deck);
+    } else if (!SampleRangeHands(*player_a_range, *player_b_range,
+                                 &player_a_hand, &player_b_hand)) {
+      throw std::invalid_argument(
+          "Could not sample non-overlapping hands from ranges");
+    }
     
     const int max_depth = config_.max_depth();
     if (log) {
@@ -110,11 +162,15 @@ void CFRSolver::run(int iterations) {
     double dealt_value =
         cfr(root, player_a_hand, player_b_hand, reach_probabilities, i, 0, max_depth);
 
-    // Train both private-card assignments for the sampled heads-up deal.
-    std::vector<double> swapped_reach_probabilities(2, 1.0);
-    double swapped_value = cfr(root, player_b_hand, player_a_hand,
-                               swapped_reach_probabilities, i, 0, max_depth);
-    cumulative_root_utility_ += (dealt_value + swapped_value) / 2.0;
+    if (train_swapped) {
+      // Train both private-card assignments for the sampled heads-up deal.
+      std::vector<double> swapped_reach_probabilities(2, 1.0);
+      double swapped_value = cfr(root, player_b_hand, player_a_hand,
+                                 swapped_reach_probabilities, i, 0, max_depth);
+      cumulative_root_utility_ += (dealt_value + swapped_value) / 2.0;
+    } else {
+      cumulative_root_utility_ += dealt_value;
+    }
     ++iterations_run_;
   }
   
