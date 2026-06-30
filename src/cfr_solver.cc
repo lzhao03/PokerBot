@@ -40,21 +40,34 @@ bool HandsOverlap(const Hand& left, const Hand& right) {
   return false;
 }
 
-bool SampleRangeHands(const HandRange& player_a_range,
-                      const HandRange& player_b_range,
+Hand SampleWeightedHand(const std::vector<std::pair<Hand, double>>& hands,
+                        std::mt19937* rng) {
+  std::vector<double> weights;
+  weights.reserve(hands.size());
+  for (const auto& hand : hands) {
+    weights.push_back(hand.second);
+  }
+
+  std::discrete_distribution<size_t> distribution(weights.begin(), weights.end());
+  return hands[distribution(*rng)].first;
+}
+
+bool SampleRangeHands(const std::vector<std::pair<Hand, double>>& player_a_hands,
+                      const std::vector<std::pair<Hand, double>>& player_b_hands,
+                      std::mt19937* rng,
                       Hand* player_a_hand,
                       Hand* player_b_hand) {
-  // ponytail: HandRange is 169 hand classes today; use exact combos if overlap-heavy ranges matter.
+  if (player_a_hands.empty() || player_b_hands.empty()) {
+    return false;
+  }
+
   constexpr int kMaxAttempts = 100;
   for (int i = 0; i < kMaxAttempts; ++i) {
-    std::vector<Hand> player_a_sample = player_a_range.sample(1);
-    std::vector<Hand> player_b_sample = player_b_range.sample(1);
-    if (player_a_sample.empty() || player_b_sample.empty()) {
-      return false;
-    }
-    if (!HandsOverlap(player_a_sample[0], player_b_sample[0])) {
-      *player_a_hand = player_a_sample[0];
-      *player_b_hand = player_b_sample[0];
+    Hand player_a_sample = SampleWeightedHand(player_a_hands, rng);
+    Hand player_b_sample = SampleWeightedHand(player_b_hands, rng);
+    if (!HandsOverlap(player_a_sample, player_b_sample)) {
+      *player_a_hand = player_a_sample;
+      *player_b_hand = player_b_sample;
       return true;
     }
   }
@@ -120,6 +133,13 @@ void CFRSolver::run(int iterations, const HandRange& player_a_range,
 void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
                                const HandRange* player_b_range,
                                bool train_swapped) {
+  std::vector<std::pair<Hand, double>> player_a_hands;
+  std::vector<std::pair<Hand, double>> player_b_hands;
+  if (player_a_range != nullptr && player_b_range != nullptr) {
+    player_a_hands = player_a_range->get_all_weighted_combos();
+    player_b_hands = player_b_range->get_all_weighted_combos();
+  }
+
   const bool log = config_.enable_logging();
   if (log) {
     std::cout << "Preparing game tree..." << std::endl;
@@ -148,7 +168,7 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
       std::shuffle(deck.begin(), deck.end(), rng_);
       player_a_hand = DealHand(&deck);
       player_b_hand = DealHand(&deck);
-    } else if (!SampleRangeHands(*player_a_range, *player_b_range,
+    } else if (!SampleRangeHands(player_a_hands, player_b_hands, &rng_,
                                  &player_a_hand, &player_b_hand)) {
       throw std::invalid_argument(
           "Could not sample non-overlapping hands from ranges");

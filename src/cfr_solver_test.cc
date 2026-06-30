@@ -83,6 +83,26 @@ Hand MakeHand(int first_rank, Suit first_suit, int second_rank, Suit second_suit
   return hand;
 }
 
+bool TestHandsOverlap(const Hand& left, const Hand& right) {
+  for (const Card& left_card : left.cards()) {
+    for (const Card& right_card : right.cards()) {
+      if (left_card.rank() == right_card.rank() &&
+          left_card.suit() == right_card.suit()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+Hand MakeHandFromCards(const std::vector<Card>& cards) {
+  Hand hand;
+  for (const Card& card : cards) {
+    *hand.add_cards() = card;
+  }
+  return hand;
+}
+
 BoardState InitialRootState(const PokerConfig& config) {
   int small_blind = config.small_blind() > 0 ? config.small_blind() : 1;
   int big_blind = config.big_blind() > 0 ? config.big_blind() : 2;
@@ -408,13 +428,51 @@ void CheckRunUsesProvidedPrivateRanges() {
   solver.run(1, player_a_range, player_b_range);
 
   InfoSetAbstraction abstraction;
-  std::string expected_info_set =
-      abstraction.state_to_info_set(InitialRootState(config), 0, player_a_hand);
   const Strategy strategy = solver.get_equilibrium_strategy();
-  Expect(strategy.has_info_set(expected_info_set),
-         "range run should train the supplied player A private hand");
   Expect(strategy.get_info_sets().size() == 1,
          "range run should not swap asymmetric player ranges");
+  InfoSetAbstraction::InfoSetComponents components =
+      abstraction.parse_info_set(strategy.get_info_sets()[0]);
+  Hand trained_hand = MakeHandFromCards(components.player_cards);
+  Expect(HandRange::hand_to_index(trained_hand) ==
+             HandRange::hand_to_index(player_a_hand),
+         "range run should train the supplied player A hand class");
+}
+
+void CheckRangeExpansionUsesExactCombos() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+
+  HandRange aces;
+  aces.add_hand_by_index(HandRange::string_to_index("AA"), 1.0);
+  std::vector<std::pair<Hand, double>> combos = aces.get_all_weighted_combos();
+  Expect(combos.size() == 6, "AA should expand to six exact combos");
+
+  HandRange ace_king_suited;
+  ace_king_suited.add_hand_by_index(HandRange::string_to_index("AKs"), 1.0);
+  Expect(ace_king_suited.get_all_weighted_combos().size() == 4,
+         "AKs should expand to four exact combos");
+
+  HandRange ace_king_offsuit;
+  ace_king_offsuit.add_hand_by_index(HandRange::string_to_index("AKo"), 1.0);
+  Expect(ace_king_offsuit.get_all_weighted_combos().size() == 12,
+         "AKo should expand to twelve exact combos");
+
+  bool has_disjoint_aces = false;
+  for (const auto& left : combos) {
+    for (const auto& right : combos) {
+      if (!TestHandsOverlap(left.first, right.first)) {
+        has_disjoint_aces = true;
+      }
+    }
+  }
+  Expect(has_disjoint_aces, "AA range should contain disjoint exact combos");
+
+  CFRSolver solver(config);
+  solver.run(1, aces, aces);
+  Expect(!solver.get_equilibrium_strategy().get_info_sets().empty(),
+         "same hand class ranges should train from disjoint exact combos");
 }
 
 void CheckRunLoggingUsesConfig() {
@@ -896,6 +954,7 @@ int main() {
   CheckRunUpdatesExpectedValue();
   CheckRunTrainsSwappedPrivateHands();
   CheckRunUsesProvidedPrivateRanges();
+  CheckRangeExpansionUsesExactCombos();
   CheckRunLoggingUsesConfig();
   CheckRunProducesDeterministicStrategyShape();
   CheckTerminalUtilityBeatsDepthLimit();

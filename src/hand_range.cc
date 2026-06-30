@@ -10,6 +10,58 @@
 
 namespace poker {
 
+namespace {
+
+Hand MakeCombo(int first_rank, Suit first_suit, int second_rank,
+               Suit second_suit) {
+  Hand hand;
+  Card* first = hand.add_cards();
+  first->set_rank(first_rank);
+  first->set_suit(first_suit);
+  Card* second = hand.add_cards();
+  second->set_rank(second_rank);
+  second->set_suit(second_suit);
+  return hand;
+}
+
+std::vector<Hand> ExpandIndexToCombos(int index) {
+  std::vector<Hand> combos;
+  const Suit suits[] = {Suit::HEARTS, Suit::DIAMONDS, Suit::CLUBS,
+                        Suit::SPADES};
+
+  if (index < 0 || index >= 169) {
+    return combos;
+  }
+
+  if (index < 13) {
+    int rank = index + 2;
+    for (int i = 0; i < 4; ++i) {
+      for (int j = i + 1; j < 4; ++j) {
+        combos.push_back(MakeCombo(rank, suits[i], rank, suits[j]));
+      }
+    }
+    return combos;
+  }
+
+  bool is_suited = index < 91;
+  int offset = is_suited ? index - 13 : index - 91;
+  int r1 = static_cast<int>(std::sqrt(2 * offset + 0.25) + 0.5);
+  int r2 = offset - (r1 * (r1 - 1) / 2);
+  int rank1 = r1 + 2;
+  int rank2 = r2 + 2;
+
+  for (Suit first_suit : suits) {
+    for (Suit second_suit : suits) {
+      if ((first_suit == second_suit) == is_suited) {
+        combos.push_back(MakeCombo(rank1, first_suit, rank2, second_suit));
+      }
+    }
+  }
+  return combos;
+}
+
+}  // namespace
+
 HandRange::HandRange() 
   : hands_cache_valid_(false),
     weights_cache_valid_(false),
@@ -136,6 +188,24 @@ std::vector<Hand> HandRange::get_all_hands() const {
   hands_cache_valid_ = true;
   
   return hands;
+}
+
+std::vector<std::pair<Hand, double>> HandRange::get_all_weighted_combos() const {
+  std::vector<std::pair<Hand, double>> weighted_combos;
+
+  for (const auto& hand_weight : hand_weights_) {
+    std::vector<Hand> combos = ExpandIndexToCombos(hand_weight.first);
+    if (combos.empty()) {
+      continue;
+    }
+
+    double combo_weight = hand_weight.second / combos.size();
+    for (const Hand& combo : combos) {
+      weighted_combos.emplace_back(combo, combo_weight);
+    }
+  }
+
+  return weighted_combos;
 }
 
 const std::vector<std::pair<int, double>>& HandRange::get_all_weights() const {

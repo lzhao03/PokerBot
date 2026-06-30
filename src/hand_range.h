@@ -3,6 +3,7 @@
 #include <vector>
 #include <unordered_map>
 #include <string>
+#include <utility>
 #include <random>
 #include <memory>
 #include <bitset>
@@ -33,6 +34,9 @@ public:
   
   // Get all hands in the range
   std::vector<Hand> get_all_hands() const;
+
+  // Get every exact two-card combo represented by the range.
+  std::vector<std::pair<Hand, double>> get_all_weighted_combos() const;
   
   // Get all hand indices with their weights
   const std::vector<std::pair<int, double>>& get_all_weights() const;
