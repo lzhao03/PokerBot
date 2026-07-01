@@ -99,6 +99,14 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+cc_test(
+    name = "hand_range_test",
+    srcs = ["hand_range_test.cc"],
+    deps = [
+        ":hand_range",
+    ],
+)
+
 cc_library(
     name = "utility_calculator",
     srcs = ["utility_calculator.cc"],

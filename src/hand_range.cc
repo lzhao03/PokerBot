@@ -103,6 +103,7 @@ void HandRange::add_hand_by_index(int index, double weight) {
   bool found = false;
   for (auto& pair : hand_weights_) {
     if (pair.first == index) {
+      total_weight_ += weight - pair.second;
       pair.second = weight;
       found = true;
       break;
@@ -111,10 +112,8 @@ void HandRange::add_hand_by_index(int index, double weight) {
   
   if (!found) {
     hand_weights_.emplace_back(index, weight);
+    total_weight_ += weight;
   }
-  
-  // Update total weight
-  total_weight_ += weight;
   
   // Invalidate caches
   invalidate_caches();
