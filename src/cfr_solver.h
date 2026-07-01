@@ -39,10 +39,14 @@ public:
   // Get the computed equilibrium strategy
   Strategy get_equilibrium_strategy() const;
   double evaluate_strategy(const Hand& player_a_hand, const Hand& player_b_hand);
+  double evaluate_strategy(int samples, const HandRange& player_a_range,
+                           const HandRange& player_b_range);
   
   // Calculate sampled exploitability of the current strategy.
   double calculate_exploitability();
   double calculate_exploitability(int samples);
+  double calculate_exploitability(int samples, const HandRange& player_a_range,
+                                  const HandRange& player_b_range);
   double calculate_exploitability(const Hand& player_a_hand,
                                   const Hand& player_b_hand);
   // Debug helper for inspecting sampled best-response choices.

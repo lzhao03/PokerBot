@@ -364,6 +364,33 @@ double CFRSolver::evaluate_strategy(const Hand& player_a_hand,
                                 strategy);
 }
 
+double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range,
+                                    const HandRange& player_b_range) {
+  if (samples <= 0) {
+    return 0.0;
+  }
+
+  std::vector<std::pair<Hand, double>> player_a_hands =
+      player_a_range.get_all_weighted_combos();
+  std::vector<std::pair<Hand, double>> player_b_hands =
+      player_b_range.get_all_weighted_combos();
+  Strategy strategy = get_equilibrium_strategy();
+  GameTree::Node* root = get_or_build_root();
+
+  double total = 0.0;
+  for (int i = 0; i < samples; ++i) {
+    Hand player_a_hand;
+    Hand player_b_hand;
+    if (!SampleRangeHands(player_a_hands, player_b_hands, &rng_,
+                          &player_a_hand, &player_b_hand)) {
+      throw std::invalid_argument(
+          "Could not sample non-overlapping hands from ranges");
+    }
+    total += evaluate_strategy_node(root, player_a_hand, player_b_hand, strategy);
+  }
+  return total / samples;
+}
+
 double CFRSolver::evaluate_strategy_node(GameTree::Node* node,
                                          const Hand& player_a_hand,
                                          const Hand& player_b_hand,
@@ -517,6 +544,32 @@ double CFRSolver::calculate_exploitability(int samples) {
     std::shuffle(deck.begin(), deck.end(), rng_);
     Hand player_a_hand = DealHand(&deck);
     Hand player_b_hand = DealHand(&deck);
+    total += calculate_exploitability(player_a_hand, player_b_hand);
+  }
+  return total / samples;
+}
+
+double CFRSolver::calculate_exploitability(int samples,
+                                           const HandRange& player_a_range,
+                                           const HandRange& player_b_range) {
+  if (samples <= 0) {
+    return 0.0;
+  }
+
+  std::vector<std::pair<Hand, double>> player_a_hands =
+      player_a_range.get_all_weighted_combos();
+  std::vector<std::pair<Hand, double>> player_b_hands =
+      player_b_range.get_all_weighted_combos();
+
+  double total = 0.0;
+  for (int i = 0; i < samples; ++i) {
+    Hand player_a_hand;
+    Hand player_b_hand;
+    if (!SampleRangeHands(player_a_hands, player_b_hands, &rng_,
+                          &player_a_hand, &player_b_hand)) {
+      throw std::invalid_argument(
+          "Could not sample non-overlapping hands from ranges");
+    }
     total += calculate_exploitability(player_a_hand, player_b_hand);
   }
   return total / samples;

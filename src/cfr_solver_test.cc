@@ -121,18 +121,23 @@ BoardState InitialRootState(const PokerConfig& config) {
   return state;
 }
 
-void WriteStrategySnapshot(const std::string& path,
-                           const std::string& info_set_key,
-                           const std::vector<std::pair<Action, double>>& actions) {
-  StrategySnapshot snapshot;
-  StrategyInfoSetSnapshot* info_set = snapshot.add_info_sets();
+void AddStrategyInfoSet(StrategySnapshot* snapshot,
+                        const std::string& info_set_key,
+                        const std::vector<std::pair<Action, double>>& actions) {
+  StrategyInfoSetSnapshot* info_set = snapshot->add_info_sets();
   info_set->set_info_set_key(info_set_key);
   for (const auto& action_prob : actions) {
     StrategyActionSnapshot* action = info_set->add_actions();
     *action->mutable_action() = action_prob.first;
     action->set_probability(action_prob.second);
   }
+}
 
+void WriteStrategySnapshot(const std::string& path,
+                           const std::string& info_set_key,
+                           const std::vector<std::pair<Action, double>>& actions) {
+  StrategySnapshot snapshot;
+  AddStrategyInfoSet(&snapshot, info_set_key, actions);
   std::ofstream file(path, std::ios::binary);
   Expect(snapshot.SerializeToOstream(&file), "strategy snapshot should write");
 }
@@ -314,6 +319,51 @@ void CheckEvaluateLoadedStrategy() {
   double loaded_value = loaded.evaluate_strategy(player_a_hand, player_b_hand);
   Expect(std::abs(value - loaded_value) < 0.000001,
          "saved and loaded strategies should evaluate the same");
+}
+
+void CheckEvaluateRangeStrategy() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+
+  HandRange player_a_range;
+  player_a_range.add_hand_by_index(HandRange::string_to_index("AA"), 1.0);
+  HandRange player_b_range;
+  player_b_range.add_hand_by_index(HandRange::string_to_index("KK"), 1.0);
+
+  InfoSetAbstraction abstraction;
+  BoardState root_state = InitialRootState(config);
+  StrategySnapshot snapshot;
+  for (const auto& combo : player_a_range.get_all_weighted_combos()) {
+    AddStrategyInfoSet(
+        &snapshot, abstraction.state_to_info_set(root_state, 0, combo.first),
+        {{MakeAction(ActionType::FOLD), 1.0}});
+  }
+
+  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
+  std::string path =
+      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/range_eval_strategy.pb";
+  {
+    std::ofstream file(path, std::ios::binary);
+    Expect(snapshot.SerializeToOstream(&file),
+           "range strategy snapshot should write");
+  }
+
+  CFRSolver solver(config);
+  solver.load_strategy(path);
+
+  std::vector<std::pair<Hand, double>> player_a_combos =
+      player_a_range.get_all_weighted_combos();
+  std::vector<std::pair<Hand, double>> player_b_combos =
+      player_b_range.get_all_weighted_combos();
+  double exact_value =
+      solver.evaluate_strategy(player_a_combos[0].first, player_b_combos[0].first);
+  double range_value = solver.evaluate_strategy(3, player_a_range, player_b_range);
+  Expect(std::abs(range_value - exact_value) < 0.000001,
+         "range evaluation should match exact fold strategy value");
+  Expect(solver.calculate_exploitability(0, player_a_range, player_b_range) == 0.0,
+         "zero range exploitability samples should return zero");
+  Expect(solver.calculate_exploitability(1, player_a_range, player_b_range) > 0.0,
+         "range fold strategy should be exploitable");
 }
 
 void CheckExploitabilityDetectsFoldStrategy() {
@@ -948,6 +998,7 @@ int main() {
   CheckSaveStrategyUsesProtobufSnapshot();
   CheckLoadStrategyPopulatesEquilibriumStrategy();
   CheckEvaluateLoadedStrategy();
+  CheckEvaluateRangeStrategy();
   CheckExploitabilityDetectsFoldStrategy();
   CheckExploitabilityZeroSamples();
   CheckRunUsesConfiguredBlinds();
