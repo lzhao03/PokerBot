@@ -52,17 +52,30 @@ Hand SampleWeightedHand(const std::vector<std::pair<Hand, double>>& hands,
   return hands[distribution(*rng)].first;
 }
 
+bool HasCompatibleHands(
+    const std::vector<std::pair<Hand, double>>& player_a_hands,
+    const std::vector<std::pair<Hand, double>>& player_b_hands) {
+  for (const auto& player_a_hand : player_a_hands) {
+    for (const auto& player_b_hand : player_b_hands) {
+      if (!HandsOverlap(player_a_hand.first, player_b_hand.first)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 bool SampleRangeHands(const std::vector<std::pair<Hand, double>>& player_a_hands,
                       const std::vector<std::pair<Hand, double>>& player_b_hands,
                       std::mt19937* rng,
                       Hand* player_a_hand,
                       Hand* player_b_hand) {
-  if (player_a_hands.empty() || player_b_hands.empty()) {
+  if (player_a_hands.empty() || player_b_hands.empty() ||
+      !HasCompatibleHands(player_a_hands, player_b_hands)) {
     return false;
   }
 
-  constexpr int kMaxAttempts = 100;
-  for (int i = 0; i < kMaxAttempts; ++i) {
+  while (true) {
     Hand player_a_sample = SampleWeightedHand(player_a_hands, rng);
     Hand player_b_sample = SampleWeightedHand(player_b_hands, rng);
     if (!HandsOverlap(player_a_sample, player_b_sample)) {
@@ -71,7 +84,6 @@ bool SampleRangeHands(const std::vector<std::pair<Hand, double>>& player_a_hands
       return true;
     }
   }
-  return false;
 }
 
 int ChanceSamples(const PokerConfig& config) {

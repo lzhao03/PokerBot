@@ -525,6 +525,25 @@ void CheckRangeExpansionUsesExactCombos() {
          "same hand class ranges should train from disjoint exact combos");
 }
 
+void CheckRangeSamplingRejectsEmptyRange() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+
+  HandRange player_a_range;
+  HandRange player_b_range;
+  player_b_range.add_hand_by_index(HandRange::string_to_index("AA"), 1.0);
+
+  CFRSolver solver(config);
+  bool threw = false;
+  try {
+    solver.run(1, player_a_range, player_b_range);
+  } catch (const std::invalid_argument&) {
+    threw = true;
+  }
+  Expect(threw, "range sampling should reject empty ranges");
+}
+
 void CheckRunLoggingUsesConfig() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -1006,6 +1025,7 @@ int main() {
   CheckRunTrainsSwappedPrivateHands();
   CheckRunUsesProvidedPrivateRanges();
   CheckRangeExpansionUsesExactCombos();
+  CheckRangeSamplingRejectsEmptyRange();
   CheckRunLoggingUsesConfig();
   CheckRunProducesDeterministicStrategyShape();
   CheckTerminalUtilityBeatsDepthLimit();
