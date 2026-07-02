@@ -664,6 +664,13 @@ void CheckRunWithoutDepthCutoffTerminates() {
          "zero max-depth range run should complete one iteration");
   Expect(solver.get_cfr_update_count() > 0,
          "zero max-depth range run should visit CFR decision nodes");
+  CFRSolver::TraversalStats stats = solver.get_traversal_stats();
+  Expect(stats.cfr_updates == solver.get_cfr_update_count(),
+         "traversal stats should track total CFR updates");
+  Expect(stats.preflop_updates > 0,
+         "zero max-depth range run should visit preflop decision nodes");
+  Expect(stats.max_decision_depth > 0,
+         "zero max-depth range run should reach deeper decisions");
   Expect(!solver.get_equilibrium_strategy().get_info_sets().empty(),
          "zero max-depth range run should produce strategy info sets");
 }

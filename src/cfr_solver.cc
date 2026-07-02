@@ -390,6 +390,25 @@ double CFRSolver::cfr(GameTree::Node* node,
   // Compute counterfactual regrets if this is not a chance player
   if (player == 0 || player == 1) {
     ++cfr_update_count_;
+    ++traversal_stats_.cfr_updates;
+    traversal_stats_.max_decision_depth =
+        std::max(traversal_stats_.max_decision_depth, depth);
+    switch (node->state.street()) {
+      case Street::PREFLOP:
+        ++traversal_stats_.preflop_updates;
+        break;
+      case Street::FLOP:
+        ++traversal_stats_.flop_updates;
+        break;
+      case Street::TURN:
+        ++traversal_stats_.turn_updates;
+        break;
+      case Street::RIVER:
+        ++traversal_stats_.river_updates;
+        break;
+      default:
+        break;
+    }
 
     // Compute the counterfactual reach probability of the opponent
     double opponent_reach_prob = reach_probabilities[1 - player];

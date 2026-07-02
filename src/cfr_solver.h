@@ -18,6 +18,15 @@ class HandRange;
 
 class CFRSolver {
 public:
+  struct TraversalStats {
+    int64_t cfr_updates = 0;
+    int64_t preflop_updates = 0;
+    int64_t flop_updates = 0;
+    int64_t turn_updates = 0;
+    int64_t river_updates = 0;
+    int max_decision_depth = 0;
+  };
+
   CFRSolver(const PokerConfig& config);
   ~CFRSolver();
   
@@ -73,6 +82,7 @@ public:
   double get_expected_value(int player_id) const;
   int get_iterations_run() const { return iterations_run_; }
   int64_t get_cfr_update_count() const { return cfr_update_count_; }
+  TraversalStats get_traversal_stats() const { return traversal_stats_; }
 
 private:
   friend class CFRSolverRegretTestPeer;
@@ -91,6 +101,7 @@ private:
   double cumulative_root_utility_;
   int iterations_run_;
   int64_t cfr_update_count_;
+  TraversalStats traversal_stats_;
   
   // CFR+ clipped regret tracking for each information set and action.
   std::unordered_map<std::string, std::unordered_map<int, double>> cumulative_regrets_;

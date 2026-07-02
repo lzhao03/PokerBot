@@ -26,6 +26,7 @@ struct BenchmarkResult {
   double result = 0.0;
   int64_t hands = 0;
   int64_t cfr_node_updates = 0;
+  poker::CFRSolver::TraversalStats traversal_stats;
 };
 
 bool ConsumePrefix(const std::string& arg,
@@ -94,7 +95,12 @@ void RunBenchmark(const std::string& name,
             << result.hands << "\t"
             << RatePerSecond(result.hands, elapsed.count()) << "\t"
             << result.cfr_node_updates << "\t"
-            << RatePerSecond(result.cfr_node_updates, elapsed.count()) << "\n";
+            << RatePerSecond(result.cfr_node_updates, elapsed.count()) << "\t"
+            << result.traversal_stats.preflop_updates << "\t"
+            << result.traversal_stats.flop_updates << "\t"
+            << result.traversal_stats.turn_updates << "\t"
+            << result.traversal_stats.river_updates << "\t"
+            << result.traversal_stats.max_decision_depth << "\n";
 }
 
 Options ParseOptions(int argc, char** argv) {
@@ -135,7 +141,9 @@ int main(int argc, char** argv) {
     poker::HandRange player_b_range = BenchmarkRange();
 
     std::cout << "case\tseconds\tresult\thands\thands_per_second"
-              << "\tcfr_node_updates\tcfr_node_updates_per_second\n";
+              << "\tcfr_node_updates\tcfr_node_updates_per_second"
+              << "\tpreflop_updates\tflop_updates\tturn_updates"
+              << "\triver_updates\tmax_decision_depth\n";
 
     RunBenchmark("range_expand", [&] {
       int64_t combos = 0;
@@ -154,7 +162,8 @@ int main(int argc, char** argv) {
       return BenchmarkResult{
           static_cast<double>(
               solver.get_equilibrium_strategy().get_info_sets().size()),
-          static_cast<int64_t>(options.iterations) * 2, updates};
+          static_cast<int64_t>(options.iterations) * 2, updates,
+          solver.get_traversal_stats()};
     });
 
     RunBenchmark("train_range", [&] {
@@ -165,7 +174,7 @@ int main(int argc, char** argv) {
       return BenchmarkResult{
           static_cast<double>(
               solver.get_equilibrium_strategy().get_info_sets().size()),
-          options.iterations, updates};
+          options.iterations, updates, solver.get_traversal_stats()};
     });
 
     poker::CFRSolver evaluate_solver(config);
