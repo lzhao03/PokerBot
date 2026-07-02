@@ -87,6 +87,9 @@ private:
   // Direct mapping from hand index to weight
   // Using a sparse representation for efficiency
   std::vector<std::pair<int, double>> hand_weights_;
+
+  // Exact two-card combos added directly with add_hand().
+  std::vector<std::pair<Hand, double>> exact_hand_weights_;
   
   // Cache of pre-computed equities by index
   std::vector<double> equity_cache_;
@@ -104,10 +107,6 @@ private:
   // Cached hands for faster access
   mutable std::vector<Hand> cached_hands_;
   mutable bool hands_cache_valid_;
-  
-  // Cached weight vector for faster sampling
-  mutable std::vector<double> weight_vector_;
-  mutable bool weights_cache_valid_;
   
   // Total weight of all hands
   double total_weight_;
@@ -130,8 +129,6 @@ private:
   // Invalidate caches when the range changes
   void invalidate_caches();
   
-  // Update internal data structures
-  void rebuild_weight_vector() const;
 };
 
 } // namespace poker

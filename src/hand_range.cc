@@ -24,6 +24,45 @@ Hand MakeCombo(int first_rank, Suit first_suit, int second_rank,
   return hand;
 }
 
+bool SameCard(const Card& left, const Card& right) {
+  return left.rank() == right.rank() && left.suit() == right.suit();
+}
+
+bool SameHand(const Hand& left, const Hand& right) {
+  if (left.cards_size() != 2 || right.cards_size() != 2) {
+    return false;
+  }
+
+  return (SameCard(left.cards(0), right.cards(0)) &&
+          SameCard(left.cards(1), right.cards(1))) ||
+         (SameCard(left.cards(0), right.cards(1)) &&
+          SameCard(left.cards(1), right.cards(0)));
+}
+
+void AddWeightedCombo(std::vector<std::pair<Hand, double>>* weighted_combos,
+                      const Hand& hand, double weight) {
+  for (auto& combo : *weighted_combos) {
+    if (SameHand(combo.first, hand)) {
+      combo.second += weight;
+      return;
+    }
+  }
+
+  weighted_combos->emplace_back(hand, weight);
+}
+
+std::string ExactHandKey(const Hand& hand) {
+  std::ostringstream oss;
+  for (int i = 0; i < hand.cards_size(); ++i) {
+    if (i > 0) {
+      oss << "-";
+    }
+    oss << hand.cards(i).rank() << ":"
+        << static_cast<int>(hand.cards(i).suit());
+  }
+  return oss.str();
+}
+
 std::vector<Hand> ExpandIndexToCombos(int index) {
   std::vector<Hand> combos;
   const Suit suits[] = {Suit::HEARTS, Suit::DIAMONDS, Suit::CLUBS,
@@ -64,7 +103,6 @@ std::vector<Hand> ExpandIndexToCombos(int index) {
 
 HandRange::HandRange() 
   : hands_cache_valid_(false),
-    weights_cache_valid_(false),
     total_weight_(0.0) {
   // Initialize random number generator with current time
   rng_.seed(static_cast<unsigned int>(std::time(nullptr)));
@@ -83,8 +121,22 @@ HandRange::~HandRange() {
 }
 
 void HandRange::add_hand(const Hand& hand, double weight) {
-  int index = hand_to_index(hand);
-  add_hand_by_index(index, weight);
+  if (hand.cards_size() != 2 || weight <= 0.0) {
+    return;
+  }
+
+  for (auto& pair : exact_hand_weights_) {
+    if (SameHand(pair.first, hand)) {
+      total_weight_ += weight - pair.second;
+      pair.second = weight;
+      invalidate_caches();
+      return;
+    }
+  }
+
+  exact_hand_weights_.emplace_back(hand, weight);
+  total_weight_ += weight;
+  invalidate_caches();
 }
 
 void HandRange::add_hand_by_index(int index, double weight) {
@@ -122,64 +174,76 @@ void HandRange::add_hand_by_index(int index, double weight) {
 std::vector<Hand> HandRange::sample(int count) const {
   std::vector<Hand> sampled_hands;
   
-  if (hand_weights_.empty() || total_weight_ <= 0.0) {
+  if (count <= 0 || total_weight_ <= 0.0) {
     return sampled_hands;
   }
-  
-  // Make sure the weight vector is up to date
-  if (!weights_cache_valid_) {
-    rebuild_weight_vector();
+
+  std::vector<std::pair<Hand, double>> weighted_combos =
+      get_all_weighted_combos();
+  if (weighted_combos.empty()) {
+    return sampled_hands;
   }
-  
-  // Create indices vector
-  std::vector<int> indices;
-  indices.reserve(hand_weights_.size());
-  for (const auto& pair : hand_weights_) {
-    indices.push_back(pair.first);
+
+  std::vector<double> weights;
+  weights.reserve(weighted_combos.size());
+  for (const auto& combo : weighted_combos) {
+    weights.push_back(combo.second);
   }
-  
+
   // Create a distribution based on hand weights
-  std::discrete_distribution<size_t> dist(weight_vector_.begin(), weight_vector_.end());
+  std::discrete_distribution<size_t> dist(weights.begin(), weights.end());
   
   // Sample hands
   sampled_hands.reserve(count);
   for (int i = 0; i < count; ++i) {
     size_t idx = dist(rng_);
-    sampled_hands.push_back(index_to_hand(indices[idx]));
+    sampled_hands.push_back(weighted_combos[idx].first);
   }
   
   return sampled_hands;
 }
 
 double HandRange::get_probability(const Hand& hand) const {
-  int index = hand_to_index(hand);
-  
-  // Check if the hand is in the range
-  if (!contains_index(index) || total_weight_ <= 0.0) {
+  if (hand.cards_size() != 2 || total_weight_ <= 0.0) {
     return 0.0;
   }
-  
-  // Find the weight
-  for (const auto& pair : hand_weights_) {
-    if (pair.first == index) {
-      return pair.second / total_weight_;
+
+  double hand_weight = 0.0;
+  for (const auto& pair : exact_hand_weights_) {
+    if (SameHand(pair.first, hand)) {
+      hand_weight += pair.second;
+    }
+  }
+
+  int index = hand_to_index(hand);
+  if (index >= 0) {
+    for (const auto& pair : hand_weights_) {
+      if (pair.first == index) {
+        std::vector<Hand> combos = ExpandIndexToCombos(index);
+        if (!combos.empty()) {
+          hand_weight += pair.second / combos.size();
+        }
+        break;
+      }
     }
   }
   
-  return 0.0;
+  return hand_weight / total_weight_;
 }
 
 std::vector<Hand> HandRange::get_all_hands() const {
   // Use cached hands if available
-  if (hands_cache_valid_ && !cached_hands_.empty()) {
+  if (hands_cache_valid_) {
     return cached_hands_;
   }
   
+  std::vector<std::pair<Hand, double>> weighted_combos =
+      get_all_weighted_combos();
   std::vector<Hand> hands;
-  hands.reserve(hand_weights_.size());
+  hands.reserve(weighted_combos.size());
   
-  for (const auto& pair : hand_weights_) {
-    hands.push_back(index_to_hand(pair.first));
+  for (const auto& combo : weighted_combos) {
+    hands.push_back(combo.first);
   }
   
   // Cache the result
@@ -192,6 +256,10 @@ std::vector<Hand> HandRange::get_all_hands() const {
 std::vector<std::pair<Hand, double>> HandRange::get_all_weighted_combos() const {
   std::vector<std::pair<Hand, double>> weighted_combos;
 
+  for (const auto& hand_weight : exact_hand_weights_) {
+    AddWeightedCombo(&weighted_combos, hand_weight.first, hand_weight.second);
+  }
+
   for (const auto& hand_weight : hand_weights_) {
     std::vector<Hand> combos = ExpandIndexToCombos(hand_weight.first);
     if (combos.empty()) {
@@ -200,7 +268,7 @@ std::vector<std::pair<Hand, double>> HandRange::get_all_weighted_combos() const 
 
     double combo_weight = hand_weight.second / combos.size();
     for (const Hand& combo : combos) {
-      weighted_combos.emplace_back(combo, combo_weight);
+      AddWeightedCombo(&weighted_combos, combo, combo_weight);
     }
   }
 
@@ -213,6 +281,7 @@ const std::vector<std::pair<int, double>>& HandRange::get_all_weights() const {
 
 void HandRange::clear() {
   hand_weights_.clear();
+  exact_hand_weights_.clear();
   equity_cache_.assign(169, 0.5);
   range_bitset_.reset();
   
@@ -270,20 +339,44 @@ std::string HandRange::to_string() const {
   }
   
   std::sort(indices.begin(), indices.end());
+
+  std::vector<std::string> exact_hands;
+  exact_hands.reserve(exact_hand_weights_.size());
+  for (const auto& pair : exact_hand_weights_) {
+    exact_hands.push_back("[" + ExactHandKey(pair.first) + "]");
+  }
+  std::sort(exact_hands.begin(), exact_hands.end());
   
-  for (size_t i = 0; i < indices.size(); ++i) {
-    if (i > 0) {
+  bool needs_separator = false;
+  for (int index : indices) {
+    if (needs_separator) {
       oss << ",";
     }
     
-    Hand hand = index_to_hand(indices[i]);
+    Hand hand = index_to_hand(index);
     oss << hand_to_string(hand);
+    needs_separator = true;
+  }
+
+  for (const std::string& hand : exact_hands) {
+    if (needs_separator) {
+      oss << ",";
+    }
+
+    oss << hand;
+    needs_separator = true;
   }
   
   return oss.str();
 }
 
 bool HandRange::contains(const Hand& hand) const {
+  for (const auto& pair : exact_hand_weights_) {
+    if (SameHand(pair.first, hand)) {
+      return true;
+    }
+  }
+
   int index = hand_to_index(hand);
   return contains_index(index);
 }
@@ -307,6 +400,10 @@ void HandRange::normalize() {
   
   // Normalize weights in the vector
   for (auto& pair : hand_weights_) {
+    pair.second /= total_weight_;
+  }
+
+  for (auto& pair : exact_hand_weights_) {
     pair.second /= total_weight_;
   }
   
@@ -353,13 +450,7 @@ void HandRange::precompute_equity(const HandEvaluator& evaluator, const BoardSta
       const Hand& opponent_hand = range_hands[j];
       
       // Get the weight of the opponent hand
-      double weight = 0.0;
-      for (const auto& pair : hand_weights_) {
-        if (pair.first == range_indices[j]) {
-          weight = pair.second;
-          break;
-        }
-      }
+      double weight = get_probability(opponent_hand);
       
       // Compare the hands
       int comparison = evaluator.compare_hands(hand, opponent_hand, board_state);
@@ -691,20 +782,7 @@ std::vector<Hand> HandRange::generate_all_hands() const {
 
 void HandRange::invalidate_caches() {
   hands_cache_valid_ = false;
-  weights_cache_valid_ = false;
   cached_hands_.clear();
-  weight_vector_.clear();
-}
-
-void HandRange::rebuild_weight_vector() const {
-  weight_vector_.clear();
-  weight_vector_.reserve(hand_weights_.size());
-  
-  for (const auto& pair : hand_weights_) {
-    weight_vector_.push_back(pair.second);
-  }
-  
-  weights_cache_valid_ = true;
 }
 
 } // namespace poker
