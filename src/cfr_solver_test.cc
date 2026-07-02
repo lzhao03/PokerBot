@@ -605,6 +605,46 @@ void CheckRunProducesDeterministicStrategyShape() {
   }
 }
 
+void CheckRepeatedRunMatchesSingleRun() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+
+  HandRange player_a_range;
+  player_a_range.add_hand_by_index(HandRange::string_to_index("AA"), 1.0);
+  HandRange player_b_range;
+  player_b_range.add_hand_by_index(HandRange::string_to_index("KK"), 1.0);
+
+  CFRSolver continued(config);
+  continued.run(10, player_a_range, player_b_range);
+  continued.run(10, player_a_range, player_b_range);
+
+  CFRSolver single(config);
+  single.run(20, player_a_range, player_b_range);
+
+  const Strategy continued_equilibrium = continued.get_equilibrium_strategy();
+  const Strategy single_equilibrium = single.get_equilibrium_strategy();
+  const auto& continued_strategy = continued_equilibrium.get_full_strategy();
+  const auto& single_strategy = single_equilibrium.get_full_strategy();
+  Expect(continued_strategy.size() == single_strategy.size(),
+         "continued run should visit the same info sets as one longer run");
+
+  for (const auto& info_set_strategy : single_strategy) {
+    auto continued_info_set = continued_strategy.find(info_set_strategy.first);
+    Expect(continued_info_set != continued_strategy.end(),
+           "continued run should include each info set from the longer run");
+    Expect(continued_info_set->second.size() == info_set_strategy.second.size(),
+           "continued run should have the same action count");
+    for (const auto& action_prob : info_set_strategy.second) {
+      auto continued_action = continued_info_set->second.find(action_prob.first);
+      Expect(continued_action != continued_info_set->second.end(),
+             "continued run should include each action");
+      Expect(std::abs(continued_action->second - action_prob.second) < 0.000001,
+             "continued run should keep CFR+ iteration weighting");
+    }
+  }
+}
+
 BoardState FoldedState(int folded_player) {
   BoardState state;
   state.set_pot(10);
@@ -1028,6 +1068,7 @@ int main() {
   CheckRangeSamplingRejectsEmptyRange();
   CheckRunLoggingUsesConfig();
   CheckRunProducesDeterministicStrategyShape();
+  CheckRepeatedRunMatchesSingleRun();
   CheckTerminalUtilityBeatsDepthLimit();
   CheckDepthLimitUsesShowdownUtility();
   CheckDepthLimitDoesNotScoreUncalledBet();

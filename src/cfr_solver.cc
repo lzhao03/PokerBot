@@ -190,15 +190,17 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
     if (log) {
       std::cout << "Iteration " << i+1 << "/" << iterations << std::endl;
     }
+    int cfr_iteration = iterations_run_;
     std::vector<double> reach_probabilities(2, 1.0);
-    double dealt_value =
-        cfr(root, player_a_hand, player_b_hand, reach_probabilities, i, 0, max_depth);
+    double dealt_value = cfr(root, player_a_hand, player_b_hand,
+                             reach_probabilities, cfr_iteration, 0, max_depth);
 
     if (train_swapped) {
       // Train both private-card assignments for the sampled heads-up deal.
       std::vector<double> swapped_reach_probabilities(2, 1.0);
       double swapped_value = cfr(root, player_b_hand, player_a_hand,
-                                 swapped_reach_probabilities, i, 0, max_depth);
+                                 swapped_reach_probabilities, cfr_iteration, 0,
+                                 max_depth);
       cumulative_root_utility_ += (dealt_value + swapped_value) / 2.0;
     } else {
       cumulative_root_utility_ += dealt_value;
