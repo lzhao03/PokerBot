@@ -121,6 +121,26 @@ int ChanceSamples(const PokerConfig& config) {
   return std::max(1, config.chance_samples());
 }
 
+template <typename EvaluateChild>
+double SampleChanceValue(GameTree* game_tree,
+                         GameTree::Node* node,
+                         const Hand& player_a_hand,
+                         const Hand& player_b_hand,
+                         int samples,
+                         std::mt19937* rng,
+                         EvaluateChild evaluate_child) {
+  double value = 0.0;
+  for (int i = 0; i < samples; ++i) {
+    std::vector<Card> cards =
+        SampleStreetCards(node->state, player_a_hand, player_b_hand, rng);
+    GameTree::Node* child_node =
+        game_tree->create_chance_child_node(node, cards);
+    value += evaluate_child(child_node);
+    delete child_node;
+  }
+  return value / samples;
+}
+
 }  // namespace
 
 CFRSolver::CFRSolver(const PokerConfig& config)
@@ -387,17 +407,12 @@ double CFRSolver::chance_sampling_cfr(GameTree::Node* node,
                       int iteration,
                       int depth,
                       int max_depth) {
-  double value = 0.0;
-  int samples = ChanceSamples(config_);
-  for (int i = 0; i < samples; ++i) {
-    std::vector<Card> cards =
-        SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
-    GameTree::Node* child_node = game_tree_->create_chance_child_node(node, cards);
-    value += cfr(child_node, player_a_hand, player_b_hand, reach_probabilities,
-                 iteration, depth, max_depth);
-    delete child_node;
-  }
-  return value / samples;
+  return SampleChanceValue(
+      game_tree_, node, player_a_hand, player_b_hand, ChanceSamples(config_),
+      &rng_, [&](GameTree::Node* child_node) {
+        return cfr(child_node, player_a_hand, player_b_hand,
+                   reach_probabilities, iteration, depth, max_depth);
+      });
 }
 
 Strategy CFRSolver::get_equilibrium_strategy() const {
@@ -484,17 +499,12 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node* node,
     return game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
   }
   if (node->is_chance_node) {
-    double value = 0.0;
-    int samples = ChanceSamples(config_);
-    for (int i = 0; i < samples; ++i) {
-      std::vector<Card> cards =
-          SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
-      GameTree::Node* child_node = game_tree_->create_chance_child_node(node, cards);
-      value +=
-          evaluate_strategy_node(child_node, player_a_hand, player_b_hand, strategy);
-      delete child_node;
-    }
-    return value / samples;
+    return SampleChanceValue(
+        game_tree_, node, player_a_hand, player_b_hand, ChanceSamples(config_),
+        &rng_, [&](GameTree::Node* child_node) {
+          return evaluate_strategy_node(child_node, player_a_hand, player_b_hand,
+                                        strategy);
+        });
   }
   if (node->legal_actions.empty()) {
     return 0.0;
@@ -547,17 +557,12 @@ double CFRSolver::best_response_value(GameTree::Node* node,
     return best_response_player == 0 ? player_a_value : -player_a_value;
   }
   if (node->is_chance_node) {
-    double value = 0.0;
-    int samples = ChanceSamples(config_);
-    for (int i = 0; i < samples; ++i) {
-      std::vector<Card> cards =
-          SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
-      GameTree::Node* child_node = game_tree_->create_chance_child_node(node, cards);
-      value += best_response_value(child_node, player_a_hand, player_b_hand,
-                                   strategy, best_response_player);
-      delete child_node;
-    }
-    return value / samples;
+    return SampleChanceValue(
+        game_tree_, node, player_a_hand, player_b_hand, ChanceSamples(config_),
+        &rng_, [&](GameTree::Node* child_node) {
+          return best_response_value(child_node, player_a_hand, player_b_hand,
+                                     strategy, best_response_player);
+        });
   }
   if (node->legal_actions.empty()) {
     return 0.0;
