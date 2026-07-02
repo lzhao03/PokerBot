@@ -1107,6 +1107,38 @@ void CheckRangeBestResponseDoesNotKnowOpponentHand() {
          "range best response should choose one action for the opponent range");
 }
 
+void CheckRangeBestResponseChanceUsesSampledOpponent() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_chance_samples(1);
+
+  CFRSolver solver(config);
+  GameTree::Node node;
+  node.is_chance_node = true;
+  node.state.set_pot(20);
+  node.state.set_street(Street::TURN);
+  node.state.set_all_in(true);
+  node.state.set_folded_player(-1);
+  node.state.add_player_contribution(10);
+  node.state.add_player_contribution(10);
+  AddCard(&node.state, 2, Suit::CLUBS);
+  AddCard(&node.state, 2, Suit::DIAMONDS);
+  AddCard(&node.state, 2, Suit::HEARTS);
+  AddCard(&node.state, 3, Suit::CLUBS);
+
+  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
+  Hand quads = MakeHand(2, Suit::SPADES, 7, Suit::SPADES);
+  Hand air = MakeHand(13, Suit::CLUBS, 12, Suit::DIAMONDS);
+  std::vector<std::pair<Hand, double>> opponent_hands = {{quads, 1.0},
+                                                         {air, 1.0}};
+
+  double value = CFRSolverRegretTestPeer::BestResponseRangeNode(
+      solver, &node, player_a_hand, opponent_hands, 0);
+
+  Expect(std::abs(std::abs(value) - 10.0) < 0.000001,
+         "chance range best response should score the sampled opponent only");
+}
+
 void CheckPlayerBRegretsUsePlayerBUtility() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -1255,6 +1287,7 @@ int main() {
   CheckEvaluationUsesChanceSamples();
   CheckBestResponseActionSelectsBestLegalAction();
   CheckRangeBestResponseDoesNotKnowOpponentHand();
+  CheckRangeBestResponseChanceUsesSampledOpponent();
   CheckPlayerBRegretsUsePlayerBUtility();
   CheckCfrPlusClipsNegativeRegrets();
   CheckCfrPlusWeightsLaterStrategies();

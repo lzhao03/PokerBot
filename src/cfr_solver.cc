@@ -655,8 +655,8 @@ double CFRSolver::best_response_value_against_range(
           SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
       GameTree::Node* child_node =
           game_tree_->create_chance_child_node(node, cards);
-      std::vector<std::pair<Hand, double>> child_opponents =
-          CompatibleHands(opponent_hands, best_response_hand, child_node->state);
+      std::vector<std::pair<Hand, double>> child_opponents = {
+          {sampled_opponent, 1.0}};
       value += best_response_value_against_range(
           child_node, best_response_hand, child_opponents, strategy,
           best_response_player);
