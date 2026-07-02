@@ -51,6 +51,14 @@ public:
                                   const HandRange& player_b_range);
   double calculate_exploitability(const Hand& player_a_hand,
                                   const Hand& player_b_hand);
+  double calculate_player_a_best_response_value(
+      int samples,
+      const HandRange& player_a_range,
+      const HandRange& player_b_range);
+  double calculate_player_b_best_response_value(
+      int samples,
+      const HandRange& player_a_range,
+      const HandRange& player_b_range);
   // Debug helper for inspecting sampled best-response choices.
   Action get_best_response_action(GameTree::Node* node,
                                   const Hand& player_a_hand,

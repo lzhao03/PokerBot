@@ -180,7 +180,17 @@ int main(int argc, char** argv) {
       poker::CFRSolver exploitability_solver(config);
       exploitability_solver.run(options.iterations, player_a_range,
                                 player_b_range);
-      RunBenchmark("exploitability_range", [&] {
+      RunBenchmark("best_response_player_a", [&] {
+        double value = exploitability_solver.calculate_player_a_best_response_value(
+            options.exploitability_samples, player_a_range, player_b_range);
+        return BenchmarkResult{value, options.exploitability_samples, 0};
+      });
+      RunBenchmark("best_response_player_b", [&] {
+        double value = exploitability_solver.calculate_player_b_best_response_value(
+            options.exploitability_samples, player_a_range, player_b_range);
+        return BenchmarkResult{value, options.exploitability_samples, 0};
+      });
+      RunBenchmark("exploitability_total", [&] {
         double value = exploitability_solver.calculate_exploitability(
             options.exploitability_samples, player_a_range, player_b_range);
         return BenchmarkResult{value, options.exploitability_samples * 3, 0};

@@ -805,6 +805,24 @@ double CFRSolver::calculate_exploitability(int samples,
   return (std::max(0.0, player_a_gap) + std::max(0.0, player_b_gap)) / 2.0;
 }
 
+double CFRSolver::calculate_player_a_best_response_value(
+    int samples,
+    const HandRange& player_a_range,
+    const HandRange& player_b_range) {
+  Strategy strategy = get_equilibrium_strategy();
+  return sampled_range_best_response_value(samples, player_a_range,
+                                           player_b_range, strategy, 0);
+}
+
+double CFRSolver::calculate_player_b_best_response_value(
+    int samples,
+    const HandRange& player_a_range,
+    const HandRange& player_b_range) {
+  Strategy strategy = get_equilibrium_strategy();
+  return sampled_range_best_response_value(samples, player_b_range,
+                                           player_a_range, strategy, 1);
+}
+
 double CFRSolver::calculate_exploitability(const Hand& player_a_hand,
                                            const Hand& player_b_hand) {
   Strategy strategy = get_equilibrium_strategy();

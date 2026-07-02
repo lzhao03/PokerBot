@@ -490,8 +490,39 @@ void CheckExploitabilityDetectsFoldStrategy() {
 void CheckExploitabilityZeroSamples() {
   PokerConfig config;
   CFRSolver solver(config);
+  HandRange player_a_range;
+  HandRange player_b_range;
   Expect(solver.calculate_exploitability(0) == 0.0,
          "zero exploitability samples should return zero");
+  Expect(solver.calculate_player_a_best_response_value(
+             0, player_a_range, player_b_range) == 0.0,
+         "zero player A best-response samples should return zero");
+  Expect(solver.calculate_player_b_best_response_value(
+             0, player_a_range, player_b_range) == 0.0,
+         "zero player B best-response samples should return zero");
+}
+
+void CheckRangeBestResponseWrappersReturnFiniteValues() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+
+  HandRange player_a_range;
+  player_a_range.set_from_string("AA,KK");
+  HandRange player_b_range;
+  player_b_range.set_from_string("QQ,JJ");
+
+  CFRSolver solver(config);
+  solver.run(2, player_a_range, player_b_range);
+
+  double player_a_value = solver.calculate_player_a_best_response_value(
+      2, player_a_range, player_b_range);
+  double player_b_value = solver.calculate_player_b_best_response_value(
+      2, player_a_range, player_b_range);
+  Expect(std::isfinite(player_a_value),
+         "player A range best-response wrapper should return a finite value");
+  Expect(std::isfinite(player_b_value),
+         "player B range best-response wrapper should return a finite value");
 }
 
 void CheckRunUsesConfiguredBlinds() {
@@ -1344,6 +1375,7 @@ int main() {
   CheckSingletonRangeMatchesExactEvaluationAndBestResponse();
   CheckExploitabilityDetectsFoldStrategy();
   CheckExploitabilityZeroSamples();
+  CheckRangeBestResponseWrappersReturnFiniteValues();
   CheckRunUsesConfiguredBlinds();
   CheckRunUpdatesExpectedValue();
   CheckRunTrainsSwappedPrivateHands();
