@@ -397,6 +397,10 @@ void CheckEvaluateRangeStrategy() {
   double range_value = solver.evaluate_strategy(3, player_a_range, player_b_range);
   Expect(std::abs(range_value - exact_value) < 0.000001,
          "range evaluation should match exact fold strategy value");
+  double large_sample_value =
+      solver.evaluate_strategy(64, player_a_range, player_b_range);
+  Expect(std::abs(large_sample_value - exact_value) < 0.000001,
+         "parallel range evaluation should match exact fold strategy value");
   Expect(solver.calculate_exploitability(0, player_a_range, player_b_range) == 0.0,
          "zero range exploitability samples should return zero");
   Expect(solver.calculate_exploitability(1, player_a_range, player_b_range) > 0.0,

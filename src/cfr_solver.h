@@ -112,6 +112,11 @@ private:
                                 const Hand& player_a_hand,
                                 const Hand& player_b_hand,
                                 const Strategy& strategy);
+  double evaluate_strategy_samples(
+      int samples,
+      const std::vector<RangeDeal>& range_deals,
+      const std::vector<double>& range_deal_weights,
+      const Strategy& strategy);
   double best_response_value(GameTree::Node* node,
                              const Hand& player_a_hand,
                              const Hand& player_b_hand,

@@ -1,14 +1,17 @@
 #include "src/cfr_solver.h"
 #include "src/card_utils.h"
 #include "src/hand_range.h"
+#include "src/thread_pool.h"
 #include <algorithm>
 #include <numeric>
 #include <random>
+#include <future>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <cmath>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 
 namespace poker {
@@ -17,6 +20,7 @@ namespace {
 
 constexpr int kActionKeyMultiplier = 1000000;
 constexpr char kInfoSetAbstractionVersion[] = "exact_cards_v1";
+constexpr int kParallelEvaluationSampleThreshold = 32;
 
 int ActionKey(const Action& action) {
   // ponytail: amounts are whole chips today; use a structured key if fractional chips matter.
@@ -480,10 +484,68 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   for (const RangeDeal& deal : range_deals) {
     range_deal_weights.push_back(deal.weight);
   }
-  std::discrete_distribution<size_t> range_deal_distribution(
-      range_deal_weights.begin(), range_deal_weights.end());
 
   Strategy strategy = get_equilibrium_strategy();
+  if (samples < kParallelEvaluationSampleThreshold) {
+    return evaluate_strategy_samples(samples, range_deals, range_deal_weights,
+                                     strategy);
+  }
+
+  int worker_count = static_cast<int>(std::thread::hardware_concurrency());
+  if (worker_count <= 0) {
+    worker_count = 1;
+  }
+  worker_count = std::min(worker_count, samples);
+  if (worker_count <= 1) {
+    return evaluate_strategy_samples(samples, range_deals, range_deal_weights,
+                                     strategy);
+  }
+
+  ThreadPoolExecutor executor(worker_count);
+  std::uniform_int_distribution<unsigned int> seed_distribution;
+  std::vector<unsigned int> worker_seeds;
+  worker_seeds.reserve(worker_count);
+  for (int i = 0; i < worker_count; ++i) {
+    worker_seeds.push_back(seed_distribution(rng_));
+  }
+
+  PokerConfig config = config_;
+  std::vector<std::future<double>> futures;
+  futures.reserve(worker_count);
+  int samples_remaining = samples;
+  for (int i = 0; i < worker_count; ++i) {
+    int shard_samples = samples_remaining / (worker_count - i);
+    samples_remaining -= shard_samples;
+    unsigned int seed = worker_seeds[i];
+    futures.push_back(executor.submit([config, &range_deals,
+                                       &range_deal_weights, &strategy,
+                                       shard_samples, seed]() {
+      CFRSolver worker(config);
+      worker.rng_.seed(seed);
+      return worker.evaluate_strategy_samples(
+                 shard_samples, range_deals, range_deal_weights, strategy) *
+             shard_samples;
+    }));
+  }
+
+  double total = 0.0;
+  for (std::future<double>& future : futures) {
+    total += future.get();
+  }
+  return total / samples;
+}
+
+double CFRSolver::evaluate_strategy_samples(
+    int samples,
+    const std::vector<RangeDeal>& range_deals,
+    const std::vector<double>& range_deal_weights,
+    const Strategy& strategy) {
+  if (samples <= 0) {
+    return 0.0;
+  }
+
+  std::discrete_distribution<size_t> range_deal_distribution(
+      range_deal_weights.begin(), range_deal_weights.end());
   GameTree::Node* root = get_or_build_root();
 
   double total = 0.0;
