@@ -67,6 +67,12 @@ public:
 private:
   friend class CFRSolverRegretTestPeer;
 
+  struct RangeDeal {
+    Hand player_a_hand;
+    Hand player_b_hand;
+    double weight;
+  };
+
   PokerConfig config_;
   GameTree* game_tree_;
   HandEvaluator* hand_evaluator_;
@@ -86,6 +92,9 @@ private:
   
   // Helper methods
   GameTree::Node* get_or_build_root();
+  static std::vector<RangeDeal> build_compatible_range_deals(
+      const std::vector<std::pair<Hand, double>>& player_a_hands,
+      const std::vector<std::pair<Hand, double>>& player_b_hands);
   void run_iterations(int iterations, const HandRange* player_a_range,
                       const HandRange* player_b_range, bool train_swapped);
   double evaluate_strategy_node(GameTree::Node* node,

@@ -1,6 +1,7 @@
 #include "src/cfr_solver.h"
 #include "src/hand_range.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -52,6 +53,21 @@ class CFRSolverRegretTestPeer {
     Strategy strategy;
     return solver.best_response_value_against_range(
         node, best_response_hand, opponent_hands, strategy, best_response_player);
+  }
+
+  static std::vector<double> CompatibleDealWeights(
+      const HandRange& player_a_range,
+      const HandRange& player_b_range) {
+    std::vector<CFRSolver::RangeDeal> deals =
+        CFRSolver::build_compatible_range_deals(
+            player_a_range.get_all_weighted_combos(),
+            player_b_range.get_all_weighted_combos());
+    std::vector<double> weights;
+    weights.reserve(deals.size());
+    for (const CFRSolver::RangeDeal& deal : deals) {
+      weights.push_back(deal.weight);
+    }
+    return weights;
   }
 };
 
@@ -559,6 +575,81 @@ void CheckRangeSamplingRejectsEmptyRange() {
     threw = true;
   }
   Expect(threw, "range sampling should reject empty ranges");
+}
+
+void CheckCompatibleDealWeightsUseProductWeights() {
+  Hand blocked = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand player_a_compatible = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
+  Hand player_b_compatible = MakeHand(12, Suit::SPADES, 12, Suit::HEARTS);
+
+  HandRange player_a_range;
+  player_a_range.add_hand(blocked, 2.0);
+  player_a_range.add_hand(player_a_compatible, 3.0);
+  HandRange player_b_range;
+  player_b_range.add_hand(blocked, 5.0);
+  player_b_range.add_hand(player_b_compatible, 7.0);
+
+  std::vector<double> weights =
+      CFRSolverRegretTestPeer::CompatibleDealWeights(player_a_range,
+                                                     player_b_range);
+  std::sort(weights.begin(), weights.end());
+
+  Expect(weights.size() == 3, "compatible deal builder should skip overlaps");
+  Expect(std::abs(weights[0] - 14.0) < 0.000001,
+         "deal weight should be player hand weight product");
+  Expect(std::abs(weights[1] - 15.0) < 0.000001,
+         "deal weight should include compatible player B hands");
+  Expect(std::abs(weights[2] - 21.0) < 0.000001,
+         "deal weight should include compatible player A and B hands");
+}
+
+void CheckRangeSamplingRejectsOnlyOverlappingHands() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+
+  Hand blocked = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  HandRange player_a_range;
+  player_a_range.add_hand(blocked, 1.0);
+  HandRange player_b_range;
+  player_b_range.add_hand(blocked, 1.0);
+
+  CFRSolver solver(config);
+  bool threw = false;
+  try {
+    solver.run(1, player_a_range, player_b_range);
+  } catch (const std::invalid_argument&) {
+    threw = true;
+  }
+  Expect(threw, "range sampling should reject fully overlapping exact ranges");
+}
+
+void CheckRangeSamplingSkipsOverlappingDeals() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+
+  Hand blocked = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand compatible = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
+  HandRange player_a_range;
+  player_a_range.add_hand(blocked, 1000.0);
+  player_a_range.add_hand(compatible, 1.0);
+  HandRange player_b_range;
+  player_b_range.add_hand(blocked, 1.0);
+
+  CFRSolver solver(config);
+  solver.run(3, player_a_range, player_b_range);
+
+  InfoSetAbstraction abstraction;
+  const Strategy strategy = solver.get_equilibrium_strategy();
+  Expect(strategy.get_info_sets().size() == 1,
+         "range sampling should only train compatible private deals");
+  InfoSetAbstraction::InfoSetComponents components =
+      abstraction.parse_info_set(strategy.get_info_sets()[0]);
+  Hand trained_hand = MakeHandFromCards(components.player_cards);
+  Expect(HandRange::hand_to_index(trained_hand) ==
+             HandRange::hand_to_index(compatible),
+         "range sampling should skip overlapping private-card deals");
 }
 
 void CheckRunLoggingUsesConfig() {
@@ -1149,6 +1240,9 @@ int main() {
   CheckRunUsesProvidedPrivateRanges();
   CheckRangeExpansionUsesExactCombos();
   CheckRangeSamplingRejectsEmptyRange();
+  CheckCompatibleDealWeightsUseProductWeights();
+  CheckRangeSamplingRejectsOnlyOverlappingHands();
+  CheckRangeSamplingSkipsOverlappingDeals();
   CheckRunLoggingUsesConfig();
   CheckRunProducesDeterministicStrategyShape();
   CheckRepeatedRunMatchesSingleRun();
