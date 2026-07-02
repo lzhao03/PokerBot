@@ -1,6 +1,7 @@
 #include "src/info_set.h"
 
 #include <stdexcept>
+#include <vector>
 
 namespace poker {
 namespace {
@@ -43,6 +44,19 @@ BoardState MakeState() {
   AddCard(&state, 7, Suit::DIAMONDS);
   AddCard(&state, 11, Suit::CLUBS);
   return state;
+}
+
+bool SameCard(const Card& left, const Card& right) {
+  return left.rank() == right.rank() && left.suit() == right.suit();
+}
+
+bool HandContainsCard(const Hand& hand, const Card& card) {
+  for (const Card& hand_card : hand.cards()) {
+    if (SameCard(hand_card, card)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace
@@ -100,6 +114,21 @@ int main() {
                 "parsed amount should match");
   poker::Expect(components.betting_history[0].player() == 1,
                 "parsed player should match");
+
+  std::vector<poker::Hand> possible_hands =
+      abstraction.get_possible_hands(bet_key);
+  poker::Expect(possible_hands.size() == 1081,
+                "possible hands should be all combos excluding known cards");
+  for (const poker::Hand& possible_hand : possible_hands) {
+    for (const poker::Card& player_card : hand.cards()) {
+      poker::Expect(!poker::HandContainsCard(possible_hand, player_card),
+                    "possible hands should exclude player cards");
+    }
+    for (const poker::Card& board_card : bet.cards()) {
+      poker::Expect(!poker::HandContainsCard(possible_hand, board_card),
+                    "possible hands should exclude board cards");
+    }
+  }
 
   return 0;
 }

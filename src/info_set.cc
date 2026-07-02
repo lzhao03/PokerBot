@@ -35,6 +35,23 @@ std::string PublicStateKey(const BoardState& state) {
   return oss.str();
 }
 
+bool SameCard(const Card& left, const Card& right) {
+  return left.rank() == right.rank() && left.suit() == right.suit();
+}
+
+bool ContainsCard(const std::vector<Card>& cards, const Card& candidate) {
+  return std::any_of(cards.begin(), cards.end(), [&](const Card& card) {
+    return SameCard(card, candidate);
+  });
+}
+
+Hand MakeHand(const Card& first, const Card& second) {
+  Hand hand;
+  *hand.add_cards() = first;
+  *hand.add_cards() = second;
+  return hand;
+}
+
 }  // namespace
 
 std::string InfoSetAbstraction::state_to_info_set(const BoardState& state, int player_id, const Hand& player_hand) const {
@@ -70,23 +87,32 @@ std::string InfoSetAbstraction::state_to_info_set(const BoardState& state, int p
 std::vector<Hand> InfoSetAbstraction::get_possible_hands(const std::string& info_set_key) const {
   // Parse the information set to get the board cards and player's hand
   InfoSetComponents components = parse_info_set(info_set_key);
-  
-  // In a real implementation, this would generate all possible opponent hands
-  // given the known cards (board + player's hand)
+
+  std::vector<Card> known_cards = components.board_cards;
+  known_cards.insert(known_cards.end(), components.player_cards.begin(),
+                     components.player_cards.end());
+
+  std::vector<Card> deck;
+  deck.reserve(52);
+  for (int suit = Suit::HEARTS; suit <= Suit::SPADES; ++suit) {
+    for (int rank = 2; rank <= 14; ++rank) {
+      Card card;
+      card.set_rank(rank);
+      card.set_suit(static_cast<Suit>(suit));
+      if (!ContainsCard(known_cards, card)) {
+        deck.push_back(card);
+      }
+    }
+  }
+
   std::vector<Hand> possible_hands;
-  
-  // This is just a placeholder that returns a single hand
-  Hand hand;
-  Card* card1 = hand.add_cards();
-  card1->set_rank(14); // Ace
-  card1->set_suit(Suit::SPADES);
-  
-  Card* card2 = hand.add_cards();
-  card2->set_rank(13); // King
-  card2->set_suit(Suit::SPADES);
-  
-  possible_hands.push_back(hand);
-  
+  possible_hands.reserve(deck.size() * (deck.size() - 1) / 2);
+  for (size_t i = 0; i < deck.size(); ++i) {
+    for (size_t j = i + 1; j < deck.size(); ++j) {
+      possible_hands.push_back(MakeHand(deck[i], deck[j]));
+    }
+  }
+
   return possible_hands;
 }
 
