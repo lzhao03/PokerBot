@@ -291,7 +291,11 @@ BoardState GameTree::apply_action(const BoardState& state, const Action& action)
       if (to_call != 0) {
         throw std::invalid_argument("Cannot bet facing a bet");
       }
-      int committed = CommitChips(&new_state, player, RequestedChips(action));
+      int requested = RequestedChips(action);
+      if (requested >= GetStack(new_state, player)) {
+        throw std::invalid_argument("Use all-in for full-stack bets");
+      }
+      int committed = CommitChips(&new_state, player, requested);
       applied.set_amount(committed);
       new_state.set_player_to_act(opponent);
       break;
@@ -303,6 +307,9 @@ BoardState GameTree::apply_action(const BoardState& state, const Action& action)
       int requested = RequestedChips(action);
       if (requested <= to_call || GetStack(new_state, player) <= to_call) {
         throw std::invalid_argument("Raise must exceed the call amount");
+      }
+      if (requested >= GetStack(new_state, player)) {
+        throw std::invalid_argument("Use all-in for full-stack raises");
       }
       int committed = CommitChips(&new_state, player, requested);
       applied.set_amount(committed);

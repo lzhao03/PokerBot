@@ -12,6 +12,19 @@ void Expect(bool condition, const char* message) {
   }
 }
 
+void ExpectInvalidAction(GameTree* tree,
+                         const BoardState& state,
+                         const Action& action,
+                         const char* message) {
+  bool threw = false;
+  try {
+    tree->apply_action(state, action);
+  } catch (const std::invalid_argument&) {
+    threw = true;
+  }
+  Expect(threw, message);
+}
+
 Action MakeAction(ActionType type, int amount = 0) {
   Action action;
   action.set_action(type);
@@ -223,6 +236,13 @@ void CheckAllInEquivalentActionsAreDeduped() {
   Expect(raise_actions[2].action() == ActionType::ALL_IN, "third facing action is all-in");
 }
 
+void CheckFullStackBetRaiseUseAllIn(GameTree* tree) {
+  ExpectInvalidAction(tree, FlopState(), MakeAction(ActionType::BET, 98),
+                      "full-stack bet should use all-in action");
+  ExpectInvalidAction(tree, PreflopState(), MakeAction(ActionType::RAISE, 99),
+                      "full-stack raise should use all-in action");
+}
+
 void CheckDuplicateConcreteBetSizesAreDeduped() {
   PokerConfig config;
   config.add_bet_sizes(0.5);
@@ -308,6 +328,7 @@ int main() {
   poker::CheckAllInAction(&tree);
   poker::CheckShortAllInCallClosesRound(&tree);
   poker::CheckAllInEquivalentActionsAreDeduped();
+  poker::CheckFullStackBetRaiseUseAllIn(&tree);
   poker::CheckDuplicateConcreteBetSizesAreDeduped();
   poker::CheckMaxRaisesCapsRaiseActions();
   poker::CheckShowdownUtility(&tree);
