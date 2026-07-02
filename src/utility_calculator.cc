@@ -2,8 +2,51 @@
 #include <algorithm>
 #include <cmath>
 #include <sstream>
+#include <utility>
 
 namespace poker {
+
+namespace {
+
+bool HandsOverlap(const Hand& left, const Hand& right) {
+  for (const Card& left_card : left.cards()) {
+    for (const Card& right_card : right.cards()) {
+      if (left_card.rank() == right_card.rank() &&
+          left_card.suit() == right_card.suit()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool HandOverlapsBoard(const Hand& hand, const BoardState& state) {
+  for (const Card& hand_card : hand.cards()) {
+    for (const Card& board_card : state.cards()) {
+      if (hand_card.rank() == board_card.rank() &&
+          hand_card.suit() == board_card.suit()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+std::vector<std::pair<Hand, double>> CompatibleWeightedHands(
+    const HandRange& range,
+    const Hand& player_hand,
+    const BoardState& state) {
+  std::vector<std::pair<Hand, double>> compatible_hands;
+  for (const auto& hand_weight : range.get_all_weighted_combos()) {
+    if (!HandsOverlap(hand_weight.first, player_hand) &&
+        !HandOverlapsBoard(hand_weight.first, state)) {
+      compatible_hands.push_back(hand_weight);
+    }
+  }
+  return compatible_hands;
+}
+
+}  // namespace
 
 UtilityCalculator::UtilityCalculator() 
   : hand_evaluator_(new HandEvaluator()), calculation_cache_() {
@@ -106,18 +149,20 @@ double UtilityCalculator::calculate_ev_impl(const BoardState& state,
                                            const Hand& player_hand,
                                            const HandRange& opponent_range,
                                            int player_id) const {
-  std::vector<Hand> opponent_hands = opponent_range.get_all_hands();
+  std::vector<std::pair<Hand, double>> opponent_hands =
+      CompatibleWeightedHands(opponent_range, player_hand, state);
   if (opponent_hands.empty()) return 0.0;
   
   double total_ev = 0.0;
   double total_weight = 0.0;
   
-  for (const Hand& opponent_hand : opponent_hands) {
-    double probability = opponent_range.get_probability(opponent_hand);
-    double utility = calculate_terminal_impl(state, player_hand, opponent_hand, player_id);
+  for (const auto& opponent_hand : opponent_hands) {
+    double utility =
+        calculate_terminal_impl(state, player_hand, opponent_hand.first,
+                                player_id);
     
-    total_ev += utility * probability;
-    total_weight += probability;
+    total_ev += utility * opponent_hand.second;
+    total_weight += opponent_hand.second;
   }
   
   return (total_weight > 0.0) ? total_ev / total_weight : 0.0;
@@ -126,20 +171,22 @@ double UtilityCalculator::calculate_ev_impl(const BoardState& state,
 double UtilityCalculator::calculate_equity_impl(const Hand& player_hand,
                                                const HandRange& opponent_range,
                                                const BoardState& board_state) const {
-  std::vector<Hand> opponent_hands = opponent_range.get_all_hands();
+  std::vector<std::pair<Hand, double>> opponent_hands =
+      CompatibleWeightedHands(opponent_range, player_hand, board_state);
   if (opponent_hands.empty()) return 0.5;  // Default 50% equity if range is empty
   
   double total_equity = 0.0;
   double total_weight = 0.0;
   
-  for (const Hand& opponent_hand : opponent_hands) {
-    double probability = opponent_range.get_probability(opponent_hand);
-    int comparison = hand_evaluator_->compare_hands(player_hand, opponent_hand, board_state);
+  for (const auto& opponent_hand : opponent_hands) {
+    int comparison =
+        hand_evaluator_->compare_hands(player_hand, opponent_hand.first,
+                                       board_state);
     
     // Calculate equity: 1 for win, 0.5 for tie, 0 for loss
     double equity = (comparison > 0) ? 1.0 : (comparison == 0) ? 0.5 : 0.0;
-    total_equity += equity * probability;
-    total_weight += probability;
+    total_equity += equity * opponent_hand.second;
+    total_weight += opponent_hand.second;
   }
   
   return (total_weight > 0.0) ? total_equity / total_weight : 0.5;
@@ -171,13 +218,15 @@ double UtilityCalculator::calculate_fold_equity_impl(const BoardState& state,
     double avg_equity = 0.0;
     double total_weight = 0.0;
     
-    for (const Hand& opponent_hand : opponent_range.get_all_hands()) {
-      double probability = opponent_range.get_probability(opponent_hand);
-      int comparison = hand_evaluator_->compare_hands(opponent_hand, player_hand, state);
+    for (const auto& opponent_hand :
+         CompatibleWeightedHands(opponent_range, player_hand, state)) {
+      int comparison =
+          hand_evaluator_->compare_hands(opponent_hand.first, player_hand,
+                                         state);
       double equity = (comparison > 0) ? 1.0 : (comparison == 0) ? 0.5 : 0.0;
       
-      avg_equity += equity * probability;
-      total_weight += probability;
+      avg_equity += equity * opponent_hand.second;
+      total_weight += opponent_hand.second;
     }
     
     if (total_weight > 0.0) avg_equity /= total_weight;

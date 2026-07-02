@@ -119,6 +119,14 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+cc_test(
+    name = "utility_calculator_test",
+    srcs = ["utility_calculator_test.cc"],
+    deps = [
+        ":utility_calculator",
+    ],
+)
+
 cc_library(
     name = "cfr_solver",
     srcs = ["cfr_solver.cc"],
