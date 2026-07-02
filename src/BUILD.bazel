@@ -167,3 +167,13 @@ cc_binary(
         "@protobuf//:protobuf",
     ],
 )
+
+cc_binary(
+    name = "cfr_benchmark",
+    srcs = ["cfr_benchmark.cc"],
+    deps = [
+        ":cfr_solver",
+        ":hand_range",
+        ":poker_cc_proto",
+    ],
+)
