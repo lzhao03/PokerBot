@@ -643,6 +643,31 @@ void CheckRunUsesProvidedPrivateRanges() {
          "range run should train the supplied player A hand class");
 }
 
+void CheckRunWithoutDepthCutoffTerminates() {
+  PokerConfig config;
+  config.set_starting_stack_size(6);
+  config.set_small_blind(1);
+  config.set_big_blind(2);
+  config.set_max_depth(0);
+  config.add_bet_sizes(1.0);
+  config.set_chance_samples(1);
+
+  HandRange player_a_range;
+  player_a_range.set_from_string("AA");
+  HandRange player_b_range;
+  player_b_range.set_from_string("KK");
+
+  CFRSolver solver(config);
+  solver.run(1, player_a_range, player_b_range);
+
+  Expect(solver.get_iterations_run() == 1,
+         "zero max-depth range run should complete one iteration");
+  Expect(solver.get_cfr_update_count() > 0,
+         "zero max-depth range run should visit CFR decision nodes");
+  Expect(!solver.get_equilibrium_strategy().get_info_sets().empty(),
+         "zero max-depth range run should produce strategy info sets");
+}
+
 void CheckRangeExpansionUsesExactCombos() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -1393,6 +1418,7 @@ int main() {
   CheckRunUpdatesExpectedValue();
   CheckRunTrainsSwappedPrivateHands();
   CheckRunUsesProvidedPrivateRanges();
+  CheckRunWithoutDepthCutoffTerminates();
   CheckRangeExpansionUsesExactCombos();
   CheckRangeSamplingRejectsEmptyRange();
   CheckCompatibleDealWeightsUseProductWeights();
