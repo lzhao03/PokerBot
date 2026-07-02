@@ -294,6 +294,10 @@ void CheckSaveStrategyUsesProtobufSnapshot() {
   Expect(std::abs(snapshot.info_sets(0).actions(0).probability() - 1.0) <
              0.000001,
          "saved snapshot should store action probability");
+  Expect(snapshot.config().starting_stack_size() == 20,
+         "saved snapshot should include solver config");
+  Expect(snapshot.abstraction_version() == "exact_cards_v1",
+         "saved snapshot should include abstraction version");
 }
 
 void CheckLoadStrategyPopulatesEquilibriumStrategy() {
@@ -445,6 +449,12 @@ void CheckRunUsesConfiguredBlinds() {
   solver.save_strategy(path);
 
   StrategySnapshot snapshot = ReadStrategySnapshot(path);
+  Expect(snapshot.iterations_run() == 1,
+         "saved snapshot should include completed iteration count");
+  Expect(snapshot.config().small_blind() == 2,
+         "saved snapshot should include configured small blind");
+  Expect(snapshot.config().big_blind() == 5,
+         "saved snapshot should include configured big blind");
   bool has_call_three = false;
   for (const StrategyInfoSetSnapshot& info_set : snapshot.info_sets()) {
     for (const StrategyActionSnapshot& action : info_set.actions()) {

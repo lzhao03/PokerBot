@@ -16,6 +16,7 @@ namespace poker {
 namespace {
 
 constexpr int kActionKeyMultiplier = 1000000;
+constexpr char kInfoSetAbstractionVersion[] = "exact_cards_v1";
 
 int ActionKey(const Action& action) {
   // ponytail: amounts are whole chips today; use a structured key if fractional chips matter.
@@ -856,6 +857,10 @@ void CFRSolver::save_strategy(const std::string& filename) const {
 
   Strategy equilibrium_strategy = get_equilibrium_strategy();
   StrategySnapshot snapshot;
+  *snapshot.mutable_config() = config_;
+  snapshot.set_iterations_run(iterations_run_);
+  snapshot.set_abstraction_version(kInfoSetAbstractionVersion);
+
   for (const std::string& info_set_key : equilibrium_strategy.get_info_sets()) {
     StrategyInfoSetSnapshot* info_set = snapshot.add_info_sets();
     info_set->set_info_set_key(info_set_key);
