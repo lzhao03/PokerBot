@@ -9,6 +9,7 @@
 #include <limits>
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 
 namespace poker {
 
@@ -40,23 +41,37 @@ bool HandsOverlap(const Hand& left, const Hand& right) {
   return false;
 }
 
-Hand SampleWeightedHand(const std::vector<std::pair<Hand, double>>& hands,
-                        std::mt19937* rng) {
+std::vector<double> WeightsFor(
+    const std::vector<std::pair<Hand, double>>& hands) {
   std::vector<double> weights;
   weights.reserve(hands.size());
   for (const auto& hand : hands) {
     weights.push_back(hand.second);
   }
-
-  std::discrete_distribution<size_t> distribution(weights.begin(), weights.end());
-  return hands[distribution(*rng)].first;
+  return weights;
 }
 
-bool HasCompatibleHands(
-    const std::vector<std::pair<Hand, double>>& player_a_hands,
-    const std::vector<std::pair<Hand, double>>& player_b_hands) {
-  for (const auto& player_a_hand : player_a_hands) {
-    for (const auto& player_b_hand : player_b_hands) {
+struct WeightedHands {
+  std::vector<std::pair<Hand, double>> hands;
+  std::vector<double> weights;
+  std::discrete_distribution<size_t> distribution;
+
+  void reset(std::vector<std::pair<Hand, double>> new_hands) {
+    hands = std::move(new_hands);
+    weights = WeightsFor(hands);
+    distribution =
+        std::discrete_distribution<size_t>(weights.begin(), weights.end());
+  }
+};
+
+Hand SampleWeightedHand(WeightedHands* hands, std::mt19937* rng) {
+  return hands->hands[hands->distribution(*rng)].first;
+}
+
+bool HasCompatibleHands(const WeightedHands& player_a_hands,
+                        const WeightedHands& player_b_hands) {
+  for (const auto& player_a_hand : player_a_hands.hands) {
+    for (const auto& player_b_hand : player_b_hands.hands) {
       if (!HandsOverlap(player_a_hand.first, player_b_hand.first)) {
         return true;
       }
@@ -65,13 +80,12 @@ bool HasCompatibleHands(
   return false;
 }
 
-bool SampleRangeHands(const std::vector<std::pair<Hand, double>>& player_a_hands,
-                      const std::vector<std::pair<Hand, double>>& player_b_hands,
-                      std::mt19937* rng,
-                      Hand* player_a_hand,
+bool SampleRangeHands(WeightedHands* player_a_hands,
+                      WeightedHands* player_b_hands,
+                      std::mt19937* rng, Hand* player_a_hand,
                       Hand* player_b_hand) {
-  if (player_a_hands.empty() || player_b_hands.empty() ||
-      !HasCompatibleHands(player_a_hands, player_b_hands)) {
+  if (player_a_hands->hands.empty() || player_b_hands->hands.empty() ||
+      !HasCompatibleHands(*player_a_hands, *player_b_hands)) {
     return false;
   }
 
@@ -145,11 +159,11 @@ void CFRSolver::run(int iterations, const HandRange& player_a_range,
 void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
                                const HandRange* player_b_range,
                                bool train_swapped) {
-  std::vector<std::pair<Hand, double>> player_a_hands;
-  std::vector<std::pair<Hand, double>> player_b_hands;
+  WeightedHands player_a_hands;
+  WeightedHands player_b_hands;
   if (player_a_range != nullptr && player_b_range != nullptr) {
-    player_a_hands = player_a_range->get_all_weighted_combos();
-    player_b_hands = player_b_range->get_all_weighted_combos();
+    player_a_hands.reset(player_a_range->get_all_weighted_combos());
+    player_b_hands.reset(player_b_range->get_all_weighted_combos());
   }
 
   const bool log = config_.enable_logging();
@@ -180,7 +194,7 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
       std::shuffle(deck.begin(), deck.end(), rng_);
       player_a_hand = DealHand(&deck);
       player_b_hand = DealHand(&deck);
-    } else if (!SampleRangeHands(player_a_hands, player_b_hands, &rng_,
+    } else if (!SampleRangeHands(&player_a_hands, &player_b_hands, &rng_,
                                  &player_a_hand, &player_b_hand)) {
       throw std::invalid_argument(
           "Could not sample non-overlapping hands from ranges");
@@ -384,10 +398,10 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
     return 0.0;
   }
 
-  std::vector<std::pair<Hand, double>> player_a_hands =
-      player_a_range.get_all_weighted_combos();
-  std::vector<std::pair<Hand, double>> player_b_hands =
-      player_b_range.get_all_weighted_combos();
+  WeightedHands player_a_hands;
+  player_a_hands.reset(player_a_range.get_all_weighted_combos());
+  WeightedHands player_b_hands;
+  player_b_hands.reset(player_b_range.get_all_weighted_combos());
   Strategy strategy = get_equilibrium_strategy();
   GameTree::Node* root = get_or_build_root();
 
@@ -395,7 +409,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   for (int i = 0; i < samples; ++i) {
     Hand player_a_hand;
     Hand player_b_hand;
-    if (!SampleRangeHands(player_a_hands, player_b_hands, &rng_,
+    if (!SampleRangeHands(&player_a_hands, &player_b_hands, &rng_,
                           &player_a_hand, &player_b_hand)) {
       throw std::invalid_argument(
           "Could not sample non-overlapping hands from ranges");
@@ -570,16 +584,16 @@ double CFRSolver::calculate_exploitability(int samples,
     return 0.0;
   }
 
-  std::vector<std::pair<Hand, double>> player_a_hands =
-      player_a_range.get_all_weighted_combos();
-  std::vector<std::pair<Hand, double>> player_b_hands =
-      player_b_range.get_all_weighted_combos();
+  WeightedHands player_a_hands;
+  player_a_hands.reset(player_a_range.get_all_weighted_combos());
+  WeightedHands player_b_hands;
+  player_b_hands.reset(player_b_range.get_all_weighted_combos());
 
   double total = 0.0;
   for (int i = 0; i < samples; ++i) {
     Hand player_a_hand;
     Hand player_b_hand;
-    if (!SampleRangeHands(player_a_hands, player_b_hands, &rng_,
+    if (!SampleRangeHands(&player_a_hands, &player_b_hands, &rng_,
                           &player_a_hand, &player_b_hand)) {
       throw std::invalid_argument(
           "Could not sample non-overlapping hands from ranges");
