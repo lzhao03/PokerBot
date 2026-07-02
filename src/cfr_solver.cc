@@ -41,6 +41,39 @@ bool HandsOverlap(const Hand& left, const Hand& right) {
   return false;
 }
 
+bool HandOverlapsBoard(const Hand& hand, const BoardState& state) {
+  for (const Card& hand_card : hand.cards()) {
+    for (const Card& board_card : state.cards()) {
+      if (SameCard(hand_card, board_card)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+double TotalWeight(const std::vector<std::pair<Hand, double>>& hands) {
+  double total = 0.0;
+  for (const auto& hand : hands) {
+    total += hand.second;
+  }
+  return total;
+}
+
+std::vector<std::pair<Hand, double>> CompatibleHands(
+    const std::vector<std::pair<Hand, double>>& hands,
+    const Hand& known_hand,
+    const BoardState& state) {
+  std::vector<std::pair<Hand, double>> compatible_hands;
+  for (const auto& hand : hands) {
+    if (!HandsOverlap(hand.first, known_hand) &&
+        !HandOverlapsBoard(hand.first, state)) {
+      compatible_hands.push_back(hand);
+    }
+  }
+  return compatible_hands;
+}
+
 std::vector<double> WeightsFor(
     const std::vector<std::pair<Hand, double>>& hands) {
   std::vector<double> weights;
@@ -66,6 +99,22 @@ struct WeightedHands {
 
 Hand SampleWeightedHand(WeightedHands* hands, std::mt19937* rng) {
   return hands->hands[hands->distribution(*rng)].first;
+}
+
+double StrategyActionProbability(const Strategy& strategy,
+                                 const std::string& info_set_key,
+                                 const std::vector<Action>& legal_actions,
+                                 int action_id) {
+  double probability_sum = 0.0;
+  for (const Action& legal_action : legal_actions) {
+    probability_sum +=
+        strategy.get_action_probability(info_set_key, ActionKey(legal_action));
+  }
+  if (probability_sum > 0.0) {
+    return strategy.get_action_probability(info_set_key, action_id) /
+           probability_sum;
+  }
+  return legal_actions.empty() ? 0.0 : 1.0 / legal_actions.size();
 }
 
 bool HasCompatibleHands(const WeightedHands& player_a_hands,
@@ -565,6 +614,147 @@ double CFRSolver::best_response_value(GameTree::Node* node,
   return value;
 }
 
+double CFRSolver::best_response_value_against_range(
+    GameTree::Node* node,
+    const Hand& best_response_hand,
+    const std::vector<std::pair<Hand, double>>& opponent_hands,
+    const Strategy& strategy,
+    int best_response_player) {
+  double total_weight = TotalWeight(opponent_hands);
+  if (total_weight <= 0.0) {
+    return 0.0;
+  }
+
+  if (node->is_terminal) {
+    double value = 0.0;
+    for (const auto& opponent_hand : opponent_hands) {
+      const Hand& player_a_hand =
+          best_response_player == 0 ? best_response_hand : opponent_hand.first;
+      const Hand& player_b_hand =
+          best_response_player == 0 ? opponent_hand.first : best_response_hand;
+      double player_a_value =
+          game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
+      value += opponent_hand.second *
+               (best_response_player == 0 ? player_a_value : -player_a_value);
+    }
+    return value / total_weight;
+  }
+
+  if (node->is_chance_node) {
+    double value = 0.0;
+    int samples = ChanceSamples(config_);
+    WeightedHands weighted_opponents;
+    weighted_opponents.reset(opponent_hands);
+    for (int i = 0; i < samples; ++i) {
+      Hand sampled_opponent = SampleWeightedHand(&weighted_opponents, &rng_);
+      const Hand& player_a_hand =
+          best_response_player == 0 ? best_response_hand : sampled_opponent;
+      const Hand& player_b_hand =
+          best_response_player == 0 ? sampled_opponent : best_response_hand;
+      std::vector<Card> cards =
+          SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
+      GameTree::Node* child_node =
+          game_tree_->create_chance_child_node(node, cards);
+      std::vector<std::pair<Hand, double>> child_opponents =
+          CompatibleHands(opponent_hands, best_response_hand, child_node->state);
+      value += best_response_value_against_range(
+          child_node, best_response_hand, child_opponents, strategy,
+          best_response_player);
+      delete child_node;
+    }
+    return value / samples;
+  }
+
+  if (node->legal_actions.empty()) {
+    return 0.0;
+  }
+
+  int player = node->player_to_act;
+  if (player != 0 && player != 1) {
+    return 0.0;
+  }
+
+  if (player == best_response_player) {
+    double value = -std::numeric_limits<double>::infinity();
+    for (const Action& action : node->legal_actions) {
+      int action_id = ActionKey(action);
+      if (node->children.find(action_id) == node->children.end()) {
+        node->children[action_id] = game_tree_->create_child_node(node, action);
+      }
+      value = std::max(value, best_response_value_against_range(
+                                  node->children[action_id], best_response_hand,
+                                  opponent_hands, strategy,
+                                  best_response_player));
+    }
+    return value;
+  }
+
+  double value = 0.0;
+  for (const Action& action : node->legal_actions) {
+    int action_id = ActionKey(action);
+    if (node->children.find(action_id) == node->children.end()) {
+      node->children[action_id] = game_tree_->create_child_node(node, action);
+    }
+
+    std::vector<std::pair<Hand, double>> child_opponents;
+    for (const auto& opponent_hand : opponent_hands) {
+      std::string info_set_key = info_set_abstraction_->state_to_info_set(
+          node->state, player, opponent_hand.first);
+      double probability = StrategyActionProbability(
+          strategy, info_set_key, node->legal_actions, action_id);
+      if (probability > 0.0) {
+        child_opponents.emplace_back(opponent_hand.first,
+                                     opponent_hand.second * probability);
+      }
+    }
+
+    double child_weight = TotalWeight(child_opponents);
+    if (child_weight > 0.0) {
+      value += (child_weight / total_weight) *
+               best_response_value_against_range(
+                   node->children[action_id], best_response_hand,
+                   child_opponents, strategy, best_response_player);
+    }
+  }
+  return value;
+}
+
+double CFRSolver::sampled_range_best_response_value(
+    int samples,
+    const HandRange& best_response_range,
+    const HandRange& opponent_range,
+    const Strategy& strategy,
+    int best_response_player) {
+  if (samples <= 0) {
+    return 0.0;
+  }
+
+  WeightedHands best_response_hands;
+  best_response_hands.reset(best_response_range.get_all_weighted_combos());
+  std::vector<std::pair<Hand, double>> opponent_hands =
+      opponent_range.get_all_weighted_combos();
+  if (best_response_hands.hands.empty() || opponent_hands.empty()) {
+    throw std::invalid_argument(
+        "Could not sample non-overlapping hands from ranges");
+  }
+
+  GameTree::Node* root = get_or_build_root();
+  double total = 0.0;
+  for (int i = 0; i < samples; ++i) {
+    Hand best_response_hand = SampleWeightedHand(&best_response_hands, &rng_);
+    std::vector<std::pair<Hand, double>> compatible_opponents =
+        CompatibleHands(opponent_hands, best_response_hand, root->state);
+    if (compatible_opponents.empty()) {
+      throw std::invalid_argument(
+          "Could not sample non-overlapping hands from ranges");
+    }
+    total += best_response_value_against_range(root, best_response_hand,
+                                               compatible_opponents, strategy,
+                                               best_response_player);
+  }
+  return total / samples;
+}
+
 double CFRSolver::calculate_exploitability() {
   return calculate_exploitability(1);
 }
@@ -592,27 +782,18 @@ double CFRSolver::calculate_exploitability(int samples,
     return 0.0;
   }
 
-  WeightedHands player_a_hands;
-  player_a_hands.reset(player_a_range.get_all_weighted_combos());
-  WeightedHands player_b_hands;
-  player_b_hands.reset(player_b_range.get_all_weighted_combos());
-  bool has_compatible_range_hands =
-      !player_a_hands.hands.empty() && !player_b_hands.hands.empty() &&
-      HasCompatibleHands(player_a_hands, player_b_hands);
-
-  double total = 0.0;
-  for (int i = 0; i < samples; ++i) {
-    Hand player_a_hand;
-    Hand player_b_hand;
-    if (!SampleRangeHands(&player_a_hands, &player_b_hands,
-                          has_compatible_range_hands, &rng_, &player_a_hand,
-                          &player_b_hand)) {
-      throw std::invalid_argument(
-          "Could not sample non-overlapping hands from ranges");
-    }
-    total += calculate_exploitability(player_a_hand, player_b_hand);
-  }
-  return total / samples;
+  Strategy strategy = get_equilibrium_strategy();
+  double strategy_player_a_value =
+      evaluate_strategy(samples, player_a_range, player_b_range);
+  double player_a_gap =
+      sampled_range_best_response_value(samples, player_a_range, player_b_range,
+                                        strategy, 0) -
+      strategy_player_a_value;
+  double player_b_gap =
+      sampled_range_best_response_value(samples, player_b_range, player_a_range,
+                                        strategy, 1) +
+      strategy_player_a_value;
+  return (std::max(0.0, player_a_gap) + std::max(0.0, player_b_gap)) / 2.0;
 }
 
 double CFRSolver::calculate_exploitability(const Hand& player_a_hand,

@@ -3,6 +3,7 @@
 #include <random>
 #include <unordered_map>
 #include <string>
+#include <utility>
 #include <vector>
 #include "src/poker.pb.h"
 #include "src/game_tree.h"
@@ -96,6 +97,18 @@ private:
                              const Hand& player_b_hand,
                              const Strategy& strategy,
                              int best_response_player);
+  double best_response_value_against_range(
+      GameTree::Node* node,
+      const Hand& best_response_hand,
+      const std::vector<std::pair<Hand, double>>& opponent_hands,
+      const Strategy& strategy,
+      int best_response_player);
+  double sampled_range_best_response_value(
+      int samples,
+      const HandRange& best_response_range,
+      const HandRange& opponent_range,
+      const Strategy& strategy,
+      int best_response_player);
   Strategy::ActionProbabilities get_strategy(
       const std::string& info_set_key,
       const std::vector<Action>& legal_actions);

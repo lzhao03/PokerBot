@@ -43,6 +43,16 @@ class CFRSolverRegretTestPeer {
     return solver.best_response_value(node, player_a_hand, player_b_hand,
                                       strategy, best_response_player);
   }
+
+  static double BestResponseRangeNode(
+      CFRSolver& solver, GameTree::Node* node,
+      const Hand& best_response_hand,
+      const std::vector<std::pair<Hand, double>>& opponent_hands,
+      int best_response_player) {
+    Strategy strategy;
+    return solver.best_response_value_against_range(
+        node, best_response_hand, opponent_hands, strategy, best_response_player);
+  }
 };
 
 }  // namespace poker
@@ -64,6 +74,13 @@ Action MakeAction(ActionType type, int amount = 0) {
 
 int TestActionKey(ActionType type, int amount = 0) {
   return static_cast<int>(type) * 1000000 + amount;
+}
+
+Card MakeTestCard(int rank, Suit suit) {
+  Card card;
+  card.set_rank(rank);
+  card.set_suit(suit);
+  return card;
 }
 
 void AddCard(BoardState* state, int rank, Suit suit) {
@@ -654,6 +671,27 @@ BoardState FoldedState(int folded_player) {
   return state;
 }
 
+BoardState ShowdownState(const std::vector<Card>& board_cards) {
+  BoardState state;
+  state.set_pot(20);
+  state.set_street(Street::RIVER);
+  state.set_all_in(false);
+  state.set_folded_player(-1);
+  state.add_player_contribution(10);
+  state.add_player_contribution(10);
+  for (const Card& card : board_cards) {
+    *state.add_cards() = card;
+  }
+  return state;
+}
+
+GameTree::Node* TerminalShowdownNode(const std::vector<Card>& board_cards) {
+  GameTree::Node* node = new GameTree::Node();
+  node->state = ShowdownState(board_cards);
+  node->is_terminal = true;
+  return node;
+}
+
 void CheckTerminalUtilityBeatsDepthLimit() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -933,6 +971,51 @@ void CheckBestResponseActionSelectsBestLegalAction() {
          "best response should return no action away from its turn");
 }
 
+void CheckRangeBestResponseDoesNotKnowOpponentHand() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+
+  CFRSolver solver(config);
+  GameTree::Node node;
+  node.state.set_player_to_act(0);
+  node.state.set_folded_player(-1);
+  node.player_to_act = 0;
+
+  Action first_board = MakeAction(ActionType::CHECK);
+  Action second_board = MakeAction(ActionType::CALL, 1);
+  node.legal_actions.push_back(first_board);
+  node.legal_actions.push_back(second_board);
+
+  node.children[TestActionKey(ActionType::CHECK)] = TerminalShowdownNode(
+      {MakeTestCard(13, Suit::SPADES), MakeTestCard(13, Suit::HEARTS),
+       MakeTestCard(3, Suit::CLUBS), MakeTestCard(4, Suit::DIAMONDS),
+       MakeTestCard(5, Suit::SPADES)});
+  node.children[TestActionKey(ActionType::CALL, 1)] = TerminalShowdownNode(
+      {MakeTestCard(2, Suit::SPADES), MakeTestCard(2, Suit::HEARTS),
+       MakeTestCard(3, Suit::CLUBS), MakeTestCard(4, Suit::DIAMONDS),
+       MakeTestCard(5, Suit::SPADES)});
+
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand kings = MakeHand(13, Suit::CLUBS, 13, Suit::DIAMONDS);
+  Hand twos = MakeHand(2, Suit::CLUBS, 2, Suit::DIAMONDS);
+  std::vector<std::pair<Hand, double>> opponent_hands = {{kings, 1.0},
+                                                         {twos, 1.0}};
+
+  double clairvoyant_average =
+      (CFRSolverRegretTestPeer::BestResponseNode(solver, &node, player_a_hand,
+                                                 kings, 0) +
+       CFRSolverRegretTestPeer::BestResponseNode(solver, &node, player_a_hand,
+                                                 twos, 0)) /
+      2.0;
+  double range_value = CFRSolverRegretTestPeer::BestResponseRangeNode(
+      solver, &node, player_a_hand, opponent_hands, 0);
+
+  Expect(clairvoyant_average > 0.0,
+         "exact-hand best response can overuse hidden opponent cards");
+  Expect(std::abs(range_value) < 0.000001,
+         "range best response should choose one action for the opponent range");
+}
+
 void CheckPlayerBRegretsUsePlayerBUtility() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -1077,6 +1160,7 @@ int main() {
   CheckChanceSamplesVisitMultipleBoards();
   CheckEvaluationUsesChanceSamples();
   CheckBestResponseActionSelectsBestLegalAction();
+  CheckRangeBestResponseDoesNotKnowOpponentHand();
   CheckPlayerBRegretsUsePlayerBUtility();
   CheckCfrPlusClipsNegativeRegrets();
   CheckCfrPlusWeightsLaterStrategies();
