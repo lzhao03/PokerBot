@@ -21,6 +21,7 @@ namespace {
 constexpr int kActionKeyMultiplier = 1000000;
 constexpr char kInfoSetAbstractionVersion[] = "exact_cards_v1";
 constexpr int kParallelEvaluationSampleThreshold = 32;
+constexpr int kParallelBestResponseSampleThreshold = 32;
 
 int ActionKey(const Action& action) {
   // ponytail: amounts are whole chips today; use a structured key if fractional chips matter.
@@ -124,6 +125,14 @@ double StrategyActionProbability(const Strategy& strategy,
 
 int ChanceSamples(const PokerConfig& config) {
   return std::max(1, config.chance_samples());
+}
+
+int WorkerCountForSamples(int samples) {
+  int worker_count = static_cast<int>(std::thread::hardware_concurrency());
+  if (worker_count <= 0) {
+    worker_count = 1;
+  }
+  return std::min(worker_count, samples);
 }
 
 template <typename EvaluateChild>
@@ -491,11 +500,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
                                      strategy);
   }
 
-  int worker_count = static_cast<int>(std::thread::hardware_concurrency());
-  if (worker_count <= 0) {
-    worker_count = 1;
-  }
-  worker_count = std::min(worker_count, samples);
+  int worker_count = WorkerCountForSamples(samples);
   if (worker_count <= 1) {
     return evaluate_strategy_samples(samples, range_deals, range_deal_weights,
                                      strategy);
@@ -800,19 +805,81 @@ double CFRSolver::sampled_range_best_response_value(
     return 0.0;
   }
 
-  WeightedHands best_response_hands;
-  best_response_hands.reset(best_response_range.get_all_weighted_combos());
+  std::vector<std::pair<Hand, double>> best_response_hands =
+      best_response_range.get_all_weighted_combos();
   std::vector<std::pair<Hand, double>> opponent_hands =
       opponent_range.get_all_weighted_combos();
-  if (best_response_hands.hands.empty() || opponent_hands.empty()) {
+  if (best_response_hands.empty() || opponent_hands.empty()) {
     throw std::invalid_argument(
         "Could not sample non-overlapping hands from ranges");
   }
 
+  if (samples < kParallelBestResponseSampleThreshold) {
+    return sampled_range_best_response_samples(
+        samples, best_response_hands, opponent_hands, strategy,
+        best_response_player);
+  }
+
+  int worker_count = WorkerCountForSamples(samples);
+  if (worker_count <= 1) {
+    return sampled_range_best_response_samples(
+        samples, best_response_hands, opponent_hands, strategy,
+        best_response_player);
+  }
+
+  ThreadPoolExecutor executor(worker_count);
+  std::uniform_int_distribution<unsigned int> seed_distribution;
+  std::vector<unsigned int> worker_seeds;
+  worker_seeds.reserve(worker_count);
+  for (int i = 0; i < worker_count; ++i) {
+    worker_seeds.push_back(seed_distribution(rng_));
+  }
+
+  PokerConfig config = config_;
+  std::vector<std::future<double>> futures;
+  futures.reserve(worker_count);
+  int samples_remaining = samples;
+  for (int i = 0; i < worker_count; ++i) {
+    int shard_samples = samples_remaining / (worker_count - i);
+    samples_remaining -= shard_samples;
+    unsigned int seed = worker_seeds[i];
+    futures.push_back(executor.submit([config, &best_response_hands,
+                                       &opponent_hands, &strategy,
+                                       shard_samples, seed,
+                                       best_response_player]() {
+      CFRSolver worker(config);
+      worker.rng_.seed(seed);
+      return worker.sampled_range_best_response_samples(
+                 shard_samples, best_response_hands, opponent_hands, strategy,
+                 best_response_player) *
+             shard_samples;
+    }));
+  }
+
+  double total = 0.0;
+  for (std::future<double>& future : futures) {
+    total += future.get();
+  }
+  return total / samples;
+}
+
+double CFRSolver::sampled_range_best_response_samples(
+    int samples,
+    const std::vector<std::pair<Hand, double>>& best_response_hands,
+    const std::vector<std::pair<Hand, double>>& opponent_hands,
+    const Strategy& strategy,
+    int best_response_player) {
+  if (samples <= 0) {
+    return 0.0;
+  }
+
+  WeightedHands weighted_best_response_hands;
+  weighted_best_response_hands.reset(best_response_hands);
   GameTree::Node* root = get_or_build_root();
   double total = 0.0;
   for (int i = 0; i < samples; ++i) {
-    Hand best_response_hand = SampleWeightedHand(&best_response_hands, &rng_);
+    Hand best_response_hand =
+        SampleWeightedHand(&weighted_best_response_hands, &rng_);
     std::vector<std::pair<Hand, double>> compatible_opponents =
         CompatibleHands(opponent_hands, best_response_hand, root->state);
     if (compatible_opponents.empty()) {

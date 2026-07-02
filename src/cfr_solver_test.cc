@@ -527,6 +527,15 @@ void CheckRangeBestResponseWrappersReturnFiniteValues() {
          "player A range best-response wrapper should return a finite value");
   Expect(std::isfinite(player_b_value),
          "player B range best-response wrapper should return a finite value");
+
+  player_a_value = solver.calculate_player_a_best_response_value(
+      64, player_a_range, player_b_range);
+  player_b_value = solver.calculate_player_b_best_response_value(
+      64, player_a_range, player_b_range);
+  Expect(std::isfinite(player_a_value),
+         "parallel player A range best-response should return a finite value");
+  Expect(std::isfinite(player_b_value),
+         "parallel player B range best-response should return a finite value");
 }
 
 void CheckRunUsesConfiguredBlinds() {

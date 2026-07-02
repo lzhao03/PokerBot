@@ -134,6 +134,12 @@ private:
       const HandRange& opponent_range,
       const Strategy& strategy,
       int best_response_player);
+  double sampled_range_best_response_samples(
+      int samples,
+      const std::vector<std::pair<Hand, double>>& best_response_hands,
+      const std::vector<std::pair<Hand, double>>& opponent_hands,
+      const Strategy& strategy,
+      int best_response_player);
   Strategy::ActionProbabilities get_strategy(
       const std::string& info_set_key,
       const std::vector<Action>& legal_actions);
