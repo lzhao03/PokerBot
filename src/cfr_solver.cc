@@ -82,10 +82,9 @@ bool HasCompatibleHands(const WeightedHands& player_a_hands,
 
 bool SampleRangeHands(WeightedHands* player_a_hands,
                       WeightedHands* player_b_hands,
-                      std::mt19937* rng, Hand* player_a_hand,
-                      Hand* player_b_hand) {
-  if (player_a_hands->hands.empty() || player_b_hands->hands.empty() ||
-      !HasCompatibleHands(*player_a_hands, *player_b_hands)) {
+                      bool has_compatible_hands, std::mt19937* rng,
+                      Hand* player_a_hand, Hand* player_b_hand) {
+  if (!has_compatible_hands) {
     return false;
   }
 
@@ -161,9 +160,13 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
                                bool train_swapped) {
   WeightedHands player_a_hands;
   WeightedHands player_b_hands;
+  bool has_compatible_range_hands = true;
   if (player_a_range != nullptr && player_b_range != nullptr) {
     player_a_hands.reset(player_a_range->get_all_weighted_combos());
     player_b_hands.reset(player_b_range->get_all_weighted_combos());
+    has_compatible_range_hands =
+        !player_a_hands.hands.empty() && !player_b_hands.hands.empty() &&
+        HasCompatibleHands(player_a_hands, player_b_hands);
   }
 
   const bool log = config_.enable_logging();
@@ -194,7 +197,8 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
       std::shuffle(deck.begin(), deck.end(), rng_);
       player_a_hand = DealHand(&deck);
       player_b_hand = DealHand(&deck);
-    } else if (!SampleRangeHands(&player_a_hands, &player_b_hands, &rng_,
+    } else if (!SampleRangeHands(&player_a_hands, &player_b_hands,
+                                 has_compatible_range_hands, &rng_,
                                  &player_a_hand, &player_b_hand)) {
       throw std::invalid_argument(
           "Could not sample non-overlapping hands from ranges");
@@ -402,6 +406,9 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   player_a_hands.reset(player_a_range.get_all_weighted_combos());
   WeightedHands player_b_hands;
   player_b_hands.reset(player_b_range.get_all_weighted_combos());
+  bool has_compatible_range_hands =
+      !player_a_hands.hands.empty() && !player_b_hands.hands.empty() &&
+      HasCompatibleHands(player_a_hands, player_b_hands);
   Strategy strategy = get_equilibrium_strategy();
   GameTree::Node* root = get_or_build_root();
 
@@ -409,8 +416,9 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   for (int i = 0; i < samples; ++i) {
     Hand player_a_hand;
     Hand player_b_hand;
-    if (!SampleRangeHands(&player_a_hands, &player_b_hands, &rng_,
-                          &player_a_hand, &player_b_hand)) {
+    if (!SampleRangeHands(&player_a_hands, &player_b_hands,
+                          has_compatible_range_hands, &rng_, &player_a_hand,
+                          &player_b_hand)) {
       throw std::invalid_argument(
           "Could not sample non-overlapping hands from ranges");
     }
@@ -588,13 +596,17 @@ double CFRSolver::calculate_exploitability(int samples,
   player_a_hands.reset(player_a_range.get_all_weighted_combos());
   WeightedHands player_b_hands;
   player_b_hands.reset(player_b_range.get_all_weighted_combos());
+  bool has_compatible_range_hands =
+      !player_a_hands.hands.empty() && !player_b_hands.hands.empty() &&
+      HasCompatibleHands(player_a_hands, player_b_hands);
 
   double total = 0.0;
   for (int i = 0; i < samples; ++i) {
     Hand player_a_hand;
     Hand player_b_hand;
-    if (!SampleRangeHands(&player_a_hands, &player_b_hands, &rng_,
-                          &player_a_hand, &player_b_hand)) {
+    if (!SampleRangeHands(&player_a_hands, &player_b_hands,
+                          has_compatible_range_hands, &rng_, &player_a_hand,
+                          &player_b_hand)) {
       throw std::invalid_argument(
           "Could not sample non-overlapping hands from ranges");
     }
