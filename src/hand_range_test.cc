@@ -51,6 +51,29 @@ double WeightForIndex(
   return weight;
 }
 
+double TotalComboWeight(
+    const std::vector<std::pair<poker::Hand, double>>& combos) {
+  double weight = 0.0;
+  for (const auto& combo : combos) {
+    weight += combo.second;
+  }
+  return weight;
+}
+
+void CheckNoDuplicateCombos(
+    const std::vector<std::pair<poker::Hand, double>>& combos) {
+  for (size_t i = 0; i < combos.size(); ++i) {
+    Expect(combos[i].first.cards_size() == 2,
+           "weighted combos should be exact two-card hands");
+    Expect(!SameCard(combos[i].first.cards(0), combos[i].first.cards(1)),
+           "weighted combos should not duplicate a card");
+    for (size_t j = i + 1; j < combos.size(); ++j) {
+      Expect(!SameHand(combos[i].first, combos[j].first),
+             "weighted combos should not contain duplicate exact hands");
+    }
+  }
+}
+
 void CheckUpdatingHandWeightReplacesTotal() {
   poker::HandRange range;
   int aces = poker::HandRange::string_to_index("AA");
@@ -100,10 +123,42 @@ void CheckAddHandPreservesExactCombo() {
          "exact hand replacement should update combo weight");
 }
 
+void CheckWeightedComboInvariants() {
+  poker::HandRange range;
+  poker::Hand aces =
+      MakeHand(14, poker::Suit::SPADES, 14, poker::Suit::HEARTS);
+  int aces_index = poker::HandRange::string_to_index("AA");
+  int ace_king_suited_index = poker::HandRange::string_to_index("AKs");
+
+  range.add_hand_by_index(aces_index, 6.0);
+  range.add_hand_by_index(ace_king_suited_index, 4.0);
+  range.add_hand(aces, 2.0);
+
+  std::vector<std::pair<poker::Hand, double>> combos =
+      range.get_all_weighted_combos();
+  CheckNoDuplicateCombos(combos);
+  Expect(combos.size() == 10,
+         "overlapping exact and class weights should merge exact combos");
+  Expect(std::abs(TotalComboWeight(combos) - range.get_total_weight()) <
+             0.000001,
+         "combo weights should sum to range total weight");
+  Expect(std::abs(range.get_probability(aces) - 0.25) < 0.000001,
+         "exact probability should include exact plus class combo weight");
+
+  range.normalize();
+  combos = range.get_all_weighted_combos();
+  CheckNoDuplicateCombos(combos);
+  Expect(std::abs(range.get_total_weight() - 1.0) < 0.000001,
+         "normalized range total should be one");
+  Expect(std::abs(TotalComboWeight(combos) - 1.0) < 0.000001,
+         "normalized combo weights should sum to one");
+}
+
 }  // namespace
 
 int main() {
   CheckUpdatingHandWeightReplacesTotal();
   CheckAddHandPreservesExactCombo();
+  CheckWeightedComboInvariants();
   return 0;
 }

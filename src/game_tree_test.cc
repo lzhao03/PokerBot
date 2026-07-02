@@ -178,6 +178,29 @@ void CheckLegalActions(GameTree* tree) {
   Expect(actions[3].amount() == 99, "all-in amount is the remaining stack");
 }
 
+void CheckLegalActionsApplyAndConserveChips(GameTree* tree) {
+  std::vector<BoardState> states = {PreflopState(), FlopState()};
+  for (const BoardState& state : states) {
+    int total_chips = state.stack_a() + state.stack_b() + state.pot();
+    std::vector<Action> actions = tree->get_legal_actions(state);
+    Expect(!actions.empty(), "test states should have legal actions");
+    for (const Action& action : actions) {
+      BoardState next = tree->apply_action(state, action);
+      Expect(next.history().actions_size() ==
+                 state.history().actions_size() + 1,
+             "legal action should append to history");
+      const Action& applied =
+          next.history().actions(next.history().actions_size() - 1);
+      Expect(applied.action() == action.action(),
+             "applied legal action should keep action type");
+      Expect(applied.player() == state.player_to_act(),
+             "applied legal action should record acting player");
+      Expect(next.stack_a() + next.stack_b() + next.pot() == total_chips,
+             "legal action should conserve chips");
+    }
+  }
+}
+
 void CheckAllInAction(GameTree* tree) {
   BoardState all_in = tree->apply_action(PreflopState(), MakeAction(ActionType::ALL_IN));
 
@@ -344,6 +367,7 @@ int main() {
   poker::CheckCheckBetCall(&tree);
   poker::CheckRaiseAndFold(&tree);
   poker::CheckLegalActions(&tree);
+  poker::CheckLegalActionsApplyAndConserveChips(&tree);
   poker::CheckAllInAction(&tree);
   poker::CheckShortAllInCallClosesRound(&tree);
   poker::CheckAllInEquivalentActionsAreDeduped();

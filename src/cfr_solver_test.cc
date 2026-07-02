@@ -403,6 +403,67 @@ void CheckEvaluateRangeStrategy() {
          "range fold strategy should be exploitable");
 }
 
+void CheckSingletonRangeMatchesExactEvaluationAndBestResponse() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 13, Suit::SPADES);
+  Hand player_b_hand = MakeHand(12, Suit::HEARTS, 11, Suit::HEARTS);
+  HandRange player_a_range;
+  player_a_range.add_hand(player_a_hand, 1.0);
+  HandRange player_b_range;
+  player_b_range.add_hand(player_b_hand, 1.0);
+
+  CFRSolver solver(config);
+  InfoSetAbstraction abstraction;
+  std::string root_info_set =
+      abstraction.state_to_info_set(InitialRootState(config), 0, player_a_hand);
+  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
+  std::string path =
+      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/singleton_strategy.pb";
+  WriteStrategySnapshot(path, root_info_set,
+                        {{MakeAction(ActionType::FOLD), 1.0}});
+  solver.load_strategy(path);
+
+  double exact_value = solver.evaluate_strategy(player_a_hand, player_b_hand);
+  double range_value = solver.evaluate_strategy(5, player_a_range, player_b_range);
+  Expect(std::abs(exact_value - range_value) < 0.000001,
+         "singleton range evaluation should match exact-hand evaluation");
+
+  GameTree::Node node;
+  node.state.set_player_to_act(0);
+  node.state.set_folded_player(-1);
+  node.player_to_act = 0;
+  node.legal_actions.push_back(MakeAction(ActionType::FOLD));
+  node.legal_actions.push_back(MakeAction(ActionType::CALL, 1));
+
+  auto folded_state = [](int folded_player) {
+    BoardState state;
+    state.set_pot(10);
+    state.set_folded_player(folded_player);
+    state.add_player_contribution(5);
+    state.add_player_contribution(5);
+    return state;
+  };
+
+  GameTree::Node* player_a_loses_child = new GameTree::Node();
+  player_a_loses_child->state = folded_state(0);
+  player_a_loses_child->is_terminal = true;
+  node.children[TestActionKey(ActionType::FOLD)] = player_a_loses_child;
+
+  GameTree::Node* player_a_wins_child = new GameTree::Node();
+  player_a_wins_child->state = folded_state(1);
+  player_a_wins_child->is_terminal = true;
+  node.children[TestActionKey(ActionType::CALL, 1)] = player_a_wins_child;
+
+  double exact_best_response = CFRSolverRegretTestPeer::BestResponseNode(
+      solver, &node, player_a_hand, player_b_hand, 0);
+  double range_best_response = CFRSolverRegretTestPeer::BestResponseRangeNode(
+      solver, &node, player_a_hand, {{player_b_hand, 1.0}}, 0);
+  Expect(std::abs(exact_best_response - range_best_response) < 0.000001,
+         "singleton range best response should match exact-hand best response");
+}
+
 void CheckExploitabilityDetectsFoldStrategy() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -1274,6 +1335,7 @@ int main() {
   CheckLoadStrategyPopulatesEquilibriumStrategy();
   CheckEvaluateLoadedStrategy();
   CheckEvaluateRangeStrategy();
+  CheckSingletonRangeMatchesExactEvaluationAndBestResponse();
   CheckExploitabilityDetectsFoldStrategy();
   CheckExploitabilityZeroSamples();
   CheckRunUsesConfiguredBlinds();

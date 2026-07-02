@@ -20,6 +20,14 @@ bool ContainsCard(const std::vector<Card>& cards, const Card& card) {
   });
 }
 
+void ExpectUniqueCards(const std::vector<Card>& cards, const char* message) {
+  for (size_t i = 0; i < cards.size(); ++i) {
+    for (size_t j = i + 1; j < cards.size(); ++j) {
+      Expect(!SameCard(cards[i], cards[j]), message);
+    }
+  }
+}
+
 void AddCard(BoardState* state, const Card& card) {
   *state->add_cards() = card;
 }
@@ -64,6 +72,31 @@ void CheckSampledStreetCardsAvoidKnownCards() {
   Expect(!ContainsCard(known, sampled[0]), "sampled cards should avoid known cards");
 }
 
+void CheckSampledFlopCardsAreUniqueAndAvoidKnownCards() {
+  Hand player_a;
+  *player_a.add_cards() = MakeCard(14, Suit::SPADES);
+  *player_a.add_cards() = MakeCard(13, Suit::SPADES);
+
+  Hand player_b;
+  *player_b.add_cards() = MakeCard(12, Suit::HEARTS);
+  *player_b.add_cards() = MakeCard(11, Suit::HEARTS);
+
+  BoardState state;
+  state.set_street(Street::PREFLOP);
+
+  std::mt19937 rng(12345);
+  std::vector<Card> sampled = SampleStreetCards(state, player_a, player_b, &rng);
+  Expect(sampled.size() == 3, "preflop samples three flop cards");
+  ExpectUniqueCards(sampled, "sampled flop cards should be unique");
+
+  std::vector<Card> known;
+  for (const Card& card : player_a.cards()) known.push_back(card);
+  for (const Card& card : player_b.cards()) known.push_back(card);
+  for (const Card& card : sampled) {
+    Expect(!ContainsCard(known, card), "sampled flop should avoid known cards");
+  }
+}
+
 void CheckSamplingThrowsWhenDeckIsTooSmall() {
   std::vector<Card> deck = BuildDeck();
   Hand player_a;
@@ -96,6 +129,7 @@ void CheckSamplingThrowsWhenDeckIsTooSmall() {
 int main() {
   poker::CheckDealtHandsAreDisjoint();
   poker::CheckSampledStreetCardsAvoidKnownCards();
+  poker::CheckSampledFlopCardsAreUniqueAndAvoidKnownCards();
   poker::CheckSamplingThrowsWhenDeckIsTooSmall();
   return 0;
 }
