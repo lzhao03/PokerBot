@@ -128,6 +128,21 @@ cc_test(
 )
 
 cc_library(
+    name = "thread_pool",
+    srcs = ["thread_pool.cc"],
+    hdrs = ["thread_pool.h"],
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "thread_pool_test",
+    srcs = ["thread_pool_test.cc"],
+    deps = [
+        ":thread_pool",
+    ],
+)
+
+cc_library(
     name = "cfr_solver",
     srcs = ["cfr_solver.cc"],
     hdrs = ["cfr_solver.h"],
