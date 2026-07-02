@@ -3,6 +3,7 @@
 #include "src/poker.pb.h"
 
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
@@ -19,6 +20,12 @@ struct Options {
   int eval_samples = 100;
   int exploitability_samples = 10;
   bool skip_exploitability = false;
+};
+
+struct BenchmarkResult {
+  double result = 0.0;
+  int64_t hands = 0;
+  int64_t cfr_node_updates = 0;
 };
 
 bool ConsumePrefix(const std::string& arg,
@@ -70,13 +77,24 @@ void PrintUsage(const char* program) {
       << "  --skip-exploitability\n";
 }
 
+double RatePerSecond(int64_t count, double seconds) {
+  if (count <= 0 || seconds <= 0.0) {
+    return 0.0;
+  }
+  return count / seconds;
+}
+
 void RunBenchmark(const std::string& name,
-                  const std::function<double()>& benchmark) {
+                  const std::function<BenchmarkResult()>& benchmark) {
   auto start = std::chrono::steady_clock::now();
-  double result = benchmark();
+  BenchmarkResult result = benchmark();
   auto end = std::chrono::steady_clock::now();
   std::chrono::duration<double> elapsed = end - start;
-  std::cout << name << "\t" << elapsed.count() << "\t" << result << "\n";
+  std::cout << name << "\t" << elapsed.count() << "\t" << result.result << "\t"
+            << result.hands << "\t"
+            << RatePerSecond(result.hands, elapsed.count()) << "\t"
+            << result.cfr_node_updates << "\t"
+            << RatePerSecond(result.cfr_node_updates, elapsed.count()) << "\n";
 }
 
 Options ParseOptions(int argc, char** argv) {
@@ -116,41 +134,56 @@ int main(int argc, char** argv) {
     poker::HandRange player_a_range = BenchmarkRange();
     poker::HandRange player_b_range = BenchmarkRange();
 
-    std::cout << "case\tseconds\tresult\n";
+    std::cout << "case\tseconds\tresult\thands\thands_per_second"
+              << "\tcfr_node_updates\tcfr_node_updates_per_second\n";
 
     RunBenchmark("range_expand", [&] {
-      double combos = 0.0;
+      int64_t combos = 0;
       for (int i = 0; i < options.eval_samples; ++i) {
-        combos += player_a_range.get_all_weighted_combos().size();
+        combos += static_cast<int64_t>(
+            player_a_range.get_all_weighted_combos().size());
       }
-      return combos;
+      return BenchmarkResult{static_cast<double>(combos), combos, 0};
     });
 
     RunBenchmark("train_deck", [&] {
       poker::CFRSolver solver(config);
+      int64_t start_updates = solver.get_cfr_update_count();
       solver.run(options.iterations);
-      return solver.get_equilibrium_strategy().get_info_sets().size();
+      int64_t updates = solver.get_cfr_update_count() - start_updates;
+      return BenchmarkResult{
+          static_cast<double>(
+              solver.get_equilibrium_strategy().get_info_sets().size()),
+          static_cast<int64_t>(options.iterations) * 2, updates};
     });
 
     RunBenchmark("train_range", [&] {
       poker::CFRSolver solver(config);
+      int64_t start_updates = solver.get_cfr_update_count();
       solver.run(options.iterations, player_a_range, player_b_range);
-      return solver.get_equilibrium_strategy().get_info_sets().size();
+      int64_t updates = solver.get_cfr_update_count() - start_updates;
+      return BenchmarkResult{
+          static_cast<double>(
+              solver.get_equilibrium_strategy().get_info_sets().size()),
+          options.iterations, updates};
     });
 
+    poker::CFRSolver evaluate_solver(config);
+    evaluate_solver.run(options.iterations, player_a_range, player_b_range);
     RunBenchmark("evaluate_range", [&] {
-      poker::CFRSolver solver(config);
-      solver.run(options.iterations, player_a_range, player_b_range);
-      return solver.evaluate_strategy(options.eval_samples, player_a_range,
-                                      player_b_range);
+      double value = evaluate_solver.evaluate_strategy(
+          options.eval_samples, player_a_range, player_b_range);
+      return BenchmarkResult{value, options.eval_samples, 0};
     });
 
     if (!options.skip_exploitability) {
+      poker::CFRSolver exploitability_solver(config);
+      exploitability_solver.run(options.iterations, player_a_range,
+                                player_b_range);
       RunBenchmark("exploitability_range", [&] {
-        poker::CFRSolver solver(config);
-        solver.run(options.iterations, player_a_range, player_b_range);
-        return solver.calculate_exploitability(options.exploitability_samples,
-                                               player_a_range, player_b_range);
+        double value = exploitability_solver.calculate_exploitability(
+            options.exploitability_samples, player_a_range, player_b_range);
+        return BenchmarkResult{value, options.exploitability_samples * 3, 0};
       });
     }
   } catch (const std::exception& error) {

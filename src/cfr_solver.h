@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <random>
 #include <unordered_map>
 #include <string>
@@ -63,6 +64,7 @@ public:
   // Get the expected value of the game for a player
   double get_expected_value(int player_id) const;
   int get_iterations_run() const { return iterations_run_; }
+  int64_t get_cfr_update_count() const { return cfr_update_count_; }
 
 private:
   friend class CFRSolverRegretTestPeer;
@@ -80,6 +82,7 @@ private:
   std::mt19937 rng_;
   double cumulative_root_utility_;
   int iterations_run_;
+  int64_t cfr_update_count_;
   
   // CFR+ clipped regret tracking for each information set and action.
   std::unordered_map<std::string, std::unordered_map<int, double>> cumulative_regrets_;

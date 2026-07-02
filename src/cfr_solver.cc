@@ -151,7 +151,8 @@ CFRSolver::CFRSolver(const PokerConfig& config)
     info_set_abstraction_(new InfoSetAbstraction()),
     rng_(12345),
     cumulative_root_utility_(0.0),
-    iterations_run_(0) {
+    iterations_run_(0),
+    cfr_update_count_(0) {
 }
 
 CFRSolver::~CFRSolver() {
@@ -375,6 +376,8 @@ double CFRSolver::cfr(GameTree::Node* node,
   
   // Compute counterfactual regrets if this is not a chance player
   if (player == 0 || player == 1) {
+    ++cfr_update_count_;
+
     // Compute the counterfactual reach probability of the opponent
     double opponent_reach_prob = reach_probabilities[1 - player];
     

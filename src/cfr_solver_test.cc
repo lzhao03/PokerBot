@@ -535,8 +535,12 @@ void CheckRunUpdatesExpectedValue() {
 
   CFRSolver solver(config);
   Expect(solver.get_iterations_run() == 0, "new solver should have no completed iterations");
+  Expect(solver.get_cfr_update_count() == 0,
+         "new solver should have no CFR updates");
   solver.run(1);
   Expect(solver.get_iterations_run() == 1, "run should record completed iterations");
+  Expect(solver.get_cfr_update_count() == 2,
+         "deck run should update both private-hand assignments");
 
   double player_a_ev = solver.get_expected_value(0);
   double player_b_ev = solver.get_expected_value(1);
@@ -547,6 +551,8 @@ void CheckRunUpdatesExpectedValue() {
 
   solver.run(1);
   Expect(solver.get_iterations_run() == 2, "repeated run should accumulate iterations");
+  Expect(solver.get_cfr_update_count() == 4,
+         "repeated run should accumulate CFR update count");
   player_a_ev = solver.get_expected_value(0);
   player_b_ev = solver.get_expected_value(1);
   Expect(std::abs(player_a_ev + player_b_ev) < 0.000001,
