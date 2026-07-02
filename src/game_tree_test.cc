@@ -260,6 +260,25 @@ void CheckDuplicateConcreteBetSizesAreDeduped() {
   Expect(raise_actions[2].amount() == 2, "duplicate raise amount is kept once");
 }
 
+void CheckStreetBetSizesOverrideGlobal() {
+  PokerConfig config;
+  config.add_bet_sizes(0.5);
+  config.add_flop_bet_sizes(1.0);
+  GameTree tree(config);
+
+  std::vector<Action> preflop_actions = tree.get_legal_actions(PreflopState());
+  Expect(preflop_actions[2].action() == ActionType::RAISE,
+         "global size should still apply preflop");
+  Expect(preflop_actions[2].amount() == 2,
+         "preflop raise should use the global size");
+
+  std::vector<Action> flop_actions = tree.get_legal_actions(FlopState());
+  Expect(flop_actions[1].action() == ActionType::BET,
+         "flop override should add a bet");
+  Expect(flop_actions[1].amount() == 4,
+         "flop bet should use the street-specific size");
+}
+
 void CheckMaxRaisesCapsRaiseActions() {
   PokerConfig config;
   config.add_bet_sizes(0.5);
@@ -330,6 +349,7 @@ int main() {
   poker::CheckAllInEquivalentActionsAreDeduped();
   poker::CheckFullStackBetRaiseUseAllIn(&tree);
   poker::CheckDuplicateConcreteBetSizesAreDeduped();
+  poker::CheckStreetBetSizesOverrideGlobal();
   poker::CheckMaxRaisesCapsRaiseActions();
   poker::CheckShowdownUtility(&tree);
   poker::CheckChanceAdvancesStreet(&tree);

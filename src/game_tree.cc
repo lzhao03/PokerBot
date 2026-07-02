@@ -63,6 +63,45 @@ int ConcreteBetAmount(const BoardState& state, double size) {
   return std::max(1, static_cast<int>(std::max(1, state.pot()) * size));
 }
 
+int StreetBetSizesSize(const PokerConfig& config, Street street) {
+  switch (street) {
+    case Street::PREFLOP:
+      return config.preflop_bet_sizes_size();
+    case Street::FLOP:
+      return config.flop_bet_sizes_size();
+    case Street::TURN:
+      return config.turn_bet_sizes_size();
+    case Street::RIVER:
+      return config.river_bet_sizes_size();
+    default:
+      return 0;
+  }
+}
+
+double BetSizeForStreet(const PokerConfig& config, Street street, int index) {
+  if (StreetBetSizesSize(config, street) == 0) {
+    return config.bet_sizes(index);
+  }
+
+  switch (street) {
+    case Street::PREFLOP:
+      return config.preflop_bet_sizes(index);
+    case Street::FLOP:
+      return config.flop_bet_sizes(index);
+    case Street::TURN:
+      return config.turn_bet_sizes(index);
+    case Street::RIVER:
+      return config.river_bet_sizes(index);
+    default:
+      return config.bet_sizes(index);
+  }
+}
+
+int BetSizesSize(const PokerConfig& config, Street street) {
+  int street_sizes = StreetBetSizesSize(config, street);
+  return street_sizes > 0 ? street_sizes : config.bet_sizes_size();
+}
+
 int RequestedChips(const Action& action) {
   return static_cast<int>(action.amount());
 }
@@ -210,9 +249,10 @@ std::vector<Action> GameTree::get_legal_actions(const BoardState& state) const {
     actions.push_back(call_action);
 
     if (CanRaise(state, config_)) {
-      for (int i = 0; i < config_.bet_sizes_size(); ++i) {
+      for (int i = 0; i < BetSizesSize(config_, state.street()); ++i) {
         int raise_amount =
-            to_call + ConcreteBetAmount(state, config_.bet_sizes(i));
+            to_call + ConcreteBetAmount(
+                          state, BetSizeForStreet(config_, state.street(), i));
         if (raise_amount < stack) {
           AddActionIfMissing(&actions, ActionType::RAISE, raise_amount);
         }
@@ -227,8 +267,9 @@ std::vector<Action> GameTree::get_legal_actions(const BoardState& state) const {
     check_action.set_amount(0);
     actions.push_back(check_action);
 
-    for (int i = 0; i < config_.bet_sizes_size(); ++i) {
-      int bet_amount = ConcreteBetAmount(state, config_.bet_sizes(i));
+    for (int i = 0; i < BetSizesSize(config_, state.street()); ++i) {
+      int bet_amount =
+          ConcreteBetAmount(state, BetSizeForStreet(config_, state.street(), i));
       if (bet_amount < stack) {
         AddActionIfMissing(&actions, ActionType::BET, bet_amount);
       }

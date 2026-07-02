@@ -12,6 +12,10 @@ message PokerConfig {
   int32 big_blind = 6;
   int32 chance_samples = 7;
   int32 max_raises_per_street = 8;
+  repeated double preflop_bet_sizes = 9;
+  repeated double flop_bet_sizes = 10;
+  repeated double turn_bet_sizes = 11;
+  repeated double river_bet_sizes = 12;
 }
 
 enum Suit {
