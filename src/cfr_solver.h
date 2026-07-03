@@ -143,6 +143,13 @@ private:
     double weight;
   };
 
+  struct ActionChoice {
+    const Action* action = nullptr;
+    int action_id = 0;
+    double probability = 0.0;
+    double value = 0.0;
+  };
+
   CFRSolver(const PokerConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache);
   CFRSolver(const PokerConfig& config,
@@ -250,7 +257,13 @@ private:
   Strategy::ActionProbabilities get_strategy(
       const std::string& info_set_key,
       const std::vector<Action>& legal_actions);
+  std::vector<ActionChoice> get_action_choices(
+      const std::string& info_set_key,
+      const std::vector<Action>& legal_actions);
   void update_strategy(const std::string& info_set_key, const Strategy::ActionProbabilities& strategy, double reach_prob);
+  void update_strategy(const std::string& info_set_key,
+                       const std::vector<ActionChoice>& choices,
+                       double reach_prob);
   double chance_sampling_cfr(
       GameTree::Node* node,
       const Hand& player_a_hand,

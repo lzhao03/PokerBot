@@ -602,29 +602,25 @@ double CFRSolver::cfr_with_ranges(
   // Get the information set key for this player
   std::string info_set_key = info_set_abstraction_->state_to_info_set(node->state, player, player_hand);
   
-  // Get the current strategy for this information set
-  Strategy::ActionProbabilities strategy =
-      get_strategy(info_set_key, node->legal_actions);
-  
-  // Initialize expected values for each action
-  std::unordered_map<int, double> action_values;
-  action_values.reserve(node->legal_actions.size());
+  std::vector<ActionChoice> action_choices =
+      get_action_choices(info_set_key, node->legal_actions);
   
   // Initialize the expected value for the player
   double node_value = 0.0;
   
   // For each action, recursively call CFR and compute the expected value
-  for (const Action& action : node->legal_actions) {
-    int action_id = ActionKey(action);
+  for (ActionChoice& choice : action_choices) {
+    const Action& action = *choice.action;
+    int action_id = choice.action_id;
     
     GameTree::Node* child_node = CachedActionChild(
         game_tree_, node, action, action_id,
         &traversal_stats_.child_nodes_created);
     
     // Update reach probabilities for the recursive call
-    const double action_probability = strategy.at(action_id);
     const double previous_reach_probability = reach_probabilities[player];
-    reach_probabilities[player] = previous_reach_probability * action_probability;
+    reach_probabilities[player] =
+        previous_reach_probability * choice.probability;
 
     const std::vector<std::pair<Hand, double>>* child_player_a_range =
         player_a_range;
@@ -644,17 +640,14 @@ double CFRSolver::cfr_with_ranges(
     }
     
     // Recursive call to get the expected value of this action
-    double action_value = cfr_with_ranges(
+    choice.value = cfr_with_ranges(
         child_node, player_a_hand, player_b_hand, reach_probabilities,
         iteration, depth + 1, max_depth, child_player_a_range,
         child_player_b_range);
     reach_probabilities[player] = previous_reach_probability;
     
-    // Store the action value
-    action_values[action_id] = action_value;
-    
     // Update the expected value of the node
-    node_value += action_probability * action_value;
+    node_value += choice.probability * choice.value;
   }
   
   // Compute counterfactual regrets if this is not a chance player
@@ -692,23 +685,20 @@ double CFRSolver::cfr_with_ranges(
     auto& regrets = cumulative_regrets_[info_set_key];
     
     // For each action, compute and accumulate the counterfactual regret
-    for (const Action& action : node->legal_actions) {
-      int action_id = ActionKey(action);
-      
+    for (const ActionChoice& choice : action_choices) {
       // get_utility returns player A's utility; player B's regret uses the
       // opposite payoff in this zero-sum game.
       double utility_sign = player == 0 ? 1.0 : -1.0;
       double regret =
-          opponent_reach_prob * utility_sign *
-          (action_values.at(action_id) - node_value);
+          opponent_reach_prob * utility_sign * (choice.value - node_value);
       
       // CFR+ clips cumulative regrets at zero.
-      double& cumulative_regret = regrets[action_id];
+      double& cumulative_regret = regrets[choice.action_id];
       cumulative_regret = std::max(0.0, cumulative_regret + regret);
     }
     
     // CFR+ commonly weights later average-strategy samples more heavily.
-    update_strategy(info_set_key, strategy,
+    update_strategy(info_set_key, action_choices,
                     reach_probabilities[player] * (iteration + 1));
   }
   
@@ -1510,12 +1500,67 @@ Strategy::ActionProbabilities CFRSolver::get_strategy(
   return strategy;
 }
 
+std::vector<CFRSolver::ActionChoice> CFRSolver::get_action_choices(
+    const std::string& info_set_key,
+    const std::vector<Action>& legal_actions) {
+  std::vector<ActionChoice> choices;
+  choices.reserve(legal_actions.size());
+  auto& regrets = cumulative_regrets_[info_set_key];
+  if (legal_actions.empty()) {
+    return choices;
+  }
+
+  regrets.reserve(legal_actions.size());
+  for (const Action& action : legal_actions) {
+    int action_id = ActionKey(action);
+    auto existing_choice =
+        std::find_if(choices.begin(), choices.end(),
+                     [action_id](const ActionChoice& choice) {
+                       return choice.action_id == action_id;
+                     });
+    if (existing_choice != choices.end()) {
+      continue;
+    }
+    regrets.try_emplace(action_id, 0.0);
+    choices.push_back({&action, action_id, 0.0, 0.0});
+  }
+
+  double sum_positive_regrets = 0.0;
+  for (const ActionChoice& choice : choices) {
+    sum_positive_regrets += std::max(0.0, regrets[choice.action_id]);
+  }
+
+  if (sum_positive_regrets > 0.0) {
+    for (ActionChoice& choice : choices) {
+      choice.probability =
+          std::max(0.0, regrets[choice.action_id]) / sum_positive_regrets;
+    }
+  } else {
+    double uniform_prob = 1.0 / choices.size();
+    for (ActionChoice& choice : choices) {
+      choice.probability = uniform_prob;
+    }
+  }
+
+  return choices;
+}
+
 void CFRSolver::update_strategy(const std::string& info_set_key, const Strategy::ActionProbabilities& strategy, double reach_prob) {
   // Accumulate the strategy weighted by the reach probability
   auto& cumulative_strategy = cumulative_strategy_[info_set_key];
   cumulative_strategy.reserve(strategy.size());
   for (const auto& action_prob : strategy) {
     cumulative_strategy[action_prob.first] += reach_prob * action_prob.second;
+  }
+}
+
+void CFRSolver::update_strategy(const std::string& info_set_key,
+                                const std::vector<ActionChoice>& choices,
+                                double reach_prob) {
+  auto& cumulative_strategy = cumulative_strategy_[info_set_key];
+  cumulative_strategy.reserve(choices.size());
+  for (const ActionChoice& choice : choices) {
+    cumulative_strategy[choice.action_id] += reach_prob * choice.probability;
   }
 }
 
