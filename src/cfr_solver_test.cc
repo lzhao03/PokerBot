@@ -106,6 +106,40 @@ class CFRSolverRegretTestPeer {
     }
     return weights;
   }
+
+  static WeightedHandRangeView ConditionRangeForAction(
+      CFRSolver& solver,
+      const WeightedHandRangeView& range,
+      const BoardState& state,
+      int player,
+      ActionType action_type,
+      int amount) {
+    std::vector<Action> legal_actions =
+        solver.game_tree_->get_legal_actions(state);
+    std::vector<CFRSolver::ActionChoice> choices;
+    choices.reserve(legal_actions.size());
+    size_t selected_index = legal_actions.size();
+    for (size_t i = 0; i < legal_actions.size(); ++i) {
+      const Action& action = legal_actions[i];
+      const int action_id =
+          static_cast<int>(action.action()) * 1000000 +
+          static_cast<int>(std::lround(action.amount()));
+      choices.push_back({std::cref(action), action_id, i, 0.0, 0.0});
+      if (action.action() == action_type &&
+          static_cast<int>(std::lround(action.amount())) == amount) {
+        selected_index = i;
+      }
+    }
+    if (selected_index == legal_actions.size()) {
+      throw std::runtime_error("Selected action is not legal");
+    }
+
+    WeightedHandRangeView conditioned_range;
+    solver.condition_range_for_action(
+        range, state, player, choices, choices[selected_index],
+        conditioned_range);
+    return conditioned_range;
+  }
 };
 
 }  // namespace poker
@@ -1411,6 +1445,32 @@ void CheckRangeRunActionConditionsRangesByHandStrategy() {
          "all-in branch should preserve only all-in hand weights");
 }
 
+void CheckActionConditioningSkipsBoardBlockedRangeHands() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+
+  BoardState state = FlopRangeCutoffState();
+  Hand blocked_by_board = MakeHand(2, Suit::HEARTS, 14, Suit::SPADES);
+  Hand compatible = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
+
+  WeightedHandRange hands;
+  hands.add(blocked_by_board, 1.0);
+  hands.add(compatible, 1.0);
+  WeightedHandRangeView range(hands);
+
+  CFRSolver solver(config, state);
+  WeightedHandRangeView conditioned =
+      CFRSolverRegretTestPeer::ConditionRangeForAction(
+          solver, range, state, 1, ActionType::CHECK, 0);
+
+  Expect(conditioned.size() == 1,
+         "action conditioning should drop hands blocked by public cards");
+  Expect(TestHandsOverlap(conditioned.hand(0), compatible),
+         "action conditioning should keep the compatible hand");
+  Expect(std::abs(conditioned.weight(0) - 0.5) < 0.000001,
+         "compatible hand should retain the check action probability");
+}
+
 void CheckZeroMaxDepthDoesNotCutOff() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -1818,6 +1878,7 @@ int main() {
   CheckDepthLimitUsesContinuationValueProvider();
   CheckRangeRunPassesContinuationRanges();
   CheckRangeRunActionConditionsRangesByHandStrategy();
+  CheckActionConditioningSkipsBoardBlockedRangeHands();
   CheckExactHandNestedCfrContinuationSolvesRiverCallSubgame();
   CheckExactHandNestedCfrContinuationCachesSubgames();
   CheckExactHandNestedCfrContinuationSeparatesPrivateHands();

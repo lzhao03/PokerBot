@@ -90,12 +90,12 @@ WeightedHandRangeView CompatibleHands(
   return compatible_hands;
 }
 
-WeightedHandRangeView PublicCompatibleRange(
-    const WeightedHandRangeView& hands,
-    const BoardState& state) {
-  WeightedHandRangeView compatible_hands;
+void PublicCompatibleRangeInto(const WeightedHandRangeView& hands,
+                               const BoardState& state,
+                               WeightedHandRangeView& compatible_hands) {
   if (!hands.has_source()) {
-    return compatible_hands;
+    compatible_hands.clear();
+    return;
   }
 
   compatible_hands.reset_to_filtered(hands.source_range());
@@ -105,6 +105,13 @@ WeightedHandRangeView PublicCompatibleRange(
       compatible_hands.add(hands.source_index(i), hands.weight(i));
     }
   }
+}
+
+WeightedHandRangeView PublicCompatibleRange(
+    const WeightedHandRangeView& hands,
+    const BoardState& state) {
+  WeightedHandRangeView compatible_hands;
+  PublicCompatibleRangeInto(hands, state, compatible_hands);
   return compatible_hands;
 }
 
@@ -937,9 +944,24 @@ double CFRSolver::chance_sampling_cfr(GameTree::Node& node,
       *game_tree_, node, player_a_hand, player_b_hand, samples,
       rng_, traversal_stats_.child_nodes_created,
       [&](GameTree::Node& child_node) {
+        OptionalWeightedHandRange child_player_a_range = player_a_range;
+        OptionalWeightedHandRange child_player_b_range = player_b_range;
+        WeightedHandRangeView public_player_a_range;
+        WeightedHandRangeView public_player_b_range;
+        if (player_a_range.has_value()) {
+          PublicCompatibleRangeInto(
+              player_a_range->get(), child_node.state, public_player_a_range);
+          child_player_a_range = std::cref(public_player_a_range);
+        }
+        if (player_b_range.has_value()) {
+          PublicCompatibleRangeInto(
+              player_b_range->get(), child_node.state, public_player_b_range);
+          child_player_b_range = std::cref(public_player_b_range);
+        }
         return cfr_with_ranges(child_node, player_a_hand, player_b_hand,
                                reach_probabilities, iteration, depth,
-                               max_depth, player_a_range, player_b_range);
+                               max_depth, child_player_a_range,
+                               child_player_b_range);
       });
 }
 
@@ -1011,7 +1033,7 @@ void CFRSolver::condition_range_for_action(
   conditioned_range.reset_to_filtered(range.source_range());
   conditioned_range.reserve(range.size());
   for (size_t i = 0; i < range.size(); ++i) {
-    if (range.weight(i) <= 0.0) {
+    if (range.weight(i) <= 0.0 || HandOverlapsBoard(range.hand(i), state)) {
       continue;
     }
     double probability = action_probability_for_hand(
