@@ -671,6 +671,12 @@ void CheckRunWithoutDepthCutoffTerminates() {
          "zero max-depth range run should visit preflop decision nodes");
   Expect(stats.max_decision_depth > 0,
          "zero max-depth range run should reach deeper decisions");
+  Expect(stats.canonical_state_visits == stats.cfr_updates,
+         "canonical state diagnostics should count decision visits");
+  Expect(stats.unique_canonical_states > 0,
+         "canonical state diagnostics should track unique public states");
+  Expect(stats.duplicate_canonical_state_visits >= 0,
+         "canonical state diagnostics should track duplicate public states");
   Expect(!solver.get_equilibrium_strategy().get_info_sets().empty(),
          "zero max-depth range run should produce strategy info sets");
 }

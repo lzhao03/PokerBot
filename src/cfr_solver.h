@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <random>
+#include <unordered_set>
 #include <unordered_map>
 #include <string>
 #include <utility>
@@ -25,6 +26,9 @@ public:
     int64_t turn_updates = 0;
     int64_t river_updates = 0;
     int max_decision_depth = 0;
+    int64_t canonical_state_visits = 0;
+    int64_t unique_canonical_states = 0;
+    int64_t duplicate_canonical_state_visits = 0;
   };
 
   CFRSolver(const PokerConfig& config);
@@ -102,6 +106,7 @@ private:
   int iterations_run_;
   int64_t cfr_update_count_;
   TraversalStats traversal_stats_;
+  std::unordered_set<std::string> visited_canonical_states_;
   
   // CFR+ clipped regret tracking for each information set and action.
   std::unordered_map<std::string, std::unordered_map<int, double>> cumulative_regrets_;

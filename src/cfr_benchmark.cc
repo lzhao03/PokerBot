@@ -99,7 +99,10 @@ void RunBenchmark(const std::string& name,
             << result.traversal_stats.flop_updates << "\t"
             << result.traversal_stats.turn_updates << "\t"
             << result.traversal_stats.river_updates << "\t"
-            << result.traversal_stats.max_decision_depth << "\n";
+            << result.traversal_stats.max_decision_depth << "\t"
+            << result.traversal_stats.canonical_state_visits << "\t"
+            << result.traversal_stats.unique_canonical_states << "\t"
+            << result.traversal_stats.duplicate_canonical_state_visits << "\n";
 }
 
 Options ParseOptions(int argc, char** argv) {
@@ -142,7 +145,9 @@ int main(int argc, char** argv) {
     std::cout << "case\tseconds\tresult\thands\thands_per_second"
               << "\tcfr_node_updates\tcfr_node_updates_per_second"
               << "\tpreflop_updates\tflop_updates\tturn_updates"
-              << "\triver_updates\tmax_decision_depth\n";
+              << "\triver_updates\tmax_decision_depth"
+              << "\tcanonical_state_visits\tunique_canonical_states"
+              << "\tduplicate_canonical_state_visits\n";
 
     RunBenchmark("range_expand", [&] {
       int64_t combos = 0;

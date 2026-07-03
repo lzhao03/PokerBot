@@ -10,6 +10,7 @@
 #include <iostream>
 #include <limits>
 #include <cmath>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -88,6 +89,43 @@ std::vector<double> WeightsFor(
     weights.push_back(hand.second);
   }
   return weights;
+}
+
+std::string RoundClosureKey(const ActionHistory& history) {
+  if (history.actions_size() == 0) {
+    return "H0";
+  }
+
+  const Action& last = history.actions(history.actions_size() - 1);
+  std::ostringstream oss;
+  oss << "H" << (history.actions_size() > 1 ? "2+" : "1") << ":L"
+      << last.player() << ":" << static_cast<int>(last.action()) << ":"
+      << last.amount();
+  return oss.str();
+}
+
+std::string CanonicalPublicStateKey(const BoardState& state) {
+  std::ostringstream oss;
+  oss << "S" << static_cast<int>(state.street()) << ":P" << state.pot()
+      << ":SA" << state.stack_a() << ":SB" << state.stack_b() << ":AI"
+      << state.all_in() << ":F" << state.folded_player() << ":T"
+      << state.player_to_act() << ":C[";
+  for (int i = 0; i < state.player_contribution_size(); ++i) {
+    if (i > 0) {
+      oss << ",";
+    }
+    oss << state.player_contribution(i);
+  }
+  oss << "]:B[";
+  for (int i = 0; i < state.cards_size(); ++i) {
+    if (i > 0) {
+      oss << ",";
+    }
+    const Card& card = state.cards(i);
+    oss << card.rank() << ":" << static_cast<int>(card.suit());
+  }
+  oss << "]:" << RoundClosureKey(state.history());
+  return oss.str();
 }
 
 struct WeightedHands {
@@ -391,6 +429,13 @@ double CFRSolver::cfr(GameTree::Node* node,
   if (player == 0 || player == 1) {
     ++cfr_update_count_;
     ++traversal_stats_.cfr_updates;
+    ++traversal_stats_.canonical_state_visits;
+    if (visited_canonical_states_.insert(
+            CanonicalPublicStateKey(node->state)).second) {
+      ++traversal_stats_.unique_canonical_states;
+    } else {
+      ++traversal_stats_.duplicate_canonical_state_visits;
+    }
     traversal_stats_.max_decision_depth =
         std::max(traversal_stats_.max_decision_depth, depth);
     switch (node->state.street()) {
