@@ -1,38 +1,77 @@
 #include "src/info_set.h"
-#include <sstream>
 #include <algorithm>
+#include <cmath>
+#include <sstream>
 
 namespace poker {
 
 namespace {
 
-std::string ActionHistoryKey(const ActionHistory& history) {
+void AppendInt(std::string* out, int value) {
+  out->append(std::to_string(value));
+}
+
+void AppendNumber(std::string* out, double value) {
+  const double rounded = std::round(value);
+  if (std::fabs(value - rounded) < 1e-6) {
+    out->append(std::to_string(static_cast<int>(rounded)));
+    return;
+  }
+
   std::ostringstream oss;
+  oss << value;
+  out->append(oss.str());
+}
+
+void AppendCard(std::string* out, const Card& card) {
+  AppendInt(out, card.rank());
+  out->push_back(':');
+  AppendInt(out, static_cast<int>(card.suit()));
+}
+
+std::string ActionHistoryKey(const ActionHistory& history) {
+  std::string key;
+  key.reserve(history.actions_size() * 8);
   for (int i = 0; i < history.actions_size(); ++i) {
     const Action& action = history.actions(i);
     if (i > 0) {
-      oss << ",";
+      key.push_back(',');
     }
-    oss << action.player() << ":" << static_cast<int>(action.action()) << ":"
-        << action.amount();
+    AppendInt(&key, action.player());
+    key.push_back(':');
+    AppendInt(&key, static_cast<int>(action.action()));
+    key.push_back(':');
+    AppendNumber(&key, action.amount());
   }
-  return oss.str();
+  return key;
 }
 
 std::string PublicStateKey(const BoardState& state) {
-  std::ostringstream oss;
-  oss << "S" << static_cast<int>(state.street()) << ":POT" << state.pot()
-      << ":ST" << state.stack_a() << "," << state.stack_b() << ":AI"
-      << state.all_in() << ":F" << state.folded_player() << ":T"
-      << state.player_to_act() << ":C[";
+  std::string key;
+  key.reserve(64);
+  key.push_back('S');
+  AppendInt(&key, static_cast<int>(state.street()));
+  key.append(":POT");
+  AppendInt(&key, state.pot());
+  key.append(":ST");
+  AppendInt(&key, state.stack_a());
+  key.push_back(',');
+  AppendInt(&key, state.stack_b());
+  key.append(":AI");
+  AppendInt(&key, state.all_in() ? 1 : 0);
+  key.append(":F");
+  AppendInt(&key, state.folded_player());
+  key.append(":T");
+  AppendInt(&key, state.player_to_act());
+  key.append(":C[");
   for (int i = 0; i < state.player_contribution_size(); ++i) {
     if (i > 0) {
-      oss << ",";
+      key.push_back(',');
     }
-    oss << state.player_contribution(i);
+    AppendNumber(&key, state.player_contribution(i));
   }
-  oss << "]";
-  return oss.str();
+  key.push_back(']');
+  return key;
 }
 
 bool SameCard(const Card& left, const Card& right) {
@@ -55,33 +94,38 @@ Hand MakeHand(const Card& first, const Card& second) {
 }  // namespace
 
 std::string InfoSetAbstraction::state_to_info_set(const BoardState& state, int player_id, const Hand& player_hand) const {
-  std::ostringstream oss;
+  std::string key;
+  key.reserve(128 + state.history().actions_size() * 8);
   
   // Player ID
-  oss << "P" << player_id << ":";
+  key.push_back('P');
+  AppendInt(&key, player_id);
+  key.push_back(':');
   
   // Player's cards
-  oss << "H[";
+  key.append("H[");
   for (int i = 0; i < player_hand.cards_size(); ++i) {
     const Card& card = player_hand.cards(i);
-    if (i > 0) oss << ",";
-    oss << card.rank() << ":" << static_cast<int>(card.suit());
+    if (i > 0) key.push_back(',');
+    AppendCard(&key, card);
   }
-  oss << "]:";
+  key.append("]:");
   
   // Board cards
-  oss << "B[";
+  key.append("B[");
   for (int i = 0; i < state.cards_size(); ++i) {
     const Card& card = state.cards(i);
-    if (i > 0) oss << ",";
-    oss << card.rank() << ":" << static_cast<int>(card.suit());
+    if (i > 0) key.push_back(',');
+    AppendCard(&key, card);
   }
-  oss << "]:";
+  key.append("]:");
   
-  oss << PublicStateKey(state) << ":";
-  oss << "A[" << ActionHistoryKey(state.history()) << "]";
+  key.append(PublicStateKey(state));
+  key.append(":A[");
+  key.append(ActionHistoryKey(state.history()));
+  key.push_back(']');
   
-  return oss.str();
+  return key;
 }
 
 std::vector<Hand> InfoSetAbstraction::get_possible_hands(const std::string& info_set_key) const {
