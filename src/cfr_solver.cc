@@ -655,11 +655,13 @@ double CFRSolver::cfr_with_ranges(
     ++cfr_update_count_;
     ++traversal_stats_.cfr_updates;
     ++traversal_stats_.canonical_state_visits;
-    if (visited_canonical_states_.insert(
-            MakeCanonicalPublicStateKey(node->state)).second) {
-      ++traversal_stats_.unique_canonical_states;
-    } else {
-      ++traversal_stats_.duplicate_canonical_state_visits;
+    if (config_.enable_logging()) {
+      if (visited_canonical_states_.insert(
+              MakeCanonicalPublicStateKey(node->state)).second) {
+        ++traversal_stats_.unique_canonical_states;
+      } else {
+        ++traversal_stats_.duplicate_canonical_state_visits;
+      }
     }
     traversal_stats_.max_decision_depth =
         std::max(traversal_stats_.max_decision_depth, depth);

@@ -775,6 +775,7 @@ void CheckRunWithoutDepthCutoffTerminates() {
   config.set_max_depth(0);
   config.add_bet_sizes(1.0);
   config.set_chance_samples(1);
+  config.set_enable_logging(true);
 
   HandRange player_a_range;
   player_a_range.set_from_string("AA");
@@ -798,9 +799,9 @@ void CheckRunWithoutDepthCutoffTerminates() {
   Expect(stats.canonical_state_visits == stats.cfr_updates,
          "canonical state diagnostics should count decision visits");
   Expect(stats.unique_canonical_states > 0,
-         "canonical state diagnostics should track unique public states");
+         "logging diagnostics should track unique public states");
   Expect(stats.duplicate_canonical_state_visits >= 0,
-         "canonical state diagnostics should track duplicate public states");
+         "logging diagnostics should track duplicate public states");
   Expect(stats.child_nodes_created > 0,
          "traversal stats should count child node creation");
   Expect(stats.chance_samples > 0,
