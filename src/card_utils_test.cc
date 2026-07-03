@@ -28,14 +28,14 @@ void ExpectUniqueCards(const std::vector<Card>& cards, const char* message) {
   }
 }
 
-void AddCard(BoardState* state, const Card& card) {
-  *state->add_cards() = card;
+void AddCard(BoardState& state, const Card& card) {
+  *state.add_cards() = card;
 }
 
 void CheckDealtHandsAreDisjoint() {
   std::vector<Card> deck = BuildDeck();
-  Hand player_a = DealHand(&deck);
-  Hand player_b = DealHand(&deck);
+  Hand player_a = DealHand(deck);
+  Hand player_b = DealHand(deck);
 
   Expect(deck.size() == 48, "dealing two hands removes four cards");
   for (const Card& left : player_a.cards()) {
@@ -56,12 +56,12 @@ void CheckSampledStreetCardsAvoidKnownCards() {
 
   BoardState state;
   state.set_street(Street::FLOP);
-  AddCard(&state, MakeCard(2, Suit::CLUBS));
-  AddCard(&state, MakeCard(3, Suit::DIAMONDS));
-  AddCard(&state, MakeCard(4, Suit::HEARTS));
+  AddCard(state, MakeCard(2, Suit::CLUBS));
+  AddCard(state, MakeCard(3, Suit::DIAMONDS));
+  AddCard(state, MakeCard(4, Suit::HEARTS));
 
   std::mt19937 rng(12345);
-  std::vector<Card> sampled = SampleStreetCards(state, player_a, player_b, &rng);
+  std::vector<Card> sampled = SampleStreetCards(state, player_a, player_b, rng);
   Expect(sampled.size() == 1, "flop samples one turn card");
 
   std::vector<Card> known;
@@ -85,7 +85,7 @@ void CheckSampledFlopCardsAreUniqueAndAvoidKnownCards() {
   state.set_street(Street::PREFLOP);
 
   std::mt19937 rng(12345);
-  std::vector<Card> sampled = SampleStreetCards(state, player_a, player_b, &rng);
+  std::vector<Card> sampled = SampleStreetCards(state, player_a, player_b, rng);
   Expect(sampled.size() == 3, "preflop samples three flop cards");
   ExpectUniqueCards(sampled, "sampled flop cards should be unique");
 
@@ -110,13 +110,13 @@ void CheckSamplingThrowsWhenDeckIsTooSmall() {
   BoardState state;
   state.set_street(Street::PREFLOP);
   for (int i = 4; i < 50; ++i) {
-    AddCard(&state, deck[i]);
+    AddCard(state, deck[i]);
   }
 
   std::mt19937 rng(12345);
   bool threw = false;
   try {
-    SampleStreetCards(state, player_a, player_b, &rng);
+    SampleStreetCards(state, player_a, player_b, rng);
   } catch (const std::runtime_error&) {
     threw = true;
   }

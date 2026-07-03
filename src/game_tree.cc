@@ -22,17 +22,17 @@ int GetStack(const BoardState& state, int player) {
   return player == 0 ? state.stack_a() : state.stack_b();
 }
 
-void SetStack(BoardState* state, int player, int stack) {
+void SetStack(BoardState& state, int player, int stack) {
   if (player == 0) {
-    state->set_stack_a(stack);
+    state.set_stack_a(stack);
   } else {
-    state->set_stack_b(stack);
+    state.set_stack_b(stack);
   }
 }
 
-void EnsureHeadsUpContributions(BoardState* state) {
-  while (state->player_contribution_size() < kPlayerCount) {
-    state->add_player_contribution(0.0);
+void EnsureHeadsUpContributions(BoardState& state) {
+  while (state.player_contribution_size() < kPlayerCount) {
+    state.add_player_contribution(0.0);
   }
 }
 
@@ -106,9 +106,9 @@ int RequestedChips(const Action& action) {
   return static_cast<int>(action.amount());
 }
 
-void AddActionIfMissing(std::vector<Action>* actions, ActionType type, int amount) {
+void AddActionIfMissing(std::vector<Action>& actions, ActionType type, int amount) {
   bool exists =
-      std::any_of(actions->begin(), actions->end(), [&](const Action& action) {
+      std::any_of(actions.begin(), actions.end(), [&](const Action& action) {
         return action.action() == type &&
                static_cast<int>(action.amount()) == amount;
       });
@@ -119,34 +119,34 @@ void AddActionIfMissing(std::vector<Action>* actions, ActionType type, int amoun
   Action new_action;
   new_action.set_action(type);
   new_action.set_amount(amount);
-  actions->push_back(new_action);
+  actions.push_back(new_action);
 }
 
-int CommitChips(BoardState* state, int player, int requested) {
+int CommitChips(BoardState& state, int player, int requested) {
   if (requested <= 0) {
     throw std::invalid_argument("Action amount must be positive");
   }
 
-  int committed = std::min(requested, GetStack(*state, player));
-  (*state->mutable_player_contribution())[player] += committed;
-  SetStack(state, player, GetStack(*state, player) - committed);
-  state->set_pot(state->pot() + committed);
-  if (GetStack(*state, player) == 0) {
-    state->set_all_in(true);
+  int committed = std::min(requested, GetStack(state, player));
+  (*state.mutable_player_contribution())[player] += committed;
+  SetStack(state, player, GetStack(state, player) - committed);
+  state.set_pot(state.pot() + committed);
+  if (GetStack(state, player) == 0) {
+    state.set_all_in(true);
   }
   return committed;
 }
 
-void AdvanceStreet(BoardState* state, const std::vector<Card>& cards) {
-  switch (state->street()) {
+void AdvanceStreet(BoardState& state, const std::vector<Card>& cards) {
+  switch (state.street()) {
     case Street::PREFLOP:
-      state->set_street(Street::FLOP);
+      state.set_street(Street::FLOP);
       break;
     case Street::FLOP:
-      state->set_street(Street::TURN);
+      state.set_street(Street::TURN);
       break;
     case Street::TURN:
-      state->set_street(Street::RIVER);
+      state.set_street(Street::RIVER);
       break;
     case Street::RIVER:
       break;
@@ -155,37 +155,34 @@ void AdvanceStreet(BoardState* state, const std::vector<Card>& cards) {
   }
 
   for (const Card& card : cards) {
-    *state->add_cards() = card;
+    *state.add_cards() = card;
   }
-  state->mutable_history()->mutable_actions()->Clear();
-  state->set_player_to_act(FirstPlayerForStreet(*state));
+  state.mutable_history()->mutable_actions()->Clear();
+  state.set_player_to_act(FirstPlayerForStreet(state));
 }
 
 }  // namespace
 
-// Node destructor - recursively delete all children
-GameTree::Node::~Node() {
-  for (auto& pair : children) {
-    delete pair.second;
+GameTree::GameTree(const PokerConfig& config)
+  : root_(nullptr), config_(config) {
+}
+
+GameTree::Node& GameTree::root() {
+  if (root_ == nullptr) {
+    throw std::logic_error("Game tree root has not been built");
   }
-  children.clear();
+  return *root_;
 }
 
-GameTree::GameTree(const PokerConfig& config) 
-  : root_(nullptr), config_(config), hand_evaluator_(new HandEvaluator()) {
+const GameTree::Node& GameTree::root() const {
+  if (root_ == nullptr) {
+    throw std::logic_error("Game tree root has not been built");
+  }
+  return *root_;
 }
 
-GameTree::~GameTree() {
-  delete hand_evaluator_;
-  cleanup();
-}
-
-GameTree::Node* GameTree::build_tree(const BoardState& initial_state) {
-  // Clean up any existing tree
-  cleanup();
-  
-  // Create the root node
-  root_ = new Node();
+GameTree::Node& GameTree::build_tree(const BoardState& initial_state) {
+  root_ = std::make_unique<Node>();
   root_->state = initial_state;
   root_->is_terminal = is_terminal(initial_state);
   root_->player_to_act = get_player_to_act(initial_state);
@@ -198,7 +195,7 @@ GameTree::Node* GameTree::build_tree(const BoardState& initial_state) {
     root_->legal_actions = get_legal_actions(initial_state);
   }
   
-  return root_;
+  return *root_;
 }
 
 std::vector<Action> GameTree::get_legal_actions(const BoardState& state) const {
@@ -238,11 +235,11 @@ std::vector<Action> GameTree::get_legal_actions(const BoardState& state) const {
           to_call + ConcreteBetAmount(
                         state, BetSizeForStreet(config_, state.street(), i));
       if (raise_amount < stack) {
-        AddActionIfMissing(&actions, ActionType::RAISE, raise_amount);
+        AddActionIfMissing(actions, ActionType::RAISE, raise_amount);
       }
     }
     if (stack > to_call) {
-      AddActionIfMissing(&actions, ActionType::ALL_IN, stack);
+      AddActionIfMissing(actions, ActionType::ALL_IN, stack);
     }
   } else {
     Action check_action;
@@ -254,10 +251,10 @@ std::vector<Action> GameTree::get_legal_actions(const BoardState& state) const {
       int bet_amount =
           ConcreteBetAmount(state, BetSizeForStreet(config_, state.street(), i));
       if (bet_amount < stack) {
-        AddActionIfMissing(&actions, ActionType::BET, bet_amount);
+        AddActionIfMissing(actions, ActionType::BET, bet_amount);
       }
     }
-    AddActionIfMissing(&actions, ActionType::ALL_IN, stack);
+    AddActionIfMissing(actions, ActionType::ALL_IN, stack);
   }
   
   return actions;
@@ -265,7 +262,7 @@ std::vector<Action> GameTree::get_legal_actions(const BoardState& state) const {
 
 BoardState GameTree::apply_action(const BoardState& state, const Action& action) const {
   BoardState new_state = state;
-  EnsureHeadsUpContributions(&new_state);
+  EnsureHeadsUpContributions(new_state);
 
   int player = new_state.player_to_act();
   if (!IsPlayer(player)) {
@@ -306,7 +303,7 @@ BoardState GameTree::apply_action(const BoardState& state, const Action& action)
       if (to_call == 0) {
         throw std::invalid_argument("Cannot call without a bet");
       }
-      int committed = CommitChips(&new_state, player, to_call);
+      int committed = CommitChips(new_state, player, to_call);
       applied.set_amount(committed);
       new_state.set_player_to_act(opponent);
       break;
@@ -319,7 +316,7 @@ BoardState GameTree::apply_action(const BoardState& state, const Action& action)
       if (requested >= GetStack(new_state, player)) {
         throw std::invalid_argument("Use all-in for full-stack bets");
       }
-      int committed = CommitChips(&new_state, player, requested);
+      int committed = CommitChips(new_state, player, requested);
       applied.set_amount(committed);
       new_state.set_player_to_act(opponent);
       break;
@@ -335,13 +332,13 @@ BoardState GameTree::apply_action(const BoardState& state, const Action& action)
       if (requested >= GetStack(new_state, player)) {
         throw std::invalid_argument("Use all-in for full-stack raises");
       }
-      int committed = CommitChips(&new_state, player, requested);
+      int committed = CommitChips(new_state, player, requested);
       applied.set_amount(committed);
       new_state.set_player_to_act(opponent);
       break;
     }
     case ActionType::ALL_IN: {
-      int committed = CommitChips(&new_state, player, GetStack(new_state, player));
+      int committed = CommitChips(new_state, player, GetStack(new_state, player));
       applied.set_amount(committed);
       new_state.set_player_to_act(opponent);
       break;
@@ -355,7 +352,9 @@ BoardState GameTree::apply_action(const BoardState& state, const Action& action)
   return new_state;
 }
 
-double GameTree::get_utility(const BoardState& state, const Hand& player_a_hand, const Hand& player_b_hand) {
+double GameTree::get_utility(const BoardState& state,
+                             const Hand& player_a_hand,
+                             const Hand& player_b_hand) const {
   double player_a_contribution = Contribution(state, 0);
 
   // If a player has folded, return the appropriate utility
@@ -379,7 +378,7 @@ double GameTree::get_utility(const BoardState& state, const Hand& player_a_hand,
   }
   
   try {
-    int comparison = hand_evaluator_->compare_hands(player_a_hand, player_b_hand, state);
+    int comparison = hand_evaluator_.compare_hands(player_a_hand, player_b_hand, state);
     
     if (comparison > 0) {
       // Player A wins
@@ -419,18 +418,12 @@ int GameTree::get_player_to_act(const BoardState& state) const {
   return FirstPlayerForStreet(state);
 }
 
-void GameTree::cleanup() {
-  if (root_) {
-    delete root_;
-    root_ = nullptr;
-  }
-}
-
-GameTree::Node* GameTree::create_child_node(Node* parent, const Action& action) {
-  // Create a new node
-  Node* child = new Node();
+std::unique_ptr<GameTree::Node> GameTree::create_child_node(
+    const Node& parent,
+    const Action& action) const {
+  auto child = std::make_unique<Node>();
   
-  child->state = apply_action(parent->state, action);
+  child->state = apply_action(parent.state, action);
   child->player_to_act = get_player_to_act(child->state);
   child->is_terminal = is_terminal(child->state);
   child->is_chance_node = !child->is_terminal && child->player_to_act == -1;
@@ -446,15 +439,16 @@ GameTree::Node* GameTree::create_child_node(Node* parent, const Action& action) 
   return child;
 }
 
-GameTree::Node* GameTree::create_chance_child_node(
-    Node* parent, const std::vector<Card>& cards) {
-  if (!parent->is_chance_node) {
+std::unique_ptr<GameTree::Node> GameTree::create_chance_child_node(
+    const Node& parent,
+    const std::vector<Card>& cards) const {
+  if (!parent.is_chance_node) {
     throw std::invalid_argument("Parent node is not a chance node");
   }
 
-  Node* child = new Node();
-  child->state = parent->state;
-  AdvanceStreet(&child->state, cards);
+  auto child = std::make_unique<Node>();
+  child->state = parent.state;
+  AdvanceStreet(child->state, cards);
   child->is_terminal = is_terminal(child->state);
   child->player_to_act = get_player_to_act(child->state);
   child->is_chance_node = !child->is_terminal && child->player_to_act == -1;

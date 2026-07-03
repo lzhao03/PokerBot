@@ -34,7 +34,7 @@ class CFRSolverRegretTestPeer {
         solver.make_info_set_key(state, player, hand));
   }
 
-  static double EvaluateNode(CFRSolver& solver, GameTree::Node* node,
+  static double EvaluateNode(CFRSolver& solver, GameTree::Node& node,
                              const Hand& player_a_hand,
                              const Hand& player_b_hand) {
     Strategy strategy;
@@ -42,7 +42,7 @@ class CFRSolverRegretTestPeer {
                                          strategy);
   }
 
-  static double BestResponseNode(CFRSolver& solver, GameTree::Node* node,
+  static double BestResponseNode(CFRSolver& solver, GameTree::Node& node,
                                  const Hand& player_a_hand,
                                  const Hand& player_b_hand,
                                  int best_response_player) {
@@ -52,7 +52,7 @@ class CFRSolverRegretTestPeer {
   }
 
   static double BestResponseRangeNode(
-      CFRSolver& solver, GameTree::Node* node,
+      CFRSolver& solver, GameTree::Node& node,
       const Hand& best_response_hand,
       const WeightedHandRange& opponent_hands,
       int best_response_player) {
@@ -123,7 +123,7 @@ class FixedContinuationValueProvider : public ContinuationValueProvider {
 
   using ContinuationValueProvider::value;
 
-  double value(GameTree* game_tree,
+  double value(GameTree& game_tree,
                const ContinuationContext& context) const override {
     (void)game_tree;
     ++calls_;
@@ -189,20 +189,14 @@ Card MakeTestCard(int rank, Suit suit) {
   return card;
 }
 
-void AddCard(BoardState* state, int rank, Suit suit) {
-  Card* card = state->add_cards();
-  card->set_rank(rank);
-  card->set_suit(suit);
+void AddCard(BoardState& state, int rank, Suit suit) {
+  *state.add_cards() = MakeTestCard(rank, suit);
 }
 
 Hand MakeHand(int first_rank, Suit first_suit, int second_rank, Suit second_suit) {
   Hand hand;
-  Card* first = hand.add_cards();
-  first->set_rank(first_rank);
-  first->set_suit(first_suit);
-  Card* second = hand.add_cards();
-  second->set_rank(second_rank);
-  second->set_suit(second_suit);
+  *hand.add_cards() = MakeTestCard(first_rank, first_suit);
+  *hand.add_cards() = MakeTestCard(second_rank, second_suit);
   return hand;
 }
 
@@ -256,15 +250,15 @@ BoardState InitialRootState(const PokerConfig& config) {
   return state;
 }
 
-void AddStrategyInfoSet(StrategySnapshot* snapshot,
+void AddStrategyInfoSet(StrategySnapshot& snapshot,
                         const std::string& info_set_key,
                         const std::vector<std::pair<Action, double>>& actions) {
-  StrategyInfoSetSnapshot* info_set = snapshot->add_info_sets();
-  info_set->set_info_set_key(info_set_key);
+  StrategyInfoSetSnapshot& info_set = *snapshot.add_info_sets();
+  info_set.set_info_set_key(info_set_key);
   for (const auto& action_prob : actions) {
-    StrategyActionSnapshot* action = info_set->add_actions();
-    *action->mutable_action() = action_prob.first;
-    action->set_probability(action_prob.second);
+    StrategyActionSnapshot& action = *info_set.add_actions();
+    *action.mutable_action() = action_prob.first;
+    action.set_probability(action_prob.second);
   }
 }
 
@@ -272,7 +266,7 @@ void WriteStrategySnapshot(const std::string& path,
                            const std::string& info_set_key,
                            const std::vector<std::pair<Action, double>>& actions) {
   StrategySnapshot snapshot;
-  AddStrategyInfoSet(&snapshot, info_set_key, actions);
+  AddStrategyInfoSet(snapshot, info_set_key, actions);
   std::ofstream file(path, std::ios::binary);
   Expect(snapshot.SerializeToOstream(&file), "strategy snapshot should write");
 }
@@ -299,16 +293,16 @@ void CheckCfrUsesLegalActions() {
   node.state.add_player_contribution(0);
   node.state.add_player_contribution(0);
   node.state.set_player_to_act(0);
-  AddCard(&node.state, 2, Suit::HEARTS);
-  AddCard(&node.state, 3, Suit::DIAMONDS);
-  AddCard(&node.state, 4, Suit::CLUBS);
+  AddCard(node.state, 2, Suit::HEARTS);
+  AddCard(node.state, 3, Suit::DIAMONDS);
+  AddCard(node.state, 4, Suit::CLUBS);
   node.player_to_act = 0;
   node.legal_actions.push_back(MakeAction(ActionType::CHECK));
 
   Hand player_a_hand;
   Hand player_b_hand;
   std::vector<double> reach_probabilities = {1.0, 1.0};
-  solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
+  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
 
   const Strategy strategy = solver.get_equilibrium_strategy();
   Expect(strategy.get_info_sets().size() == 1, "CFR should visit one info set");
@@ -345,7 +339,7 @@ void CheckCfrDistinguishesActionAmounts() {
   Hand player_a_hand;
   Hand player_b_hand;
   std::vector<double> reach_probabilities = {1.0, 1.0};
-  solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
+  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
 
   const Strategy strategy = solver.get_equilibrium_strategy();
   Expect(strategy.get_info_sets().size() == 1, "CFR should visit one info set");
@@ -378,7 +372,7 @@ void CheckSaveStrategyUsesProtobufSnapshot() {
   Hand player_a_hand;
   Hand player_b_hand;
   std::vector<double> reach_probabilities = {1.0, 1.0};
-  solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
+  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
 
   const char* test_tmpdir = std::getenv("TEST_TMPDIR");
   std::string path = std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/strategy.pb";
@@ -437,11 +431,11 @@ void CheckTerminalUtilityCacheReusesScores() {
   state.set_folded_player(-1);
   state.add_player_contribution(6);
   state.add_player_contribution(6);
-  AddCard(&state, 2, Suit::CLUBS);
-  AddCard(&state, 7, Suit::DIAMONDS);
-  AddCard(&state, 9, Suit::HEARTS);
-  AddCard(&state, 11, Suit::SPADES);
-  AddCard(&state, 12, Suit::CLUBS);
+  AddCard(state, 2, Suit::CLUBS);
+  AddCard(state, 7, Suit::DIAMONDS);
+  AddCard(state, 9, Suit::HEARTS);
+  AddCard(state, 11, Suit::SPADES);
+  AddCard(state, 12, Suit::CLUBS);
 
   Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
   Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
@@ -505,7 +499,7 @@ void CheckEvaluateRangeStrategy() {
   WeightedHandRange player_a_combos = player_a_range.get_all_weighted_combos();
   for (const Hand& hand : player_a_combos.hands) {
     AddStrategyInfoSet(
-        &snapshot,
+        snapshot,
         CFRSolverRegretTestPeer::InfoSetKey(solver, root_state, 0, hand),
         {{MakeAction(ActionType::FOLD), 1.0}});
   }
@@ -581,22 +575,24 @@ void CheckSingletonRangeMatchesExactEvaluationAndBestResponse() {
     return state;
   };
 
-  GameTree::Node* player_a_loses_child = new GameTree::Node();
+  auto player_a_loses_child = std::make_unique<GameTree::Node>();
   player_a_loses_child->state = folded_state(0);
   player_a_loses_child->is_terminal = true;
-  node.children[TestActionKey(ActionType::FOLD)] = player_a_loses_child;
+  node.children[TestActionKey(ActionType::FOLD)] =
+      std::move(player_a_loses_child);
 
-  GameTree::Node* player_a_wins_child = new GameTree::Node();
+  auto player_a_wins_child = std::make_unique<GameTree::Node>();
   player_a_wins_child->state = folded_state(1);
   player_a_wins_child->is_terminal = true;
-  node.children[TestActionKey(ActionType::CALL, 1)] = player_a_wins_child;
+  node.children[TestActionKey(ActionType::CALL, 1)] =
+      std::move(player_a_wins_child);
 
   double exact_best_response = CFRSolverRegretTestPeer::BestResponseNode(
-      solver, &node, player_a_hand, player_b_hand, 0);
+      solver, node, player_a_hand, player_b_hand, 0);
   WeightedHandRange player_b_singleton;
   player_b_singleton.add(player_b_hand, 1.0);
   double range_best_response = CFRSolverRegretTestPeer::BestResponseRangeNode(
-      solver, &node, player_a_hand, player_b_singleton, 0);
+      solver, node, player_a_hand, player_b_singleton, 0);
   Expect(std::abs(exact_best_response - range_best_response) < 0.000001,
          "singleton range best response should match exact-hand best response");
 }
@@ -1061,6 +1057,15 @@ BoardState FoldedState(int folded_player) {
   return state;
 }
 
+void AddTerminalChild(GameTree::Node& node,
+                      int action_id,
+                      const BoardState& state) {
+  auto child = std::make_unique<GameTree::Node>();
+  child->state = state;
+  child->is_terminal = true;
+  node.children[action_id] = std::move(child);
+}
+
 BoardState FlopRangeCutoffState() {
   BoardState state;
   state.set_stack_a(20);
@@ -1072,9 +1077,9 @@ BoardState FlopRangeCutoffState() {
   state.set_player_to_act(1);
   state.add_player_contribution(0);
   state.add_player_contribution(0);
-  AddCard(&state, 2, Suit::HEARTS);
-  AddCard(&state, 7, Suit::DIAMONDS);
-  AddCard(&state, 9, Suit::CLUBS);
+  AddCard(state, 2, Suit::HEARTS);
+  AddCard(state, 7, Suit::DIAMONDS);
+  AddCard(state, 9, Suit::CLUBS);
   return state;
 }
 
@@ -1119,11 +1124,11 @@ BoardState RiverFacingCallState() {
   state.add_player_contribution(5);
   state.add_player_contribution(10);
   *state.mutable_history()->add_actions() = MakeAction(ActionType::BET, 5);
-  AddCard(&state, 2, Suit::HEARTS);
-  AddCard(&state, 7, Suit::DIAMONDS);
-  AddCard(&state, 9, Suit::CLUBS);
-  AddCard(&state, 11, Suit::SPADES);
-  AddCard(&state, 12, Suit::DIAMONDS);
+  AddCard(state, 2, Suit::HEARTS);
+  AddCard(state, 7, Suit::DIAMONDS);
+  AddCard(state, 9, Suit::CLUBS);
+  AddCard(state, 11, Suit::SPADES);
+  AddCard(state, 12, Suit::DIAMONDS);
   return state;
 }
 
@@ -1135,7 +1140,7 @@ void CheckExactHandNestedCfrContinuationSolvesRiverCallSubgame() {
   GameTree game_tree(config);
   Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
-  double value = provider.value(&game_tree, RiverFacingCallState(),
+  double value = provider.value(game_tree, RiverFacingCallState(),
                                 player_a_hand, player_b_hand);
 
   Expect(std::abs(value - 2.5) < 0.000001,
@@ -1152,10 +1157,10 @@ void CheckExactHandNestedCfrContinuationCachesSubgames() {
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   BoardState state = RiverFacingCallState();
 
-  double first = provider.value(&game_tree, state, player_a_hand, player_b_hand);
+  double first = provider.value(game_tree, state, player_a_hand, player_b_hand);
   ExactHandNestedCFRContinuationValueProvider::Stats first_stats =
       provider.stats();
-  double second = provider.value(&game_tree, state, player_a_hand, player_b_hand);
+  double second = provider.value(game_tree, state, player_a_hand, player_b_hand);
   ExactHandNestedCFRContinuationValueProvider::Stats second_stats =
       provider.stats();
 
@@ -1180,9 +1185,9 @@ void CheckExactHandNestedCfrContinuationSeparatesPrivateHands() {
   BoardState state = RiverFacingCallState();
 
   double value_against_loser =
-      provider.value(&game_tree, state, player_a_hand, losing_player_b_hand);
+      provider.value(game_tree, state, player_a_hand, losing_player_b_hand);
   double value_against_winner =
-      provider.value(&game_tree, state, player_a_hand, winning_player_b_hand);
+      provider.value(game_tree, state, player_a_hand, winning_player_b_hand);
   ExactHandNestedCFRContinuationValueProvider::Stats stats = provider.stats();
 
   Expect(std::abs(value_against_loser - 2.5) < 0.000001,
@@ -1209,9 +1214,9 @@ void CheckCfrDepthLimitUsesExactHandNestedContinuationProvider() {
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   std::vector<double> reach_probabilities = {1.0, 1.0};
 
-  double first = solver.cfr(&node, player_a_hand, player_b_hand,
+  double first = solver.cfr(node, player_a_hand, player_b_hand,
                             reach_probabilities, 0, 1, 1);
-  double second = solver.cfr(&node, player_a_hand, player_b_hand,
+  double second = solver.cfr(node, player_a_hand, player_b_hand,
                              reach_probabilities, 1, 1, 1);
   ExactHandNestedCFRContinuationValueProvider::Stats stats = provider->stats();
 
@@ -1222,8 +1227,9 @@ void CheckCfrDepthLimitUsesExactHandNestedContinuationProvider() {
          "CFR depth cutoff should reuse exact-hand nested continuation values");
 }
 
-GameTree::Node* TerminalShowdownNode(const std::vector<Card>& board_cards) {
-  GameTree::Node* node = new GameTree::Node();
+std::unique_ptr<GameTree::Node> TerminalShowdownNode(
+    const std::vector<Card>& board_cards) {
+  auto node = std::make_unique<GameTree::Node>();
   node->state = ShowdownState(board_cards);
   node->is_terminal = true;
   return node;
@@ -1242,7 +1248,7 @@ void CheckTerminalUtilityBeatsDepthLimit() {
   Hand player_b_hand;
   std::vector<double> reach_probabilities = {1.0, 1.0};
   double value =
-      solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
+      solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
   Expect(value == 5.0, "terminal utility should be returned at the depth limit");
 }
@@ -1262,17 +1268,17 @@ void CheckDepthLimitUsesShowdownUtility() {
   node.state.set_player_to_act(1);
   *node.state.mutable_history()->add_actions() = MakeAction(ActionType::CHECK);
   *node.state.mutable_history()->add_actions() = MakeAction(ActionType::CHECK);
-  AddCard(&node.state, 2, Suit::HEARTS);
-  AddCard(&node.state, 7, Suit::DIAMONDS);
-  AddCard(&node.state, 9, Suit::CLUBS);
-  AddCard(&node.state, 11, Suit::SPADES);
-  AddCard(&node.state, 12, Suit::DIAMONDS);
+  AddCard(node.state, 2, Suit::HEARTS);
+  AddCard(node.state, 7, Suit::DIAMONDS);
+  AddCard(node.state, 9, Suit::CLUBS);
+  AddCard(node.state, 11, Suit::SPADES);
+  AddCard(node.state, 12, Suit::DIAMONDS);
 
   Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   std::vector<double> reach_probabilities = {1.0, 1.0};
   double value =
-      solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
+      solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
   Expect(value == 10.0, "depth cutoff should use showdown utility when available");
 }
@@ -1290,17 +1296,17 @@ void CheckDepthLimitDoesNotScoreUncalledBet() {
   node.state.add_player_contribution(10);
   node.state.add_player_contribution(5);
   node.state.set_player_to_act(1);
-  AddCard(&node.state, 2, Suit::HEARTS);
-  AddCard(&node.state, 7, Suit::DIAMONDS);
-  AddCard(&node.state, 9, Suit::CLUBS);
-  AddCard(&node.state, 11, Suit::SPADES);
-  AddCard(&node.state, 12, Suit::DIAMONDS);
+  AddCard(node.state, 2, Suit::HEARTS);
+  AddCard(node.state, 7, Suit::DIAMONDS);
+  AddCard(node.state, 9, Suit::CLUBS);
+  AddCard(node.state, 11, Suit::SPADES);
+  AddCard(node.state, 12, Suit::DIAMONDS);
 
   Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   std::vector<double> reach_probabilities = {1.0, 1.0};
   double value =
-      solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
+      solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
   Expect(value == 0.0, "depth cutoff should not score unresolved bets");
 }
@@ -1323,7 +1329,7 @@ void CheckDepthLimitUsesContinuationValueProvider() {
   Hand player_b_hand;
   std::vector<double> reach_probabilities = {1.0, 1.0};
   double value =
-      solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
+      solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
   Expect(value == 7.0,
          "depth cutoff should use the continuation value provider");
@@ -1414,28 +1420,32 @@ void CheckZeroMaxDepthDoesNotCutOff() {
   root.player_to_act = 0;
   root.legal_actions.push_back(MakeAction(ActionType::CHECK));
 
-  GameTree::Node* first_child = new GameTree::Node();
-  first_child->state.set_player_to_act(1);
-  first_child->player_to_act = 1;
-  first_child->legal_actions.push_back(MakeAction(ActionType::CHECK));
-  root.children[TestActionKey(ActionType::CHECK)] = first_child;
+  auto first_child = std::make_unique<GameTree::Node>();
+  GameTree::Node& first_child_ref = *first_child;
+  first_child_ref.state.set_player_to_act(1);
+  first_child_ref.player_to_act = 1;
+  first_child_ref.legal_actions.push_back(MakeAction(ActionType::CHECK));
+  root.children[TestActionKey(ActionType::CHECK)] = std::move(first_child);
 
-  GameTree::Node* second_child = new GameTree::Node();
-  second_child->state.set_player_to_act(0);
-  second_child->player_to_act = 0;
-  second_child->legal_actions.push_back(MakeAction(ActionType::CHECK));
-  first_child->children[TestActionKey(ActionType::CHECK)] = second_child;
+  auto second_child = std::make_unique<GameTree::Node>();
+  GameTree::Node& second_child_ref = *second_child;
+  second_child_ref.state.set_player_to_act(0);
+  second_child_ref.player_to_act = 0;
+  second_child_ref.legal_actions.push_back(MakeAction(ActionType::CHECK));
+  first_child_ref.children[TestActionKey(ActionType::CHECK)] =
+      std::move(second_child);
 
-  GameTree::Node* terminal_child = new GameTree::Node();
+  auto terminal_child = std::make_unique<GameTree::Node>();
   terminal_child->state = FoldedState(1);
   terminal_child->is_terminal = true;
-  second_child->children[TestActionKey(ActionType::CHECK)] = terminal_child;
+  second_child_ref.children[TestActionKey(ActionType::CHECK)] =
+      std::move(terminal_child);
 
   Hand player_a_hand;
   Hand player_b_hand;
   std::vector<double> reach_probabilities = {1.0, 1.0};
   double value =
-      solver.cfr(&root, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 0);
+      solver.cfr(root, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 0);
 
   Expect(value == 5.0, "zero max depth should not cut off CFR traversal");
 }
@@ -1453,16 +1463,16 @@ void CheckChanceDoesNotConsumeDepth() {
   node.state.set_folded_player(-1);
   node.state.add_player_contribution(10);
   node.state.add_player_contribution(10);
-  AddCard(&node.state, 14, Suit::HEARTS);
-  AddCard(&node.state, 14, Suit::DIAMONDS);
-  AddCard(&node.state, 14, Suit::CLUBS);
-  AddCard(&node.state, 2, Suit::CLUBS);
+  AddCard(node.state, 14, Suit::HEARTS);
+  AddCard(node.state, 14, Suit::DIAMONDS);
+  AddCard(node.state, 14, Suit::CLUBS);
+  AddCard(node.state, 2, Suit::CLUBS);
 
   Hand player_a_hand = MakeHand(14, Suit::SPADES, 3, Suit::HEARTS);
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   std::vector<double> reach_probabilities = {1.0, 1.0};
   double value =
-      solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
+      solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
   Expect(value == 10.0, "chance nodes should not consume CFR depth");
 }
@@ -1489,7 +1499,7 @@ void CheckChanceSamplesVisitMultipleBoards() {
   one_sample_node.is_chance_node = true;
   one_sample_node.state = state;
   std::vector<double> one_sample_reach = {1.0, 1.0};
-  one_sample_solver.cfr(&one_sample_node, player_a_hand, player_b_hand,
+  one_sample_solver.cfr(one_sample_node, player_a_hand, player_b_hand,
                         one_sample_reach, 0, 0, 1);
 
   PokerConfig three_sample_config;
@@ -1500,7 +1510,7 @@ void CheckChanceSamplesVisitMultipleBoards() {
   three_sample_node.is_chance_node = true;
   three_sample_node.state = state;
   std::vector<double> three_sample_reach = {1.0, 1.0};
-  three_sample_solver.cfr(&three_sample_node, player_a_hand, player_b_hand,
+  three_sample_solver.cfr(three_sample_node, player_a_hand, player_b_hand,
                           three_sample_reach, 0, 0, 1);
 
   Expect(one_sample_solver.get_equilibrium_strategy().get_info_sets().size() == 1,
@@ -1519,10 +1529,10 @@ void CheckEvaluationUsesChanceSamples() {
   node.state.set_folded_player(-1);
   node.state.add_player_contribution(10);
   node.state.add_player_contribution(10);
-  AddCard(&node.state, 2, Suit::HEARTS);
-  AddCard(&node.state, 7, Suit::DIAMONDS);
-  AddCard(&node.state, 9, Suit::CLUBS);
-  AddCard(&node.state, 11, Suit::SPADES);
+  AddCard(node.state, 2, Suit::HEARTS);
+  AddCard(node.state, 7, Suit::DIAMONDS);
+  AddCard(node.state, 9, Suit::CLUBS);
+  AddCard(node.state, 11, Suit::SPADES);
 
   Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
   Hand player_b_hand = MakeHand(10, Suit::HEARTS, 10, Suit::CLUBS);
@@ -1531,11 +1541,11 @@ void CheckEvaluationUsesChanceSamples() {
   one_sample_config.set_starting_stack_size(10);
   CFRSolver one_sample_solver(one_sample_config);
   double first = CFRSolverRegretTestPeer::EvaluateNode(
-      one_sample_solver, &node, player_a_hand, player_b_hand);
+      one_sample_solver, node, player_a_hand, player_b_hand);
   double second = CFRSolverRegretTestPeer::EvaluateNode(
-      one_sample_solver, &node, player_a_hand, player_b_hand);
+      one_sample_solver, node, player_a_hand, player_b_hand);
   double third = CFRSolverRegretTestPeer::EvaluateNode(
-      one_sample_solver, &node, player_a_hand, player_b_hand);
+      one_sample_solver, node, player_a_hand, player_b_hand);
   double expected_average = (first + second + third) / 3.0;
   Expect(std::abs(first - expected_average) > 0.000001,
          "chance sample fixture should have varied outcomes");
@@ -1545,23 +1555,23 @@ void CheckEvaluationUsesChanceSamples() {
   three_sample_config.set_chance_samples(3);
   CFRSolver three_sample_solver(three_sample_config);
   double sampled_average = CFRSolverRegretTestPeer::EvaluateNode(
-      three_sample_solver, &node, player_a_hand, player_b_hand);
+      three_sample_solver, node, player_a_hand, player_b_hand);
   Expect(std::abs(sampled_average - expected_average) < 0.000001,
          "strategy evaluation should average configured chance samples");
 
   CFRSolver one_sample_best_response(one_sample_config);
   double first_response = CFRSolverRegretTestPeer::BestResponseNode(
-      one_sample_best_response, &node, player_a_hand, player_b_hand, 0);
+      one_sample_best_response, node, player_a_hand, player_b_hand, 0);
   double second_response = CFRSolverRegretTestPeer::BestResponseNode(
-      one_sample_best_response, &node, player_a_hand, player_b_hand, 0);
+      one_sample_best_response, node, player_a_hand, player_b_hand, 0);
   double third_response = CFRSolverRegretTestPeer::BestResponseNode(
-      one_sample_best_response, &node, player_a_hand, player_b_hand, 0);
+      one_sample_best_response, node, player_a_hand, player_b_hand, 0);
   double expected_response_average =
       (first_response + second_response + third_response) / 3.0;
 
   CFRSolver three_sample_best_response(three_sample_config);
   double sampled_response_average = CFRSolverRegretTestPeer::BestResponseNode(
-      three_sample_best_response, &node, player_a_hand, player_b_hand, 0);
+      three_sample_best_response, node, player_a_hand, player_b_hand, 0);
   Expect(std::abs(sampled_response_average - expected_response_average) <
              0.000001,
          "best response should average configured chance samples");
@@ -1582,27 +1592,20 @@ void CheckBestResponseActionSelectsBestLegalAction() {
   node.legal_actions.push_back(player_a_loses);
   node.legal_actions.push_back(player_a_wins);
 
-  GameTree::Node* player_a_loses_child = new GameTree::Node();
-  player_a_loses_child->state = FoldedState(0);
-  player_a_loses_child->is_terminal = true;
-  node.children[TestActionKey(ActionType::FOLD)] = player_a_loses_child;
-
-  GameTree::Node* player_a_wins_child = new GameTree::Node();
-  player_a_wins_child->state = FoldedState(1);
-  player_a_wins_child->is_terminal = true;
-  node.children[TestActionKey(ActionType::CALL, 1)] = player_a_wins_child;
+  AddTerminalChild(node, TestActionKey(ActionType::FOLD), FoldedState(0));
+  AddTerminalChild(node, TestActionKey(ActionType::CALL, 1), FoldedState(1));
 
   Hand player_a_hand;
   Hand player_b_hand;
   Action best_action =
-      solver.get_best_response_action(&node, player_a_hand, player_b_hand, 0);
+      solver.get_best_response_action(node, player_a_hand, player_b_hand, 0);
   Expect(best_action.action() == ActionType::CALL,
          "best response should select the highest-value legal action");
   Expect(best_action.amount() == 1,
          "best response should preserve selected action amount");
 
   Action opponent_turn_action =
-      solver.get_best_response_action(&node, player_a_hand, player_b_hand, 1);
+      solver.get_best_response_action(node, player_a_hand, player_b_hand, 1);
   Expect(opponent_turn_action.action() == ActionType::NO_ACTION,
          "best response should return no action away from its turn");
 }
@@ -1639,13 +1642,13 @@ void CheckRangeBestResponseDoesNotKnowOpponentHand() {
   opponent_hands.add(twos, 1.0);
 
   double clairvoyant_average =
-      (CFRSolverRegretTestPeer::BestResponseNode(solver, &node, player_a_hand,
+      (CFRSolverRegretTestPeer::BestResponseNode(solver, node, player_a_hand,
                                                  kings, 0) +
-       CFRSolverRegretTestPeer::BestResponseNode(solver, &node, player_a_hand,
+       CFRSolverRegretTestPeer::BestResponseNode(solver, node, player_a_hand,
                                                  twos, 0)) /
       2.0;
   double range_value = CFRSolverRegretTestPeer::BestResponseRangeNode(
-      solver, &node, player_a_hand, opponent_hands, 0);
+      solver, node, player_a_hand, opponent_hands, 0);
 
   Expect(clairvoyant_average > 0.0,
          "exact-hand best response can overuse hidden opponent cards");
@@ -1667,10 +1670,10 @@ void CheckRangeBestResponseChanceUsesSampledOpponent() {
   node.state.set_folded_player(-1);
   node.state.add_player_contribution(10);
   node.state.add_player_contribution(10);
-  AddCard(&node.state, 2, Suit::CLUBS);
-  AddCard(&node.state, 2, Suit::DIAMONDS);
-  AddCard(&node.state, 2, Suit::HEARTS);
-  AddCard(&node.state, 3, Suit::CLUBS);
+  AddCard(node.state, 2, Suit::CLUBS);
+  AddCard(node.state, 2, Suit::DIAMONDS);
+  AddCard(node.state, 2, Suit::HEARTS);
+  AddCard(node.state, 3, Suit::CLUBS);
 
   Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
   Hand quads = MakeHand(2, Suit::SPADES, 7, Suit::SPADES);
@@ -1680,7 +1683,7 @@ void CheckRangeBestResponseChanceUsesSampledOpponent() {
   opponent_hands.add(air, 1.0);
 
   double value = CFRSolverRegretTestPeer::BestResponseRangeNode(
-      solver, &node, player_a_hand, opponent_hands, 0);
+      solver, node, player_a_hand, opponent_hands, 0);
 
   Expect(std::abs(std::abs(value) - 10.0) < 0.000001,
          "chance range best response should score the sampled opponent only");
@@ -1700,21 +1703,14 @@ void CheckPlayerBRegretsUsePlayerBUtility() {
   node.legal_actions.push_back(player_b_loses);
   node.legal_actions.push_back(player_b_wins);
 
-  GameTree::Node* player_b_loses_child = new GameTree::Node();
-  player_b_loses_child->state = FoldedState(1);
-  player_b_loses_child->is_terminal = true;
-  node.children[TestActionKey(ActionType::FOLD)] = player_b_loses_child;
-
-  GameTree::Node* player_b_wins_child = new GameTree::Node();
-  player_b_wins_child->state = FoldedState(0);
-  player_b_wins_child->is_terminal = true;
-  node.children[TestActionKey(ActionType::CALL, 1)] = player_b_wins_child;
+  AddTerminalChild(node, TestActionKey(ActionType::FOLD), FoldedState(1));
+  AddTerminalChild(node, TestActionKey(ActionType::CALL, 1), FoldedState(0));
 
   Hand player_a_hand;
   Hand player_b_hand;
   std::vector<double> reach_probabilities = {1.0, 1.0};
-  solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 2);
-  solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 1, 0, 2);
+  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 2);
+  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 1, 0, 2);
 
   const Strategy strategy = solver.get_equilibrium_strategy();
   const auto action_probs = strategy.get_strategy(strategy.get_info_sets()[0]);
@@ -1738,22 +1734,15 @@ void CheckCfrPlusClipsNegativeRegrets() {
   node.legal_actions.push_back(player_a_loses);
   node.legal_actions.push_back(player_a_wins);
 
-  GameTree::Node* player_a_loses_child = new GameTree::Node();
-  player_a_loses_child->state = FoldedState(0);
-  player_a_loses_child->is_terminal = true;
-  node.children[TestActionKey(ActionType::FOLD)] = player_a_loses_child;
-
-  GameTree::Node* player_a_wins_child = new GameTree::Node();
-  player_a_wins_child->state = FoldedState(1);
-  player_a_wins_child->is_terminal = true;
-  node.children[TestActionKey(ActionType::CALL, 1)] = player_a_wins_child;
+  AddTerminalChild(node, TestActionKey(ActionType::FOLD), FoldedState(0));
+  AddTerminalChild(node, TestActionKey(ActionType::CALL, 1), FoldedState(1));
 
   Hand player_a_hand;
   Hand player_b_hand;
   std::string info_set_key =
       CFRSolverRegretTestPeer::InfoSetKey(solver, node.state, 0, player_a_hand);
   std::vector<double> reach_probabilities = {1.0, 1.0};
-  solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
+  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
 
   Expect(CFRSolverRegretTestPeer::Regret(
              solver, info_set_key, TestActionKey(ActionType::FOLD)) == 0.0,
@@ -1778,21 +1767,14 @@ void CheckCfrPlusWeightsLaterStrategies() {
   node.legal_actions.push_back(player_a_loses);
   node.legal_actions.push_back(player_a_wins);
 
-  GameTree::Node* player_a_loses_child = new GameTree::Node();
-  player_a_loses_child->state = FoldedState(0);
-  player_a_loses_child->is_terminal = true;
-  node.children[TestActionKey(ActionType::FOLD)] = player_a_loses_child;
-
-  GameTree::Node* player_a_wins_child = new GameTree::Node();
-  player_a_wins_child->state = FoldedState(1);
-  player_a_wins_child->is_terminal = true;
-  node.children[TestActionKey(ActionType::CALL, 1)] = player_a_wins_child;
+  AddTerminalChild(node, TestActionKey(ActionType::FOLD), FoldedState(0));
+  AddTerminalChild(node, TestActionKey(ActionType::CALL, 1), FoldedState(1));
 
   Hand player_a_hand;
   Hand player_b_hand;
   std::vector<double> reach_probabilities = {1.0, 1.0};
-  solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
-  solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 1, 0, 1);
+  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
+  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 1, 0, 1);
 
   const Strategy strategy = solver.get_equilibrium_strategy();
   const auto action_probs = strategy.get_strategy(strategy.get_info_sets()[0]);

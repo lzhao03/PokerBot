@@ -16,12 +16,15 @@ void Expect(bool condition, const char* message) {
 poker::Hand MakeHand(int first_rank, poker::Suit first_suit, int second_rank,
                      poker::Suit second_suit) {
   poker::Hand hand;
-  poker::Card* first = hand.add_cards();
-  first->set_rank(first_rank);
-  first->set_suit(first_suit);
-  poker::Card* second = hand.add_cards();
-  second->set_rank(second_rank);
-  second->set_suit(second_suit);
+  poker::Card first;
+  first.set_rank(first_rank);
+  first.set_suit(first_suit);
+  *hand.add_cards() = first;
+
+  poker::Card second;
+  second.set_rank(second_rank);
+  second.set_suit(second_suit);
+  *hand.add_cards() = second;
   return hand;
 }
 

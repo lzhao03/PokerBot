@@ -19,47 +19,30 @@ int Strategy::get_or_create_info_set_id(const std::string& info_set_key) {
   return id;
 }
 
-Strategy::InfoSetData* Strategy::find_info_set(
-    const std::string& info_set_key) {
-  auto existing = info_set_ids_.find(info_set_key);
-  if (existing == info_set_ids_.end()) {
-    return nullptr;
-  }
-  return &info_sets_[existing->second];
-}
-
-const Strategy::InfoSetData* Strategy::find_info_set(
-    const std::string& info_set_key) const {
-  auto existing = info_set_ids_.find(info_set_key);
-  if (existing == info_set_ids_.end()) {
-    return nullptr;
-  }
-  return &info_sets_[existing->second];
-}
-
-size_t Strategy::ensure_action(InfoSetData* info_set, int action_id) {
-  auto existing = std::find(info_set->action_ids.begin(),
-                            info_set->action_ids.end(), action_id);
-  if (existing != info_set->action_ids.end()) {
-    return static_cast<size_t>(existing - info_set->action_ids.begin());
+size_t Strategy::ensure_action(InfoSetData& info_set, int action_id) {
+  auto existing = std::find(info_set.action_ids.begin(),
+                            info_set.action_ids.end(), action_id);
+  if (existing != info_set.action_ids.end()) {
+    return static_cast<size_t>(existing - info_set.action_ids.begin());
   }
 
-  info_set->action_ids.push_back(action_id);
-  info_set->probabilities.push_back(0.0);
-  return info_set->action_ids.size() - 1;
+  info_set.action_ids.push_back(action_id);
+  info_set.probabilities.push_back(0.0);
+  return info_set.action_ids.size() - 1;
 }
 
 Strategy::ActionProbabilities Strategy::get_strategy(
     const std::string& info_set_key) const {
-  const InfoSetData* info_set = find_info_set(info_set_key);
-  if (info_set == nullptr) {
+  auto existing = info_set_ids_.find(info_set_key);
+  if (existing == info_set_ids_.end()) {
     return ActionProbabilities();
   }
+  const InfoSetData& info_set = info_sets_[existing->second];
 
   ActionProbabilities strategy;
-  strategy.reserve(info_set->action_ids.size());
-  for (size_t i = 0; i < info_set->action_ids.size(); ++i) {
-    strategy[info_set->action_ids[i]] = info_set->probabilities[i];
+  strategy.reserve(info_set.action_ids.size());
+  for (size_t i = 0; i < info_set.action_ids.size(); ++i) {
+    strategy[info_set.action_ids[i]] = info_set.probabilities[i];
   }
   return strategy;
 }
@@ -95,19 +78,20 @@ void Strategy::update(const std::string& info_set_key,
 
 double Strategy::get_action_probability(const std::string& info_set_key,
                                         int action_id) const {
-  const InfoSetData* info_set = find_info_set(info_set_key);
-  if (info_set == nullptr) {
+  auto existing_info_set = info_set_ids_.find(info_set_key);
+  if (existing_info_set == info_set_ids_.end()) {
     return 0.0;
   }
+  const InfoSetData& info_set = info_sets_[existing_info_set->second];
 
-  auto action = std::find(info_set->action_ids.begin(),
-                          info_set->action_ids.end(), action_id);
-  if (action == info_set->action_ids.end()) {
+  auto action = std::find(info_set.action_ids.begin(),
+                          info_set.action_ids.end(), action_id);
+  if (action == info_set.action_ids.end()) {
     return 0.0;
   }
   const size_t index =
-      static_cast<size_t>(action - info_set->action_ids.begin());
-  return info_set->probabilities[index];
+      static_cast<size_t>(action - info_set.action_ids.begin());
+  return info_set.probabilities[index];
 }
 
 void Strategy::set_action_probability(const std::string& info_set_key,
@@ -115,7 +99,7 @@ void Strategy::set_action_probability(const std::string& info_set_key,
                                       double probability) {
   const int info_set_id = get_or_create_info_set_id(info_set_key);
   InfoSetData& info_set = info_sets_[info_set_id];
-  const size_t action_index = ensure_action(&info_set, action_id);
+  const size_t action_index = ensure_action(info_set, action_id);
   info_set.probabilities[action_index] = probability;
 }
 
@@ -138,20 +122,24 @@ void Strategy::clear() {
 }
 
 void Strategy::normalize(const std::string& info_set_key) {
-  InfoSetData* info_set = find_info_set(info_set_key);
-  if (info_set == nullptr || info_set->probabilities.empty()) {
+  auto existing = info_set_ids_.find(info_set_key);
+  if (existing == info_set_ids_.end()) {
+    return;
+  }
+  InfoSetData& info_set = info_sets_[existing->second];
+  if (info_set.probabilities.empty()) {
     return;
   }
 
-  double sum = std::accumulate(info_set->probabilities.begin(),
-                               info_set->probabilities.end(), 0.0);
+  double sum = std::accumulate(info_set.probabilities.begin(),
+                               info_set.probabilities.end(), 0.0);
   if (sum > 0.0) {
-    for (double& probability : info_set->probabilities) {
+    for (double& probability : info_set.probabilities) {
       probability /= sum;
     }
   } else {
-    const double uniform_prob = 1.0 / info_set->probabilities.size();
-    for (double& probability : info_set->probabilities) {
+    const double uniform_prob = 1.0 / info_set.probabilities.size();
+    for (double& probability : info_set.probabilities) {
       probability = uniform_prob;
     }
   }

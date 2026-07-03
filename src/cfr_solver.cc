@@ -107,40 +107,36 @@ int ChanceCardsKey(const std::vector<Card>& cards) {
   return -1 - key;
 }
 
-GameTree::Node* CachedChanceChild(GameTree* game_tree,
-                                  GameTree::Node* node,
+GameTree::Node& CachedChanceChild(GameTree& game_tree,
+                                  GameTree::Node& node,
                                   const std::vector<Card>& cards,
-                                  int64_t* created_nodes) {
+                                  int64_t& created_nodes) {
   const int child_key = ChanceCardsKey(cards);
-  auto child = node->children.find(child_key);
-  if (child != node->children.end()) {
-    return child->second;
+  auto child = node.children.find(child_key);
+  if (child != node.children.end()) {
+    return *child->second;
   }
 
-  GameTree::Node* child_node = game_tree->create_chance_child_node(node, cards);
-  node->children[child_key] = child_node;
-  if (created_nodes != nullptr) {
-    ++(*created_nodes);
-  }
-  return child_node;
+  auto child_node = game_tree.create_chance_child_node(node, cards);
+  auto inserted = node.children.emplace(child_key, std::move(child_node));
+  ++created_nodes;
+  return *inserted.first->second;
 }
 
-GameTree::Node* CachedActionChild(GameTree* game_tree,
-                                  GameTree::Node* node,
+GameTree::Node& CachedActionChild(GameTree& game_tree,
+                                  GameTree::Node& node,
                                   const Action& action,
                                   int action_id,
-                                  int64_t* created_nodes) {
-  auto child = node->children.find(action_id);
-  if (child != node->children.end()) {
-    return child->second;
+                                  int64_t& created_nodes) {
+  auto child = node.children.find(action_id);
+  if (child != node.children.end()) {
+    return *child->second;
   }
 
-  GameTree::Node* child_node = game_tree->create_child_node(node, action);
-  node->children.emplace(action_id, child_node);
-  if (created_nodes != nullptr) {
-    ++(*created_nodes);
-  }
-  return child_node;
+  auto child_node = game_tree.create_child_node(node, action);
+  auto inserted = node.children.emplace(action_id, std::move(child_node));
+  ++created_nodes;
+  return *inserted.first->second;
 }
 
 int RoundedContribution(const BoardState& state, int player) {
@@ -178,40 +174,38 @@ CanonicalPublicStateKey MakeCanonicalPublicStateKey(const BoardState& state) {
   return key;
 }
 
-void HashCombine(size_t* seed, int value) {
-  *seed ^= std::hash<int>{}(value) + 0x9e3779b9 + (*seed << 6) + (*seed >> 2);
+void HashCombine(size_t& seed, int value) {
+  seed ^= std::hash<int>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 }
 
 template <size_t N>
-void HashArray(size_t* seed, const std::array<int, N>& values) {
+void HashArray(size_t& seed, const std::array<int, N>& values) {
   for (int value : values) {
     HashCombine(seed, value);
   }
 }
 
-void AppendInt(std::string* out, int value) {
-  out->append(std::to_string(value));
+void AppendInt(std::string& out, int value) {
+  out.append(std::to_string(value));
 }
 
-void AppendEncodedCard(std::string* out, int encoded_card) {
+void AppendEncodedCard(std::string& out, int encoded_card) {
   AppendInt(out, encoded_card / 8);
-  out->push_back(':');
+  out.push_back(':');
   AppendInt(out, encoded_card % 8);
 }
 
 struct WeightedHands {
-  const WeightedHandRange* hands = nullptr;
-  std::discrete_distribution<size_t> distribution;
+  explicit WeightedHands(const WeightedHandRange& hands)
+      : hands(hands),
+        distribution(hands.weights.begin(), hands.weights.end()) {}
 
-  void reset(const WeightedHandRange& new_hands) {
-    hands = &new_hands;
-    distribution = std::discrete_distribution<size_t>(
-        hands->weights.begin(), hands->weights.end());
-  }
+  const WeightedHandRange& hands;
+  std::discrete_distribution<size_t> distribution;
 };
 
-Hand SampleWeightedHand(WeightedHands* hands, std::mt19937* rng) {
-  return hands->hands->hands[hands->distribution(*rng)];
+Hand SampleWeightedHand(WeightedHands& hands, std::mt19937& rng) {
+  return hands.hands.hands[hands.distribution(rng)];
 }
 
 double StrategyActionProbability(const Strategy& strategy,
@@ -243,19 +237,19 @@ int WorkerCountForSamples(int samples) {
 }
 
 template <typename EvaluateChild>
-double SampleChanceValue(GameTree* game_tree,
-                         GameTree::Node* node,
+double SampleChanceValue(GameTree& game_tree,
+                         GameTree::Node& node,
                          const Hand& player_a_hand,
                          const Hand& player_b_hand,
                          int samples,
-                         std::mt19937* rng,
-                         int64_t* created_nodes,
+                         std::mt19937& rng,
+                         int64_t& created_nodes,
                          EvaluateChild evaluate_child) {
   double value = 0.0;
   for (int i = 0; i < samples; ++i) {
     std::vector<Card> cards =
-        SampleStreetCards(node->state, player_a_hand, player_b_hand, rng);
-    GameTree::Node* child_node =
+        SampleStreetCards(node.state, player_a_hand, player_b_hand, rng);
+    GameTree::Node& child_node =
         CachedChanceChild(game_tree, node, cards, created_nodes);
     value += evaluate_child(child_node);
   }
@@ -298,20 +292,20 @@ bool CanonicalPublicStateKey::operator==(
 size_t CanonicalPublicStateKeyHash::operator()(
     const CanonicalPublicStateKey& key) const {
   size_t seed = 0;
-  HashCombine(&seed, key.street);
-  HashCombine(&seed, key.pot);
-  HashCombine(&seed, key.stack_a);
-  HashCombine(&seed, key.stack_b);
-  HashCombine(&seed, key.all_in);
-  HashCombine(&seed, key.folded_player);
-  HashCombine(&seed, key.player_to_act);
-  HashArray(&seed, key.player_contributions);
-  HashCombine(&seed, key.board_size);
-  HashArray(&seed, key.board_cards);
-  HashCombine(&seed, key.history_bucket);
-  HashCombine(&seed, key.last_player);
-  HashCombine(&seed, key.last_action);
-  HashCombine(&seed, key.last_amount);
+  HashCombine(seed, key.street);
+  HashCombine(seed, key.pot);
+  HashCombine(seed, key.stack_a);
+  HashCombine(seed, key.stack_b);
+  HashCombine(seed, key.all_in);
+  HashCombine(seed, key.folded_player);
+  HashCombine(seed, key.player_to_act);
+  HashArray(seed, key.player_contributions);
+  HashCombine(seed, key.board_size);
+  HashArray(seed, key.board_cards);
+  HashCombine(seed, key.history_bucket);
+  HashCombine(seed, key.last_player);
+  HashCombine(seed, key.last_action);
+  HashCombine(seed, key.last_amount);
   return seed;
 }
 
@@ -332,24 +326,24 @@ bool CFRSolver::InfoSetKey::operator==(const InfoSetKey& other) const {
 
 size_t CFRSolver::InfoSetKeyHash::operator()(const InfoSetKey& key) const {
   size_t seed = 0;
-  HashCombine(&seed, key.player);
-  HashCombine(&seed, key.street);
-  HashCombine(&seed, key.pot);
-  HashCombine(&seed, key.stack_a);
-  HashCombine(&seed, key.stack_b);
-  HashCombine(&seed, key.all_in);
-  HashCombine(&seed, key.folded_player);
-  HashCombine(&seed, key.player_to_act);
-  HashCombine(&seed, key.player_contribution_size);
-  HashArray(&seed, key.player_contributions);
-  HashCombine(&seed, key.hand_size);
-  HashArray(&seed, key.hand_cards);
-  HashCombine(&seed, key.board_size);
-  HashArray(&seed, key.board_cards);
-  HashCombine(&seed, key.history_size);
-  HashArray(&seed, key.history_values);
+  HashCombine(seed, key.player);
+  HashCombine(seed, key.street);
+  HashCombine(seed, key.pot);
+  HashCombine(seed, key.stack_a);
+  HashCombine(seed, key.stack_b);
+  HashCombine(seed, key.all_in);
+  HashCombine(seed, key.folded_player);
+  HashCombine(seed, key.player_to_act);
+  HashCombine(seed, key.player_contribution_size);
+  HashArray(seed, key.player_contributions);
+  HashCombine(seed, key.hand_size);
+  HashArray(seed, key.hand_cards);
+  HashCombine(seed, key.board_size);
+  HashArray(seed, key.board_cards);
+  HashCombine(seed, key.history_size);
+  HashArray(seed, key.history_values);
   for (int value : key.history_overflow) {
-    HashCombine(&seed, value);
+    HashCombine(seed, value);
   }
   return seed;
 }
@@ -387,17 +381,13 @@ CFRSolver::CFRSolver(
     BoardState initial_state)
   : config_(config),
     initial_state_(std::move(initial_state)),
-    game_tree_(new GameTree(config)),
+    game_tree_(std::make_unique<GameTree>(config)),
     rng_(12345),
     cumulative_root_utility_(0.0),
     iterations_run_(0),
     cfr_update_count_(0),
     utility_cache_(std::move(utility_cache)),
     continuation_value_provider_(std::move(continuation_value_provider)) {
-}
-
-CFRSolver::~CFRSolver() {
-  delete game_tree_;
 }
 
 void CFRSolver::set_continuation_value_provider(
@@ -408,12 +398,11 @@ void CFRSolver::set_continuation_value_provider(
   continuation_value_provider_ = std::move(provider);
 }
 
-GameTree::Node* CFRSolver::get_or_build_root() {
-  GameTree::Node* root = game_tree_->get_root();
-  if (root == nullptr) {
+GameTree::Node& CFRSolver::get_or_build_root() {
+  if (!game_tree_->has_root()) {
     return game_tree_->build_tree(initial_state_);
   }
-  return root;
+  return game_tree_->root();
 }
 
 std::vector<CFRSolver::RangeDeal> CFRSolver::build_compatible_range_deals(
@@ -488,17 +477,17 @@ CFRSolver::InfoSetKey CFRSolver::make_info_set_key(
 }
 
 void CFRSolver::ensure_info_set_actions(
-    InfoSetData* info_set,
+    InfoSetData& info_set,
     const std::vector<Action>& legal_actions) {
   for (const Action& action : legal_actions) {
     int action_id = ActionKey(action);
-    if (std::find(info_set->action_ids.begin(), info_set->action_ids.end(),
-                  action_id) != info_set->action_ids.end()) {
+    if (std::find(info_set.action_ids.begin(), info_set.action_ids.end(),
+                  action_id) != info_set.action_ids.end()) {
       continue;
     }
-    info_set->action_ids.push_back(action_id);
-    info_set->cumulative_regrets.push_back(0.0);
-    info_set->cumulative_strategy.push_back(0.0);
+    info_set.action_ids.push_back(action_id);
+    info_set.cumulative_regrets.push_back(0.0);
+    info_set.cumulative_strategy.push_back(0.0);
   }
 }
 
@@ -507,67 +496,58 @@ int CFRSolver::get_or_create_info_set_id(
     const std::vector<Action>& legal_actions) {
   auto existing = info_set_ids_.find(key);
   if (existing != info_set_ids_.end()) {
-    ensure_info_set_actions(&info_sets_[existing->second], legal_actions);
+    ensure_info_set_actions(info_sets_[existing->second], legal_actions);
     return existing->second;
   }
 
   const int id = static_cast<int>(info_sets_.size());
   InfoSetData data;
   data.key = key;
-  ensure_info_set_actions(&data, legal_actions);
+  ensure_info_set_actions(data, legal_actions);
   info_sets_.push_back(std::move(data));
   info_set_ids_.emplace(info_sets_.back().key, id);
   return id;
-}
-
-const CFRSolver::InfoSetData* CFRSolver::find_info_set(
-    const InfoSetKey& key) const {
-  auto existing = info_set_ids_.find(key);
-  if (existing == info_set_ids_.end()) {
-    return nullptr;
-  }
-  return &info_sets_[existing->second];
 }
 
 std::string CFRSolver::info_set_key_to_string(const InfoSetKey& key) const {
   std::string text;
   text.reserve(128 + key.history_size * 4);
   text.push_back('P');
-  AppendInt(&text, key.player);
+  AppendInt(text, key.player);
   text.append(":H[");
   for (int i = 0; i < key.hand_size; ++i) {
     if (i > 0) {
       text.push_back(',');
     }
-    AppendEncodedCard(&text, key.hand_cards[i]);
+    AppendEncodedCard(text, key.hand_cards[i]);
   }
   text.append("]:B[");
   for (int i = 0; i < key.board_size; ++i) {
     if (i > 0) {
       text.push_back(',');
     }
-    AppendEncodedCard(&text, key.board_cards[i]);
+    AppendEncodedCard(text, key.board_cards[i]);
   }
   text.append("]:S");
-  AppendInt(&text, key.street);
+  AppendInt(text, key.street);
   text.append(":POT");
-  AppendInt(&text, key.pot);
+  AppendInt(text, key.pot);
   text.append(":ST");
-  AppendInt(&text, key.stack_a);
+  AppendInt(text, key.stack_a);
   text.push_back(',');
-  AppendInt(&text, key.stack_b);
+  AppendInt(text, key.stack_b);
   text.append(":AI");
-  AppendInt(&text, key.all_in);
+  AppendInt(text, key.all_in);
   text.append(":F");
-  AppendInt(&text, key.folded_player);
+  AppendInt(text, key.folded_player);
   text.append(":T");
-  AppendInt(&text, key.player_to_act);
+  AppendInt(text, key.player_to_act);
   text.append(":C[");
   for (int i = 0; i < key.player_contribution_size; ++i) {
     if (i > 0) {
       text.push_back(',');
     }
-    AppendInt(&text, key.player_contributions[i]);
+    AppendInt(text, key.player_contributions[i]);
   }
   text.append("]:A[");
   for (int i = 0; i < key.history_size; i += 3) {
@@ -580,11 +560,11 @@ std::string CFRSolver::info_set_key_to_string(const InfoSetKey& key) const {
       }
       return key.history_overflow[index - InfoSetKey::kInlineHistoryValues];
     };
-    AppendInt(&text, history_value(i));
+    AppendInt(text, history_value(i));
     text.push_back(':');
-    AppendInt(&text, history_value(i + 1));
+    AppendInt(text, history_value(i + 1));
     text.push_back(':');
-    AppendInt(&text, history_value(i + 2));
+    AppendInt(text, history_value(i + 2));
   }
   text.push_back(']');
   return text;
@@ -609,7 +589,7 @@ double CFRSolver::regret_for_info_set(const std::string& info_set_key,
 }
 
 void CFRSolver::run(int iterations) {
-  run_iterations(iterations, nullptr, nullptr, true);
+  run_iterations(iterations, std::nullopt, std::nullopt, true);
 }
 
 void CFRSolver::run(int iterations, const Hand& player_a_hand,
@@ -618,7 +598,7 @@ void CFRSolver::run(int iterations, const Hand& player_a_hand,
     return;
   }
 
-  GameTree::Node* root = get_or_build_root();
+  GameTree::Node& root = get_or_build_root();
   const int max_depth = config_.max_depth();
   for (int i = 0; i < iterations; ++i) {
     std::vector<double> reach_probabilities(2, 1.0);
@@ -631,23 +611,28 @@ void CFRSolver::run(int iterations, const Hand& player_a_hand,
 
 void CFRSolver::run(int iterations, const HandRange& player_a_range,
                     const HandRange& player_b_range) {
-  run_iterations(iterations, &player_a_range, &player_b_range, false);
+  run_iterations(iterations, std::cref(player_a_range),
+                 std::cref(player_b_range), false);
 }
 
-void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
-                               const HandRange* player_b_range,
+void CFRSolver::run_iterations(int iterations,
+                               OptionalHandRange player_a_range,
+                               OptionalHandRange player_b_range,
                                bool train_swapped) {
-  const WeightedHandRange* player_a_hands = nullptr;
-  const WeightedHandRange* player_b_hands = nullptr;
+  OptionalWeightedHandRange player_a_hands;
+  OptionalWeightedHandRange player_b_hands;
   std::vector<RangeDeal> range_deals;
   std::vector<double> range_deal_weights;
   std::discrete_distribution<size_t> range_deal_distribution;
-  if (iterations > 0 && player_a_range != nullptr &&
-      player_b_range != nullptr) {
-    player_a_hands = &player_a_range->get_all_weighted_combos();
-    player_b_hands = &player_b_range->get_all_weighted_combos();
+  if (iterations > 0 && player_a_range.has_value() &&
+      player_b_range.has_value()) {
+    player_a_hands =
+        std::cref(player_a_range->get().get_all_weighted_combos());
+    player_b_hands =
+        std::cref(player_b_range->get().get_all_weighted_combos());
     range_deals =
-        build_compatible_range_deals(*player_a_hands, *player_b_hands);
+        build_compatible_range_deals(player_a_hands->get(),
+                                     player_b_hands->get());
     if (range_deals.empty()) {
       throw std::invalid_argument(
           "Could not sample non-overlapping hands from ranges");
@@ -664,14 +649,14 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
   if (log) {
     std::cout << "Preparing game tree..." << std::endl;
   }
-  bool had_root = game_tree_->get_root() != nullptr;
-  GameTree::Node* root = get_or_build_root();
+  bool had_root = game_tree_->has_root();
+  GameTree::Node& root = get_or_build_root();
   if (log) {
     if (!had_root) {
-      std::cout << "Game tree built with " << root->legal_actions.size()
+      std::cout << "Game tree built with " << root.legal_actions.size()
                 << " legal actions at root" << std::endl;
     } else {
-      std::cout << "Reusing game tree with " << root->legal_actions.size()
+      std::cout << "Reusing game tree with " << root.legal_actions.size()
                 << " legal actions at root" << std::endl;
     }
   }
@@ -683,15 +668,15 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
   for (int i = 0; i < iterations; ++i) {
     Hand player_a_hand;
     Hand player_b_hand;
-    if (player_a_range == nullptr || player_b_range == nullptr) {
+    if (!player_a_range.has_value() || !player_b_range.has_value()) {
       std::vector<Card> deck = BuildDeck();
       std::shuffle(deck.begin(), deck.end(), rng_);
-      player_a_hand = DealHand(&deck);
-      player_b_hand = DealHand(&deck);
+      player_a_hand = DealHand(deck);
+      player_b_hand = DealHand(deck);
     } else {
       const RangeDeal& deal = range_deals[range_deal_distribution(rng_)];
-      player_a_hand = player_a_hands->hands[deal.player_a_index];
-      player_b_hand = player_b_hands->hands[deal.player_b_index];
+      player_a_hand = player_a_hands->get().hands[deal.player_a_index];
+      player_b_hand = player_b_hands->get().hands[deal.player_b_index];
     }
     
     const int max_depth = config_.max_depth();
@@ -700,10 +685,10 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
     }
     int cfr_iteration = iterations_run_;
     std::vector<double> reach_probabilities(2, 1.0);
-    const WeightedHandRange* player_a_context_range =
-        max_depth > 0 ? player_a_hands : nullptr;
-    const WeightedHandRange* player_b_context_range =
-        max_depth > 0 ? player_b_hands : nullptr;
+    OptionalWeightedHandRange player_a_context_range =
+        max_depth > 0 ? player_a_hands : std::nullopt;
+    OptionalWeightedHandRange player_b_context_range =
+        max_depth > 0 ? player_b_hands : std::nullopt;
     double dealt_value = cfr_with_ranges(
         root, player_a_hand, player_b_hand, reach_probabilities,
         cfr_iteration, 0, max_depth, player_a_context_range,
@@ -714,7 +699,7 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
       std::vector<double> swapped_reach_probabilities(2, 1.0);
       double swapped_value = cfr_with_ranges(
           root, player_b_hand, player_a_hand, swapped_reach_probabilities,
-          cfr_iteration, 0, max_depth, nullptr, nullptr);
+          cfr_iteration, 0, max_depth, std::nullopt, std::nullopt);
       cumulative_root_utility_ += (dealt_value + swapped_value) / 2.0;
     } else {
       cumulative_root_utility_ += dealt_value;
@@ -731,7 +716,7 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
   }
 }
 
-double CFRSolver::cfr(GameTree::Node* node, 
+double CFRSolver::cfr(GameTree::Node& node,
                       const Hand& player_a_hand, 
                       const Hand& player_b_hand,
                       std::vector<double>& reach_probabilities, 
@@ -740,35 +725,35 @@ double CFRSolver::cfr(GameTree::Node* node,
                       int max_depth) {
   return cfr_with_ranges(node, player_a_hand, player_b_hand,
                          reach_probabilities, iteration, depth, max_depth,
-                         nullptr, nullptr);
+                         std::nullopt, std::nullopt);
 }
 
 double CFRSolver::cfr_with_ranges(
-    GameTree::Node* node,
+    GameTree::Node& node,
     const Hand& player_a_hand,
     const Hand& player_b_hand,
     std::vector<double>& reach_probabilities,
     int iteration,
     int depth,
     int max_depth,
-    const WeightedHandRange* player_a_range,
-    const WeightedHandRange* player_b_range) {
+    OptionalWeightedHandRange player_a_range,
+    OptionalWeightedHandRange player_b_range) {
   // If the node is a terminal node, return the utility
-  if (node->is_terminal) {
+  if (node.is_terminal) {
     ++traversal_stats_.terminal_utility_calls;
-    if (node->state.folded_player() >= 0) {
+    if (node.state.folded_player() >= 0) {
       ++traversal_stats_.fold_utility_calls;
     } else {
       ++traversal_stats_.showdown_utility_calls;
     }
     if (max_depth > 0) {
-      return game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
+      return game_tree_->get_utility(node.state, player_a_hand, player_b_hand);
     }
-    return utility(node->state, player_a_hand, player_b_hand);
+    return utility(node.state, player_a_hand, player_b_hand);
   }
 
   // Chance card deals are not player decisions, so they do not consume CFR depth.
-  if (node->is_chance_node) {
+  if (node.is_chance_node) {
     return chance_sampling_cfr(node, player_a_hand, player_b_hand,
                                reach_probabilities, iteration, depth, max_depth,
                                player_a_range, player_b_range);
@@ -777,22 +762,22 @@ double CFRSolver::cfr_with_ranges(
   // Check depth limit to prevent infinite recursion
   if (max_depth > 0 && depth >= max_depth) {
     ContinuationContext context = build_continuation_context(
-        node->state, player_a_hand, player_b_hand, player_a_range,
+        node.state, player_a_hand, player_b_hand, player_a_range,
         player_b_range);
-    return continuation_value_provider_->value(game_tree_, context);
+    return continuation_value_provider_->value(*game_tree_, context);
   }
   
   // Get the player to act at this node
-  int player = node->player_to_act;
+  int player = node.player_to_act;
   
   // Get the player's hand
   const Hand& player_hand = (player == 0) ? player_a_hand : player_b_hand;
   
-  InfoSetKey info_set_key = make_info_set_key(node->state, player, player_hand);
+  InfoSetKey info_set_key = make_info_set_key(node.state, player, player_hand);
   const int info_set_id =
-      get_or_create_info_set_id(info_set_key, node->legal_actions);
+      get_or_create_info_set_id(info_set_key, node.legal_actions);
   std::vector<ActionChoice> action_choices =
-      get_action_choices(info_set_id, node->legal_actions);
+      get_action_choices(info_set_id, node.legal_actions);
   
   // Initialize the expected value for the player
   double node_value = 0.0;
@@ -804,32 +789,30 @@ double CFRSolver::cfr_with_ranges(
   }
   // For each action, recursively call CFR and compute the expected value
   for (ActionChoice& choice : action_choices) {
-    const Action& action = *choice.action;
+    const Action& action = choice.action;
     int action_id = choice.action_id;
     
-    GameTree::Node* child_node = CachedActionChild(
-        game_tree_, node, action, action_id,
-        &traversal_stats_.child_nodes_created);
+    GameTree::Node& child_node = CachedActionChild(
+        *game_tree_, node, action, action_id,
+        traversal_stats_.child_nodes_created);
     
     // Update reach probabilities for the recursive call
     const double previous_reach_probability = reach_probabilities[player];
     reach_probabilities[player] =
         previous_reach_probability * choice.probability;
 
-    const WeightedHandRange* child_player_a_range =
-        player_a_range;
-    const WeightedHandRange* child_player_b_range =
-        player_b_range;
-    if (player == 0 && player_a_range != nullptr) {
+    OptionalWeightedHandRange child_player_a_range = player_a_range;
+    OptionalWeightedHandRange child_player_b_range = player_b_range;
+    if (player == 0 && player_a_range.has_value()) {
       condition_range_for_action(
-          *player_a_range, node->state, player, legal_action_ids,
-          action_id, &conditioned_player_range);
-      child_player_a_range = &conditioned_player_range;
-    } else if (player == 1 && player_b_range != nullptr) {
+          player_a_range->get(), node.state, player, legal_action_ids,
+          action_id, conditioned_player_range);
+      child_player_a_range = std::cref(conditioned_player_range);
+    } else if (player == 1 && player_b_range.has_value()) {
       condition_range_for_action(
-          *player_b_range, node->state, player, legal_action_ids,
-          action_id, &conditioned_player_range);
-      child_player_b_range = &conditioned_player_range;
+          player_b_range->get(), node.state, player, legal_action_ids,
+          action_id, conditioned_player_range);
+      child_player_b_range = std::cref(conditioned_player_range);
     }
     
     // Recursive call to get the expected value of this action
@@ -850,7 +833,7 @@ double CFRSolver::cfr_with_ranges(
     ++traversal_stats_.canonical_state_visits;
     if (config_.enable_logging()) {
       if (visited_canonical_states_.insert(
-              MakeCanonicalPublicStateKey(node->state)).second) {
+              MakeCanonicalPublicStateKey(node.state)).second) {
         ++traversal_stats_.unique_canonical_states;
       } else {
         ++traversal_stats_.duplicate_canonical_state_visits;
@@ -858,7 +841,7 @@ double CFRSolver::cfr_with_ranges(
     }
     traversal_stats_.max_decision_depth =
         std::max(traversal_stats_.max_decision_depth, depth);
-    switch (node->state.street()) {
+    switch (node.state.street()) {
       case Street::PREFLOP:
         ++traversal_stats_.preflop_updates;
         break;
@@ -901,21 +884,21 @@ double CFRSolver::cfr_with_ranges(
   return node_value;
 }
 
-double CFRSolver::chance_sampling_cfr(GameTree::Node* node, 
+double CFRSolver::chance_sampling_cfr(GameTree::Node& node,
                       const Hand& player_a_hand, 
                       const Hand& player_b_hand,
                       std::vector<double>& reach_probabilities, 
                       int iteration,
                       int depth,
                       int max_depth,
-                      const WeightedHandRange* player_a_range,
-                      const WeightedHandRange* player_b_range) {
+                      OptionalWeightedHandRange player_a_range,
+                      OptionalWeightedHandRange player_b_range) {
   int samples = ChanceSamples(config_);
   traversal_stats_.chance_samples += samples;
   return SampleChanceValue(
-      game_tree_, node, player_a_hand, player_b_hand, samples,
-      &rng_, &traversal_stats_.child_nodes_created,
-      [&](GameTree::Node* child_node) {
+      *game_tree_, node, player_a_hand, player_b_hand, samples,
+      rng_, traversal_stats_.child_nodes_created,
+      [&](GameTree::Node& child_node) {
         return cfr_with_ranges(child_node, player_a_hand, player_b_hand,
                                reach_probabilities, iteration, depth,
                                max_depth, player_a_range, player_b_range);
@@ -937,31 +920,32 @@ double CFRSolver::action_probability_for_hand(
   }
 
   InfoSetKey key = make_info_set_key(state, player, hand);
-  const InfoSetData* info_set = find_info_set(key);
-  if (info_set != nullptr) {
+  auto existing_info_set = info_set_ids_.find(key);
+  if (existing_info_set != info_set_ids_.end()) {
+    const InfoSetData& info_set = info_sets_[existing_info_set->second];
     double sum_positive_regrets = 0.0;
     for (int legal_action_id : legal_action_ids) {
-      auto action = std::find(info_set->action_ids.begin(),
-                              info_set->action_ids.end(), legal_action_id);
-      if (action != info_set->action_ids.end()) {
+      auto action = std::find(info_set.action_ids.begin(),
+                              info_set.action_ids.end(), legal_action_id);
+      if (action != info_set.action_ids.end()) {
         const size_t index =
-            static_cast<size_t>(action - info_set->action_ids.begin());
+            static_cast<size_t>(action - info_set.action_ids.begin());
         sum_positive_regrets += std::max(0.0,
-                                         info_set->cumulative_regrets[index]);
+                                         info_set.cumulative_regrets[index]);
       }
     }
     if (sum_positive_regrets <= 0.0) {
       return 1.0 / legal_action_ids.size();
     }
 
-    auto action = std::find(info_set->action_ids.begin(),
-                            info_set->action_ids.end(), action_id);
-    if (action == info_set->action_ids.end()) {
+    auto action = std::find(info_set.action_ids.begin(),
+                            info_set.action_ids.end(), action_id);
+    if (action == info_set.action_ids.end()) {
       return 0.0;
     }
     const size_t index =
-        static_cast<size_t>(action - info_set->action_ids.begin());
-    return std::max(0.0, info_set->cumulative_regrets[index]) /
+        static_cast<size_t>(action - info_set.action_ids.begin());
+    return std::max(0.0, info_set.cumulative_regrets[index]) /
            sum_positive_regrets;
   }
 
@@ -974,9 +958,9 @@ void CFRSolver::condition_range_for_action(
     int player,
     const std::vector<int>& legal_action_ids,
     int action_id,
-    WeightedHandRange* conditioned_range) const {
-  conditioned_range->clear();
-  conditioned_range->reserve(range.size());
+    WeightedHandRange& conditioned_range) const {
+  conditioned_range.clear();
+  conditioned_range.reserve(range.size());
   for (size_t i = 0; i < range.size(); ++i) {
     if (range.weights[i] <= 0.0) {
       continue;
@@ -985,7 +969,7 @@ void CFRSolver::condition_range_for_action(
         state, player, range.hands[i], legal_action_ids, action_id);
     double conditioned_weight = range.weights[i] * probability;
     if (conditioned_weight > 0.0) {
-      conditioned_range->add(range.hands[i], conditioned_weight);
+      conditioned_range.add(range.hands[i], conditioned_weight);
     }
   }
 }
@@ -994,13 +978,13 @@ ContinuationContext CFRSolver::build_continuation_context(
     const BoardState& state,
     const Hand& player_a_hand,
     const Hand& player_b_hand,
-    const WeightedHandRange* player_a_range,
-    const WeightedHandRange* player_b_range) const {
+    OptionalWeightedHandRange player_a_range,
+    OptionalWeightedHandRange player_b_range) const {
   ContinuationContext context =
       ContinuationContext::ExactHands(state, player_a_hand, player_b_hand);
-  if (player_a_range != nullptr && player_b_range != nullptr) {
-    context.player_a_range = PublicCompatibleRange(*player_a_range, state);
-    context.player_b_range = PublicCompatibleRange(*player_b_range, state);
+  if (player_a_range.has_value() && player_b_range.has_value()) {
+    context.player_a_range = PublicCompatibleRange(player_a_range->get(), state);
+    context.player_b_range = PublicCompatibleRange(player_b_range->get(), state);
   }
   return context;
 }
@@ -1130,7 +1114,7 @@ double CFRSolver::evaluate_strategy_samples(
 
   std::discrete_distribution<size_t> range_deal_distribution(
       range_deal_weights.begin(), range_deal_weights.end());
-  GameTree::Node* root = get_or_build_root();
+  GameTree::Node& root = get_or_build_root();
 
   double total = 0.0;
   for (int i = 0; i < samples; ++i) {
@@ -1142,53 +1126,56 @@ double CFRSolver::evaluate_strategy_samples(
   return total / samples;
 }
 
-double CFRSolver::evaluate_strategy_node(GameTree::Node* node,
+double CFRSolver::evaluate_strategy_node(GameTree::Node& node,
                                          const Hand& player_a_hand,
                                          const Hand& player_b_hand,
                                          const Strategy& strategy) {
-  if (node->is_terminal) {
-    return utility(node->state, player_a_hand, player_b_hand);
+  if (node.is_terminal) {
+    return utility(node.state, player_a_hand, player_b_hand);
   }
-  if (node->is_chance_node) {
+  if (node.is_chance_node) {
+    int64_t ignored_created_nodes = 0;
     return SampleChanceValue(
-        game_tree_, node, player_a_hand, player_b_hand, ChanceSamples(config_),
-        &rng_, nullptr, [&](GameTree::Node* child_node) {
+        *game_tree_, node, player_a_hand, player_b_hand, ChanceSamples(config_),
+        rng_, ignored_created_nodes, [&](GameTree::Node& child_node) {
           return evaluate_strategy_node(child_node, player_a_hand, player_b_hand,
                                         strategy);
         });
   }
-  if (node->legal_actions.empty()) {
+  if (node.legal_actions.empty()) {
     return 0.0;
   }
 
-  int player = node->player_to_act;
+  int player = node.player_to_act;
   if (player != 0 && player != 1) {
     return 0.0;
   }
 
   const Hand& player_hand = player == 0 ? player_a_hand : player_b_hand;
   std::string info_set_key = info_set_key_to_string(
-      make_info_set_key(node->state, player, player_hand));
+      make_info_set_key(node.state, player, player_hand));
 
   std::vector<int> action_ids;
-  action_ids.reserve(node->legal_actions.size());
+  action_ids.reserve(node.legal_actions.size());
   double probability_sum = 0.0;
-  for (const Action& action : node->legal_actions) {
+  for (const Action& action : node.legal_actions) {
     int action_id = ActionKey(action);
     action_ids.push_back(action_id);
     probability_sum += strategy.get_action_probability(info_set_key, action_id);
   }
 
   double value = 0.0;
-  for (size_t i = 0; i < node->legal_actions.size(); ++i) {
-    const Action& action = node->legal_actions[i];
+  int64_t ignored_created_nodes = 0;
+  for (size_t i = 0; i < node.legal_actions.size(); ++i) {
+    const Action& action = node.legal_actions[i];
     int action_id = action_ids[i];
     double probability = probability_sum > 0.0
                              ? strategy.get_action_probability(info_set_key, action_id) /
                                    probability_sum
-                             : 1.0 / node->legal_actions.size();
-    GameTree::Node* child_node =
-        CachedActionChild(game_tree_, node, action, action_id, nullptr);
+                             : 1.0 / node.legal_actions.size();
+    GameTree::Node& child_node =
+        CachedActionChild(*game_tree_, node, action, action_id,
+                          ignored_created_nodes);
     value += probability * evaluate_strategy_node(
                               child_node, player_a_hand, player_b_hand,
                               strategy);
@@ -1196,53 +1183,56 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node* node,
   return value;
 }
 
-double CFRSolver::best_response_value(GameTree::Node* node,
+double CFRSolver::best_response_value(GameTree::Node& node,
                                       const Hand& player_a_hand,
                                       const Hand& player_b_hand,
                                       const Strategy& strategy,
                                       int best_response_player) {
-  if (node->is_terminal) {
+  if (node.is_terminal) {
     double player_a_value =
-        utility(node->state, player_a_hand, player_b_hand);
+        utility(node.state, player_a_hand, player_b_hand);
     return best_response_player == 0 ? player_a_value : -player_a_value;
   }
-  if (node->is_chance_node) {
+  if (node.is_chance_node) {
+    int64_t ignored_created_nodes = 0;
     return SampleChanceValue(
-        game_tree_, node, player_a_hand, player_b_hand, ChanceSamples(config_),
-        &rng_, nullptr, [&](GameTree::Node* child_node) {
+        *game_tree_, node, player_a_hand, player_b_hand, ChanceSamples(config_),
+        rng_, ignored_created_nodes, [&](GameTree::Node& child_node) {
           return best_response_value(child_node, player_a_hand, player_b_hand,
                                      strategy, best_response_player);
         });
   }
-  if (node->legal_actions.empty()) {
+  if (node.legal_actions.empty()) {
     return 0.0;
   }
 
-  int player = node->player_to_act;
+  int player = node.player_to_act;
   if (player != 0 && player != 1) {
     return 0.0;
   }
 
   const Hand& player_hand = player == 0 ? player_a_hand : player_b_hand;
   std::string info_set_key = info_set_key_to_string(
-      make_info_set_key(node->state, player, player_hand));
+      make_info_set_key(node.state, player, player_hand));
 
   std::vector<int> action_ids;
-  action_ids.reserve(node->legal_actions.size());
+  action_ids.reserve(node.legal_actions.size());
   double probability_sum = 0.0;
-  for (const Action& action : node->legal_actions) {
+  for (const Action& action : node.legal_actions) {
     int action_id = ActionKey(action);
     action_ids.push_back(action_id);
     probability_sum += strategy.get_action_probability(info_set_key, action_id);
   }
 
+  int64_t ignored_created_nodes = 0;
   if (player == best_response_player) {
     double value = -std::numeric_limits<double>::infinity();
-    for (size_t i = 0; i < node->legal_actions.size(); ++i) {
-      const Action& action = node->legal_actions[i];
+    for (size_t i = 0; i < node.legal_actions.size(); ++i) {
+      const Action& action = node.legal_actions[i];
       int action_id = action_ids[i];
-      GameTree::Node* child_node =
-          CachedActionChild(game_tree_, node, action, action_id, nullptr);
+      GameTree::Node& child_node =
+          CachedActionChild(*game_tree_, node, action, action_id,
+                            ignored_created_nodes);
       value = std::max(value, best_response_value(
                                   child_node, player_a_hand, player_b_hand,
                                   strategy, best_response_player));
@@ -1251,15 +1241,16 @@ double CFRSolver::best_response_value(GameTree::Node* node,
   }
 
   double value = 0.0;
-  for (size_t i = 0; i < node->legal_actions.size(); ++i) {
-    const Action& action = node->legal_actions[i];
+  for (size_t i = 0; i < node.legal_actions.size(); ++i) {
+    const Action& action = node.legal_actions[i];
     int action_id = action_ids[i];
     double probability = probability_sum > 0.0
                              ? strategy.get_action_probability(info_set_key, action_id) /
                                    probability_sum
-                             : 1.0 / node->legal_actions.size();
-    GameTree::Node* child_node =
-        CachedActionChild(game_tree_, node, action, action_id, nullptr);
+                             : 1.0 / node.legal_actions.size();
+    GameTree::Node& child_node =
+        CachedActionChild(*game_tree_, node, action, action_id,
+                          ignored_created_nodes);
     value += probability * best_response_value(
                                child_node, player_a_hand, player_b_hand,
                                strategy, best_response_player);
@@ -1268,7 +1259,7 @@ double CFRSolver::best_response_value(GameTree::Node* node,
 }
 
 double CFRSolver::best_response_value_against_range(
-    GameTree::Node* node,
+    GameTree::Node& node,
     const Hand& best_response_hand,
     const WeightedHandRange& opponent_hands,
     const Strategy& strategy,
@@ -1278,7 +1269,7 @@ double CFRSolver::best_response_value_against_range(
     return 0.0;
   }
 
-  if (node->is_terminal) {
+  if (node.is_terminal) {
     double value = 0.0;
     for (size_t i = 0; i < opponent_hands.size(); ++i) {
       const Hand& player_a_hand =
@@ -1288,28 +1279,28 @@ double CFRSolver::best_response_value_against_range(
           best_response_player == 0 ? opponent_hands.hands[i]
                                     : best_response_hand;
       double player_a_value =
-          utility(node->state, player_a_hand, player_b_hand);
+          utility(node.state, player_a_hand, player_b_hand);
       value += opponent_hands.weights[i] *
                (best_response_player == 0 ? player_a_value : -player_a_value);
     }
     return value / total_weight;
   }
 
-  if (node->is_chance_node) {
+  if (node.is_chance_node) {
     double value = 0.0;
     int samples = ChanceSamples(config_);
-    WeightedHands weighted_opponents;
-    weighted_opponents.reset(opponent_hands);
+    WeightedHands weighted_opponents(opponent_hands);
+    int64_t ignored_created_nodes = 0;
     for (int i = 0; i < samples; ++i) {
-      Hand sampled_opponent = SampleWeightedHand(&weighted_opponents, &rng_);
+      Hand sampled_opponent = SampleWeightedHand(weighted_opponents, rng_);
       const Hand& player_a_hand =
           best_response_player == 0 ? best_response_hand : sampled_opponent;
       const Hand& player_b_hand =
           best_response_player == 0 ? sampled_opponent : best_response_hand;
       std::vector<Card> cards =
-          SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
-      GameTree::Node* child_node =
-          CachedChanceChild(game_tree_, node, cards, nullptr);
+          SampleStreetCards(node.state, player_a_hand, player_b_hand, rng_);
+      GameTree::Node& child_node =
+          CachedChanceChild(*game_tree_, node, cards, ignored_created_nodes);
       WeightedHandRange child_opponents;
       child_opponents.add(sampled_opponent, 1.0);
       value += best_response_value_against_range(
@@ -1319,21 +1310,23 @@ double CFRSolver::best_response_value_against_range(
     return value / samples;
   }
 
-  if (node->legal_actions.empty()) {
+  if (node.legal_actions.empty()) {
     return 0.0;
   }
 
-  int player = node->player_to_act;
+  int player = node.player_to_act;
   if (player != 0 && player != 1) {
     return 0.0;
   }
 
+  int64_t ignored_created_nodes = 0;
   if (player == best_response_player) {
     double value = -std::numeric_limits<double>::infinity();
-    for (const Action& action : node->legal_actions) {
+    for (const Action& action : node.legal_actions) {
       int action_id = ActionKey(action);
-      GameTree::Node* child_node =
-          CachedActionChild(game_tree_, node, action, action_id, nullptr);
+      GameTree::Node& child_node =
+          CachedActionChild(*game_tree_, node, action, action_id,
+                            ignored_created_nodes);
       value = std::max(value, best_response_value_against_range(
                                   child_node, best_response_hand,
                                   opponent_hands, strategy,
@@ -1343,18 +1336,19 @@ double CFRSolver::best_response_value_against_range(
   }
 
   double value = 0.0;
-  for (const Action& action : node->legal_actions) {
+  for (const Action& action : node.legal_actions) {
     int action_id = ActionKey(action);
-    GameTree::Node* child_node =
-        CachedActionChild(game_tree_, node, action, action_id, nullptr);
+    GameTree::Node& child_node =
+        CachedActionChild(*game_tree_, node, action, action_id,
+                          ignored_created_nodes);
 
     WeightedHandRange child_opponents;
     child_opponents.reserve(opponent_hands.size());
     for (size_t i = 0; i < opponent_hands.size(); ++i) {
       std::string info_set_key = info_set_key_to_string(
-          make_info_set_key(node->state, player, opponent_hands.hands[i]));
+          make_info_set_key(node.state, player, opponent_hands.hands[i]));
       double probability = StrategyActionProbability(
-          strategy, info_set_key, node->legal_actions, action_id);
+          strategy, info_set_key, node.legal_actions, action_id);
       if (probability > 0.0) {
         child_opponents.add(opponent_hands.hands[i],
                             opponent_hands.weights[i] * probability);
@@ -1453,15 +1447,14 @@ double CFRSolver::sampled_range_best_response_samples(
     return 0.0;
   }
 
-  WeightedHands weighted_best_response_hands;
-  weighted_best_response_hands.reset(best_response_hands);
-  GameTree::Node* root = get_or_build_root();
+  WeightedHands weighted_best_response_hands(best_response_hands);
+  GameTree::Node& root = get_or_build_root();
   double total = 0.0;
   for (int i = 0; i < samples; ++i) {
     Hand best_response_hand =
-        SampleWeightedHand(&weighted_best_response_hands, &rng_);
+        SampleWeightedHand(weighted_best_response_hands, rng_);
     WeightedHandRange compatible_opponents =
-        CompatibleHands(opponent_hands, best_response_hand, root->state);
+        CompatibleHands(opponent_hands, best_response_hand, root.state);
     if (compatible_opponents.empty()) {
       throw std::invalid_argument(
           "Could not sample non-overlapping hands from ranges");
@@ -1486,8 +1479,8 @@ double CFRSolver::calculate_exploitability(int samples) {
   for (int i = 0; i < samples; ++i) {
     std::vector<Card> deck = BuildDeck();
     std::shuffle(deck.begin(), deck.end(), rng_);
-    Hand player_a_hand = DealHand(&deck);
-    Hand player_b_hand = DealHand(&deck);
+    Hand player_a_hand = DealHand(deck);
+    Hand player_b_hand = DealHand(deck);
     total += calculate_exploitability(player_a_hand, player_b_hand);
   }
   return total / samples;
@@ -1535,7 +1528,7 @@ double CFRSolver::calculate_player_b_best_response_value(
 double CFRSolver::calculate_exploitability(const Hand& player_a_hand,
                                            const Hand& player_b_hand) {
   Strategy strategy = get_equilibrium_strategy();
-  GameTree::Node* root = get_or_build_root();
+  GameTree::Node& root = get_or_build_root();
   double strategy_player_a_value =
       evaluate_strategy_node(root, player_a_hand, player_b_hand, strategy);
   double player_a_gap =
@@ -1547,24 +1540,26 @@ double CFRSolver::calculate_exploitability(const Hand& player_a_hand,
   return (std::max(0.0, player_a_gap) + std::max(0.0, player_b_gap)) / 2.0;
 }
 
-Action CFRSolver::get_best_response_action(GameTree::Node* node,
+Action CFRSolver::get_best_response_action(GameTree::Node& node,
                                            const Hand& player_a_hand,
                                            const Hand& player_b_hand,
                                            int best_response_player) {
   Action no_action;
   no_action.set_action(ActionType::NO_ACTION);
-  if (node == nullptr || node->is_terminal || node->is_chance_node ||
-      node->legal_actions.empty() || node->player_to_act != best_response_player) {
+  if (node.is_terminal || node.is_chance_node ||
+      node.legal_actions.empty() || node.player_to_act != best_response_player) {
     return no_action;
   }
 
   Strategy strategy = get_equilibrium_strategy();
   double best_value = -std::numeric_limits<double>::infinity();
   Action best_action = no_action;
-  for (const Action& action : node->legal_actions) {
+  int64_t ignored_created_nodes = 0;
+  for (const Action& action : node.legal_actions) {
     int action_id = ActionKey(action);
-    GameTree::Node* child_node =
-        CachedActionChild(game_tree_, node, action, action_id, nullptr);
+    GameTree::Node& child_node =
+        CachedActionChild(*game_tree_, node, action, action_id,
+                          ignored_created_nodes);
     double value = best_response_value(child_node, player_a_hand,
                                        player_b_hand, strategy,
                                        best_response_player);
@@ -1591,15 +1586,15 @@ void CFRSolver::save_strategy(const std::string& filename) const {
   snapshot.set_abstraction_version(kInfoSetKeyVersion);
 
   for (const std::string& info_set_key : equilibrium_strategy.get_info_sets()) {
-    StrategyInfoSetSnapshot* info_set = snapshot.add_info_sets();
-    info_set->set_info_set_key(info_set_key);
+    StrategyInfoSetSnapshot& info_set = *snapshot.add_info_sets();
+    info_set.set_info_set_key(info_set_key);
 
     Strategy::ActionProbabilities action_probs =
         equilibrium_strategy.get_strategy(info_set_key);
     for (const auto& action_prob : action_probs) {
-      StrategyActionSnapshot* action = info_set->add_actions();
-      *action->mutable_action() = ActionFromKey(action_prob.first);
-      action->set_probability(action_prob.second);
+      StrategyActionSnapshot& action = *info_set.add_actions();
+      *action.mutable_action() = ActionFromKey(action_prob.first);
+      action.set_probability(action_prob.second);
     }
   }
 
@@ -1669,7 +1664,7 @@ std::vector<CFRSolver::ActionChoice> CFRSolver::get_action_choices(
     int info_set_id,
     const std::vector<Action>& legal_actions) {
   InfoSetData& info_set = info_sets_[info_set_id];
-  ensure_info_set_actions(&info_set, legal_actions);
+  ensure_info_set_actions(info_set, legal_actions);
 
   std::vector<ActionChoice> choices;
   choices.reserve(legal_actions.size());
@@ -1689,7 +1684,7 @@ std::vector<CFRSolver::ActionChoice> CFRSolver::get_action_choices(
       continue;
     }
     choices.push_back(
-        {&action, action_id,
+        {action, action_id,
          static_cast<size_t>(action_index - info_set.action_ids.begin()), 0.0,
          0.0});
   }

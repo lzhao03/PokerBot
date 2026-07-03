@@ -3,7 +3,9 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <random>
 #include <unordered_set>
 #include <unordered_map>
@@ -71,7 +73,6 @@ public:
 
   CFRSolver(const PokerConfig& config);
   CFRSolver(const PokerConfig& config, const BoardState& initial_state);
-  ~CFRSolver();
   
   // Run CFR for a specified number of iterations
   void run(int iterations);
@@ -84,7 +85,7 @@ public:
   // Uses CFR+ regret clipping and linearly weighted average strategy.
   // Returns the expected value of the game for player A.
   // max_depth <= 0 disables the depth cutoff.
-  double cfr(GameTree::Node* node, 
+  double cfr(GameTree::Node& node,
              const Hand& player_a_hand, 
              const Hand& player_b_hand,
              std::vector<double>& reach_probabilities, 
@@ -114,7 +115,7 @@ public:
       const HandRange& player_a_range,
       const HandRange& player_b_range);
   // Debug helper for inspecting sampled best-response choices.
-  Action get_best_response_action(GameTree::Node* node,
+  Action get_best_response_action(GameTree::Node& node,
                                   const Hand& player_a_hand,
                                   const Hand& player_b_hand,
                                   int best_response_player);
@@ -146,8 +147,13 @@ private:
     double weight = 0.0;
   };
 
+  using OptionalHandRange =
+      std::optional<std::reference_wrapper<const HandRange>>;
+  using OptionalWeightedHandRange =
+      std::optional<std::reference_wrapper<const WeightedHandRange>>;
+
   struct ActionChoice {
-    const Action* action = nullptr;
+    Action action;
     int action_id = 0;
     size_t action_index = 0;
     double probability = 0.0;
@@ -202,7 +208,7 @@ private:
 
   PokerConfig config_;
   BoardState initial_state_;
-  GameTree* game_tree_;
+  std::unique_ptr<GameTree> game_tree_;
   std::mt19937 rng_;
   double cumulative_root_utility_;
   int iterations_run_;
@@ -220,22 +226,24 @@ private:
   Strategy current_strategy_;
   
   // Helper methods
-  GameTree::Node* get_or_build_root();
+  GameTree::Node& get_or_build_root();
   static std::vector<RangeDeal> build_compatible_range_deals(
       const WeightedHandRange& player_a_hands,
       const WeightedHandRange& player_b_hands);
-  void run_iterations(int iterations, const HandRange* player_a_range,
-                      const HandRange* player_b_range, bool train_swapped);
+  void run_iterations(int iterations,
+                      OptionalHandRange player_a_range,
+                      OptionalHandRange player_b_range,
+                      bool train_swapped);
   double cfr_with_ranges(
-      GameTree::Node* node,
+      GameTree::Node& node,
       const Hand& player_a_hand,
       const Hand& player_b_hand,
       std::vector<double>& reach_probabilities,
       int iteration,
       int depth,
       int max_depth,
-      const WeightedHandRange* player_a_range,
-      const WeightedHandRange* player_b_range);
+      OptionalWeightedHandRange player_a_range,
+      OptionalWeightedHandRange player_b_range);
   double action_probability_for_hand(
       const BoardState& state,
       int player,
@@ -248,14 +256,13 @@ private:
       int player,
       const std::vector<int>& legal_action_ids,
       int action_id,
-      WeightedHandRange* conditioned_range) const;
+      WeightedHandRange& conditioned_range) const;
   InfoSetKey make_info_set_key(const BoardState& state,
                                int player,
                                const Hand& hand) const;
   int get_or_create_info_set_id(const InfoSetKey& key,
                                 const std::vector<Action>& legal_actions);
-  const InfoSetData* find_info_set(const InfoSetKey& key) const;
-  void ensure_info_set_actions(InfoSetData* info_set,
+  void ensure_info_set_actions(InfoSetData& info_set,
                                const std::vector<Action>& legal_actions);
   std::string info_set_key_to_string(const InfoSetKey& key) const;
   double regret_for_info_set(const std::string& info_set_key,
@@ -264,12 +271,12 @@ private:
       const BoardState& state,
       const Hand& player_a_hand,
       const Hand& player_b_hand,
-      const WeightedHandRange* player_a_range,
-      const WeightedHandRange* player_b_range) const;
+      OptionalWeightedHandRange player_a_range,
+      OptionalWeightedHandRange player_b_range) const;
   double utility(const BoardState& state,
                  const Hand& player_a_hand,
                  const Hand& player_b_hand);
-  double evaluate_strategy_node(GameTree::Node* node,
+  double evaluate_strategy_node(GameTree::Node& node,
                                 const Hand& player_a_hand,
                                 const Hand& player_b_hand,
                                 const Strategy& strategy);
@@ -280,13 +287,13 @@ private:
       const std::vector<RangeDeal>& range_deals,
       const std::vector<double>& range_deal_weights,
       const Strategy& strategy);
-  double best_response_value(GameTree::Node* node,
+  double best_response_value(GameTree::Node& node,
                              const Hand& player_a_hand,
                              const Hand& player_b_hand,
                              const Strategy& strategy,
                              int best_response_player);
   double best_response_value_against_range(
-      GameTree::Node* node,
+      GameTree::Node& node,
       const Hand& best_response_hand,
       const WeightedHandRange& opponent_hands,
       const Strategy& strategy,
@@ -310,15 +317,15 @@ private:
                        const std::vector<ActionChoice>& choices,
                        double reach_prob);
   double chance_sampling_cfr(
-      GameTree::Node* node,
+      GameTree::Node& node,
       const Hand& player_a_hand,
       const Hand& player_b_hand,
       std::vector<double>& reach_probabilities,
       int iteration,
       int depth,
       int max_depth,
-      const WeightedHandRange* player_a_range,
-      const WeightedHandRange* player_b_range);
+      OptionalWeightedHandRange player_a_range,
+      OptionalWeightedHandRange player_b_range);
 };
 
 } // namespace poker

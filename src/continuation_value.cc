@@ -20,7 +20,7 @@ bool ContinuationContext::has_ranges() const {
 }
 
 double ContinuationValueProvider::value(
-    GameTree* game_tree,
+    GameTree& game_tree,
     const BoardState& state,
     const Hand& player_a_hand,
     const Hand& player_b_hand) const {
@@ -30,10 +30,10 @@ double ContinuationValueProvider::value(
 }
 
 double BettingRoundTerminalValueProvider::value(
-    GameTree* game_tree,
+    GameTree& game_tree,
     const ContinuationContext& context) const {
-  if (game_tree->is_betting_round_over(context.state)) {
-    return game_tree->get_utility(
+  if (game_tree.is_betting_round_over(context.state)) {
+    return game_tree.get_utility(
         context.state, context.player_a_hand, context.player_b_hand);
   }
   return 0.0;

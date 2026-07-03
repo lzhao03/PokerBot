@@ -8,15 +8,18 @@ namespace poker {
 
 namespace {
 
+Card MakeRangeCard(int rank, Suit suit) {
+  Card card;
+  card.set_rank(rank);
+  card.set_suit(suit);
+  return card;
+}
+
 Hand MakeCombo(int first_rank, Suit first_suit, int second_rank,
                Suit second_suit) {
   Hand hand;
-  Card* first = hand.add_cards();
-  first->set_rank(first_rank);
-  first->set_suit(first_suit);
-  Card* second = hand.add_cards();
-  second->set_rank(second_rank);
-  second->set_suit(second_suit);
+  *hand.add_cards() = MakeRangeCard(first_rank, first_suit);
+  *hand.add_cards() = MakeRangeCard(second_rank, second_suit);
   return hand;
 }
 
@@ -35,16 +38,16 @@ bool SameHand(const Hand& left, const Hand& right) {
           SameCard(left.cards(1), right.cards(0)));
 }
 
-void AddWeightedCombo(WeightedHandRange* weighted_combos, const Hand& hand,
+void AddWeightedCombo(WeightedHandRange& weighted_combos, const Hand& hand,
                       double weight) {
-  for (size_t i = 0; i < weighted_combos->size(); ++i) {
-    if (SameHand(weighted_combos->hands[i], hand)) {
-      weighted_combos->weights[i] += weight;
+  for (size_t i = 0; i < weighted_combos.size(); ++i) {
+    if (SameHand(weighted_combos.hands[i], hand)) {
+      weighted_combos.weights[i] += weight;
       return;
     }
   }
 
-  weighted_combos->add(hand, weight);
+  weighted_combos.add(hand, weight);
 }
 
 std::string ExactHandKey(const Hand& hand) {
@@ -179,7 +182,7 @@ const WeightedHandRange& HandRange::get_all_weighted_combos() const {
 
   cached_weighted_combos_.clear();
   for (const auto& hand_weight : exact_hand_weights_) {
-    AddWeightedCombo(&cached_weighted_combos_, hand_weight.first,
+    AddWeightedCombo(cached_weighted_combos_, hand_weight.first,
                      hand_weight.second);
   }
 
@@ -191,7 +194,7 @@ const WeightedHandRange& HandRange::get_all_weighted_combos() const {
 
     double combo_weight = hand_weight.second / combos.size();
     for (const Hand& combo : combos) {
-      AddWeightedCombo(&cached_weighted_combos_, combo, combo_weight);
+      AddWeightedCombo(cached_weighted_combos_, combo, combo_weight);
     }
   }
 
@@ -375,14 +378,9 @@ Hand HandRange::index_to_hand(int index) {
   int rank1 = r1 + 2;
   int rank2 = r2 + 2;
   
-  // Create the cards
-  Card* card1 = hand.add_cards();
-  card1->set_rank(rank1);
-  card1->set_suit(Suit::SPADES);
-  
-  Card* card2 = hand.add_cards();
-  card2->set_rank(rank2);
-  card2->set_suit(is_suited ? Suit::SPADES : Suit::HEARTS);
+  *hand.add_cards() = MakeRangeCard(rank1, Suit::SPADES);
+  *hand.add_cards() =
+      MakeRangeCard(rank2, is_suited ? Suit::SPADES : Suit::HEARTS);
   
   return hand;
 }

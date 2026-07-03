@@ -12,19 +12,19 @@ namespace poker {
 namespace {
 
 template <typename Message>
-void AppendSerialized(std::string* key, const Message& message) {
+void AppendSerialized(std::string& key, const Message& message) {
   std::string serialized;
   message.SerializeToString(&serialized);
-  key->append(std::to_string(serialized.size()));
-  key->append(":");
-  key->append(serialized);
+  key.append(std::to_string(serialized.size()));
+  key.append(":");
+  key.append(serialized);
 }
 
 std::string CacheKey(const ContinuationContext& context) {
   std::string key;
-  AppendSerialized(&key, context.state);
-  AppendSerialized(&key, context.player_a_hand);
-  AppendSerialized(&key, context.player_b_hand);
+  AppendSerialized(key, context.state);
+  AppendSerialized(key, context.player_a_hand);
+  AppendSerialized(key, context.player_b_hand);
   return key;
 }
 
@@ -41,12 +41,8 @@ ExactHandNestedCFRContinuationValueProvider::
 }
 
 double ExactHandNestedCFRContinuationValueProvider::value(
-    GameTree* game_tree,
+    GameTree& game_tree,
     const ContinuationContext& context) const {
-  if (game_tree == nullptr) {
-    throw std::invalid_argument("Game tree cannot be null");
-  }
-
   std::string key = CacheKey(context);
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -78,10 +74,10 @@ ExactHandNestedCFRContinuationValueProvider::stats() const {
 }
 
 double ExactHandNestedCFRContinuationValueProvider::compute_value(
-    GameTree* game_tree,
+    GameTree& game_tree,
     const ContinuationContext& context) const {
-  if (game_tree->is_terminal(context.state)) {
-    return game_tree->get_utility(
+  if (game_tree.is_terminal(context.state)) {
+    return game_tree.get_utility(
         context.state, context.player_a_hand, context.player_b_hand);
   }
 

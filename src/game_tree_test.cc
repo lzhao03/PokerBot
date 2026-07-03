@@ -1,5 +1,6 @@
 #include "src/game_tree.h"
 
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -12,13 +13,13 @@ void Expect(bool condition, const char* message) {
   }
 }
 
-void ExpectInvalidAction(GameTree* tree,
+void ExpectInvalidAction(GameTree& tree,
                          const BoardState& state,
                          const Action& action,
                          const char* message) {
   bool threw = false;
   try {
-    tree->apply_action(state, action);
+    tree.apply_action(state, action);
   } catch (const std::invalid_argument&) {
     threw = true;
   }
@@ -39,20 +40,14 @@ Card MakeCard(int rank, Suit suit) {
   return card;
 }
 
-void AddCard(BoardState* state, int rank, Suit suit) {
-  Card* card = state->add_cards();
-  card->set_rank(rank);
-  card->set_suit(suit);
+void AddCard(BoardState& state, int rank, Suit suit) {
+  *state.add_cards() = MakeCard(rank, suit);
 }
 
 Hand MakeHand(int first_rank, Suit first_suit, int second_rank, Suit second_suit) {
   Hand hand;
-  Card* first = hand.add_cards();
-  first->set_rank(first_rank);
-  first->set_suit(first_suit);
-  Card* second = hand.add_cards();
-  second->set_rank(second_rank);
-  second->set_suit(second_suit);
+  *hand.add_cards() = MakeCard(first_rank, first_suit);
+  *hand.add_cards() = MakeCard(second_rank, second_suit);
   return hand;
 }
 
@@ -97,16 +92,16 @@ BoardState ShowdownState() {
   state.set_player_to_act(1);
   *state.mutable_history()->add_actions() = MakeAction(ActionType::CHECK);
   *state.mutable_history()->add_actions() = MakeAction(ActionType::CHECK);
-  AddCard(&state, 2, Suit::HEARTS);
-  AddCard(&state, 7, Suit::DIAMONDS);
-  AddCard(&state, 9, Suit::CLUBS);
-  AddCard(&state, 11, Suit::SPADES);
-  AddCard(&state, 12, Suit::DIAMONDS);
+  AddCard(state, 2, Suit::HEARTS);
+  AddCard(state, 7, Suit::DIAMONDS);
+  AddCard(state, 9, Suit::CLUBS);
+  AddCard(state, 11, Suit::SPADES);
+  AddCard(state, 12, Suit::DIAMONDS);
   return state;
 }
 
-void CheckCallAndCheck(GameTree* tree) {
-  BoardState called = tree->apply_action(PreflopState(), MakeAction(ActionType::CALL));
+void CheckCallAndCheck(GameTree& tree) {
+  BoardState called = tree.apply_action(PreflopState(), MakeAction(ActionType::CALL));
 
   Expect(called.stack_a() == 98, "call subtracts chips from caller");
   Expect(called.stack_b() == 98, "call leaves opponent stack alone");
@@ -116,59 +111,59 @@ void CheckCallAndCheck(GameTree* tree) {
   Expect(called.history().actions_size() == 1, "call is recorded");
   Expect(called.history().actions(0).amount() == 1, "call records committed chips");
   Expect(called.history().actions(0).player() == 0, "call records acting player");
-  Expect(!tree->is_betting_round_over(called), "call alone does not close preflop");
+  Expect(!tree.is_betting_round_over(called), "call alone does not close preflop");
 
-  BoardState checked = tree->apply_action(called, MakeAction(ActionType::CHECK));
+  BoardState checked = tree.apply_action(called, MakeAction(ActionType::CHECK));
   Expect(checked.pot() == 4, "check leaves pot alone");
   Expect(checked.player_to_act() == 0, "check passes action");
   Expect(checked.history().actions_size() == 2, "check is recorded");
-  Expect(tree->is_betting_round_over(checked), "call/check closes preflop");
+  Expect(tree.is_betting_round_over(checked), "call/check closes preflop");
 }
 
-void CheckBetAndCall(GameTree* tree) {
-  BoardState bet = tree->apply_action(FlopState(), MakeAction(ActionType::BET, 5));
+void CheckBetAndCall(GameTree& tree) {
+  BoardState bet = tree.apply_action(FlopState(), MakeAction(ActionType::BET, 5));
 
   Expect(bet.stack_b() == 93, "bet subtracts chips from bettor");
   Expect(bet.pot() == 9, "bet adds chips to pot");
   Expect(bet.player_contribution(1) == 7, "bet adds to contribution");
   Expect(bet.player_to_act() == 0, "bet passes action");
 
-  BoardState called = tree->apply_action(bet, MakeAction(ActionType::CALL));
+  BoardState called = tree.apply_action(bet, MakeAction(ActionType::CALL));
   Expect(called.stack_a() == 93, "call after bet subtracts matching chips");
   Expect(called.pot() == 14, "call after bet adds matching chips to pot");
   Expect(called.player_contribution(0) == 7, "call after bet matches contribution");
   Expect(called.player_to_act() == 1, "call after bet returns action to first postflop player");
-  Expect(tree->is_betting_round_over(called), "bet/call closes postflop");
+  Expect(tree.is_betting_round_over(called), "bet/call closes postflop");
 }
 
-void CheckCheckBetCall(GameTree* tree) {
-  BoardState checked = tree->apply_action(FlopState(), MakeAction(ActionType::CHECK));
-  BoardState bet = tree->apply_action(checked, MakeAction(ActionType::BET, 5));
-  BoardState called = tree->apply_action(bet, MakeAction(ActionType::CALL));
+void CheckCheckBetCall(GameTree& tree) {
+  BoardState checked = tree.apply_action(FlopState(), MakeAction(ActionType::CHECK));
+  BoardState bet = tree.apply_action(checked, MakeAction(ActionType::BET, 5));
+  BoardState called = tree.apply_action(bet, MakeAction(ActionType::CALL));
 
   Expect(called.player_to_act() == 0, "call after checked bet returns action");
-  Expect(tree->is_betting_round_over(called), "check/bet/call closes postflop");
+  Expect(tree.is_betting_round_over(called), "check/bet/call closes postflop");
 }
 
-void CheckRaiseAndFold(GameTree* tree) {
-  BoardState raised = tree->apply_action(PreflopState(), MakeAction(ActionType::RAISE, 4));
+void CheckRaiseAndFold(GameTree& tree) {
+  BoardState raised = tree.apply_action(PreflopState(), MakeAction(ActionType::RAISE, 4));
 
   Expect(raised.stack_a() == 95, "raise subtracts committed chips");
   Expect(raised.pot() == 7, "raise adds committed chips to pot");
   Expect(raised.player_contribution(0) == 5, "raise increases contribution");
   Expect(raised.player_to_act() == 1, "raise passes action");
 
-  BoardState folded = tree->apply_action(raised, MakeAction(ActionType::FOLD));
+  BoardState folded = tree.apply_action(raised, MakeAction(ActionType::FOLD));
   Expect(folded.folded_player() == 1, "fold records folded player");
   Expect(folded.player_to_act() == -1, "fold clears player to act");
   Expect(folded.history().actions_size() == 2, "fold is recorded");
-  Expect(tree->is_terminal(folded), "fold is terminal");
-  Expect(tree->get_utility(folded, Hand(), Hand()) == 2,
+  Expect(tree.is_terminal(folded), "fold is terminal");
+  Expect(tree.get_utility(folded, Hand(), Hand()) == 2,
          "fold utility is net chips for player A");
 }
 
-void CheckLegalActions(GameTree* tree) {
-  std::vector<Action> actions = tree->get_legal_actions(PreflopState());
+void CheckLegalActions(GameTree& tree) {
+  std::vector<Action> actions = tree.get_legal_actions(PreflopState());
   Expect(actions.size() == 4, "preflop facing blind has fold/call/raise/all-in");
   Expect(actions[0].action() == ActionType::FOLD, "first legal action is fold");
   Expect(actions[1].action() == ActionType::CALL, "second legal action is call");
@@ -178,14 +173,14 @@ void CheckLegalActions(GameTree* tree) {
   Expect(actions[3].amount() == 99, "all-in amount is the remaining stack");
 }
 
-void CheckLegalActionsApplyAndConserveChips(GameTree* tree) {
+void CheckLegalActionsApplyAndConserveChips(GameTree& tree) {
   std::vector<BoardState> states = {PreflopState(), FlopState()};
   for (const BoardState& state : states) {
     int total_chips = state.stack_a() + state.stack_b() + state.pot();
-    std::vector<Action> actions = tree->get_legal_actions(state);
+    std::vector<Action> actions = tree.get_legal_actions(state);
     Expect(!actions.empty(), "test states should have legal actions");
     for (const Action& action : actions) {
-      BoardState next = tree->apply_action(state, action);
+      BoardState next = tree.apply_action(state, action);
       Expect(next.history().actions_size() ==
                  state.history().actions_size() + 1,
              "legal action should append to history");
@@ -201,8 +196,8 @@ void CheckLegalActionsApplyAndConserveChips(GameTree* tree) {
   }
 }
 
-void CheckAllInAction(GameTree* tree) {
-  BoardState all_in = tree->apply_action(PreflopState(), MakeAction(ActionType::ALL_IN));
+void CheckAllInAction(GameTree& tree) {
+  BoardState all_in = tree.apply_action(PreflopState(), MakeAction(ActionType::ALL_IN));
 
   Expect(all_in.stack_a() == 0, "all-in commits the remaining stack");
   Expect(all_in.pot() == 102, "all-in adds remaining chips to the pot");
@@ -216,12 +211,12 @@ void CheckAllInAction(GameTree* tree) {
          "all-in records committed chips");
 }
 
-void CheckShortAllInCallClosesRound(GameTree* tree) {
+void CheckShortAllInCallClosesRound(GameTree& tree) {
   BoardState state = FlopState();
   state.set_stack_a(5);
 
-  BoardState bet = tree->apply_action(state, MakeAction(ActionType::BET, 10));
-  BoardState called = tree->apply_action(bet, MakeAction(ActionType::CALL));
+  BoardState bet = tree.apply_action(state, MakeAction(ActionType::BET, 10));
+  BoardState called = tree.apply_action(bet, MakeAction(ActionType::CALL));
 
   Expect(called.stack_a() == 0, "short all-in call commits caller stack");
   Expect(called.player_contribution(0) == 7,
@@ -229,13 +224,13 @@ void CheckShortAllInCallClosesRound(GameTree* tree) {
   Expect(called.player_contribution(1) == 12,
          "bettor keeps larger contribution");
   Expect(called.all_in(), "short call marks state all-in");
-  Expect(tree->is_betting_round_over(called),
+  Expect(tree.is_betting_round_over(called),
          "short all-in call closes heads-up betting");
-  Expect(tree->get_player_to_act(called) == -1,
+  Expect(tree.get_player_to_act(called) == -1,
          "short all-in call leaves no player action");
 
-  GameTree::Node* root = tree->build_tree(called);
-  Expect(root->is_chance_node, "short all-in call can run out the board");
+  GameTree::Node& root = tree.build_tree(called);
+  Expect(root.is_chance_node, "short all-in call can run out the board");
 }
 
 void CheckAllInEquivalentActionsAreDeduped() {
@@ -259,7 +254,7 @@ void CheckAllInEquivalentActionsAreDeduped() {
   Expect(raise_actions[2].action() == ActionType::ALL_IN, "third facing action is all-in");
 }
 
-void CheckFullStackBetRaiseUseAllIn(GameTree* tree) {
+void CheckFullStackBetRaiseUseAllIn(GameTree& tree) {
   ExpectInvalidAction(tree, FlopState(), MakeAction(ActionType::BET, 98),
                       "full-stack bet should use all-in action");
   ExpectInvalidAction(tree, PreflopState(), MakeAction(ActionType::RAISE, 99),
@@ -322,39 +317,39 @@ void CheckRaisesRemainAvailableAfterPriorRaise() {
          "facing action keeps all-in");
 }
 
-void CheckShowdownUtility(GameTree* tree) {
+void CheckShowdownUtility(GameTree& tree) {
   BoardState showdown = ShowdownState();
   Hand player_a = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
   Hand player_b = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
 
-  Expect(tree->is_terminal(showdown), "closed river action is terminal");
-  Expect(tree->get_utility(showdown, player_a, player_b) == 10,
+  Expect(tree.is_terminal(showdown), "closed river action is terminal");
+  Expect(tree.get_utility(showdown, player_a, player_b) == 10,
          "showdown utility is net chips for player A");
 }
 
-void CheckChanceAdvancesStreet(GameTree* tree) {
+void CheckChanceAdvancesStreet(GameTree& tree) {
   BoardState closed_preflop =
-      tree->apply_action(PreflopState(), MakeAction(ActionType::CALL));
-  closed_preflop = tree->apply_action(closed_preflop, MakeAction(ActionType::CHECK));
+      tree.apply_action(PreflopState(), MakeAction(ActionType::CALL));
+  closed_preflop = tree.apply_action(closed_preflop, MakeAction(ActionType::CHECK));
 
-  GameTree::Node* root = tree->build_tree(closed_preflop);
-  Expect(root->is_chance_node, "closed preflop action creates chance node");
+  GameTree::Node& root = tree.build_tree(closed_preflop);
+  Expect(root.is_chance_node, "closed preflop action creates chance node");
 
   std::vector<Card> flop = {
       MakeCard(8, Suit::HEARTS),
       MakeCard(9, Suit::CLUBS),
       MakeCard(10, Suit::SPADES),
   };
-  GameTree::Node* child = tree->create_chance_child_node(root, flop);
+  std::unique_ptr<GameTree::Node> child =
+      tree.create_chance_child_node(root, flop);
+  GameTree::Node& child_ref = *child;
 
-  Expect(child->state.street() == Street::FLOP, "chance advances preflop to flop");
-  Expect(child->state.cards_size() == 3, "chance adds sampled flop cards");
-  Expect(child->state.cards(0).rank() == 8, "chance keeps sampled card order");
-  Expect(child->state.history().actions_size() == 0, "chance clears street action history");
-  Expect(child->player_to_act == 1, "flop action starts with player 1");
-  Expect(!child->legal_actions.empty(), "chance child has legal player actions");
-
-  delete child;
+  Expect(child_ref.state.street() == Street::FLOP, "chance advances preflop to flop");
+  Expect(child_ref.state.cards_size() == 3, "chance adds sampled flop cards");
+  Expect(child_ref.state.cards(0).rank() == 8, "chance keeps sampled card order");
+  Expect(child_ref.state.history().actions_size() == 0, "chance clears street action history");
+  Expect(child_ref.player_to_act == 1, "flop action starts with player 1");
+  Expect(!child_ref.legal_actions.empty(), "chance child has legal player actions");
 }
 
 }  // namespace
@@ -365,20 +360,20 @@ int main() {
   config.add_bet_sizes(0.5);
 
   poker::GameTree tree(config);
-  poker::CheckCallAndCheck(&tree);
-  poker::CheckBetAndCall(&tree);
-  poker::CheckCheckBetCall(&tree);
-  poker::CheckRaiseAndFold(&tree);
-  poker::CheckLegalActions(&tree);
-  poker::CheckLegalActionsApplyAndConserveChips(&tree);
-  poker::CheckAllInAction(&tree);
-  poker::CheckShortAllInCallClosesRound(&tree);
+  poker::CheckCallAndCheck(tree);
+  poker::CheckBetAndCall(tree);
+  poker::CheckCheckBetCall(tree);
+  poker::CheckRaiseAndFold(tree);
+  poker::CheckLegalActions(tree);
+  poker::CheckLegalActionsApplyAndConserveChips(tree);
+  poker::CheckAllInAction(tree);
+  poker::CheckShortAllInCallClosesRound(tree);
   poker::CheckAllInEquivalentActionsAreDeduped();
-  poker::CheckFullStackBetRaiseUseAllIn(&tree);
+  poker::CheckFullStackBetRaiseUseAllIn(tree);
   poker::CheckDuplicateConcreteBetSizesAreDeduped();
   poker::CheckStreetBetSizesOverrideGlobal();
   poker::CheckRaisesRemainAvailableAfterPriorRaise();
-  poker::CheckShowdownUtility(&tree);
-  poker::CheckChanceAdvancesStreet(&tree);
+  poker::CheckShowdownUtility(tree);
+  poker::CheckChanceAdvancesStreet(tree);
   return 0;
 }

@@ -50,9 +50,7 @@ private:
   };
 
   int get_or_create_info_set_id(const std::string& info_set_key);
-  InfoSetData* find_info_set(const std::string& info_set_key);
-  const InfoSetData* find_info_set(const std::string& info_set_key) const;
-  size_t ensure_action(InfoSetData* info_set, int action_id);
+  size_t ensure_action(InfoSetData& info_set, int action_id);
 
   std::unordered_map<std::string, int> info_set_ids_;
   std::vector<InfoSetData> info_sets_;

@@ -32,12 +32,12 @@ int ContributionAt(const BoardState& state, int player) {
              : 0;
 }
 
-void HashCombine(size_t* seed, int value) {
-  *seed ^= std::hash<int>{}(value) + 0x9e3779b9 + (*seed << 6) + (*seed >> 2);
+void HashCombine(size_t& seed, int value) {
+  seed ^= std::hash<int>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 }
 
 template <size_t N>
-void HashArray(size_t* seed, const std::array<int, N>& values) {
+void HashArray(size_t& seed, const std::array<int, N>& values) {
   for (int value : values) {
     HashCombine(seed, value);
   }
@@ -62,14 +62,14 @@ bool TerminalUtilityCache::Key::operator==(const Key& other) const {
 
 size_t TerminalUtilityCache::KeyHash::operator()(const Key& key) const {
   size_t seed = 0;
-  HashCombine(&seed, key.street);
-  HashCombine(&seed, key.pot);
-  HashCombine(&seed, key.player_a_contribution);
-  HashCombine(&seed, key.player_b_contribution);
-  HashCombine(&seed, key.board_size);
-  HashArray(&seed, key.player_a_cards);
-  HashArray(&seed, key.player_b_cards);
-  HashArray(&seed, key.board_cards);
+  HashCombine(seed, key.street);
+  HashCombine(seed, key.pot);
+  HashCombine(seed, key.player_a_contribution);
+  HashCombine(seed, key.player_b_contribution);
+  HashCombine(seed, key.board_size);
+  HashArray(seed, key.player_a_cards);
+  HashArray(seed, key.player_b_cards);
+  HashArray(seed, key.board_cards);
   return seed;
 }
 

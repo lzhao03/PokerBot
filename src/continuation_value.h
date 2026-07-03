@@ -25,11 +25,11 @@ class ContinuationValueProvider {
  public:
   virtual ~ContinuationValueProvider() = default;
 
-  double value(GameTree* game_tree,
+  double value(GameTree& game_tree,
                const BoardState& state,
                const Hand& player_a_hand,
                const Hand& player_b_hand) const;
-  virtual double value(GameTree* game_tree,
+  virtual double value(GameTree& game_tree,
                        const ContinuationContext& context) const = 0;
 };
 
@@ -37,7 +37,7 @@ class BettingRoundTerminalValueProvider : public ContinuationValueProvider {
  public:
   using ContinuationValueProvider::value;
 
-  double value(GameTree* game_tree,
+  double value(GameTree& game_tree,
                const ContinuationContext& context) const override;
 };
 

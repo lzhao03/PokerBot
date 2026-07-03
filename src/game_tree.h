@@ -1,14 +1,12 @@
 #pragma once
 
-#include <vector>
+#include <memory>
 #include <unordered_map>
-#include <string>
+#include <vector>
+#include "src/hand_evaluator.h"
 #include "src/poker.pb.h"
 
 namespace poker {
-
-// Forward declarations
-class HandEvaluator;
 
 class GameTree {
 public:
@@ -19,31 +17,33 @@ public:
     bool is_chance_node;
     int player_to_act; // 0 for player A, 1 for player B, -1 for chance
     std::vector<Action> legal_actions;
-    std::unordered_map<int, Node*> children; // Action ID -> Node
+    std::unordered_map<int, std::unique_ptr<Node>> children; // Action ID -> Node
     
     // For terminal nodes
     double utility;
     
-    // Constructor and destructor
     Node() : is_terminal(false), is_chance_node(false), player_to_act(-1), utility(0.0) {}
-    ~Node();
   };
   
   // Constructor
   GameTree(const PokerConfig& config);
-  ~GameTree();
   
   // Build the root node from the initial state
-  Node* build_tree(const BoardState& initial_state);
+  Node& build_tree(const BoardState& initial_state);
   
   // Get the root node of the tree
-  Node* get_root() const { return root_; }
+  bool has_root() const { return root_ != nullptr; }
+  Node& root();
+  const Node& root() const;
   
   // Create a child node for a given action
-  Node* create_child_node(Node* parent, const Action& action);
+  std::unique_ptr<Node> create_child_node(const Node& parent,
+                                          const Action& action) const;
 
   // Create a child node for a sampled chance outcome
-  Node* create_chance_child_node(Node* parent, const std::vector<Card>& cards);
+  std::unique_ptr<Node> create_chance_child_node(
+      const Node& parent,
+      const std::vector<Card>& cards) const;
   
   // Get legal actions at a given state
   std::vector<Action> get_legal_actions(const BoardState& state) const;
@@ -52,7 +52,8 @@ public:
   BoardState apply_action(const BoardState& state, const Action& action) const;
   
   // Get the utility at a terminal state
-  double get_utility(const BoardState& state, const Hand& player_a_hand, const Hand& player_b_hand);
+  double get_utility(const BoardState& state, const Hand& player_a_hand,
+                     const Hand& player_b_hand) const;
   
   // Check if a state is terminal
   bool is_terminal(const BoardState& state) const;
@@ -67,12 +68,9 @@ public:
   bool is_hand_over(const BoardState& state) const;
 
 private:
-  Node* root_;
+  std::unique_ptr<Node> root_;
   PokerConfig config_;
-  HandEvaluator* hand_evaluator_;
-  
-  // Clean up the tree
-  void cleanup();
+  HandEvaluator hand_evaluator_;
 };
 
 } // namespace poker
