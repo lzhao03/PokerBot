@@ -34,19 +34,6 @@ int ActionKey(const Action& action) {
          static_cast<int>(std::lround(action.amount()));
 }
 
-std::vector<int> UniqueActionIds(const std::vector<Action>& legal_actions) {
-  std::vector<int> action_ids;
-  action_ids.reserve(legal_actions.size());
-  for (const Action& action : legal_actions) {
-    int action_id = ActionKey(action);
-    if (std::find(action_ids.begin(), action_ids.end(), action_id) ==
-        action_ids.end()) {
-      action_ids.push_back(action_id);
-    }
-  }
-  return action_ids;
-}
-
 Action ActionFromKey(int action_key) {
   Action action;
   action.set_action(static_cast<ActionType>(action_key / kActionKeyMultiplier));
@@ -900,6 +887,11 @@ double CFRSolver::cfr_with_ranges(
   // Initialize the expected value for the player
   double node_value = 0.0;
   std::vector<std::pair<Hand, double>> conditioned_player_range;
+  std::vector<int> legal_action_ids;
+  legal_action_ids.reserve(action_choices.size());
+  for (const ActionChoice& choice : action_choices) {
+    legal_action_ids.push_back(choice.action_id);
+  }
   
   // For each action, recursively call CFR and compute the expected value
   for (ActionChoice& choice : action_choices) {
@@ -921,12 +913,12 @@ double CFRSolver::cfr_with_ranges(
         player_b_range;
     if (player == 0 && player_a_range != nullptr) {
       condition_range_for_action(
-          *player_a_range, node->state, player, node->legal_actions,
+          *player_a_range, node->state, player, legal_action_ids,
           action_id, &conditioned_player_range);
       child_player_a_range = &conditioned_player_range;
     } else if (player == 1 && player_b_range != nullptr) {
       condition_range_for_action(
-          *player_b_range, node->state, player, node->legal_actions,
+          *player_b_range, node->state, player, legal_action_ids,
           action_id, &conditioned_player_range);
       child_player_b_range = &conditioned_player_range;
     }
@@ -1025,14 +1017,13 @@ double CFRSolver::action_probability_for_hand(
     const BoardState& state,
     int player,
     const Hand& hand,
-    const std::vector<Action>& legal_actions,
+    const std::vector<int>& legal_action_ids,
     int action_id) const {
-  std::vector<int> action_ids = UniqueActionIds(legal_actions);
-  if (std::find(action_ids.begin(), action_ids.end(), action_id) ==
-      action_ids.end()) {
+  if (legal_action_ids.empty()) {
     return 0.0;
   }
-  if (action_ids.empty()) {
+  if (std::find(legal_action_ids.begin(), legal_action_ids.end(),
+                action_id) == legal_action_ids.end()) {
     return 0.0;
   }
 
@@ -1043,7 +1034,7 @@ double CFRSolver::action_probability_for_hand(
         find_legacy_info_set(info_set_key);
     if (legacy_info_set != nullptr) {
       double sum_positive_regrets = 0.0;
-      for (int legal_action_id : action_ids) {
+      for (int legal_action_id : legal_action_ids) {
         auto action = std::find(legacy_info_set->action_ids.begin(),
                                 legacy_info_set->action_ids.end(),
                                 legal_action_id);
@@ -1055,7 +1046,7 @@ double CFRSolver::action_probability_for_hand(
         }
       }
       if (sum_positive_regrets <= 0.0) {
-        return 1.0 / action_ids.size();
+        return 1.0 / legal_action_ids.size();
       }
 
       auto action = std::find(legacy_info_set->action_ids.begin(),
@@ -1074,7 +1065,7 @@ double CFRSolver::action_probability_for_hand(
   const InfoSetData* info_set = find_info_set(key);
   if (info_set != nullptr) {
     double sum_positive_regrets = 0.0;
-    for (int legal_action_id : action_ids) {
+    for (int legal_action_id : legal_action_ids) {
       auto action = std::find(info_set->action_ids.begin(),
                               info_set->action_ids.end(), legal_action_id);
       if (action != info_set->action_ids.end()) {
@@ -1085,7 +1076,7 @@ double CFRSolver::action_probability_for_hand(
       }
     }
     if (sum_positive_regrets <= 0.0) {
-      return 1.0 / action_ids.size();
+      return 1.0 / legal_action_ids.size();
     }
 
     auto action = std::find(info_set->action_ids.begin(),
@@ -1099,14 +1090,14 @@ double CFRSolver::action_probability_for_hand(
            sum_positive_regrets;
   }
 
-  return 1.0 / action_ids.size();
+  return 1.0 / legal_action_ids.size();
 }
 
 void CFRSolver::condition_range_for_action(
     const std::vector<std::pair<Hand, double>>& range,
     const BoardState& state,
     int player,
-    const std::vector<Action>& legal_actions,
+    const std::vector<int>& legal_action_ids,
     int action_id,
     std::vector<std::pair<Hand, double>>* conditioned_range) const {
   conditioned_range->clear();
@@ -1116,7 +1107,7 @@ void CFRSolver::condition_range_for_action(
       continue;
     }
     double probability = action_probability_for_hand(
-        state, player, hand.first, legal_actions, action_id);
+        state, player, hand.first, legal_action_ids, action_id);
     double conditioned_weight = hand.second * probability;
     if (conditioned_weight > 0.0) {
       conditioned_range->emplace_back(hand.first, conditioned_weight);
