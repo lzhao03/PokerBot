@@ -104,6 +104,7 @@ cc_test(
     name = "hand_range_test",
     srcs = ["hand_range_test.cc"],
     deps = [
+        ":card",
         ":hand_range",
     ],
 )

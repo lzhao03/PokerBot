@@ -5,10 +5,6 @@
 
 namespace poker {
 
-bool SameCard(const Card& left, const Card& right) {
-  return left.rank() == right.rank() && left.suit() == right.suit();
-}
-
 std::vector<Card> BuildDeck() {
   std::vector<Card> deck;
   deck.reserve(52);

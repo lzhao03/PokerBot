@@ -8,7 +8,6 @@
 
 namespace poker {
 
-bool SameCard(const Card& left, const Card& right);
 std::vector<Card> BuildDeck();
 Hand DealHand(std::vector<Card>& deck);
 int CardsForNextStreet(Street street);

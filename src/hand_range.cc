@@ -18,10 +18,6 @@ Hand MakeCombo(int first_rank, Suit first_suit, int second_rank,
   return hand;
 }
 
-bool SameCard(const Card& left, const Card& right) {
-  return left.rank() == right.rank() && left.suit() == right.suit();
-}
-
 bool SameHand(const Hand& left, const Hand& right) {
   if (left.cards_size() != 2 || right.cards_size() != 2) {
     return false;

@@ -1,4 +1,5 @@
 #include "src/hand_range.h"
+#include "src/card.h"
 
 #include <cmath>
 #include <stdexcept>
@@ -28,19 +29,15 @@ poker::Hand MakeHand(int first_rank, poker::Suit first_suit, int second_rank,
   return hand;
 }
 
-bool SameCard(const poker::Card& left, const poker::Card& right) {
-  return left.rank() == right.rank() && left.suit() == right.suit();
-}
-
 bool SameHand(const poker::Hand& left, const poker::Hand& right) {
   if (left.cards_size() != 2 || right.cards_size() != 2) {
     return false;
   }
 
-  return (SameCard(left.cards(0), right.cards(0)) &&
-          SameCard(left.cards(1), right.cards(1))) ||
-         (SameCard(left.cards(0), right.cards(1)) &&
-          SameCard(left.cards(1), right.cards(0)));
+  return (poker::SameCard(left.cards(0), right.cards(0)) &&
+          poker::SameCard(left.cards(1), right.cards(1))) ||
+         (poker::SameCard(left.cards(0), right.cards(1)) &&
+          poker::SameCard(left.cards(1), right.cards(0)));
 }
 
 double WeightForIndex(
@@ -66,7 +63,8 @@ void CheckNoDuplicateCombos(const poker::WeightedHandRange& combos) {
   for (size_t i = 0; i < combos.size(); ++i) {
     Expect(combos.hands[i].cards_size() == 2,
            "weighted combos should be exact two-card hands");
-    Expect(!SameCard(combos.hands[i].cards(0), combos.hands[i].cards(1)),
+    Expect(!poker::SameCard(combos.hands[i].cards(0),
+                            combos.hands[i].cards(1)),
            "weighted combos should not duplicate a card");
     for (size_t j = i + 1; j < combos.size(); ++j) {
       Expect(!SameHand(combos.hands[i], combos.hands[j]),
