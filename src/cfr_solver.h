@@ -153,7 +153,7 @@ private:
       std::optional<std::reference_wrapper<const WeightedHandRange>>;
 
   struct ActionChoice {
-    Action action;
+    std::reference_wrapper<const Action> action;
     int action_id = 0;
     size_t action_index = 0;
     double probability = 0.0;
@@ -248,19 +248,19 @@ private:
       const BoardState& state,
       int player,
       const Hand& hand,
-      const std::vector<int>& legal_action_ids,
-      int action_id) const;
+      const std::vector<ActionChoice>& legal_action_choices,
+      const ActionChoice& action_choice) const;
   double regret_matched_probability_for_action(
       const InfoSetData& info_set,
-      const std::vector<int>& legal_action_ids,
-      int action_id,
+      const std::vector<ActionChoice>& legal_action_choices,
+      const ActionChoice& action_choice,
       double fallback_probability) const;
   void condition_range_for_action(
       const WeightedHandRange& range,
       const BoardState& state,
       int player,
-      const std::vector<int>& legal_action_ids,
-      int action_id,
+      const std::vector<ActionChoice>& legal_action_choices,
+      const ActionChoice& action_choice,
       WeightedHandRange& conditioned_range) const;
   InfoSetKey make_info_set_key(const BoardState& state,
                                int player,
