@@ -164,10 +164,6 @@ struct WeightedHands {
   std::discrete_distribution<size_t> distribution;
 };
 
-size_t SampleWeightedHandIndex(WeightedHands& hands, std::mt19937& rng) {
-  return hands.distribution(rng);
-}
-
 struct WeightedHandViewSampler {
   explicit WeightedHandViewSampler(const WeightedHandRangeView& hands)
       : hands(hands) {
@@ -183,11 +179,6 @@ struct WeightedHandViewSampler {
   std::vector<double> weights;
   std::discrete_distribution<size_t> distribution;
 };
-
-size_t SampleWeightedHandSourceIndex(WeightedHandViewSampler& hands,
-                                     std::mt19937& rng) {
-  return hands.hands.source_index(hands.distribution(rng));
-}
 
 double StrategyActionProbability(const Strategy& strategy,
                                  const std::string& info_set_key,
@@ -1328,7 +1319,8 @@ double CFRSolver::best_response_value_against_range(
     int64_t ignored_created_nodes = 0;
     for (int i = 0; i < samples; ++i) {
       size_t sampled_opponent_index =
-          SampleWeightedHandSourceIndex(weighted_opponents, rng_);
+          weighted_opponents.hands.source_index(
+              weighted_opponents.distribution(rng_));
       const Hand& sampled_opponent =
           opponent_hands.source_range().hands[sampled_opponent_index];
       const Hand& player_a_hand =
@@ -1495,7 +1487,7 @@ double CFRSolver::sampled_range_best_response_samples(
   for (int i = 0; i < samples; ++i) {
     const Hand& best_response_hand =
         best_response_hands.hands[
-            SampleWeightedHandIndex(weighted_best_response_hands, rng_)];
+            weighted_best_response_hands.distribution(rng_)];
     WeightedHandRangeView compatible_opponents =
         CompatibleHands(opponent_view, best_response_hand, root.state);
     if (compatible_opponents.empty()) {
