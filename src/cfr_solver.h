@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <random>
 #include <unordered_set>
 #include <unordered_map>
@@ -16,6 +17,7 @@
 namespace poker {
 
 class HandRange;
+class TerminalUtilityCache;
 
 class CFRSolver {
 public:
@@ -29,6 +31,12 @@ public:
     int64_t canonical_state_visits = 0;
     int64_t unique_canonical_states = 0;
     int64_t duplicate_canonical_state_visits = 0;
+  };
+
+  struct UtilityCacheStats {
+    int64_t hits = 0;
+    int64_t misses = 0;
+    int64_t entries = 0;
   };
 
   CFRSolver(const PokerConfig& config);
@@ -87,6 +95,7 @@ public:
   int get_iterations_run() const { return iterations_run_; }
   int64_t get_cfr_update_count() const { return cfr_update_count_; }
   TraversalStats get_traversal_stats() const { return traversal_stats_; }
+  UtilityCacheStats get_utility_cache_stats() const;
 
 private:
   friend class CFRSolverRegretTestPeer;
@@ -96,6 +105,9 @@ private:
     Hand player_b_hand;
     double weight;
   };
+
+  CFRSolver(const PokerConfig& config,
+            std::shared_ptr<TerminalUtilityCache> utility_cache);
 
   PokerConfig config_;
   GameTree* game_tree_;
@@ -107,6 +119,7 @@ private:
   int64_t cfr_update_count_;
   TraversalStats traversal_stats_;
   std::unordered_set<std::string> visited_canonical_states_;
+  std::shared_ptr<TerminalUtilityCache> utility_cache_;
   
   // CFR+ clipped regret tracking for each information set and action.
   std::unordered_map<std::string, std::unordered_map<int, double>> cumulative_regrets_;
@@ -124,6 +137,9 @@ private:
       const std::vector<std::pair<Hand, double>>& player_b_hands);
   void run_iterations(int iterations, const HandRange* player_a_range,
                       const HandRange* player_b_range, bool train_swapped);
+  double utility(const BoardState& state,
+                 const Hand& player_a_hand,
+                 const Hand& player_b_hand);
   double evaluate_strategy_node(GameTree::Node* node,
                                 const Hand& player_a_hand,
                                 const Hand& player_b_hand,

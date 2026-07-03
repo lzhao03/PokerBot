@@ -1,6 +1,7 @@
 #include "src/cfr_solver.h"
 #include "src/card_utils.h"
 #include "src/hand_range.h"
+#include "src/terminal_utility_cache.h"
 #include "src/thread_pool.h"
 #include <algorithm>
 #include <numeric>
@@ -10,6 +11,7 @@
 #include <iostream>
 #include <limits>
 #include <cmath>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -196,6 +198,11 @@ double SampleChanceValue(GameTree* game_tree,
 }  // namespace
 
 CFRSolver::CFRSolver(const PokerConfig& config)
+    : CFRSolver(config, std::make_shared<TerminalUtilityCache>()) {
+}
+
+CFRSolver::CFRSolver(const PokerConfig& config,
+                     std::shared_ptr<TerminalUtilityCache> utility_cache)
   : config_(config),
     game_tree_(new GameTree(config)),
     hand_evaluator_(new HandEvaluator()),
@@ -203,7 +210,8 @@ CFRSolver::CFRSolver(const PokerConfig& config)
     rng_(12345),
     cumulative_root_utility_(0.0),
     iterations_run_(0),
-    cfr_update_count_(0) {
+    cfr_update_count_(0),
+    utility_cache_(std::move(utility_cache)) {
 }
 
 CFRSolver::~CFRSolver() {
@@ -363,7 +371,10 @@ double CFRSolver::cfr(GameTree::Node* node,
                       int max_depth) {
   // If the node is a terminal node, return the utility
   if (node->is_terminal) {
-    return game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
+    if (max_depth > 0) {
+      return game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
+    }
+    return utility(node->state, player_a_hand, player_b_hand);
   }
 
   // Chance card deals are not player decisions, so they do not consume CFR depth.
@@ -579,6 +590,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   }
 
   PokerConfig config = config_;
+  std::shared_ptr<TerminalUtilityCache> utility_cache = utility_cache_;
   std::vector<std::future<double>> futures;
   futures.reserve(worker_count);
   int samples_remaining = samples;
@@ -588,8 +600,8 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
     unsigned int seed = worker_seeds[i];
     futures.push_back(executor.submit([config, &range_deals,
                                        &range_deal_weights, &strategy,
-                                       shard_samples, seed]() {
-      CFRSolver worker(config);
+                                       utility_cache, shard_samples, seed]() {
+      CFRSolver worker(config, utility_cache);
       worker.rng_.seed(seed);
       return worker.evaluate_strategy_samples(
                  shard_samples, range_deals, range_deal_weights, strategy) *
@@ -631,7 +643,7 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node* node,
                                          const Hand& player_b_hand,
                                          const Strategy& strategy) {
   if (node->is_terminal) {
-    return game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
+    return utility(node->state, player_a_hand, player_b_hand);
   }
   if (node->is_chance_node) {
     return SampleChanceValue(
@@ -688,7 +700,7 @@ double CFRSolver::best_response_value(GameTree::Node* node,
                                       int best_response_player) {
   if (node->is_terminal) {
     double player_a_value =
-        game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
+        utility(node->state, player_a_hand, player_b_hand);
     return best_response_player == 0 ? player_a_value : -player_a_value;
   }
   if (node->is_chance_node) {
@@ -773,7 +785,7 @@ double CFRSolver::best_response_value_against_range(
       const Hand& player_b_hand =
           best_response_player == 0 ? opponent_hand.first : best_response_hand;
       double player_a_value =
-          game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
+          utility(node->state, player_a_hand, player_b_hand);
       value += opponent_hand.second *
                (best_response_player == 0 ? player_a_value : -player_a_value);
     }
@@ -900,6 +912,7 @@ double CFRSolver::sampled_range_best_response_value(
   }
 
   PokerConfig config = config_;
+  std::shared_ptr<TerminalUtilityCache> utility_cache = utility_cache_;
   std::vector<std::future<double>> futures;
   futures.reserve(worker_count);
   int samples_remaining = samples;
@@ -909,9 +922,9 @@ double CFRSolver::sampled_range_best_response_value(
     unsigned int seed = worker_seeds[i];
     futures.push_back(executor.submit([config, &best_response_hands,
                                        &opponent_hands, &strategy,
-                                       shard_samples, seed,
+                                       utility_cache, shard_samples, seed,
                                        best_response_player]() {
-      CFRSolver worker(config);
+      CFRSolver worker(config, utility_cache);
       worker.rng_.seed(seed);
       return worker.sampled_range_best_response_samples(
                  shard_samples, best_response_hands, opponent_hands, strategy,
@@ -1128,6 +1141,25 @@ double CFRSolver::get_expected_value(int player_id) const {
   }
   double player_a_ev = cumulative_root_utility_ / iterations_run_;
   return player_id == 0 ? player_a_ev : -player_a_ev;
+}
+
+CFRSolver::UtilityCacheStats CFRSolver::get_utility_cache_stats() const {
+  TerminalUtilityCache::Stats stats = utility_cache_->stats();
+  return {stats.hits, stats.misses, stats.entries};
+}
+
+double CFRSolver::utility(const BoardState& state,
+                          const Hand& player_a_hand,
+                          const Hand& player_b_hand) {
+  if (state.folded_player() >= 0 ||
+      player_a_hand.cards_size() + state.cards_size() < 5) {
+    return game_tree_->get_utility(state, player_a_hand, player_b_hand);
+  }
+
+  return utility_cache_->get_or_compute(
+      state, player_a_hand, player_b_hand, [&]() {
+        return game_tree_->get_utility(state, player_a_hand, player_b_hand);
+      });
 }
 
 Strategy::ActionProbabilities CFRSolver::get_strategy(

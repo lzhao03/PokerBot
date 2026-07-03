@@ -55,6 +55,13 @@ class CFRSolverRegretTestPeer {
         node, best_response_hand, opponent_hands, strategy, best_response_player);
   }
 
+  static double Utility(CFRSolver& solver,
+                        const BoardState& state,
+                        const Hand& player_a_hand,
+                        const Hand& player_b_hand) {
+    return solver.utility(state, player_a_hand, player_b_hand);
+  }
+
   static std::vector<double> CompatibleDealWeights(
       const HandRange& player_a_range,
       const HandRange& player_b_range) {
@@ -323,6 +330,37 @@ void CheckLoadStrategyPopulatesEquilibriumStrategy() {
   Expect(std::abs(action_probs.at(TestActionKey(ActionType::CALL, 3)) - 0.75) <
              0.000001,
          "loaded strategy should keep call probability");
+}
+
+void CheckTerminalUtilityCacheReusesScores() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+
+  CFRSolver solver(config);
+  BoardState state;
+  state.set_pot(12);
+  state.set_folded_player(-1);
+  state.add_player_contribution(6);
+  state.add_player_contribution(6);
+  AddCard(&state, 2, Suit::CLUBS);
+  AddCard(&state, 7, Suit::DIAMONDS);
+  AddCard(&state, 9, Suit::HEARTS);
+  AddCard(&state, 11, Suit::SPADES);
+  AddCard(&state, 12, Suit::CLUBS);
+
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
+
+  double first = CFRSolverRegretTestPeer::Utility(
+      solver, state, player_a_hand, player_b_hand);
+  double second = CFRSolverRegretTestPeer::Utility(
+      solver, state, player_a_hand, player_b_hand);
+  CFRSolver::UtilityCacheStats stats = solver.get_utility_cache_stats();
+
+  Expect(first == second, "cached utility should preserve score");
+  Expect(stats.misses == 1, "first utility lookup should miss cache");
+  Expect(stats.hits == 1, "second utility lookup should hit cache");
+  Expect(stats.entries == 1, "cache should contain one utility entry");
 }
 
 void CheckEvaluateLoadedStrategy() {
@@ -1421,6 +1459,7 @@ int main() {
   CheckCfrDistinguishesActionAmounts();
   CheckSaveStrategyUsesProtobufSnapshot();
   CheckLoadStrategyPopulatesEquilibriumStrategy();
+  CheckTerminalUtilityCacheReusesScores();
   CheckEvaluateLoadedStrategy();
   CheckEvaluateRangeStrategy();
   CheckSingletonRangeMatchesExactEvaluationAndBestResponse();

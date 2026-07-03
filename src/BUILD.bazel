@@ -143,6 +143,16 @@ cc_test(
 )
 
 cc_library(
+    name = "terminal_utility_cache",
+    srcs = ["terminal_utility_cache.cc"],
+    hdrs = ["terminal_utility_cache.h"],
+    deps = [
+        ":poker_cc_proto",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "cfr_solver",
     srcs = ["cfr_solver.cc"],
     hdrs = ["cfr_solver.h"],
@@ -156,6 +166,7 @@ cc_library(
         ":hand_range",
         ":utility_calculator",
         ":thread_pool",
+        ":terminal_utility_cache",
     ],
     visibility = ["//visibility:public"],
 )

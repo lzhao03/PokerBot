@@ -27,6 +27,7 @@ struct BenchmarkResult {
   int64_t hands = 0;
   int64_t cfr_node_updates = 0;
   poker::CFRSolver::TraversalStats traversal_stats;
+  poker::CFRSolver::UtilityCacheStats utility_cache_stats;
 };
 
 bool ConsumePrefix(const std::string& arg,
@@ -84,6 +85,13 @@ double RatePerSecond(int64_t count, double seconds) {
   return count / seconds;
 }
 
+poker::CFRSolver::UtilityCacheStats CacheDelta(
+    const poker::CFRSolver::UtilityCacheStats& after,
+    const poker::CFRSolver::UtilityCacheStats& before) {
+  return {after.hits - before.hits, after.misses - before.misses,
+          after.entries};
+}
+
 void RunBenchmark(const std::string& name,
                   const std::function<BenchmarkResult()>& benchmark) {
   auto start = std::chrono::steady_clock::now();
@@ -102,7 +110,10 @@ void RunBenchmark(const std::string& name,
             << result.traversal_stats.max_decision_depth << "\t"
             << result.traversal_stats.canonical_state_visits << "\t"
             << result.traversal_stats.unique_canonical_states << "\t"
-            << result.traversal_stats.duplicate_canonical_state_visits << "\n";
+            << result.traversal_stats.duplicate_canonical_state_visits << "\t"
+            << result.utility_cache_stats.hits << "\t"
+            << result.utility_cache_stats.misses << "\t"
+            << result.utility_cache_stats.entries << "\n";
 }
 
 Options ParseOptions(int argc, char** argv) {
@@ -147,7 +158,9 @@ int main(int argc, char** argv) {
               << "\tpreflop_updates\tflop_updates\tturn_updates"
               << "\triver_updates\tmax_decision_depth"
               << "\tcanonical_state_visits\tunique_canonical_states"
-              << "\tduplicate_canonical_state_visits\n";
+              << "\tduplicate_canonical_state_visits"
+              << "\tutility_cache_hits\tutility_cache_misses"
+              << "\tutility_cache_entries\n";
 
     RunBenchmark("range_expand", [&] {
       int64_t combos = 0;
@@ -167,7 +180,7 @@ int main(int argc, char** argv) {
           static_cast<double>(
               solver.get_equilibrium_strategy().get_info_sets().size()),
           static_cast<int64_t>(options.iterations) * 2, updates,
-          solver.get_traversal_stats()};
+          solver.get_traversal_stats(), solver.get_utility_cache_stats()};
     });
 
     RunBenchmark("train_range", [&] {
@@ -178,15 +191,20 @@ int main(int argc, char** argv) {
       return BenchmarkResult{
           static_cast<double>(
               solver.get_equilibrium_strategy().get_info_sets().size()),
-          options.iterations, updates, solver.get_traversal_stats()};
+          options.iterations, updates, solver.get_traversal_stats(),
+          solver.get_utility_cache_stats()};
     });
 
     poker::CFRSolver evaluate_solver(config);
     evaluate_solver.run(options.iterations, player_a_range, player_b_range);
     RunBenchmark("evaluate_range", [&] {
+      poker::CFRSolver::UtilityCacheStats before =
+          evaluate_solver.get_utility_cache_stats();
       double value = evaluate_solver.evaluate_strategy(
           options.eval_samples, player_a_range, player_b_range);
-      return BenchmarkResult{value, options.eval_samples, 0};
+      return BenchmarkResult{
+          value, options.eval_samples, 0, {},
+          CacheDelta(evaluate_solver.get_utility_cache_stats(), before)};
     });
 
     if (!options.skip_exploitability) {
@@ -194,19 +212,31 @@ int main(int argc, char** argv) {
       exploitability_solver.run(options.iterations, player_a_range,
                                 player_b_range);
       RunBenchmark("best_response_player_a", [&] {
+        poker::CFRSolver::UtilityCacheStats before =
+            exploitability_solver.get_utility_cache_stats();
         double value = exploitability_solver.calculate_player_a_best_response_value(
             options.exploitability_samples, player_a_range, player_b_range);
-        return BenchmarkResult{value, options.exploitability_samples, 0};
+        return BenchmarkResult{
+            value, options.exploitability_samples, 0, {},
+            CacheDelta(exploitability_solver.get_utility_cache_stats(), before)};
       });
       RunBenchmark("best_response_player_b", [&] {
+        poker::CFRSolver::UtilityCacheStats before =
+            exploitability_solver.get_utility_cache_stats();
         double value = exploitability_solver.calculate_player_b_best_response_value(
             options.exploitability_samples, player_a_range, player_b_range);
-        return BenchmarkResult{value, options.exploitability_samples, 0};
+        return BenchmarkResult{
+            value, options.exploitability_samples, 0, {},
+            CacheDelta(exploitability_solver.get_utility_cache_stats(), before)};
       });
       RunBenchmark("exploitability_total", [&] {
+        poker::CFRSolver::UtilityCacheStats before =
+            exploitability_solver.get_utility_cache_stats();
         double value = exploitability_solver.calculate_exploitability(
             options.exploitability_samples, player_a_range, player_b_range);
-        return BenchmarkResult{value, options.exploitability_samples * 3, 0};
+        return BenchmarkResult{
+            value, options.exploitability_samples * 3, 0, {},
+            CacheDelta(exploitability_solver.get_utility_cache_stats(), before)};
       });
     }
   } catch (const std::exception& error) {
