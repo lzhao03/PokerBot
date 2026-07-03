@@ -4,13 +4,37 @@
 
 namespace poker {
 
-double BettingRoundTerminalValueProvider::value(
+ContinuationContext ContinuationContext::ExactHands(
+    const BoardState& state,
+    const Hand& player_a_hand,
+    const Hand& player_b_hand) {
+  ContinuationContext context;
+  context.state = state;
+  context.player_a_hand = player_a_hand;
+  context.player_b_hand = player_b_hand;
+  return context;
+}
+
+bool ContinuationContext::has_ranges() const {
+  return !player_a_range.empty() && !player_b_range.empty();
+}
+
+double ContinuationValueProvider::value(
     GameTree* game_tree,
     const BoardState& state,
     const Hand& player_a_hand,
     const Hand& player_b_hand) const {
-  if (game_tree->is_betting_round_over(state)) {
-    return game_tree->get_utility(state, player_a_hand, player_b_hand);
+  return value(game_tree,
+               ContinuationContext::ExactHands(
+                   state, player_a_hand, player_b_hand));
+}
+
+double BettingRoundTerminalValueProvider::value(
+    GameTree* game_tree,
+    const ContinuationContext& context) const {
+  if (game_tree->is_betting_round_over(context.state)) {
+    return game_tree->get_utility(
+        context.state, context.player_a_hand, context.player_b_hand);
   }
   return 0.0;
 }

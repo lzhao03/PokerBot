@@ -95,19 +95,23 @@ class FixedContinuationValueProvider : public ContinuationValueProvider {
  public:
   explicit FixedContinuationValueProvider(double value) : value_(value) {}
 
+  using ContinuationValueProvider::value;
+
   double value(GameTree* game_tree,
-               const BoardState& state,
-               const Hand& player_a_hand,
-               const Hand& player_b_hand) const override {
+               const ContinuationContext& context) const override {
     (void)game_tree;
-    (void)state;
-    (void)player_a_hand;
-    (void)player_b_hand;
+    ++calls_;
+    saw_empty_ranges_ = !context.has_ranges();
     return value_;
   }
 
+  int calls() const { return calls_; }
+  bool saw_empty_ranges() const { return saw_empty_ranges_; }
+
  private:
   double value_;
+  mutable int calls_ = 0;
+  mutable bool saw_empty_ranges_ = false;
 };
 
 Action MakeAction(ActionType type, int amount = 0) {
@@ -1213,8 +1217,8 @@ void CheckDepthLimitUsesContinuationValueProvider() {
   config.set_starting_stack_size(20);
 
   CFRSolver solver(config);
-  solver.set_continuation_value_provider(
-      std::make_shared<FixedContinuationValueProvider>(7.0));
+  auto provider = std::make_shared<FixedContinuationValueProvider>(7.0);
+  solver.set_continuation_value_provider(provider);
 
   GameTree::Node node;
   node.state.set_player_to_act(0);
@@ -1230,6 +1234,10 @@ void CheckDepthLimitUsesContinuationValueProvider() {
 
   Expect(value == 7.0,
          "depth cutoff should use the continuation value provider");
+  Expect(provider->calls() == 1,
+         "depth cutoff should pass through the continuation provider");
+  Expect(provider->saw_empty_ranges(),
+         "exact-hand CFR cutoff context should not include ranges yet");
 }
 
 void CheckZeroMaxDepthDoesNotCutOff() {

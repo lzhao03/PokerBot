@@ -26,17 +26,15 @@ class ExactHandNestedCFRContinuationValueProvider
   ExactHandNestedCFRContinuationValueProvider(PokerConfig config,
                                               int iterations);
 
+  using ContinuationValueProvider::value;
+
   double value(GameTree* game_tree,
-               const BoardState& state,
-               const Hand& player_a_hand,
-               const Hand& player_b_hand) const override;
+               const ContinuationContext& context) const override;
   Stats stats() const;
 
  private:
   double compute_value(GameTree* game_tree,
-                       const BoardState& state,
-                       const Hand& player_a_hand,
-                       const Hand& player_b_hand) const;
+                       const ContinuationContext& context) const;
 
   PokerConfig config_;
   int iterations_;

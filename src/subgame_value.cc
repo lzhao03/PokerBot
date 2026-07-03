@@ -20,13 +20,11 @@ void AppendSerialized(std::string* key, const Message& message) {
   key->append(serialized);
 }
 
-std::string CacheKey(const BoardState& state,
-                     const Hand& player_a_hand,
-                     const Hand& player_b_hand) {
+std::string CacheKey(const ContinuationContext& context) {
   std::string key;
-  AppendSerialized(&key, state);
-  AppendSerialized(&key, player_a_hand);
-  AppendSerialized(&key, player_b_hand);
+  AppendSerialized(&key, context.state);
+  AppendSerialized(&key, context.player_a_hand);
+  AppendSerialized(&key, context.player_b_hand);
   return key;
 }
 
@@ -44,14 +42,12 @@ ExactHandNestedCFRContinuationValueProvider::
 
 double ExactHandNestedCFRContinuationValueProvider::value(
     GameTree* game_tree,
-    const BoardState& state,
-    const Hand& player_a_hand,
-    const Hand& player_b_hand) const {
+    const ContinuationContext& context) const {
   if (game_tree == nullptr) {
     throw std::invalid_argument("Game tree cannot be null");
   }
 
-  std::string key = CacheKey(state, player_a_hand, player_b_hand);
+  std::string key = CacheKey(context);
   {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = values_.find(key);
@@ -61,8 +57,7 @@ double ExactHandNestedCFRContinuationValueProvider::value(
     }
   }
 
-  double computed =
-      compute_value(game_tree, state, player_a_hand, player_b_hand);
+  double computed = compute_value(game_tree, context);
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -84,18 +79,19 @@ ExactHandNestedCFRContinuationValueProvider::stats() const {
 
 double ExactHandNestedCFRContinuationValueProvider::compute_value(
     GameTree* game_tree,
-    const BoardState& state,
-    const Hand& player_a_hand,
-    const Hand& player_b_hand) const {
-  if (game_tree->is_terminal(state)) {
-    return game_tree->get_utility(state, player_a_hand, player_b_hand);
+    const ContinuationContext& context) const {
+  if (game_tree->is_terminal(context.state)) {
+    return game_tree->get_utility(
+        context.state, context.player_a_hand, context.player_b_hand);
   }
 
   PokerConfig subgame_config = config_;
   subgame_config.set_max_depth(0);
-  CFRSolver subgame_solver(subgame_config, state);
-  subgame_solver.run(iterations_, player_a_hand, player_b_hand);
-  return subgame_solver.evaluate_strategy(player_a_hand, player_b_hand);
+  CFRSolver subgame_solver(subgame_config, context.state);
+  subgame_solver.run(
+      iterations_, context.player_a_hand, context.player_b_hand);
+  return subgame_solver.evaluate_strategy(
+      context.player_a_hand, context.player_b_hand);
 }
 
 }  // namespace poker
