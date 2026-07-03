@@ -46,6 +46,10 @@ double NestedCFRContinuationValueProvider::value(
     const BoardState& state,
     const Hand& player_a_hand,
     const Hand& player_b_hand) const {
+  if (game_tree == nullptr) {
+    throw std::invalid_argument("Game tree cannot be null");
+  }
+
   std::string key = CacheKey(state, player_a_hand, player_b_hand);
   {
     std::lock_guard<std::mutex> lock(mutex_);
