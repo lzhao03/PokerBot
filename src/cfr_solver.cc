@@ -155,31 +155,6 @@ void HashArray(size_t& seed, const std::array<int, N>& values) {
   }
 }
 
-struct WeightedHands {
-  explicit WeightedHands(const WeightedHandRange& hands)
-      : hands(hands),
-        distribution(hands.weights.begin(), hands.weights.end()) {}
-
-  const WeightedHandRange& hands;
-  std::discrete_distribution<size_t> distribution;
-};
-
-struct WeightedHandViewSampler {
-  explicit WeightedHandViewSampler(const WeightedHandRangeView& hand_view)
-      : hand_view(hand_view) {
-    weights.reserve(hand_view.size());
-    for (size_t i = 0; i < hand_view.size(); ++i) {
-      weights.push_back(hand_view.weight(i));
-    }
-    distribution =
-        std::discrete_distribution<size_t>(weights.begin(), weights.end());
-  }
-
-  const WeightedHandRangeView& hand_view;
-  std::vector<double> weights;
-  std::discrete_distribution<size_t> distribution;
-};
-
 double StrategyActionProbability(const Strategy& strategy,
                                  const std::string& info_set_key,
                                  const std::vector<Action>& legal_actions,
@@ -1315,12 +1290,18 @@ double CFRSolver::best_response_value_against_range(
   if (node.is_chance_node) {
     double value = 0.0;
     int samples = ChanceSamples(config_);
-    WeightedHandViewSampler weighted_opponents(opponent_hands);
+    std::vector<double> opponent_weights;
+    opponent_weights.reserve(opponent_hands.size());
+    for (size_t i = 0; i < opponent_hands.size(); ++i) {
+      opponent_weights.push_back(opponent_hands.weight(i));
+    }
+    std::discrete_distribution<size_t> opponent_distribution(
+        opponent_weights.begin(), opponent_weights.end());
     int64_t ignored_created_nodes = 0;
     for (int i = 0; i < samples; ++i) {
+      size_t sampled_opponent_view_index = opponent_distribution(rng_);
       size_t sampled_opponent_index =
-          weighted_opponents.hand_view.source_index(
-              weighted_opponents.distribution(rng_));
+          opponent_hands.source_index(sampled_opponent_view_index);
       const Hand& sampled_opponent =
           opponent_hands.source_range().hands[sampled_opponent_index];
       const Hand& player_a_hand =
@@ -1480,14 +1461,14 @@ double CFRSolver::sampled_range_best_response_samples(
     return 0.0;
   }
 
-  WeightedHands weighted_best_response_hands(best_response_hands);
+  std::discrete_distribution<size_t> best_response_hand_distribution(
+      best_response_hands.weights.begin(), best_response_hands.weights.end());
   GameTree::Node& root = get_or_build_root();
   WeightedHandRangeView opponent_view(opponent_hands);
   double total = 0.0;
   for (int i = 0; i < samples; ++i) {
     const Hand& best_response_hand =
-        best_response_hands.hands[
-            weighted_best_response_hands.distribution(rng_)];
+        best_response_hands.hands[best_response_hand_distribution(rng_)];
     WeightedHandRangeView compatible_opponents =
         CompatibleHands(opponent_view, best_response_hand, root.state);
     if (compatible_opponents.empty()) {
