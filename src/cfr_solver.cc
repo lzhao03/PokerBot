@@ -590,6 +590,7 @@ double CFRSolver::cfr_with_ranges(
   
   // Initialize expected values for each action
   std::unordered_map<int, double> action_values;
+  action_values.reserve(node->legal_actions.size());
   
   // Initialize the expected value for the player
   double node_value = 0.0;
@@ -608,8 +609,9 @@ double CFRSolver::cfr_with_ranges(
     GameTree::Node* child_node = node->children[action_id];
     
     // Update reach probabilities for the recursive call
-    std::vector<double> new_reach_probabilities = reach_probabilities;
-    new_reach_probabilities[player] *= strategy[action_id];
+    const double action_probability = strategy.at(action_id);
+    const double previous_reach_probability = reach_probabilities[player];
+    reach_probabilities[player] = previous_reach_probability * action_probability;
 
     const std::vector<std::pair<Hand, double>>* child_player_a_range =
         player_a_range;
@@ -630,15 +632,16 @@ double CFRSolver::cfr_with_ranges(
     
     // Recursive call to get the expected value of this action
     double action_value = cfr_with_ranges(
-        child_node, player_a_hand, player_b_hand, new_reach_probabilities,
+        child_node, player_a_hand, player_b_hand, reach_probabilities,
         iteration, depth + 1, max_depth, child_player_a_range,
         child_player_b_range);
+    reach_probabilities[player] = previous_reach_probability;
     
     // Store the action value
     action_values[action_id] = action_value;
     
     // Update the expected value of the node
-    node_value += strategy[action_id] * action_value;
+    node_value += action_probability * action_value;
   }
   
   // Compute counterfactual regrets if this is not a chance player
@@ -673,6 +676,7 @@ double CFRSolver::cfr_with_ranges(
 
     // Compute the counterfactual reach probability of the opponent
     double opponent_reach_prob = reach_probabilities[1 - player];
+    auto& regrets = cumulative_regrets_[info_set_key];
     
     // For each action, compute and accumulate the counterfactual regret
     for (const Action& action : node->legal_actions) {
@@ -682,10 +686,11 @@ double CFRSolver::cfr_with_ranges(
       // opposite payoff in this zero-sum game.
       double utility_sign = player == 0 ? 1.0 : -1.0;
       double regret =
-          opponent_reach_prob * utility_sign * (action_values[action_id] - node_value);
+          opponent_reach_prob * utility_sign *
+          (action_values.at(action_id) - node_value);
       
       // CFR+ clips cumulative regrets at zero.
-      double& cumulative_regret = cumulative_regrets_[info_set_key][action_id];
+      double& cumulative_regret = regrets[action_id];
       cumulative_regret = std::max(0.0, cumulative_regret + regret);
     }
     
@@ -1463,18 +1468,18 @@ Strategy::ActionProbabilities CFRSolver::get_strategy(
     return strategy;
   }
 
+  regrets.reserve(legal_actions.size());
   std::vector<int> action_ids;
   action_ids.reserve(legal_actions.size());
   for (const Action& action : legal_actions) {
     int action_id = ActionKey(action);
-    if (regrets.find(action_id) == regrets.end()) {
-      regrets[action_id] = 0.0;
-    }
+    regrets.try_emplace(action_id, 0.0);
     if (std::find(action_ids.begin(), action_ids.end(), action_id) ==
         action_ids.end()) {
       action_ids.push_back(action_id);
     }
   }
+  strategy.reserve(action_ids.size());
   
   // Compute the sum of positive regrets
   double sum_positive_regrets = 0.0;
@@ -1500,8 +1505,10 @@ Strategy::ActionProbabilities CFRSolver::get_strategy(
 
 void CFRSolver::update_strategy(const std::string& info_set_key, const Strategy::ActionProbabilities& strategy, double reach_prob) {
   // Accumulate the strategy weighted by the reach probability
+  auto& cumulative_strategy = cumulative_strategy_[info_set_key];
+  cumulative_strategy.reserve(strategy.size());
   for (const auto& action_prob : strategy) {
-    cumulative_strategy_[info_set_key][action_prob.first] += reach_prob * action_prob.second;
+    cumulative_strategy[action_prob.first] += reach_prob * action_prob.second;
   }
 }
 

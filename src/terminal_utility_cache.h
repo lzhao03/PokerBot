@@ -4,9 +4,9 @@
 #include <array>
 #include <cstdint>
 #include <cstddef>
-#include <functional>
 #include <mutex>
 #include <unordered_map>
+#include <utility>
 
 #include "src/poker.pb.h"
 
@@ -20,10 +20,35 @@ class TerminalUtilityCache {
     int64_t entries = 0;
   };
 
+  template <typename Compute>
   double get_or_compute(const BoardState& state,
                         const Hand& player_a_hand,
                         const Hand& player_b_hand,
-                        const std::function<double()>& compute);
+                        Compute compute) {
+    Key key = key_for(state, player_a_hand, player_b_hand);
+
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      auto it = values_.find(key);
+      if (it != values_.end()) {
+        ++hits_;
+        return it->second;
+      }
+    }
+
+    double value = compute();
+
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      auto inserted = values_.emplace(std::move(key), value);
+      if (inserted.second) {
+        ++misses_;
+        return value;
+      }
+      ++hits_;
+      return inserted.first->second;
+    }
+  }
 
   Stats stats() const;
 

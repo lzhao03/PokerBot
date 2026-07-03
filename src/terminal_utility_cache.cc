@@ -2,8 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <utility>
-#include <vector>
 
 namespace poker {
 namespace {
@@ -16,17 +14,15 @@ template <size_t N, typename Cards>
 std::array<int, N> EncodedSortedCards(const Cards& cards) {
   std::array<int, N> encoded;
   encoded.fill(-1);
-  std::vector<int> sorted_cards;
-  sorted_cards.reserve(cards.size());
+  size_t count = 0;
   for (const Card& card : cards) {
-    sorted_cards.push_back(EncodeCard(card));
+    if (count == N) {
+      break;
+    }
+    encoded[count] = EncodeCard(card);
+    ++count;
   }
-  std::sort(sorted_cards.begin(), sorted_cards.end());
-
-  size_t limit = std::min(N, sorted_cards.size());
-  for (size_t i = 0; i < limit; ++i) {
-    encoded[i] = sorted_cards[i];
-  }
+  std::sort(encoded.begin(), encoded.begin() + count);
   return encoded;
 }
 
@@ -48,36 +44,6 @@ void HashArray(size_t* seed, const std::array<int, N>& values) {
 }
 
 }  // namespace
-
-double TerminalUtilityCache::get_or_compute(
-    const BoardState& state,
-    const Hand& player_a_hand,
-    const Hand& player_b_hand,
-    const std::function<double()>& compute) {
-  Key key = key_for(state, player_a_hand, player_b_hand);
-
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto it = values_.find(key);
-    if (it != values_.end()) {
-      ++hits_;
-      return it->second;
-    }
-  }
-
-  double value = compute();
-
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto inserted = values_.emplace(std::move(key), value);
-    if (inserted.second) {
-      ++misses_;
-      return value;
-    }
-    ++hits_;
-    return inserted.first->second;
-  }
-}
 
 TerminalUtilityCache::Stats TerminalUtilityCache::stats() const {
   std::lock_guard<std::mutex> lock(mutex_);
