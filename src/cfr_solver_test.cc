@@ -23,12 +23,7 @@ class CFRSolverRegretTestPeer {
  public:
   static double Regret(const CFRSolver& solver, const std::string& info_set_key,
                        int action_id) {
-    auto info_set_it = solver.cumulative_regrets_.find(info_set_key);
-    if (info_set_it == solver.cumulative_regrets_.end()) {
-      return 0.0;
-    }
-    auto action_it = info_set_it->second.find(action_id);
-    return action_it == info_set_it->second.end() ? 0.0 : action_it->second;
+    return solver.regret_for_info_set(info_set_key, action_id);
   }
 
   static double EvaluateNode(CFRSolver& solver, GameTree::Node* node,

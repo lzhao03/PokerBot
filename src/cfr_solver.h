@@ -146,8 +146,45 @@ private:
   struct ActionChoice {
     const Action* action = nullptr;
     int action_id = 0;
+    size_t action_index = 0;
     double probability = 0.0;
     double value = 0.0;
+  };
+
+  struct InfoSetKey {
+    static constexpr int kMaxCards = 5;
+    static constexpr int kInlineHistoryValues = 48;
+
+    int player = 0;
+    int street = 0;
+    int pot = 0;
+    int stack_a = 0;
+    int stack_b = 0;
+    int all_in = 0;
+    int folded_player = 0;
+    int player_to_act = 0;
+    int player_contribution_size = 0;
+    std::array<int, 2> player_contributions = {0, 0};
+    int hand_size = 0;
+    std::array<int, 2> hand_cards = {-1, -1};
+    int board_size = 0;
+    std::array<int, kMaxCards> board_cards = {-1, -1, -1, -1, -1};
+    int history_size = 0;
+    std::array<int, kInlineHistoryValues> history_values = {};
+    std::vector<int> history_overflow;
+
+    bool operator==(const InfoSetKey& other) const;
+  };
+
+  struct InfoSetKeyHash {
+    size_t operator()(const InfoSetKey& key) const;
+  };
+
+  struct InfoSetData {
+    InfoSetKey key;
+    std::vector<int> action_ids;
+    std::vector<double> cumulative_regrets;
+    std::vector<double> cumulative_strategy;
   };
 
   CFRSolver(const PokerConfig& config,
@@ -175,11 +212,12 @@ private:
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
   
-  // CFR+ clipped regret tracking for each information set and action.
+  // Legacy string-keyed storage used for loaded strategies and test-seeded regrets.
   std::unordered_map<std::string, std::unordered_map<int, double>> cumulative_regrets_;
-  
-  // Strategy tracking for each information set and action
   std::unordered_map<std::string, std::unordered_map<int, double>> cumulative_strategy_;
+
+  std::unordered_map<InfoSetKey, int, InfoSetKeyHash> info_set_ids_;
+  std::vector<InfoSetData> info_sets_;
   
   // Current iteration strategy
   Strategy current_strategy_;
@@ -213,6 +251,17 @@ private:
       int player,
       const std::vector<Action>& legal_actions,
       int action_id) const;
+  InfoSetKey make_info_set_key(const BoardState& state,
+                               int player,
+                               const Hand& hand) const;
+  int get_or_create_info_set_id(const InfoSetKey& key,
+                                const std::vector<Action>& legal_actions);
+  const InfoSetData* find_info_set(const InfoSetKey& key) const;
+  void ensure_info_set_actions(InfoSetData* info_set,
+                               const std::vector<Action>& legal_actions);
+  std::string info_set_key_to_string(const InfoSetKey& key) const;
+  double regret_for_info_set(const std::string& info_set_key,
+                             int action_id) const;
   ContinuationContext build_continuation_context(
       const BoardState& state,
       const Hand& player_a_hand,
@@ -260,8 +309,14 @@ private:
   std::vector<ActionChoice> get_action_choices(
       const std::string& info_set_key,
       const std::vector<Action>& legal_actions);
+  std::vector<ActionChoice> get_action_choices(
+      int info_set_id,
+      const std::vector<Action>& legal_actions);
   void update_strategy(const std::string& info_set_key, const Strategy::ActionProbabilities& strategy, double reach_prob);
   void update_strategy(const std::string& info_set_key,
+                       const std::vector<ActionChoice>& choices,
+                       double reach_prob);
+  void update_strategy(int info_set_id,
                        const std::vector<ActionChoice>& choices,
                        double reach_prob);
   double chance_sampling_cfr(
