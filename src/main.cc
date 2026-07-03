@@ -93,7 +93,6 @@ void PrintUsage(const char* program) {
       << "  --big-blind=N\n"
       << "  --max-depth=N                   0 disables depth cutoff\n"
       << "  --chance-samples=N\n"
-      << "  --max-raises-per-street=N\n"
       << "  --bet-size=X                    replaces default global sizes on first use\n"
       << "  --preflop-bet-size=X\n"
       << "  --flop-bet-size=X\n"
@@ -139,9 +138,6 @@ int main(int argc, char** argv) {
         config.set_max_depth(ParseInt(value, "--max-depth"));
       } else if (ConsumePrefix(arg, "--chance-samples=", &value)) {
         config.set_chance_samples(ParseInt(value, "--chance-samples"));
-      } else if (ConsumePrefix(arg, "--max-raises-per-street=", &value)) {
-        config.set_max_raises_per_street(
-            ParseInt(value, "--max-raises-per-street"));
       } else if (ConsumePrefix(arg, "--bet-size=", &value)) {
         if (!saw_global_bet_size) {
           config.clear_bet_sizes();

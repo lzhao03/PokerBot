@@ -302,21 +302,24 @@ void CheckStreetBetSizesOverrideGlobal() {
          "flop bet should use the street-specific size");
 }
 
-void CheckMaxRaisesCapsRaiseActions() {
+void CheckRaisesRemainAvailableAfterPriorRaise() {
   PokerConfig config;
   config.add_bet_sizes(0.5);
-  config.set_max_raises_per_street(1);
   GameTree tree(config);
 
   BoardState raised =
       tree.apply_action(PreflopState(), MakeAction(ActionType::RAISE, 4));
   std::vector<Action> actions = tree.get_legal_actions(raised);
 
-  Expect(actions.size() == 3, "raise cap should remove regular raise actions");
-  Expect(actions[0].action() == ActionType::FOLD, "capped facing action keeps fold");
-  Expect(actions[1].action() == ActionType::CALL, "capped facing action keeps call");
-  Expect(actions[2].action() == ActionType::ALL_IN,
-         "capped facing action keeps all-in");
+  Expect(actions.size() == 4, "facing action should include regular raise");
+  Expect(actions[0].action() == ActionType::FOLD, "facing action keeps fold");
+  Expect(actions[1].action() == ActionType::CALL, "facing action keeps call");
+  Expect(actions[2].action() == ActionType::RAISE,
+         "prior raise should not hide regular raise");
+  Expect(actions[2].amount() == 6,
+         "regular raise amount should use configured pot fraction");
+  Expect(actions[3].action() == ActionType::ALL_IN,
+         "facing action keeps all-in");
 }
 
 void CheckShowdownUtility(GameTree* tree) {
@@ -374,7 +377,7 @@ int main() {
   poker::CheckFullStackBetRaiseUseAllIn(&tree);
   poker::CheckDuplicateConcreteBetSizesAreDeduped();
   poker::CheckStreetBetSizesOverrideGlobal();
-  poker::CheckMaxRaisesCapsRaiseActions();
+  poker::CheckRaisesRemainAvailableAfterPriorRaise();
   poker::CheckShowdownUtility(&tree);
   poker::CheckChanceAdvancesStreet(&tree);
   return 0;

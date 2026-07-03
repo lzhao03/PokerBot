@@ -122,21 +122,6 @@ void AddActionIfMissing(std::vector<Action>* actions, ActionType type, int amoun
   actions->push_back(new_action);
 }
 
-int RaisesThisStreet(const ActionHistory& history) {
-  int raises = 0;
-  for (const Action& action : history.actions()) {
-    if (action.action() == ActionType::RAISE) {
-      ++raises;
-    }
-  }
-  return raises;
-}
-
-bool CanRaise(const BoardState& state, const PokerConfig& config) {
-  return config.max_raises_per_street() <= 0 ||
-         RaisesThisStreet(state.history()) < config.max_raises_per_street();
-}
-
 int CommitChips(BoardState* state, int player, int requested) {
   if (requested <= 0) {
     throw std::invalid_argument("Action amount must be positive");
@@ -248,14 +233,12 @@ std::vector<Action> GameTree::get_legal_actions(const BoardState& state) const {
     call_action.set_amount(std::min(to_call, stack));
     actions.push_back(call_action);
 
-    if (CanRaise(state, config_)) {
-      for (int i = 0; i < BetSizesSize(config_, state.street()); ++i) {
-        int raise_amount =
-            to_call + ConcreteBetAmount(
-                          state, BetSizeForStreet(config_, state.street(), i));
-        if (raise_amount < stack) {
-          AddActionIfMissing(&actions, ActionType::RAISE, raise_amount);
-        }
+    for (int i = 0; i < BetSizesSize(config_, state.street()); ++i) {
+      int raise_amount =
+          to_call + ConcreteBetAmount(
+                        state, BetSizeForStreet(config_, state.street(), i));
+      if (raise_amount < stack) {
+        AddActionIfMissing(&actions, ActionType::RAISE, raise_amount);
       }
     }
     if (stack > to_call) {

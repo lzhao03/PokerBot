@@ -57,7 +57,6 @@ poker::PokerConfig BenchmarkConfig(const Options& options) {
   config.set_big_blind(2);
   config.set_max_depth(options.max_depth);
   config.set_chance_samples(options.chance_samples);
-  config.set_max_raises_per_street(2);
   return config;
 }
 
