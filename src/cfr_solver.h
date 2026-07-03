@@ -162,11 +162,15 @@ private:
     size_t operator()(const InfoSetKey& key) const;
   };
 
+  struct ActionState {
+    int action_id = 0;
+    double cumulative_regret = 0.0;
+    double cumulative_strategy = 0.0;
+  };
+
   struct InfoSetData {
     InfoSetKey key;
-    std::vector<int> action_ids;
-    std::vector<double> cumulative_regrets;
-    std::vector<double> cumulative_strategy;
+    std::vector<ActionState> actions;
   };
 
   CFRSolver(const PokerConfig& config,

@@ -78,14 +78,15 @@ class CFRSolverRegretTestPeer {
     const int info_set_id =
         solver.get_or_create_info_set_id(key, legal_actions);
     CFRSolver::InfoSetData& info_set = solver.info_sets_[info_set_id];
-    auto action = std::find(info_set.action_ids.begin(),
-                            info_set.action_ids.end(), action_id);
-    if (action == info_set.action_ids.end()) {
+    auto action = std::find_if(
+        info_set.actions.begin(), info_set.actions.end(),
+        [action_id](const CFRSolver::ActionState& action_state) {
+          return action_state.action_id == action_id;
+        });
+    if (action == info_set.actions.end()) {
       throw std::runtime_error("Seeded regret action is not legal");
     }
-    const size_t action_index =
-        static_cast<size_t>(action - info_set.action_ids.begin());
-    info_set.cumulative_regrets[action_index] = regret;
+    action->cumulative_regret = regret;
   }
 
   static std::vector<double> CompatibleDealWeights(
