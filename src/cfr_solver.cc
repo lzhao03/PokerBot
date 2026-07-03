@@ -940,14 +940,14 @@ double CFRSolver::chance_sampling_cfr(GameTree::Node& node,
                       OptionalWeightedHandRange player_b_range) {
   int samples = ChanceSamples(config_);
   traversal_stats_.chance_samples += samples;
+  WeightedHandRangeView public_player_a_range;
+  WeightedHandRangeView public_player_b_range;
   return SampleChanceValue(
       *game_tree_, node, player_a_hand, player_b_hand, samples,
       rng_, traversal_stats_.child_nodes_created,
       [&](GameTree::Node& child_node) {
         OptionalWeightedHandRange child_player_a_range = player_a_range;
         OptionalWeightedHandRange child_player_b_range = player_b_range;
-        WeightedHandRangeView public_player_a_range;
-        WeightedHandRangeView public_player_b_range;
         if (player_a_range.has_value()) {
           PublicCompatibleRangeInto(
               player_a_range->get(), child_node.state, public_player_a_range);
