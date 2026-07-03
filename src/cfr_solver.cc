@@ -718,8 +718,56 @@ double CFRSolver::cfr_with_ranges(
   InfoSetKey info_set_key = make_info_set_key(node.state, player, player_hand);
   const int info_set_id =
       get_or_create_info_set_id(info_set_key, node.legal_actions);
-  std::vector<ActionChoice> action_choices =
-      get_action_choices(info_set_id, node.legal_actions);
+  std::vector<ActionChoice> action_choices;
+  action_choices.reserve(node.legal_actions.size());
+  {
+    InfoSetData& info_set = info_sets_[info_set_id];
+    for (const Action& action : node.legal_actions) {
+      int action_id = ActionKey(action);
+      auto existing_choice =
+          std::find_if(action_choices.begin(), action_choices.end(),
+                       [action_id](const ActionChoice& choice) {
+                         return choice.action_id == action_id;
+                       });
+      if (existing_choice != action_choices.end()) {
+        continue;
+      }
+      auto action_state = std::find_if(
+          info_set.actions.begin(), info_set.actions.end(),
+          [action_id](const ActionState& state) {
+            return state.action_id == action_id;
+          });
+      if (action_state == info_set.actions.end()) {
+        continue;
+      }
+      action_choices.push_back(
+          {std::cref(action), action_id,
+           static_cast<size_t>(action_state - info_set.actions.begin()), 0.0,
+           0.0});
+    }
+
+    double sum_positive_regrets = 0.0;
+    for (const ActionChoice& choice : action_choices) {
+      sum_positive_regrets +=
+          std::max(0.0,
+                   info_set.actions[choice.action_index].cumulative_regret);
+    }
+
+    if (sum_positive_regrets > 0.0) {
+      for (ActionChoice& choice : action_choices) {
+        choice.probability =
+            std::max(
+                0.0,
+                info_set.actions[choice.action_index].cumulative_regret) /
+            sum_positive_regrets;
+      }
+    } else if (!action_choices.empty()) {
+      double uniform_prob = 1.0 / action_choices.size();
+      for (ActionChoice& choice : action_choices) {
+        choice.probability = uniform_prob;
+      }
+    }
+  }
   
   // Initialize the expected value for the player
   double node_value = 0.0;
@@ -789,7 +837,6 @@ double CFRSolver::cfr_with_ranges(
     // Compute the counterfactual reach probability of the opponent
     double opponent_reach_prob = reach_probabilities[1 - player];
     InfoSetData& info_set = info_sets_[info_set_id];
-    
     // For each action, compute and accumulate the counterfactual regret
     for (const ActionChoice& choice : action_choices) {
       // get_utility returns player A's utility; player B's regret uses the
@@ -1648,63 +1695,6 @@ double CFRSolver::utility(const BoardState& state,
       state, player_a_hand, player_b_hand, [&]() {
         return game_tree_->get_utility(state, player_a_hand, player_b_hand);
       });
-}
-
-std::vector<CFRSolver::ActionChoice> CFRSolver::get_action_choices(
-    int info_set_id,
-    const std::vector<Action>& legal_actions) {
-  InfoSetData& info_set = info_sets_[info_set_id];
-  ensure_info_set_actions(info_set, legal_actions);
-
-  std::vector<ActionChoice> choices;
-  choices.reserve(legal_actions.size());
-  for (const Action& action : legal_actions) {
-    int action_id = ActionKey(action);
-    auto existing_choice =
-        std::find_if(choices.begin(), choices.end(),
-                     [action_id](const ActionChoice& choice) {
-                       return choice.action_id == action_id;
-                     });
-    if (existing_choice != choices.end()) {
-      continue;
-    }
-    auto action_state = std::find_if(
-        info_set.actions.begin(), info_set.actions.end(),
-        [action_id](const ActionState& state) {
-          return state.action_id == action_id;
-        });
-    if (action_state == info_set.actions.end()) {
-      continue;
-    }
-    choices.push_back(
-        {std::cref(action), action_id,
-         static_cast<size_t>(action_state - info_set.actions.begin()), 0.0,
-         0.0});
-  }
-
-  double sum_positive_regrets = 0.0;
-  for (const ActionChoice& choice : choices) {
-    sum_positive_regrets +=
-        std::max(0.0,
-                 info_set.actions[choice.action_index].cumulative_regret);
-  }
-
-  if (sum_positive_regrets > 0.0) {
-    for (ActionChoice& choice : choices) {
-      choice.probability =
-          std::max(
-              0.0,
-              info_set.actions[choice.action_index].cumulative_regret) /
-          sum_positive_regrets;
-    }
-  } else if (!choices.empty()) {
-    double uniform_prob = 1.0 / choices.size();
-    for (ActionChoice& choice : choices) {
-      choice.probability = uniform_prob;
-    }
-  }
-
-  return choices;
 }
 
 void CFRSolver::update_strategy(int info_set_id,

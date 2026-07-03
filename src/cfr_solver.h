@@ -296,9 +296,6 @@ private:
       const WeightedHandRange& best_response_hands,
       const WeightedHandRange& opponent_hands,
       int best_response_player);
-  std::vector<ActionChoice> get_action_choices(
-      int info_set_id,
-      const std::vector<Action>& legal_actions);
   void update_strategy(int info_set_id,
                        const std::vector<ActionChoice>& choices,
                        double reach_prob);
