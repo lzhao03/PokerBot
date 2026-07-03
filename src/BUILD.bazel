@@ -116,26 +116,6 @@ cc_test(
 )
 
 cc_library(
-    name = "utility_calculator",
-    srcs = ["utility_calculator.cc"],
-    hdrs = ["utility_calculator.h"],
-    deps = [
-        ":poker_cc_proto",
-        ":hand_evaluator",
-        ":hand_range",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_test(
-    name = "utility_calculator_test",
-    srcs = ["utility_calculator_test.cc"],
-    deps = [
-        ":utility_calculator",
-    ],
-)
-
-cc_library(
     name = "thread_pool",
     srcs = ["thread_pool.cc"],
     hdrs = ["thread_pool.h"],
