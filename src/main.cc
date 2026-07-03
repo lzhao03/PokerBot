@@ -1,4 +1,5 @@
 #include "src/cfr_solver.h"
+#include "absl/log/initialize.h"
 #include "src/poker.pb.h"
 
 #include <chrono>
@@ -104,6 +105,8 @@ void PrintUsage(const char* program) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  absl::InitializeLog();
+
   poker::PokerConfig config = DefaultConfig();
   int iterations = 100;
   int exploitability_samples = 0;

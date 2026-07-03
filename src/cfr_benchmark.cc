@@ -1,4 +1,5 @@
 #include "src/cfr_solver.h"
+#include "absl/log/initialize.h"
 #include "src/hand_range.h"
 #include "src/poker.pb.h"
 
@@ -149,6 +150,8 @@ Options ParseOptions(int argc, char** argv) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  absl::InitializeLog();
+
   try {
     Options options = ParseOptions(argc, argv);
     poker::PokerConfig config = BenchmarkConfig(options);

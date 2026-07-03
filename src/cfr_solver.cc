@@ -1,4 +1,5 @@
 #include "src/cfr_solver.h"
+#include "absl/log/log.h"
 #include "src/card_utils.h"
 #include "src/continuation_value.h"
 #include "src/hand_range.h"
@@ -551,25 +552,19 @@ void CFRSolver::run_iterations(int iterations,
   }
 
   const bool log = config_.enable_logging();
-  if (log) {
-    std::cout << "Preparing game tree..." << std::endl;
-  }
+  LOG_IF(INFO, log) << "Preparing game tree...";
   bool had_root = game_tree_->has_root();
   GameTree::Node& root = get_or_build_root();
-  if (log) {
-    if (!had_root) {
-      std::cout << "Game tree built with " << root.legal_actions.size()
-                << " legal actions at root" << std::endl;
-    } else {
-      std::cout << "Reusing game tree with " << root.legal_actions.size()
-                << " legal actions at root" << std::endl;
-    }
+  if (!had_root) {
+    LOG_IF(INFO, log) << "Game tree built with " << root.legal_actions.size()
+                      << " legal actions at root";
+  } else {
+    LOG_IF(INFO, log) << "Reusing game tree with " << root.legal_actions.size()
+                      << " legal actions at root";
   }
   
   // Run iterations of CFR
-  if (log) {
-    std::cout << "Starting CFR iterations..." << std::endl;
-  }
+  LOG_IF(INFO, log) << "Starting CFR iterations...";
   for (int i = 0; i < iterations; ++i) {
     Hand player_a_hand;
     Hand player_b_hand;
@@ -585,9 +580,7 @@ void CFRSolver::run_iterations(int iterations,
     }
     
     const int max_depth = config_.max_depth();
-    if (log) {
-      std::cout << "Iteration " << i+1 << "/" << iterations << std::endl;
-    }
+    LOG_IF(INFO, log) << "Iteration " << i + 1 << "/" << iterations;
     int cfr_iteration = iterations_run_;
     std::vector<double> reach_probabilities(2, 1.0);
     OptionalWeightedHandRange player_a_context_range;
@@ -615,13 +608,10 @@ void CFRSolver::run_iterations(int iterations,
     ++iterations_run_;
   }
   
-  if (log) {
-    std::cout << "CFR iterations completed" << std::endl;
-    std::cout << "Iterations run: " << iterations_run_ << std::endl;
-    std::cout << "Information sets: "
-              << get_equilibrium_strategy().get_info_sets().size() << std::endl;
-    std::cout << "Player A average EV: " << get_expected_value(0) << std::endl;
-  }
+  LOG_IF(INFO, log) << "CFR iterations completed";
+  LOG_IF(INFO, log) << "Iterations run: " << iterations_run_;
+  LOG_IF(INFO, log) << "Information sets: " << info_sets_.size();
+  LOG_IF(INFO, log) << "Player A average EV: " << get_expected_value(0);
 }
 
 double CFRSolver::cfr(GameTree::Node& node,

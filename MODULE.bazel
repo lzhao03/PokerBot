@@ -3,6 +3,7 @@ module(
     version = "0.1.0",
 )
 
+bazel_dep(name = "abseil-cpp", version = "20240116.1")
 bazel_dep(
     name = "protobuf",
     version = "29.0",

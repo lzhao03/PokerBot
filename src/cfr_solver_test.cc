@@ -1,4 +1,7 @@
 #include "src/cfr_solver.h"
+#include "absl/log/log_entry.h"
+#include "absl/log/log_sink.h"
+#include "absl/log/log_sink_registry.h"
 #include "src/continuation_value.h"
 #include "src/hand_range.h"
 #include "src/subgame_value.h"
@@ -201,6 +204,33 @@ class FixedContinuationValueProvider : public ContinuationValueProvider {
   mutable size_t last_player_b_range_size_ = 0;
   mutable double last_player_a_range_weight_ = 0.0;
   mutable double last_player_b_range_weight_ = 0.0;
+};
+
+class CapturingLogSink : public absl::LogSink {
+ public:
+  void Send(const absl::LogEntry& entry) override {
+    messages_.append(entry.text_message().data(), entry.text_message().size());
+    messages_.push_back('\n');
+  }
+
+  const std::string& messages() const { return messages_; }
+
+ private:
+  std::string messages_;
+};
+
+class ScopedLogSink {
+ public:
+  explicit ScopedLogSink(absl::LogSink& sink) : sink_(sink) {
+    absl::AddLogSink(&sink_.get());
+  }
+
+  ~ScopedLogSink() {
+    absl::RemoveLogSink(&sink_.get());
+  }
+
+ private:
+  std::reference_wrapper<absl::LogSink> sink_;
 };
 
 Action MakeAction(ActionType type, int amount = 0) {
@@ -978,26 +1008,32 @@ void CheckRunLoggingUsesConfig() {
   config.set_starting_stack_size(20);
   config.set_max_depth(1);
 
-  std::ostringstream quiet_output;
-  std::streambuf* original = std::cout.rdbuf(quiet_output.rdbuf());
-  CFRSolver quiet_solver(config);
-  quiet_solver.run(1);
-  std::cout.rdbuf(original);
-  Expect(quiet_output.str().empty(), "run should be quiet by default");
+  CapturingLogSink quiet_output;
+  {
+    ScopedLogSink capture_logs(quiet_output);
+    CFRSolver quiet_solver(config);
+    quiet_solver.run(1);
+  }
+  Expect(quiet_output.messages().empty(), "run should be quiet by default");
 
   config.set_enable_logging(true);
-  std::ostringstream logged_output;
-  original = std::cout.rdbuf(logged_output.rdbuf());
-  CFRSolver logged_solver(config);
-  logged_solver.run(1);
-  std::cout.rdbuf(original);
-  Expect(logged_output.str().find("Starting CFR iterations") != std::string::npos,
+  CapturingLogSink logged_output;
+  {
+    ScopedLogSink capture_logs(logged_output);
+    CFRSolver logged_solver(config);
+    logged_solver.run(1);
+  }
+  Expect(logged_output.messages().find("Starting CFR iterations") !=
+             std::string::npos,
          "run should log when enable_logging is set");
-  Expect(logged_output.str().find("Iterations run: 1") != std::string::npos,
+  Expect(logged_output.messages().find("Iterations run: 1") !=
+             std::string::npos,
          "run should log completed iteration count");
-  Expect(logged_output.str().find("Information sets: 2") != std::string::npos,
+  Expect(logged_output.messages().find("Information sets: 2") !=
+             std::string::npos,
          "run should log trained info set count");
-  Expect(logged_output.str().find("Player A average EV:") != std::string::npos,
+  Expect(logged_output.messages().find("Player A average EV:") !=
+             std::string::npos,
          "run should log average root EV");
 }
 

@@ -172,6 +172,7 @@ cc_library(
         ":hand_range",
         ":thread_pool",
         ":terminal_utility_cache",
+        "@abseil-cpp//absl/log:log",
     ],
     visibility = ["//visibility:public"],
 )
@@ -183,6 +184,9 @@ cc_test(
         ":cfr_solver",
         ":continuation_value",
         ":subgame_value",
+        "@abseil-cpp//absl/log:log_entry",
+        "@abseil-cpp//absl/log:log_sink",
+        "@abseil-cpp//absl/log:log_sink_registry",
     ],
 )
 
@@ -192,6 +196,7 @@ cc_binary(
     deps = [
         ":cfr_solver",
         ":poker_cc_proto",
+        "@abseil-cpp//absl/log:initialize",
     ],
 )
 
@@ -202,5 +207,6 @@ cc_binary(
         ":cfr_solver",
         ":hand_range",
         ":poker_cc_proto",
+        "@abseil-cpp//absl/log:initialize",
     ],
 )
