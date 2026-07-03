@@ -1,4 +1,6 @@
 #include "src/hand_range.h"
+#include "src/card.h"
+
 #include <algorithm>
 #include <cmath>
 #include <regex>
@@ -8,18 +10,11 @@ namespace poker {
 
 namespace {
 
-Card MakeRangeCard(int rank, Suit suit) {
-  Card card;
-  card.set_rank(rank);
-  card.set_suit(suit);
-  return card;
-}
-
 Hand MakeCombo(int first_rank, Suit first_suit, int second_rank,
                Suit second_suit) {
   Hand hand;
-  *hand.add_cards() = MakeRangeCard(first_rank, first_suit);
-  *hand.add_cards() = MakeRangeCard(second_rank, second_suit);
+  *hand.add_cards() = MakeCard(first_rank, first_suit);
+  *hand.add_cards() = MakeCard(second_rank, second_suit);
   return hand;
 }
 
@@ -378,9 +373,9 @@ Hand HandRange::index_to_hand(int index) {
   int rank1 = r1 + 2;
   int rank2 = r2 + 2;
   
-  *hand.add_cards() = MakeRangeCard(rank1, Suit::SPADES);
+  *hand.add_cards() = MakeCard(rank1, Suit::SPADES);
   *hand.add_cards() =
-      MakeRangeCard(rank2, is_suited ? Suit::SPADES : Suit::HEARTS);
+      MakeCard(rank2, is_suited ? Suit::SPADES : Suit::HEARTS);
   
   return hand;
 }

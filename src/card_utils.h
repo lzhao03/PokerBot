@@ -3,11 +3,11 @@
 #include <random>
 #include <vector>
 
+#include "src/card.h"
 #include "src/poker.pb.h"
 
 namespace poker {
 
-Card MakeCard(int rank, Suit suit);
 bool SameCard(const Card& left, const Card& right);
 std::vector<Card> BuildDeck();
 Hand DealHand(std::vector<Card>& deck);
