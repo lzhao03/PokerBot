@@ -899,6 +899,7 @@ double CFRSolver::cfr_with_ranges(
   
   // Initialize the expected value for the player
   double node_value = 0.0;
+  std::vector<std::pair<Hand, double>> conditioned_player_range;
   
   // For each action, recursively call CFR and compute the expected value
   for (ActionChoice& choice : action_choices) {
@@ -918,16 +919,15 @@ double CFRSolver::cfr_with_ranges(
         player_a_range;
     const std::vector<std::pair<Hand, double>>* child_player_b_range =
         player_b_range;
-    std::vector<std::pair<Hand, double>> conditioned_player_range;
     if (player == 0 && player_a_range != nullptr) {
-      conditioned_player_range = condition_range_for_action(
+      condition_range_for_action(
           *player_a_range, node->state, player, node->legal_actions,
-          action_id);
+          action_id, &conditioned_player_range);
       child_player_a_range = &conditioned_player_range;
     } else if (player == 1 && player_b_range != nullptr) {
-      conditioned_player_range = condition_range_for_action(
+      condition_range_for_action(
           *player_b_range, node->state, player, node->legal_actions,
-          action_id);
+          action_id, &conditioned_player_range);
       child_player_b_range = &conditioned_player_range;
     }
     
@@ -1102,14 +1102,15 @@ double CFRSolver::action_probability_for_hand(
   return 1.0 / action_ids.size();
 }
 
-std::vector<std::pair<Hand, double>> CFRSolver::condition_range_for_action(
+void CFRSolver::condition_range_for_action(
     const std::vector<std::pair<Hand, double>>& range,
     const BoardState& state,
     int player,
     const std::vector<Action>& legal_actions,
-    int action_id) const {
-  std::vector<std::pair<Hand, double>> conditioned_range;
-  conditioned_range.reserve(range.size());
+    int action_id,
+    std::vector<std::pair<Hand, double>>* conditioned_range) const {
+  conditioned_range->clear();
+  conditioned_range->reserve(range.size());
   for (const auto& hand : range) {
     if (hand.second <= 0.0) {
       continue;
@@ -1118,10 +1119,9 @@ std::vector<std::pair<Hand, double>> CFRSolver::condition_range_for_action(
         state, player, hand.first, legal_actions, action_id);
     double conditioned_weight = hand.second * probability;
     if (conditioned_weight > 0.0) {
-      conditioned_range.emplace_back(hand.first, conditioned_weight);
+      conditioned_range->emplace_back(hand.first, conditioned_weight);
     }
   }
-  return conditioned_range;
 }
 
 ContinuationContext CFRSolver::build_continuation_context(

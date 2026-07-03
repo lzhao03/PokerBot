@@ -251,12 +251,13 @@ private:
       const Hand& hand,
       const std::vector<Action>& legal_actions,
       int action_id) const;
-  std::vector<std::pair<Hand, double>> condition_range_for_action(
+  void condition_range_for_action(
       const std::vector<std::pair<Hand, double>>& range,
       const BoardState& state,
       int player,
       const std::vector<Action>& legal_actions,
-      int action_id) const;
+      int action_id,
+      std::vector<std::pair<Hand, double>>* conditioned_range) const;
   InfoSetKey make_info_set_key(const BoardState& state,
                                int player,
                                const Hand& hand) const;
