@@ -41,34 +41,32 @@ bool SameHand(const poker::Hand& left, const poker::Hand& right) {
 }
 
 double WeightForIndex(
-    const std::vector<std::pair<poker::Hand, double>>& combos, int index) {
+    const poker::WeightedHandRange& combos, int index) {
   double weight = 0.0;
-  for (const auto& combo : combos) {
-    if (poker::HandRange::hand_to_index(combo.first) == index) {
-      weight += combo.second;
+  for (size_t i = 0; i < combos.size(); ++i) {
+    if (poker::HandRange::hand_to_index(combos.hands[i]) == index) {
+      weight += combos.weights[i];
     }
   }
   return weight;
 }
 
-double TotalComboWeight(
-    const std::vector<std::pair<poker::Hand, double>>& combos) {
+double TotalComboWeight(const poker::WeightedHandRange& combos) {
   double weight = 0.0;
-  for (const auto& combo : combos) {
-    weight += combo.second;
+  for (double combo_weight : combos.weights) {
+    weight += combo_weight;
   }
   return weight;
 }
 
-void CheckNoDuplicateCombos(
-    const std::vector<std::pair<poker::Hand, double>>& combos) {
+void CheckNoDuplicateCombos(const poker::WeightedHandRange& combos) {
   for (size_t i = 0; i < combos.size(); ++i) {
-    Expect(combos[i].first.cards_size() == 2,
+    Expect(combos.hands[i].cards_size() == 2,
            "weighted combos should be exact two-card hands");
-    Expect(!SameCard(combos[i].first.cards(0), combos[i].first.cards(1)),
+    Expect(!SameCard(combos.hands[i].cards(0), combos.hands[i].cards(1)),
            "weighted combos should not duplicate a card");
     for (size_t j = i + 1; j < combos.size(); ++j) {
-      Expect(!SameHand(combos[i].first, combos[j].first),
+      Expect(!SameHand(combos.hands[i], combos.hands[j]),
              "weighted combos should not contain duplicate exact hands");
     }
   }
@@ -84,8 +82,7 @@ void CheckUpdatingHandWeightReplacesTotal() {
   range.add_hand_by_index(aces, 3.0);
 
   poker::Hand aces_hand = poker::HandRange::index_to_hand(aces);
-  std::vector<std::pair<poker::Hand, double>> combos =
-      range.get_all_weighted_combos();
+  poker::WeightedHandRange combos = range.get_all_weighted_combos();
   Expect(std::abs(range.get_total_weight() - 4.0) < 0.000001,
          "updating a hand should replace its old total weight");
   Expect(std::abs(WeightForIndex(combos, aces) - 3.0) < 0.000001,
@@ -105,11 +102,10 @@ void CheckAddHandPreservesExactCombo() {
 
   range.add_hand(aces, 1.0);
 
-  std::vector<std::pair<poker::Hand, double>> combos =
-      range.get_all_weighted_combos();
+  poker::WeightedHandRange combos = range.get_all_weighted_combos();
   Expect(combos.size() == 1, "exact hand should stay one combo");
-  Expect(SameHand(combos[0].first, aces), "exact combo should be preserved");
-  Expect(std::abs(combos[0].second - 1.0) < 0.000001,
+  Expect(SameHand(combos.hands[0], aces), "exact combo should be preserved");
+  Expect(std::abs(combos.weights[0] - 1.0) < 0.000001,
          "exact combo should keep its weight");
   Expect(std::abs(range.get_probability(aces) - 1.0) < 0.000001,
          "exact combo should have the full range probability");
@@ -119,7 +115,7 @@ void CheckAddHandPreservesExactCombo() {
   Expect(combos.size() == 1, "same exact cards should replace existing combo");
   Expect(std::abs(range.get_total_weight() - 3.0) < 0.000001,
          "exact hand replacement should update total weight");
-  Expect(std::abs(combos[0].second - 3.0) < 0.000001,
+  Expect(std::abs(combos.weights[0] - 3.0) < 0.000001,
          "exact hand replacement should update combo weight");
 }
 
@@ -134,8 +130,7 @@ void CheckWeightedComboInvariants() {
   range.add_hand_by_index(ace_king_suited_index, 4.0);
   range.add_hand(aces, 2.0);
 
-  std::vector<std::pair<poker::Hand, double>> combos =
-      range.get_all_weighted_combos();
+  poker::WeightedHandRange combos = range.get_all_weighted_combos();
   CheckNoDuplicateCombos(combos);
   Expect(combos.size() == 10,
          "overlapping exact and class weights should merge exact combos");

@@ -64,11 +64,7 @@ bool HandOverlapsBoard(const Hand& hand, const BoardState& state) {
 }
 
 double TotalWeight(const WeightedHandRange& hands) {
-  double total = 0.0;
-  for (const auto& hand : hands) {
-    total += hand.second;
-  }
-  return total;
+  return std::accumulate(hands.weights.begin(), hands.weights.end(), 0.0);
 }
 
 WeightedHandRange CompatibleHands(
@@ -76,10 +72,11 @@ WeightedHandRange CompatibleHands(
     const Hand& known_hand,
     const BoardState& state) {
   WeightedHandRange compatible_hands;
-  for (const auto& hand : hands) {
-    if (!HandsOverlap(hand.first, known_hand) &&
-        !HandOverlapsBoard(hand.first, state)) {
-      compatible_hands.push_back(hand);
+  compatible_hands.reserve(hands.size());
+  for (size_t i = 0; i < hands.size(); ++i) {
+    if (!HandsOverlap(hands.hands[i], known_hand) &&
+        !HandOverlapsBoard(hands.hands[i], state)) {
+      compatible_hands.add(hands.hands[i], hands.weights[i]);
     }
   }
   return compatible_hands;
@@ -90,22 +87,12 @@ WeightedHandRange PublicCompatibleRange(
     const BoardState& state) {
   WeightedHandRange compatible_hands;
   compatible_hands.reserve(hands.size());
-  for (const auto& hand : hands) {
-    if (hand.second > 0.0 && !HandOverlapsBoard(hand.first, state)) {
-      compatible_hands.push_back(hand);
+  for (size_t i = 0; i < hands.size(); ++i) {
+    if (hands.weights[i] > 0.0 && !HandOverlapsBoard(hands.hands[i], state)) {
+      compatible_hands.add(hands.hands[i], hands.weights[i]);
     }
   }
   return compatible_hands;
-}
-
-std::vector<double> WeightsFor(
-    const WeightedHandRange& hands) {
-  std::vector<double> weights;
-  weights.reserve(hands.size());
-  for (const auto& hand : hands) {
-    weights.push_back(hand.second);
-  }
-  return weights;
 }
 
 int EncodedCard(const Card& card) {
@@ -214,19 +201,17 @@ void AppendEncodedCard(std::string* out, int encoded_card) {
 
 struct WeightedHands {
   WeightedHandRange hands;
-  std::vector<double> weights;
   std::discrete_distribution<size_t> distribution;
 
   void reset(WeightedHandRange new_hands) {
     hands = std::move(new_hands);
-    weights = WeightsFor(hands);
-    distribution =
-        std::discrete_distribution<size_t>(weights.begin(), weights.end());
+    distribution = std::discrete_distribution<size_t>(
+        hands.weights.begin(), hands.weights.end());
   }
 };
 
 Hand SampleWeightedHand(WeightedHands* hands, std::mt19937* rng) {
-  return hands->hands[hands->distribution(*rng)].first;
+  return hands->hands.hands[hands->distribution(*rng)];
 }
 
 double StrategyActionProbability(const Strategy& strategy,
@@ -439,17 +424,17 @@ std::vector<CFRSolver::RangeDeal> CFRSolver::build_compatible_range_deals(
     const WeightedHandRange& player_a_hands,
     const WeightedHandRange& player_b_hands) {
   std::vector<RangeDeal> deals;
-  for (const auto& player_a_hand : player_a_hands) {
-    if (player_a_hand.second <= 0.0) {
+  for (size_t a = 0; a < player_a_hands.size(); ++a) {
+    if (player_a_hands.weights[a] <= 0.0) {
       continue;
     }
-    for (const auto& player_b_hand : player_b_hands) {
-      if (player_b_hand.second <= 0.0 ||
-          HandsOverlap(player_a_hand.first, player_b_hand.first)) {
+    for (size_t b = 0; b < player_b_hands.size(); ++b) {
+      if (player_b_hands.weights[b] <= 0.0 ||
+          HandsOverlap(player_a_hands.hands[a], player_b_hands.hands[b])) {
         continue;
       }
-      deals.push_back({player_a_hand.first, player_b_hand.first,
-                       player_a_hand.second * player_b_hand.second});
+      deals.push_back({player_a_hands.hands[a], player_b_hands.hands[b],
+                       player_a_hands.weights[a] * player_b_hands.weights[b]});
     }
   }
   return deals;
@@ -1101,15 +1086,15 @@ void CFRSolver::condition_range_for_action(
     WeightedHandRange* conditioned_range) const {
   conditioned_range->clear();
   conditioned_range->reserve(range.size());
-  for (const auto& hand : range) {
-    if (hand.second <= 0.0) {
+  for (size_t i = 0; i < range.size(); ++i) {
+    if (range.weights[i] <= 0.0) {
       continue;
     }
     double probability = action_probability_for_hand(
-        state, player, hand.first, legal_action_ids, action_id);
-    double conditioned_weight = hand.second * probability;
+        state, player, range.hands[i], legal_action_ids, action_id);
+    double conditioned_weight = range.weights[i] * probability;
     if (conditioned_weight > 0.0) {
-      conditioned_range->emplace_back(hand.first, conditioned_weight);
+      conditioned_range->add(range.hands[i], conditioned_weight);
     }
   }
 }
@@ -1419,14 +1404,16 @@ double CFRSolver::best_response_value_against_range(
 
   if (node->is_terminal) {
     double value = 0.0;
-    for (const auto& opponent_hand : opponent_hands) {
+    for (size_t i = 0; i < opponent_hands.size(); ++i) {
       const Hand& player_a_hand =
-          best_response_player == 0 ? best_response_hand : opponent_hand.first;
+          best_response_player == 0 ? best_response_hand
+                                    : opponent_hands.hands[i];
       const Hand& player_b_hand =
-          best_response_player == 0 ? opponent_hand.first : best_response_hand;
+          best_response_player == 0 ? opponent_hands.hands[i]
+                                    : best_response_hand;
       double player_a_value =
           utility(node->state, player_a_hand, player_b_hand);
-      value += opponent_hand.second *
+      value += opponent_hands.weights[i] *
                (best_response_player == 0 ? player_a_value : -player_a_value);
     }
     return value / total_weight;
@@ -1447,8 +1434,8 @@ double CFRSolver::best_response_value_against_range(
           SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
       GameTree::Node* child_node =
           CachedChanceChild(game_tree_, node, cards, nullptr);
-      WeightedHandRange child_opponents = {
-          {sampled_opponent, 1.0}};
+      WeightedHandRange child_opponents;
+      child_opponents.add(sampled_opponent, 1.0);
       value += best_response_value_against_range(
           child_node, best_response_hand, child_opponents, strategy,
           best_response_player);
@@ -1486,14 +1473,15 @@ double CFRSolver::best_response_value_against_range(
         CachedActionChild(game_tree_, node, action, action_id, nullptr);
 
     WeightedHandRange child_opponents;
-    for (const auto& opponent_hand : opponent_hands) {
+    child_opponents.reserve(opponent_hands.size());
+    for (size_t i = 0; i < opponent_hands.size(); ++i) {
       std::string info_set_key = info_set_abstraction_->state_to_info_set(
-          node->state, player, opponent_hand.first);
+          node->state, player, opponent_hands.hands[i]);
       double probability = StrategyActionProbability(
           strategy, info_set_key, node->legal_actions, action_id);
       if (probability > 0.0) {
-        child_opponents.emplace_back(opponent_hand.first,
-                                     opponent_hand.second * probability);
+        child_opponents.add(opponent_hands.hands[i],
+                            opponent_hands.weights[i] * probability);
       }
     }
 

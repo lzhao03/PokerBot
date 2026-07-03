@@ -1,16 +1,12 @@
 #ifndef POKER_CONTINUATION_VALUE_H_
 #define POKER_CONTINUATION_VALUE_H_
 
+#include "src/hand_range.h"
 #include "src/poker.pb.h"
-
-#include <utility>
-#include <vector>
 
 namespace poker {
 
 class GameTree;
-
-using WeightedHandRange = std::vector<std::pair<Hand, double>>;
 
 struct ContinuationContext {
   BoardState state;

@@ -32,15 +32,17 @@ bool HandOverlapsBoard(const Hand& hand, const BoardState& state) {
   return false;
 }
 
-std::vector<std::pair<Hand, double>> CompatibleWeightedHands(
+WeightedHandRange CompatibleWeightedHands(
     const HandRange& range,
     const Hand& player_hand,
     const BoardState& state) {
-  std::vector<std::pair<Hand, double>> compatible_hands;
-  for (const auto& hand_weight : range.get_all_weighted_combos()) {
-    if (!HandsOverlap(hand_weight.first, player_hand) &&
-        !HandOverlapsBoard(hand_weight.first, state)) {
-      compatible_hands.push_back(hand_weight);
+  WeightedHandRange compatible_hands;
+  WeightedHandRange weighted_combos = range.get_all_weighted_combos();
+  compatible_hands.reserve(weighted_combos.size());
+  for (size_t i = 0; i < weighted_combos.size(); ++i) {
+    if (!HandsOverlap(weighted_combos.hands[i], player_hand) &&
+        !HandOverlapsBoard(weighted_combos.hands[i], state)) {
+      compatible_hands.add(weighted_combos.hands[i], weighted_combos.weights[i]);
     }
   }
   return compatible_hands;
@@ -149,20 +151,20 @@ double UtilityCalculator::calculate_ev_impl(const BoardState& state,
                                            const Hand& player_hand,
                                            const HandRange& opponent_range,
                                            int player_id) const {
-  std::vector<std::pair<Hand, double>> opponent_hands =
+  WeightedHandRange opponent_hands =
       CompatibleWeightedHands(opponent_range, player_hand, state);
   if (opponent_hands.empty()) return 0.0;
   
   double total_ev = 0.0;
   double total_weight = 0.0;
   
-  for (const auto& opponent_hand : opponent_hands) {
+  for (size_t i = 0; i < opponent_hands.size(); ++i) {
     double utility =
-        calculate_terminal_impl(state, player_hand, opponent_hand.first,
+        calculate_terminal_impl(state, player_hand, opponent_hands.hands[i],
                                 player_id);
     
-    total_ev += utility * opponent_hand.second;
-    total_weight += opponent_hand.second;
+    total_ev += utility * opponent_hands.weights[i];
+    total_weight += opponent_hands.weights[i];
   }
   
   return (total_weight > 0.0) ? total_ev / total_weight : 0.0;
@@ -171,22 +173,22 @@ double UtilityCalculator::calculate_ev_impl(const BoardState& state,
 double UtilityCalculator::calculate_equity_impl(const Hand& player_hand,
                                                const HandRange& opponent_range,
                                                const BoardState& board_state) const {
-  std::vector<std::pair<Hand, double>> opponent_hands =
+  WeightedHandRange opponent_hands =
       CompatibleWeightedHands(opponent_range, player_hand, board_state);
   if (opponent_hands.empty()) return 0.5;  // Default 50% equity if range is empty
   
   double total_equity = 0.0;
   double total_weight = 0.0;
   
-  for (const auto& opponent_hand : opponent_hands) {
+  for (size_t i = 0; i < opponent_hands.size(); ++i) {
     int comparison =
-        hand_evaluator_->compare_hands(player_hand, opponent_hand.first,
+        hand_evaluator_->compare_hands(player_hand, opponent_hands.hands[i],
                                        board_state);
     
     // Calculate equity: 1 for win, 0.5 for tie, 0 for loss
     double equity = (comparison > 0) ? 1.0 : (comparison == 0) ? 0.5 : 0.0;
-    total_equity += equity * opponent_hand.second;
-    total_weight += opponent_hand.second;
+    total_equity += equity * opponent_hands.weights[i];
+    total_weight += opponent_hands.weights[i];
   }
   
   return (total_weight > 0.0) ? total_equity / total_weight : 0.5;
@@ -218,15 +220,16 @@ double UtilityCalculator::calculate_fold_equity_impl(const BoardState& state,
     double avg_equity = 0.0;
     double total_weight = 0.0;
     
-    for (const auto& opponent_hand :
-         CompatibleWeightedHands(opponent_range, player_hand, state)) {
+    WeightedHandRange opponent_hands =
+        CompatibleWeightedHands(opponent_range, player_hand, state);
+    for (size_t i = 0; i < opponent_hands.size(); ++i) {
       int comparison =
-          hand_evaluator_->compare_hands(opponent_hand.first, player_hand,
+          hand_evaluator_->compare_hands(opponent_hands.hands[i], player_hand,
                                          state);
       double equity = (comparison > 0) ? 1.0 : (comparison == 0) ? 0.5 : 0.0;
       
-      avg_equity += equity * opponent_hand.second;
-      total_weight += opponent_hand.second;
+      avg_equity += equity * opponent_hands.weights[i];
+      total_weight += opponent_hands.weights[i];
     }
     
     if (total_weight > 0.0) avg_equity /= total_weight;

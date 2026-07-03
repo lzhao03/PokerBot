@@ -12,19 +12,16 @@
 #include <vector>
 #include "src/poker.pb.h"
 #include "src/game_tree.h"
+#include "src/hand_range.h"
 #include "src/strategy.h"
 #include "src/info_set.h"
 #include "src/hand_evaluator.h"
 
 namespace poker {
 
-class HandRange;
 struct ContinuationContext;
 class ContinuationValueProvider;
 class TerminalUtilityCache;
-
-using WeightedHand = std::pair<Hand, double>;
-using WeightedHandRange = std::vector<WeightedHand>;
 
 struct CanonicalPublicStateKey {
   int street = 0;

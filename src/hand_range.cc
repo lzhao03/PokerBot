@@ -39,16 +39,16 @@ bool SameHand(const Hand& left, const Hand& right) {
           SameCard(left.cards(1), right.cards(0)));
 }
 
-void AddWeightedCombo(std::vector<std::pair<Hand, double>>* weighted_combos,
-                      const Hand& hand, double weight) {
-  for (auto& combo : *weighted_combos) {
-    if (SameHand(combo.first, hand)) {
-      combo.second += weight;
+void AddWeightedCombo(WeightedHandRange* weighted_combos, const Hand& hand,
+                      double weight) {
+  for (size_t i = 0; i < weighted_combos->size(); ++i) {
+    if (SameHand(weighted_combos->hands[i], hand)) {
+      weighted_combos->weights[i] += weight;
       return;
     }
   }
 
-  weighted_combos->emplace_back(hand, weight);
+  weighted_combos->add(hand, weight);
 }
 
 std::string ExactHandKey(const Hand& hand) {
@@ -178,26 +178,20 @@ std::vector<Hand> HandRange::sample(int count) const {
     return sampled_hands;
   }
 
-  std::vector<std::pair<Hand, double>> weighted_combos =
-      get_all_weighted_combos();
+  WeightedHandRange weighted_combos = get_all_weighted_combos();
   if (weighted_combos.empty()) {
     return sampled_hands;
   }
 
-  std::vector<double> weights;
-  weights.reserve(weighted_combos.size());
-  for (const auto& combo : weighted_combos) {
-    weights.push_back(combo.second);
-  }
-
   // Create a distribution based on hand weights
-  std::discrete_distribution<size_t> dist(weights.begin(), weights.end());
+  std::discrete_distribution<size_t> dist(weighted_combos.weights.begin(),
+                                          weighted_combos.weights.end());
   
   // Sample hands
   sampled_hands.reserve(count);
   for (int i = 0; i < count; ++i) {
     size_t idx = dist(rng_);
-    sampled_hands.push_back(weighted_combos[idx].first);
+    sampled_hands.push_back(weighted_combos.hands[idx]);
   }
   
   return sampled_hands;
@@ -237,14 +231,7 @@ std::vector<Hand> HandRange::get_all_hands() const {
     return cached_hands_;
   }
   
-  std::vector<std::pair<Hand, double>> weighted_combos =
-      get_all_weighted_combos();
-  std::vector<Hand> hands;
-  hands.reserve(weighted_combos.size());
-  
-  for (const auto& combo : weighted_combos) {
-    hands.push_back(combo.first);
-  }
+  std::vector<Hand> hands = get_all_weighted_combos().hands;
   
   // Cache the result
   cached_hands_ = hands;
@@ -253,8 +240,8 @@ std::vector<Hand> HandRange::get_all_hands() const {
   return hands;
 }
 
-std::vector<std::pair<Hand, double>> HandRange::get_all_weighted_combos() const {
-  std::vector<std::pair<Hand, double>> weighted_combos;
+WeightedHandRange HandRange::get_all_weighted_combos() const {
+  WeightedHandRange weighted_combos;
 
   for (const auto& hand_weight : exact_hand_weights_) {
     AddWeightedCombo(&weighted_combos, hand_weight.first, hand_weight.second);

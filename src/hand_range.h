@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <vector>
 #include <unordered_map>
 #include <string>
@@ -12,8 +13,30 @@
 
 namespace poker {
 
-// Forward declaration
 class HandEvaluator;
+
+struct WeightedHandRange {
+  std::vector<Hand> hands;
+  std::vector<double> weights;
+
+  size_t size() const { return hands.size(); }
+  bool empty() const { return hands.empty(); }
+
+  void reserve(size_t count) {
+    hands.reserve(count);
+    weights.reserve(count);
+  }
+
+  void clear() {
+    hands.clear();
+    weights.clear();
+  }
+
+  void add(const Hand& hand, double weight) {
+    hands.push_back(hand);
+    weights.push_back(weight);
+  }
+};
 
 class HandRange {
 public:
@@ -36,7 +59,7 @@ public:
   std::vector<Hand> get_all_hands() const;
 
   // Get every exact two-card combo represented by the range.
-  std::vector<std::pair<Hand, double>> get_all_weighted_combos() const;
+  WeightedHandRange get_all_weighted_combos() const;
   
   // Get all hand indices with their weights
   const std::vector<std::pair<int, double>>& get_all_weights() const;

@@ -46,7 +46,7 @@ class CFRSolverRegretTestPeer {
   static double BestResponseRangeNode(
       CFRSolver& solver, GameTree::Node* node,
       const Hand& best_response_hand,
-      const std::vector<std::pair<Hand, double>>& opponent_hands,
+      const WeightedHandRange& opponent_hands,
       int best_response_player) {
     Strategy strategy;
     return solver.best_response_value_against_range(
@@ -110,11 +110,11 @@ class FixedContinuationValueProvider : public ContinuationValueProvider {
       last_player_b_range_size_ = context.player_b_range.size();
       last_player_a_range_weight_ = 0.0;
       last_player_b_range_weight_ = 0.0;
-      for (const auto& hand : context.player_a_range) {
-        last_player_a_range_weight_ += hand.second;
+      for (double weight : context.player_a_range.weights) {
+        last_player_a_range_weight_ += weight;
       }
-      for (const auto& hand : context.player_b_range) {
-        last_player_b_range_weight_ += hand.second;
+      for (double weight : context.player_b_range.weights) {
+        last_player_b_range_weight_ += weight;
       }
     }
     return value_;
@@ -194,23 +194,21 @@ bool TestHandsOverlap(const Hand& left, const Hand& right) {
   return false;
 }
 
-double TestTotalWeight(const std::vector<std::pair<Hand, double>>& hands) {
+double TestTotalWeight(const WeightedHandRange& hands) {
   double total = 0.0;
-  for (const auto& hand : hands) {
-    total += hand.second;
+  for (double weight : hands.weights) {
+    total += weight;
   }
   return total;
 }
 
-double TestTotalWeightForRank(
-    const std::vector<std::pair<Hand, double>>& hands,
-    int rank) {
+double TestTotalWeightForRank(const WeightedHandRange& hands, int rank) {
   double total = 0.0;
-  for (const auto& hand : hands) {
-    if (hand.first.cards_size() == 2 &&
-        hand.first.cards(0).rank() == rank &&
-        hand.first.cards(1).rank() == rank) {
-      total += hand.second;
+  for (size_t i = 0; i < hands.size(); ++i) {
+    if (hands.hands[i].cards_size() == 2 &&
+        hands.hands[i].cards(0).rank() == rank &&
+        hands.hands[i].cards(1).rank() == rank) {
+      total += hands.weights[i];
     }
   }
   return total;
@@ -489,9 +487,10 @@ void CheckEvaluateRangeStrategy() {
   InfoSetAbstraction abstraction;
   BoardState root_state = InitialRootState(config);
   StrategySnapshot snapshot;
-  for (const auto& combo : player_a_range.get_all_weighted_combos()) {
+  WeightedHandRange player_a_combos = player_a_range.get_all_weighted_combos();
+  for (const Hand& hand : player_a_combos.hands) {
     AddStrategyInfoSet(
-        &snapshot, abstraction.state_to_info_set(root_state, 0, combo.first),
+        &snapshot, abstraction.state_to_info_set(root_state, 0, hand),
         {{MakeAction(ActionType::FOLD), 1.0}});
   }
 
@@ -507,12 +506,11 @@ void CheckEvaluateRangeStrategy() {
   CFRSolver solver(config);
   solver.load_strategy(path);
 
-  std::vector<std::pair<Hand, double>> player_a_combos =
-      player_a_range.get_all_weighted_combos();
-  std::vector<std::pair<Hand, double>> player_b_combos =
+  WeightedHandRange player_b_combos =
       player_b_range.get_all_weighted_combos();
   double exact_value =
-      solver.evaluate_strategy(player_a_combos[0].first, player_b_combos[0].first);
+      solver.evaluate_strategy(player_a_combos.hands[0],
+                               player_b_combos.hands[0]);
   double range_value = solver.evaluate_strategy(3, player_a_range, player_b_range);
   Expect(std::abs(range_value - exact_value) < 0.000001,
          "range evaluation should match exact fold strategy value");
@@ -581,8 +579,10 @@ void CheckSingletonRangeMatchesExactEvaluationAndBestResponse() {
 
   double exact_best_response = CFRSolverRegretTestPeer::BestResponseNode(
       solver, &node, player_a_hand, player_b_hand, 0);
+  WeightedHandRange player_b_singleton;
+  player_b_singleton.add(player_b_hand, 1.0);
   double range_best_response = CFRSolverRegretTestPeer::BestResponseRangeNode(
-      solver, &node, player_a_hand, {{player_b_hand, 1.0}}, 0);
+      solver, &node, player_a_hand, player_b_singleton, 0);
   Expect(std::abs(exact_best_response - range_best_response) < 0.000001,
          "singleton range best response should match exact-hand best response");
 }
@@ -821,7 +821,7 @@ void CheckRangeExpansionUsesExactCombos() {
 
   HandRange aces;
   aces.add_hand_by_index(HandRange::string_to_index("AA"), 1.0);
-  std::vector<std::pair<Hand, double>> combos = aces.get_all_weighted_combos();
+  WeightedHandRange combos = aces.get_all_weighted_combos();
   Expect(combos.size() == 6, "AA should expand to six exact combos");
 
   HandRange ace_king_suited;
@@ -835,9 +835,9 @@ void CheckRangeExpansionUsesExactCombos() {
          "AKo should expand to twelve exact combos");
 
   bool has_disjoint_aces = false;
-  for (const auto& left : combos) {
-    for (const auto& right : combos) {
-      if (!TestHandsOverlap(left.first, right.first)) {
+  for (const Hand& left : combos.hands) {
+    for (const Hand& right : combos.hands) {
+      if (!TestHandsOverlap(left, right)) {
         has_disjoint_aces = true;
       }
     }
@@ -1377,11 +1377,12 @@ void CheckRangeRunActionConditionsRangesByHandStrategy() {
   solver.set_continuation_value_provider(provider);
 
   InfoSetAbstraction abstraction;
-  for (const auto& hand : player_b_range.get_all_weighted_combos()) {
+  WeightedHandRange player_b_combos = player_b_range.get_all_weighted_combos();
+  for (const Hand& hand : player_b_combos.hands) {
     std::string info_set_key =
-        abstraction.state_to_info_set(root_state, 1, hand.first);
+        abstraction.state_to_info_set(root_state, 1, hand);
     int preferred_action =
-        hand.first.cards(0).rank() == 12
+        hand.cards(0).rank() == 12
             ? TestActionKey(ActionType::ALL_IN, 20)
             : TestActionKey(ActionType::CHECK);
     CFRSolverRegretTestPeer::SetRegret(
@@ -1629,8 +1630,9 @@ void CheckRangeBestResponseDoesNotKnowOpponentHand() {
   Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
   Hand kings = MakeHand(13, Suit::CLUBS, 13, Suit::DIAMONDS);
   Hand twos = MakeHand(2, Suit::CLUBS, 2, Suit::DIAMONDS);
-  std::vector<std::pair<Hand, double>> opponent_hands = {{kings, 1.0},
-                                                         {twos, 1.0}};
+  WeightedHandRange opponent_hands;
+  opponent_hands.add(kings, 1.0);
+  opponent_hands.add(twos, 1.0);
 
   double clairvoyant_average =
       (CFRSolverRegretTestPeer::BestResponseNode(solver, &node, player_a_hand,
@@ -1669,8 +1671,9 @@ void CheckRangeBestResponseChanceUsesSampledOpponent() {
   Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
   Hand quads = MakeHand(2, Suit::SPADES, 7, Suit::SPADES);
   Hand air = MakeHand(13, Suit::CLUBS, 12, Suit::DIAMONDS);
-  std::vector<std::pair<Hand, double>> opponent_hands = {{quads, 1.0},
-                                                         {air, 1.0}};
+  WeightedHandRange opponent_hands;
+  opponent_hands.add(quads, 1.0);
+  opponent_hands.add(air, 1.0);
 
   double value = CFRSolverRegretTestPeer::BestResponseRangeNode(
       solver, &node, player_a_hand, opponent_hands, 0);
