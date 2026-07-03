@@ -154,29 +154,6 @@ private:
     double value = 0.0;
   };
 
-  struct RegretMatchCache {
-    std::vector<double> positive_regret_sums;
-    std::vector<char> positive_regret_sum_cached;
-
-    void reset(size_t hand_count) {
-      positive_regret_sums.resize(hand_count);
-      positive_regret_sum_cached.assign(hand_count, 0);
-    }
-
-    bool has_sum(size_t hand_index) const {
-      return positive_regret_sum_cached[hand_index] != 0;
-    }
-
-    double sum(size_t hand_index) const {
-      return positive_regret_sums[hand_index];
-    }
-
-    void set_sum(size_t hand_index, double value) {
-      positive_regret_sums[hand_index] = value;
-      positive_regret_sum_cached[hand_index] = 1;
-    }
-  };
-
   struct InfoSetKey {
     static constexpr int kMaxCards = 5;
     static constexpr int kInlineHistoryValues = 48;
@@ -276,16 +253,13 @@ private:
       int player,
       const Hand& hand,
       const std::vector<int>& legal_action_ids,
-      int action_id,
-      size_t hand_index,
-      RegretMatchCache* regret_match_cache) const;
+      int action_id) const;
   void condition_range_for_action(
       const WeightedHandRange& range,
       const BoardState& state,
       int player,
       const std::vector<int>& legal_action_ids,
       int action_id,
-      RegretMatchCache* regret_match_cache,
       WeightedHandRange* conditioned_range) const;
   InfoSetKey make_info_set_key(const BoardState& state,
                                int player,
