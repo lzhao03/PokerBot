@@ -1045,6 +1045,30 @@ void CheckNestedCfrContinuationSolvesRiverCallSubgame() {
          "nested CFR continuation should solve from the cutoff state");
 }
 
+void CheckNestedCfrContinuationCachesSubgames() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+
+  NestedCFRContinuationValueProvider provider(config, 1);
+  GameTree game_tree(config);
+  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
+  Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
+  BoardState state = RiverFacingCallState();
+
+  double first = provider.value(&game_tree, state, player_a_hand, player_b_hand);
+  NestedCFRContinuationValueProvider::Stats first_stats = provider.stats();
+  double second = provider.value(&game_tree, state, player_a_hand, player_b_hand);
+  NestedCFRContinuationValueProvider::Stats second_stats = provider.stats();
+
+  Expect(first == second, "cached subgame value should match the first solve");
+  Expect(first_stats.misses == 1 && first_stats.hits == 0 &&
+             first_stats.entries == 1,
+         "first subgame lookup should miss and populate the cache");
+  Expect(second_stats.misses == 1 && second_stats.hits == 1 &&
+             second_stats.entries == 1,
+         "second subgame lookup should hit the cache");
+}
+
 GameTree::Node* TerminalShowdownNode(const std::vector<Card>& board_cards) {
   GameTree::Node* node = new GameTree::Node();
   node->state = ShowdownState(board_cards);
@@ -1581,6 +1605,7 @@ int main() {
   CheckDepthLimitDoesNotScoreUncalledBet();
   CheckDepthLimitUsesContinuationValueProvider();
   CheckNestedCfrContinuationSolvesRiverCallSubgame();
+  CheckNestedCfrContinuationCachesSubgames();
   CheckZeroMaxDepthDoesNotCutOff();
   CheckChanceDoesNotConsumeDepth();
   CheckChanceSamplesVisitMultipleBoards();

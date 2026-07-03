@@ -3,10 +3,34 @@
 #include "src/cfr_solver.h"
 #include "src/game_tree.h"
 
+#include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace poker {
+namespace {
+
+template <typename Message>
+void AppendSerialized(std::string* key, const Message& message) {
+  std::string serialized;
+  message.SerializeToString(&serialized);
+  key->append(std::to_string(serialized.size()));
+  key->append(":");
+  key->append(serialized);
+}
+
+std::string CacheKey(const BoardState& state,
+                     const Hand& player_a_hand,
+                     const Hand& player_b_hand) {
+  std::string key;
+  AppendSerialized(&key, state);
+  AppendSerialized(&key, player_a_hand);
+  AppendSerialized(&key, player_b_hand);
+  return key;
+}
+
+}  // namespace
 
 NestedCFRContinuationValueProvider::NestedCFRContinuationValueProvider(
     PokerConfig config,
@@ -18,6 +42,42 @@ NestedCFRContinuationValueProvider::NestedCFRContinuationValueProvider(
 }
 
 double NestedCFRContinuationValueProvider::value(
+    GameTree* game_tree,
+    const BoardState& state,
+    const Hand& player_a_hand,
+    const Hand& player_b_hand) const {
+  std::string key = CacheKey(state, player_a_hand, player_b_hand);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = values_.find(key);
+    if (it != values_.end()) {
+      ++hits_;
+      return it->second;
+    }
+  }
+
+  double computed =
+      compute_value(game_tree, state, player_a_hand, player_b_hand);
+
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto inserted = values_.emplace(std::move(key), computed);
+    if (inserted.second) {
+      ++misses_;
+      return computed;
+    }
+    ++hits_;
+    return inserted.first->second;
+  }
+}
+
+NestedCFRContinuationValueProvider::Stats
+NestedCFRContinuationValueProvider::stats() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return {hits_, misses_, static_cast<int64_t>(values_.size())};
+}
+
+double NestedCFRContinuationValueProvider::compute_value(
     GameTree* game_tree,
     const BoardState& state,
     const Hand& player_a_hand,
