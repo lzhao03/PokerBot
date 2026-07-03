@@ -59,7 +59,7 @@ public:
   std::vector<Hand> get_all_hands() const;
 
   // Get every exact two-card combo represented by the range.
-  WeightedHandRange get_all_weighted_combos() const;
+  const WeightedHandRange& get_all_weighted_combos() const;
   
   // Get all hand indices with their weights
   const std::vector<std::pair<int, double>>& get_all_weights() const;
@@ -128,6 +128,8 @@ private:
   std::array<std::array<double, 13>, 13> hand_matrix_;
   
   // Cached hands for faster access
+  mutable WeightedHandRange cached_weighted_combos_;
+  mutable bool weighted_combos_cache_valid_;
   mutable std::vector<Hand> cached_hands_;
   mutable bool hands_cache_valid_;
   

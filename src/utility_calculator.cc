@@ -37,7 +37,7 @@ WeightedHandRange CompatibleWeightedHands(
     const Hand& player_hand,
     const BoardState& state) {
   WeightedHandRange compatible_hands;
-  WeightedHandRange weighted_combos = range.get_all_weighted_combos();
+  const WeightedHandRange& weighted_combos = range.get_all_weighted_combos();
   compatible_hands.reserve(weighted_combos.size());
   for (size_t i = 0; i < weighted_combos.size(); ++i) {
     if (!HandsOverlap(weighted_combos.hands[i], player_hand) &&

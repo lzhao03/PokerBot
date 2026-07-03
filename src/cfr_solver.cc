@@ -200,18 +200,18 @@ void AppendEncodedCard(std::string* out, int encoded_card) {
 }
 
 struct WeightedHands {
-  WeightedHandRange hands;
+  const WeightedHandRange* hands = nullptr;
   std::discrete_distribution<size_t> distribution;
 
-  void reset(WeightedHandRange new_hands) {
-    hands = std::move(new_hands);
+  void reset(const WeightedHandRange& new_hands) {
+    hands = &new_hands;
     distribution = std::discrete_distribution<size_t>(
-        hands.weights.begin(), hands.weights.end());
+        hands->weights.begin(), hands->weights.end());
   }
 };
 
 Hand SampleWeightedHand(WeightedHands* hands, std::mt19937* rng) {
-  return hands->hands.hands[hands->distribution(*rng)];
+  return hands->hands->hands[hands->distribution(*rng)];
 }
 
 double StrategyActionProbability(const Strategy& strategy,
@@ -712,17 +712,17 @@ void CFRSolver::run(int iterations, const HandRange& player_a_range,
 void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
                                const HandRange* player_b_range,
                                bool train_swapped) {
-  WeightedHandRange player_a_hands;
-  WeightedHandRange player_b_hands;
+  const WeightedHandRange* player_a_hands = nullptr;
+  const WeightedHandRange* player_b_hands = nullptr;
   std::vector<RangeDeal> range_deals;
   std::vector<double> range_deal_weights;
   std::discrete_distribution<size_t> range_deal_distribution;
   if (iterations > 0 && player_a_range != nullptr &&
       player_b_range != nullptr) {
-    player_a_hands = player_a_range->get_all_weighted_combos();
-    player_b_hands = player_b_range->get_all_weighted_combos();
+    player_a_hands = &player_a_range->get_all_weighted_combos();
+    player_b_hands = &player_b_range->get_all_weighted_combos();
     range_deals =
-        build_compatible_range_deals(player_a_hands, player_b_hands);
+        build_compatible_range_deals(*player_a_hands, *player_b_hands);
     if (range_deals.empty()) {
       throw std::invalid_argument(
           "Could not sample non-overlapping hands from ranges");
@@ -776,9 +776,9 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
     int cfr_iteration = iterations_run_;
     std::vector<double> reach_probabilities(2, 1.0);
     const WeightedHandRange* player_a_context_range =
-        max_depth > 0 && player_a_range != nullptr ? &player_a_hands : nullptr;
+        max_depth > 0 ? player_a_hands : nullptr;
     const WeightedHandRange* player_b_context_range =
-        max_depth > 0 && player_b_range != nullptr ? &player_b_hands : nullptr;
+        max_depth > 0 ? player_b_hands : nullptr;
     double dealt_value = cfr_with_ranges(
         root, player_a_hand, player_b_hand, reach_probabilities,
         cfr_iteration, 0, max_depth, player_a_context_range,
@@ -1506,9 +1506,9 @@ double CFRSolver::sampled_range_best_response_value(
     return 0.0;
   }
 
-  WeightedHandRange best_response_hands =
+  const WeightedHandRange& best_response_hands =
       best_response_range.get_all_weighted_combos();
-  WeightedHandRange opponent_hands =
+  const WeightedHandRange& opponent_hands =
       opponent_range.get_all_weighted_combos();
   if (best_response_hands.empty() || opponent_hands.empty()) {
     throw std::invalid_argument(

@@ -102,7 +102,8 @@ std::vector<Hand> ExpandIndexToCombos(int index) {
 }  // namespace
 
 HandRange::HandRange() 
-  : hands_cache_valid_(false),
+  : weighted_combos_cache_valid_(false),
+    hands_cache_valid_(false),
     total_weight_(0.0) {
   // Initialize random number generator with current time
   rng_.seed(static_cast<unsigned int>(std::time(nullptr)));
@@ -178,7 +179,7 @@ std::vector<Hand> HandRange::sample(int count) const {
     return sampled_hands;
   }
 
-  WeightedHandRange weighted_combos = get_all_weighted_combos();
+  const WeightedHandRange& weighted_combos = get_all_weighted_combos();
   if (weighted_combos.empty()) {
     return sampled_hands;
   }
@@ -240,11 +241,15 @@ std::vector<Hand> HandRange::get_all_hands() const {
   return hands;
 }
 
-WeightedHandRange HandRange::get_all_weighted_combos() const {
-  WeightedHandRange weighted_combos;
+const WeightedHandRange& HandRange::get_all_weighted_combos() const {
+  if (weighted_combos_cache_valid_) {
+    return cached_weighted_combos_;
+  }
 
+  cached_weighted_combos_.clear();
   for (const auto& hand_weight : exact_hand_weights_) {
-    AddWeightedCombo(&weighted_combos, hand_weight.first, hand_weight.second);
+    AddWeightedCombo(&cached_weighted_combos_, hand_weight.first,
+                     hand_weight.second);
   }
 
   for (const auto& hand_weight : hand_weights_) {
@@ -255,11 +260,12 @@ WeightedHandRange HandRange::get_all_weighted_combos() const {
 
     double combo_weight = hand_weight.second / combos.size();
     for (const Hand& combo : combos) {
-      AddWeightedCombo(&weighted_combos, combo, combo_weight);
+      AddWeightedCombo(&cached_weighted_combos_, combo, combo_weight);
     }
   }
 
-  return weighted_combos;
+  weighted_combos_cache_valid_ = true;
+  return cached_weighted_combos_;
 }
 
 const std::vector<std::pair<int, double>>& HandRange::get_all_weights() const {
@@ -768,6 +774,8 @@ std::vector<Hand> HandRange::generate_all_hands() const {
 }
 
 void HandRange::invalidate_caches() {
+  weighted_combos_cache_valid_ = false;
+  cached_weighted_combos_.clear();
   hands_cache_valid_ = false;
   cached_hands_.clear();
 }
