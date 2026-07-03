@@ -155,16 +155,6 @@ void HashArray(size_t& seed, const std::array<int, N>& values) {
   }
 }
 
-void AppendInt(std::string& out, int value) {
-  out.append(std::to_string(value));
-}
-
-void AppendEncodedCard(std::string& out, int encoded_card) {
-  AppendInt(out, encoded_card / 8);
-  out.push_back(':');
-  AppendInt(out, encoded_card % 8);
-}
-
 struct WeightedHands {
   explicit WeightedHands(const WeightedHandRange& hands)
       : hands(hands),
@@ -468,49 +458,34 @@ int CFRSolver::get_or_create_info_set_id(
 }
 
 std::string CFRSolver::info_set_key_to_string(const InfoSetKey& key) const {
-  std::string text;
-  text.reserve(128 + key.history_size * 4);
-  text.push_back('P');
-  AppendInt(text, key.player);
-  text.append(":H[");
+  std::ostringstream text;
+  text << 'P' << key.player << ":H[";
   for (int i = 0; i < key.hand_size; ++i) {
     if (i > 0) {
-      text.push_back(',');
+      text << ',';
     }
-    AppendEncodedCard(text, key.hand_cards[i]);
+    text << key.hand_cards[i] / 8 << ':' << key.hand_cards[i] % 8;
   }
-  text.append("]:B[");
+  text << "]:B[";
   for (int i = 0; i < key.board_size; ++i) {
     if (i > 0) {
-      text.push_back(',');
+      text << ',';
     }
-    AppendEncodedCard(text, key.board_cards[i]);
+    text << key.board_cards[i] / 8 << ':' << key.board_cards[i] % 8;
   }
-  text.append("]:S");
-  AppendInt(text, key.street);
-  text.append(":POT");
-  AppendInt(text, key.pot);
-  text.append(":ST");
-  AppendInt(text, key.stack_a);
-  text.push_back(',');
-  AppendInt(text, key.stack_b);
-  text.append(":AI");
-  AppendInt(text, key.all_in);
-  text.append(":F");
-  AppendInt(text, key.folded_player);
-  text.append(":T");
-  AppendInt(text, key.player_to_act);
-  text.append(":C[");
+  text << "]:S" << key.street << ":POT" << key.pot << ":ST"
+       << key.stack_a << ',' << key.stack_b << ":AI" << key.all_in << ":F"
+       << key.folded_player << ":T" << key.player_to_act << ":C[";
   for (int i = 0; i < key.player_contribution_size; ++i) {
     if (i > 0) {
-      text.push_back(',');
+      text << ',';
     }
-    AppendInt(text, key.player_contributions[i]);
+    text << key.player_contributions[i];
   }
-  text.append("]:A[");
+  text << "]:A[";
   for (int i = 0; i < key.history_size; i += 3) {
     if (i > 0) {
-      text.push_back(',');
+      text << ',';
     }
     auto history_value = [&](int index) {
       if (index < InfoSetKey::kInlineHistoryValues) {
@@ -518,14 +493,11 @@ std::string CFRSolver::info_set_key_to_string(const InfoSetKey& key) const {
       }
       return key.history_overflow[index - InfoSetKey::kInlineHistoryValues];
     };
-    AppendInt(text, history_value(i));
-    text.push_back(':');
-    AppendInt(text, history_value(i + 1));
-    text.push_back(':');
-    AppendInt(text, history_value(i + 2));
+    text << history_value(i) << ':' << history_value(i + 1) << ':'
+         << history_value(i + 2);
   }
-  text.push_back(']');
-  return text;
+  text << ']';
+  return text.str();
 }
 
 double CFRSolver::regret_for_info_set(const std::string& info_set_key,
