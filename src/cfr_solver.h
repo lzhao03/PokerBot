@@ -14,8 +14,6 @@
 #include "src/game_tree.h"
 #include "src/hand_range.h"
 #include "src/strategy.h"
-#include "src/info_set.h"
-#include "src/hand_evaluator.h"
 
 namespace poker {
 
@@ -192,13 +190,6 @@ private:
     std::vector<double> cumulative_strategy;
   };
 
-  struct LegacyInfoSetData {
-    std::string key;
-    std::vector<int> action_ids;
-    std::vector<double> cumulative_regrets;
-    std::vector<double> cumulative_strategy;
-  };
-
   CFRSolver(const PokerConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache);
   CFRSolver(const PokerConfig& config,
@@ -212,8 +203,6 @@ private:
   PokerConfig config_;
   BoardState initial_state_;
   GameTree* game_tree_;
-  HandEvaluator* hand_evaluator_;
-  InfoSetAbstraction* info_set_abstraction_;
   std::mt19937 rng_;
   double cumulative_root_utility_;
   int iterations_run_;
@@ -224,9 +213,6 @@ private:
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
   
-  // Legacy string-keyed lookup used for loaded strategies and test-seeded regrets.
-  std::unordered_map<std::string, int> legacy_info_set_ids_;
-  std::vector<LegacyInfoSetData> legacy_info_sets_;
   std::unordered_map<InfoSetKey, int, InfoSetKeyHash> info_set_ids_;
   std::vector<InfoSetData> info_sets_;
   
@@ -271,20 +257,9 @@ private:
   const InfoSetData* find_info_set(const InfoSetKey& key) const;
   void ensure_info_set_actions(InfoSetData* info_set,
                                const std::vector<Action>& legal_actions);
-  int get_or_create_legacy_info_set_id(const std::string& info_set_key);
-  const LegacyInfoSetData* find_legacy_info_set(
-      const std::string& info_set_key) const;
-  size_t ensure_legacy_info_set_action(LegacyInfoSetData* info_set,
-                                       int action_id);
-  void ensure_legacy_info_set_actions(
-      LegacyInfoSetData* info_set,
-      const std::vector<Action>& legal_actions);
   std::string info_set_key_to_string(const InfoSetKey& key) const;
   double regret_for_info_set(const std::string& info_set_key,
                              int action_id) const;
-  void set_legacy_regret_for_info_set(const std::string& info_set_key,
-                                      int action_id,
-                                      double regret);
   ContinuationContext build_continuation_context(
       const BoardState& state,
       const Hand& player_a_hand,
@@ -328,19 +303,9 @@ private:
       const WeightedHandRange& opponent_hands,
       const Strategy& strategy,
       int best_response_player);
-  Strategy::ActionProbabilities get_strategy(
-      const std::string& info_set_key,
-      const std::vector<Action>& legal_actions);
-  std::vector<ActionChoice> get_action_choices(
-      const std::string& info_set_key,
-      const std::vector<Action>& legal_actions);
   std::vector<ActionChoice> get_action_choices(
       int info_set_id,
       const std::vector<Action>& legal_actions);
-  void update_strategy(const std::string& info_set_key, const Strategy::ActionProbabilities& strategy, double reach_prob);
-  void update_strategy(const std::string& info_set_key,
-                       const std::vector<ActionChoice>& choices,
-                       double reach_prob);
   void update_strategy(int info_set_id,
                        const std::vector<ActionChoice>& choices,
                        double reach_prob);

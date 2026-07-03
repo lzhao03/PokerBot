@@ -388,8 +388,6 @@ CFRSolver::CFRSolver(
   : config_(config),
     initial_state_(std::move(initial_state)),
     game_tree_(new GameTree(config)),
-    hand_evaluator_(new HandEvaluator()),
-    info_set_abstraction_(new InfoSetAbstraction()),
     rng_(12345),
     cumulative_root_utility_(0.0),
     iterations_run_(0),
@@ -400,8 +398,6 @@ CFRSolver::CFRSolver(
 
 CFRSolver::~CFRSolver() {
   delete game_tree_;
-  delete hand_evaluator_;
-  delete info_set_abstraction_;
 }
 
 void CFRSolver::set_continuation_value_provider(
@@ -533,53 +529,6 @@ const CFRSolver::InfoSetData* CFRSolver::find_info_set(
   return &info_sets_[existing->second];
 }
 
-int CFRSolver::get_or_create_legacy_info_set_id(
-    const std::string& info_set_key) {
-  auto existing = legacy_info_set_ids_.find(info_set_key);
-  if (existing != legacy_info_set_ids_.end()) {
-    return existing->second;
-  }
-
-  const int id = static_cast<int>(legacy_info_sets_.size());
-  LegacyInfoSetData data;
-  data.key = info_set_key;
-  legacy_info_sets_.push_back(std::move(data));
-  legacy_info_set_ids_.emplace(legacy_info_sets_.back().key, id);
-  return id;
-}
-
-const CFRSolver::LegacyInfoSetData* CFRSolver::find_legacy_info_set(
-    const std::string& info_set_key) const {
-  auto existing = legacy_info_set_ids_.find(info_set_key);
-  if (existing == legacy_info_set_ids_.end()) {
-    return nullptr;
-  }
-  return &legacy_info_sets_[existing->second];
-}
-
-size_t CFRSolver::ensure_legacy_info_set_action(
-    LegacyInfoSetData* info_set,
-    int action_id) {
-  auto existing = std::find(info_set->action_ids.begin(),
-                            info_set->action_ids.end(), action_id);
-  if (existing != info_set->action_ids.end()) {
-    return static_cast<size_t>(existing - info_set->action_ids.begin());
-  }
-
-  info_set->action_ids.push_back(action_id);
-  info_set->cumulative_regrets.push_back(0.0);
-  info_set->cumulative_strategy.push_back(0.0);
-  return info_set->action_ids.size() - 1;
-}
-
-void CFRSolver::ensure_legacy_info_set_actions(
-    LegacyInfoSetData* info_set,
-    const std::vector<Action>& legal_actions) {
-  for (const Action& action : legal_actions) {
-    ensure_legacy_info_set_action(info_set, ActionKey(action));
-  }
-}
-
 std::string CFRSolver::info_set_key_to_string(const InfoSetKey& key) const {
   std::string text;
   text.reserve(128 + key.history_size * 4);
@@ -643,19 +592,6 @@ std::string CFRSolver::info_set_key_to_string(const InfoSetKey& key) const {
 
 double CFRSolver::regret_for_info_set(const std::string& info_set_key,
                                       int action_id) const {
-  const LegacyInfoSetData* legacy_info_set =
-      find_legacy_info_set(info_set_key);
-  if (legacy_info_set != nullptr) {
-    auto action = std::find(legacy_info_set->action_ids.begin(),
-                            legacy_info_set->action_ids.end(), action_id);
-    if (action == legacy_info_set->action_ids.end()) {
-      return 0.0;
-    }
-    const size_t index =
-        static_cast<size_t>(action - legacy_info_set->action_ids.begin());
-    return legacy_info_set->cumulative_regrets[index];
-  }
-
   for (const InfoSetData& info_set : info_sets_) {
     if (info_set_key_to_string(info_set.key) != info_set_key) {
       continue;
@@ -670,17 +606,6 @@ double CFRSolver::regret_for_info_set(const std::string& info_set_key,
     return info_set.cumulative_regrets[index];
   }
   return 0.0;
-}
-
-void CFRSolver::set_legacy_regret_for_info_set(
-    const std::string& info_set_key,
-    int action_id,
-    double regret) {
-  const int info_set_id = get_or_create_legacy_info_set_id(info_set_key);
-  LegacyInfoSetData& info_set = legacy_info_sets_[info_set_id];
-  const size_t action_index =
-      ensure_legacy_info_set_action(&info_set, action_id);
-  info_set.cumulative_regrets[action_index] = regret;
 }
 
 void CFRSolver::run(int iterations) {
@@ -1011,40 +936,6 @@ double CFRSolver::action_probability_for_hand(
     return 0.0;
   }
 
-  if (!legacy_info_sets_.empty()) {
-    std::string info_set_key = info_set_abstraction_->state_to_info_set(
-        state, player, hand);
-    const LegacyInfoSetData* legacy_info_set =
-        find_legacy_info_set(info_set_key);
-    if (legacy_info_set != nullptr) {
-      double sum_positive_regrets = 0.0;
-      for (int legal_action_id : legal_action_ids) {
-        auto action = std::find(legacy_info_set->action_ids.begin(),
-                                legacy_info_set->action_ids.end(),
-                                legal_action_id);
-        if (action != legacy_info_set->action_ids.end()) {
-          const size_t index =
-              static_cast<size_t>(action - legacy_info_set->action_ids.begin());
-          sum_positive_regrets +=
-              std::max(0.0, legacy_info_set->cumulative_regrets[index]);
-        }
-      }
-      if (sum_positive_regrets <= 0.0) {
-        return 1.0 / legal_action_ids.size();
-      }
-
-      auto action = std::find(legacy_info_set->action_ids.begin(),
-                              legacy_info_set->action_ids.end(), action_id);
-      if (action == legacy_info_set->action_ids.end()) {
-        return 0.0;
-      }
-      const size_t index =
-          static_cast<size_t>(action - legacy_info_set->action_ids.begin());
-      return std::max(0.0, legacy_info_set->cumulative_regrets[index]) /
-             sum_positive_regrets;
-    }
-  }
-
   InfoSetKey key = make_info_set_key(state, player, hand);
   const InfoSetData* info_set = find_info_set(key);
   if (info_set != nullptr) {
@@ -1115,7 +1006,7 @@ ContinuationContext CFRSolver::build_continuation_context(
 }
 
 Strategy CFRSolver::get_equilibrium_strategy() const {
-  Strategy equilibrium_strategy;
+  Strategy equilibrium_strategy = current_strategy_;
 
   for (const InfoSetData& info_set : info_sets_) {
     double sum = 0.0;
@@ -1140,30 +1031,7 @@ Strategy CFRSolver::get_equilibrium_strategy() const {
     equilibrium_strategy.update(info_set_key_to_string(info_set.key),
                                 normalized_strategy);
   }
-  
-  for (const LegacyInfoSetData& info_set : legacy_info_sets_) {
-    double sum = 0.0;
-    for (double probability : info_set.cumulative_strategy) {
-      sum += probability;
-    }
-    
-    Strategy::ActionProbabilities normalized_strategy;
-    normalized_strategy.reserve(info_set.action_ids.size());
-    if (sum > 0.0) {
-      for (size_t i = 0; i < info_set.action_ids.size(); ++i) {
-        normalized_strategy[info_set.action_ids[i]] =
-            info_set.cumulative_strategy[i] / sum;
-      }
-    } else if (!info_set.action_ids.empty()) {
-      double uniform_prob = 1.0 / info_set.action_ids.size();
-      for (int action_id : info_set.action_ids) {
-        normalized_strategy[action_id] = uniform_prob;
-      }
-    }
-    
-    equilibrium_strategy.update(info_set.key, normalized_strategy);
-  }
-  
+
   return equilibrium_strategy;
 }
 
@@ -1299,8 +1167,8 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node* node,
   }
 
   const Hand& player_hand = player == 0 ? player_a_hand : player_b_hand;
-  std::string info_set_key =
-      info_set_abstraction_->state_to_info_set(node->state, player, player_hand);
+  std::string info_set_key = info_set_key_to_string(
+      make_info_set_key(node->state, player, player_hand));
 
   std::vector<int> action_ids;
   action_ids.reserve(node->legal_actions.size());
@@ -1356,8 +1224,8 @@ double CFRSolver::best_response_value(GameTree::Node* node,
   }
 
   const Hand& player_hand = player == 0 ? player_a_hand : player_b_hand;
-  std::string info_set_key =
-      info_set_abstraction_->state_to_info_set(node->state, player, player_hand);
+  std::string info_set_key = info_set_key_to_string(
+      make_info_set_key(node->state, player, player_hand));
 
   std::vector<int> action_ids;
   action_ids.reserve(node->legal_actions.size());
@@ -1483,8 +1351,8 @@ double CFRSolver::best_response_value_against_range(
     WeightedHandRange child_opponents;
     child_opponents.reserve(opponent_hands.size());
     for (size_t i = 0; i < opponent_hands.size(); ++i) {
-      std::string info_set_key = info_set_abstraction_->state_to_info_set(
-          node->state, player, opponent_hands.hands[i]);
+      std::string info_set_key = info_set_key_to_string(
+          make_info_set_key(node->state, player, opponent_hands.hands[i]));
       double probability = StrategyActionProbability(
           strategy, info_set_key, node->legal_actions, action_id);
       if (probability > 0.0) {
@@ -1755,24 +1623,15 @@ void CFRSolver::load_strategy(const std::string& filename) {
   }
 
   current_strategy_.clear();
-  legacy_info_set_ids_.clear();
-  legacy_info_sets_.clear();
   info_set_ids_.clear();
   info_sets_.clear();
 
   for (const StrategyInfoSetSnapshot& info_set : snapshot.info_sets()) {
     Strategy::ActionProbabilities action_probs;
-    const int info_set_id =
-        get_or_create_legacy_info_set_id(info_set.info_set_key());
-    LegacyInfoSetData& legacy_info_set = legacy_info_sets_[info_set_id];
     for (const StrategyActionSnapshot& action : info_set.actions()) {
       if (action.has_action()) {
         const int action_id = ActionKey(action.action());
         action_probs[action_id] = action.probability();
-        const size_t action_index =
-            ensure_legacy_info_set_action(&legacy_info_set, action_id);
-        legacy_info_set.cumulative_strategy[action_index] =
-            action.probability();
       }
     }
     current_strategy_.update(info_set.info_set_key(), action_probs);
@@ -1804,124 +1663,6 @@ double CFRSolver::utility(const BoardState& state,
       state, player_a_hand, player_b_hand, [&]() {
         return game_tree_->get_utility(state, player_a_hand, player_b_hand);
       });
-}
-
-Strategy::ActionProbabilities CFRSolver::get_strategy(
-    const std::string& info_set_key,
-    const std::vector<Action>& legal_actions) {
-  Strategy::ActionProbabilities strategy;
-  if (legal_actions.empty()) {
-    return strategy;
-  }
-
-  const int info_set_id = get_or_create_legacy_info_set_id(info_set_key);
-  LegacyInfoSetData& info_set = legacy_info_sets_[info_set_id];
-  ensure_legacy_info_set_actions(&info_set, legal_actions);
-
-  std::vector<int> action_ids;
-  action_ids.reserve(legal_actions.size());
-  for (const Action& action : legal_actions) {
-    int action_id = ActionKey(action);
-    if (std::find(action_ids.begin(), action_ids.end(), action_id) ==
-        action_ids.end()) {
-      action_ids.push_back(action_id);
-    }
-  }
-  strategy.reserve(action_ids.size());
-  
-  // Compute the sum of positive regrets
-  double sum_positive_regrets = 0.0;
-  for (int action_id : action_ids) {
-    auto action = std::find(info_set.action_ids.begin(),
-                            info_set.action_ids.end(), action_id);
-    if (action == info_set.action_ids.end()) {
-      continue;
-    }
-    const size_t action_index =
-        static_cast<size_t>(action - info_set.action_ids.begin());
-    sum_positive_regrets +=
-        std::max(0.0, info_set.cumulative_regrets[action_index]);
-  }
-  
-  // If there are positive regrets, use regret matching
-  if (sum_positive_regrets > 0.0) {
-    for (int action_id : action_ids) {
-      auto action = std::find(info_set.action_ids.begin(),
-                              info_set.action_ids.end(), action_id);
-      if (action == info_set.action_ids.end()) {
-        continue;
-      }
-      const size_t action_index =
-          static_cast<size_t>(action - info_set.action_ids.begin());
-      strategy[action_id] =
-          std::max(0.0, info_set.cumulative_regrets[action_index]) /
-          sum_positive_regrets;
-    }
-  } else {
-    // If all regrets are negative or zero, use a uniform strategy
-    double uniform_prob = 1.0 / action_ids.size();
-    for (int action_id : action_ids) {
-      strategy[action_id] = uniform_prob;
-    }
-  }
-  
-  return strategy;
-}
-
-std::vector<CFRSolver::ActionChoice> CFRSolver::get_action_choices(
-    const std::string& info_set_key,
-    const std::vector<Action>& legal_actions) {
-  std::vector<ActionChoice> choices;
-  choices.reserve(legal_actions.size());
-  if (legal_actions.empty()) {
-    return choices;
-  }
-
-  const int info_set_id = get_or_create_legacy_info_set_id(info_set_key);
-  LegacyInfoSetData& info_set = legacy_info_sets_[info_set_id];
-  ensure_legacy_info_set_actions(&info_set, legal_actions);
-
-  for (const Action& action : legal_actions) {
-    int action_id = ActionKey(action);
-    auto existing_choice =
-        std::find_if(choices.begin(), choices.end(),
-                     [action_id](const ActionChoice& choice) {
-                       return choice.action_id == action_id;
-                     });
-    if (existing_choice != choices.end()) {
-      continue;
-    }
-    auto action_index = std::find(info_set.action_ids.begin(),
-                                  info_set.action_ids.end(), action_id);
-    if (action_index == info_set.action_ids.end()) {
-      continue;
-    }
-    choices.push_back(
-        {&action, action_id,
-         static_cast<size_t>(action_index - info_set.action_ids.begin()), 0.0,
-         0.0});
-  }
-
-  double sum_positive_regrets = 0.0;
-  for (const ActionChoice& choice : choices) {
-    sum_positive_regrets +=
-        std::max(0.0, info_set.cumulative_regrets[choice.action_index]);
-  }
-
-  if (sum_positive_regrets > 0.0) {
-    for (ActionChoice& choice : choices) {
-      choice.probability =
-          std::max(0.0, info_set.cumulative_regrets[choice.action_index]) /
-          sum_positive_regrets;
-    }
-  } else if (!choices.empty()) {
-    double uniform_prob = 1.0 / choices.size();
-    for (ActionChoice& choice : choices) {
-      choice.probability = uniform_prob;
-    }
-  }
-
-  return choices;
 }
 
 std::vector<CFRSolver::ActionChoice> CFRSolver::get_action_choices(
@@ -1973,30 +1714,6 @@ std::vector<CFRSolver::ActionChoice> CFRSolver::get_action_choices(
   }
 
   return choices;
-}
-
-void CFRSolver::update_strategy(const std::string& info_set_key, const Strategy::ActionProbabilities& strategy, double reach_prob) {
-  const int info_set_id = get_or_create_legacy_info_set_id(info_set_key);
-  LegacyInfoSetData& info_set = legacy_info_sets_[info_set_id];
-  for (const auto& action_prob : strategy) {
-    const size_t action_index =
-        ensure_legacy_info_set_action(&info_set, action_prob.first);
-    info_set.cumulative_strategy[action_index] +=
-        reach_prob * action_prob.second;
-  }
-}
-
-void CFRSolver::update_strategy(const std::string& info_set_key,
-                                const std::vector<ActionChoice>& choices,
-                                double reach_prob) {
-  const int info_set_id = get_or_create_legacy_info_set_id(info_set_key);
-  LegacyInfoSetData& info_set = legacy_info_sets_[info_set_id];
-  for (const ActionChoice& choice : choices) {
-    const size_t action_index =
-        ensure_legacy_info_set_action(&info_set, choice.action_id);
-    info_set.cumulative_strategy[action_index] +=
-        reach_prob * choice.probability;
-  }
 }
 
 void CFRSolver::update_strategy(int info_set_id,

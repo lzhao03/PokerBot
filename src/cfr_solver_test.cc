@@ -1,6 +1,7 @@
 #include "src/cfr_solver.h"
 #include "src/continuation_value.h"
 #include "src/hand_range.h"
+#include "src/info_set.h"
 #include "src/subgame_value.h"
 
 #include <algorithm>
@@ -61,10 +62,26 @@ class CFRSolverRegretTestPeer {
   }
 
   static void SetRegret(CFRSolver& solver,
-                        const std::string& info_set_key,
+                        const BoardState& state,
+                        int player,
+                        const Hand& hand,
                         int action_id,
                         double regret) {
-    solver.set_legacy_regret_for_info_set(info_set_key, action_id, regret);
+    std::vector<Action> legal_actions =
+        solver.game_tree_->get_legal_actions(state);
+    const CFRSolver::InfoSetKey key =
+        solver.make_info_set_key(state, player, hand);
+    const int info_set_id =
+        solver.get_or_create_info_set_id(key, legal_actions);
+    CFRSolver::InfoSetData& info_set = solver.info_sets_[info_set_id];
+    auto action = std::find(info_set.action_ids.begin(),
+                            info_set.action_ids.end(), action_id);
+    if (action == info_set.action_ids.end()) {
+      throw std::runtime_error("Seeded regret action is not legal");
+    }
+    const size_t action_index =
+        static_cast<size_t>(action - info_set.action_ids.begin());
+    info_set.cumulative_regrets[action_index] = regret;
   }
 
   static std::vector<double> CompatibleDealWeights(
@@ -1376,17 +1393,14 @@ void CheckRangeRunActionConditionsRangesByHandStrategy() {
   auto provider = std::make_shared<FixedContinuationValueProvider>(7.0);
   solver.set_continuation_value_provider(provider);
 
-  InfoSetAbstraction abstraction;
   WeightedHandRange player_b_combos = player_b_range.get_all_weighted_combos();
   for (const Hand& hand : player_b_combos.hands) {
-    std::string info_set_key =
-        abstraction.state_to_info_set(root_state, 1, hand);
     int preferred_action =
         hand.cards(0).rank() == 12
             ? TestActionKey(ActionType::ALL_IN, 20)
             : TestActionKey(ActionType::CHECK);
     CFRSolverRegretTestPeer::SetRegret(
-        solver, info_set_key, preferred_action, 1.0);
+        solver, root_state, 1, hand, preferred_action, 1.0);
   }
 
   solver.run(1, player_a_range, player_b_range);
