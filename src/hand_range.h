@@ -6,6 +6,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "src/card.h"
 #include "src/poker.pb.h"
 
 namespace poker {
@@ -13,6 +14,7 @@ namespace poker {
 struct WeightedHandRange {
   std::vector<Hand> hands;
   std::vector<double> weights;
+  std::vector<CardMask> masks;
 
   size_t size() const { return hands.size(); }
   bool empty() const { return hands.empty(); }
@@ -20,16 +22,19 @@ struct WeightedHandRange {
   void reserve(size_t count) {
     hands.reserve(count);
     weights.reserve(count);
+    masks.reserve(count);
   }
 
   void clear() {
     hands.clear();
     weights.clear();
+    masks.clear();
   }
 
   void add(const Hand& hand, double weight) {
     hands.push_back(hand);
     weights.push_back(weight);
+    masks.push_back(HandMask(hand));
   }
 };
 
@@ -101,6 +106,10 @@ struct WeightedHandRangeView {
 
   double weight(size_t index) const {
     return all_source_hands ? source_range().weights[index] : weights[index];
+  }
+
+  CardMask mask(size_t index) const {
+    return source_range().masks[source_index(index)];
   }
 };
 

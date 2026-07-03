@@ -40,28 +40,6 @@ Action ActionFromKey(int action_key) {
   return action;
 }
 
-bool HandsOverlap(const Hand& left, const Hand& right) {
-  for (const Card& left_card : left.cards()) {
-    for (const Card& right_card : right.cards()) {
-      if (SameCard(left_card, right_card)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-bool HandOverlapsBoard(const Hand& hand, const BoardState& state) {
-  for (const Card& hand_card : hand.cards()) {
-    for (const Card& board_card : state.cards()) {
-      if (SameCard(hand_card, board_card)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 double TotalWeight(const WeightedHandRangeView& hands) {
   double total = 0.0;
   for (size_t i = 0; i < hands.size(); ++i) {
@@ -79,11 +57,11 @@ WeightedHandRangeView CompatibleHands(
     return compatible_hands;
   }
 
+  const CardMask blocked_cards = HandMask(known_hand) | BoardMask(state);
   compatible_hands.reset_to_filtered(hands.source_range());
   compatible_hands.reserve(hands.size());
   for (size_t i = 0; i < hands.size(); ++i) {
-    if (!HandsOverlap(hands.hand(i), known_hand) &&
-        !HandOverlapsBoard(hands.hand(i), state)) {
+    if ((hands.mask(i) & blocked_cards) == 0) {
       compatible_hands.add(hands.source_index(i), hands.weight(i));
     }
   }
@@ -98,10 +76,11 @@ void PublicCompatibleRangeInto(const WeightedHandRangeView& hands,
     return;
   }
 
+  const CardMask board_mask = BoardMask(state);
   compatible_hands.reset_to_filtered(hands.source_range());
   compatible_hands.reserve(hands.size());
   for (size_t i = 0; i < hands.size(); ++i) {
-    if (hands.weight(i) > 0.0 && !HandOverlapsBoard(hands.hand(i), state)) {
+    if (hands.weight(i) > 0.0 && (hands.mask(i) & board_mask) == 0) {
       compatible_hands.add(hands.source_index(i), hands.weight(i));
     }
   }
@@ -456,7 +435,7 @@ std::vector<CFRSolver::RangeDeal> CFRSolver::build_compatible_range_deals(
     }
     for (size_t b = 0; b < player_b_hands.size(); ++b) {
       if (player_b_hands.weights[b] <= 0.0 ||
-          HandsOverlap(player_a_hands.hands[a], player_b_hands.hands[b])) {
+          (player_a_hands.masks[a] & player_b_hands.masks[b]) != 0) {
         continue;
       }
       deals.emplace_back(
@@ -1090,8 +1069,9 @@ void CFRSolver::condition_range_for_action(
 
   conditioned_range.reset_to_filtered(range.source_range());
   conditioned_range.reserve(range.size());
+  const CardMask board_mask = BoardMask(state);
   for (size_t i = 0; i < range.size(); ++i) {
-    if (range.weight(i) <= 0.0 || HandOverlapsBoard(range.hand(i), state)) {
+    if (range.weight(i) <= 0.0 || (range.mask(i) & board_mask) != 0) {
       continue;
     }
     double probability = action_probability_for_hand(

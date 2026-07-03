@@ -150,11 +150,38 @@ void CheckWeightedComboInvariants() {
          "normalized combo weights should sum to one");
 }
 
+void CheckWeightedComboMasks() {
+  poker::WeightedHandRange combos;
+  poker::Hand aces =
+      MakeHand(14, poker::Suit::SPADES, 14, poker::Suit::HEARTS);
+  poker::Hand kings =
+      MakeHand(13, poker::Suit::CLUBS, 13, poker::Suit::DIAMONDS);
+
+  combos.add(aces, 2.0);
+  combos.add(kings, 3.0);
+
+  Expect(combos.masks.size() == combos.size(),
+         "weighted combo masks should match combo count");
+  Expect(combos.masks[0] == poker::HandMask(aces),
+         "weighted combo should cache its hand mask");
+  Expect((combos.masks[0] & poker::CardBit(aces.cards(0))) != 0,
+         "weighted combo mask should include first card");
+  Expect((combos.masks[0] & poker::CardBit(aces.cards(1))) != 0,
+         "weighted combo mask should include second card");
+  Expect((combos.masks[0] & combos.masks[1]) == 0,
+         "disjoint hands should have disjoint masks");
+
+  poker::WeightedHandRangeView view(combos);
+  Expect(view.mask(1) == poker::HandMask(kings),
+         "range view should expose source hand masks");
+}
+
 }  // namespace
 
 int main() {
   CheckUpdatingHandWeightReplacesTotal();
   CheckAddHandPreservesExactCombo();
   CheckWeightedComboInvariants();
+  CheckWeightedComboMasks();
   return 0;
 }
