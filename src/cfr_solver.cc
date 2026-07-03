@@ -5,6 +5,7 @@
 #include "src/terminal_utility_cache.h"
 #include "src/thread_pool.h"
 #include <algorithm>
+#include <cstdint>
 #include <numeric>
 #include <random>
 #include <future>
@@ -124,6 +125,32 @@ int EncodedCard(const Card& card) {
   return card.rank() * 8 + static_cast<int>(card.suit());
 }
 
+int ChanceCardsKey(const std::vector<Card>& cards) {
+  int key = static_cast<int>(cards.size());
+  for (const Card& card : cards) {
+    key = key * 128 + EncodedCard(card);
+  }
+  return -1 - key;
+}
+
+GameTree::Node* CachedChanceChild(GameTree* game_tree,
+                                  GameTree::Node* node,
+                                  const std::vector<Card>& cards,
+                                  int64_t* created_nodes) {
+  const int child_key = ChanceCardsKey(cards);
+  auto child = node->children.find(child_key);
+  if (child != node->children.end()) {
+    return child->second;
+  }
+
+  GameTree::Node* child_node = game_tree->create_chance_child_node(node, cards);
+  node->children[child_key] = child_node;
+  if (created_nodes != nullptr) {
+    ++(*created_nodes);
+  }
+  return child_node;
+}
+
 int RoundedContribution(const BoardState& state, int player) {
   return state.player_contribution_size() > player
              ? static_cast<int>(std::lround(state.player_contribution(player)))
@@ -222,15 +249,15 @@ double SampleChanceValue(GameTree* game_tree,
                          const Hand& player_b_hand,
                          int samples,
                          std::mt19937* rng,
+                         int64_t* created_nodes,
                          EvaluateChild evaluate_child) {
   double value = 0.0;
   for (int i = 0; i < samples; ++i) {
     std::vector<Card> cards =
         SampleStreetCards(node->state, player_a_hand, player_b_hand, rng);
     GameTree::Node* child_node =
-        game_tree->create_chance_child_node(node, cards);
+        CachedChanceChild(game_tree, node, cards, created_nodes);
     value += evaluate_child(child_node);
-    delete child_node;
   }
   return value / samples;
 }
@@ -683,7 +710,8 @@ double CFRSolver::chance_sampling_cfr(GameTree::Node* node,
   traversal_stats_.chance_samples += samples;
   return SampleChanceValue(
       game_tree_, node, player_a_hand, player_b_hand, samples,
-      &rng_, [&](GameTree::Node* child_node) {
+      &rng_, &traversal_stats_.child_nodes_created,
+      [&](GameTree::Node* child_node) {
         return cfr_with_ranges(child_node, player_a_hand, player_b_hand,
                                reach_probabilities, iteration, depth,
                                max_depth, player_a_range, player_b_range);
@@ -911,7 +939,7 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node* node,
   if (node->is_chance_node) {
     return SampleChanceValue(
         game_tree_, node, player_a_hand, player_b_hand, ChanceSamples(config_),
-        &rng_, [&](GameTree::Node* child_node) {
+        &rng_, nullptr, [&](GameTree::Node* child_node) {
           return evaluate_strategy_node(child_node, player_a_hand, player_b_hand,
                                         strategy);
         });
@@ -969,7 +997,7 @@ double CFRSolver::best_response_value(GameTree::Node* node,
   if (node->is_chance_node) {
     return SampleChanceValue(
         game_tree_, node, player_a_hand, player_b_hand, ChanceSamples(config_),
-        &rng_, [&](GameTree::Node* child_node) {
+        &rng_, nullptr, [&](GameTree::Node* child_node) {
           return best_response_value(child_node, player_a_hand, player_b_hand,
                                      strategy, best_response_player);
         });
@@ -1069,13 +1097,12 @@ double CFRSolver::best_response_value_against_range(
       std::vector<Card> cards =
           SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
       GameTree::Node* child_node =
-          game_tree_->create_chance_child_node(node, cards);
+          CachedChanceChild(game_tree_, node, cards, nullptr);
       std::vector<std::pair<Hand, double>> child_opponents = {
           {sampled_opponent, 1.0}};
       value += best_response_value_against_range(
           child_node, best_response_hand, child_opponents, strategy,
           best_response_player);
-      delete child_node;
     }
     return value / samples;
   }

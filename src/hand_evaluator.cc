@@ -1,9 +1,131 @@
 #include "src/hand_evaluator.h"
-#include <map>
 #include <set>
-#include <functional>
 
 namespace poker {
+namespace {
+
+HandEvaluation EvaluateFiveCards(const std::array<Card, 5>& cards) {
+  std::vector<int> ranks;
+  ranks.reserve(cards.size());
+  for (const Card& card : cards) {
+    ranks.push_back(card.rank());
+  }
+  std::sort(ranks.begin(), ranks.end(), std::greater<int>());
+
+  bool flush = true;
+  for (const Card& card : cards) {
+    if (card.suit() != cards[0].suit()) {
+      flush = false;
+      break;
+    }
+  }
+
+  const bool wheel_straight = ranks[0] == 14 && ranks[1] == 5 &&
+                              ranks[2] == 4 && ranks[3] == 3 &&
+                              ranks[4] == 2;
+  bool straight = wheel_straight;
+  if (!straight) {
+    straight = true;
+    for (size_t i = 1; i < ranks.size(); ++i) {
+      if (ranks[i - 1] != ranks[i] + 1) {
+        straight = false;
+        break;
+      }
+    }
+  }
+
+  if (flush && ranks[0] == 14 && ranks[1] == 13 && ranks[2] == 12 &&
+      ranks[3] == 11 && ranks[4] == 10) {
+    return {HandRank::ROYAL_FLUSH, {}};
+  }
+
+  if (flush && straight) {
+    return {HandRank::STRAIGHT_FLUSH, {ranks[0]}};
+  }
+
+  std::array<int, 15> rank_counts = {};
+  for (int rank : ranks) {
+    ++rank_counts[rank];
+  }
+
+  for (size_t i = 1; i < rank_counts.size(); ++i) {
+    if (rank_counts[i] == 4) {
+      std::vector<int> kickers = {static_cast<int>(i)};
+      for (int rank : ranks) {
+        if (rank != static_cast<int>(i)) {
+          kickers.push_back(rank);
+          break;
+        }
+      }
+      return {HandRank::FOUR_OF_A_KIND, kickers};
+    }
+  }
+
+  int three_of_a_kind_rank = -1;
+  int pair_rank = -1;
+  for (size_t i = 1; i < rank_counts.size(); ++i) {
+    if (rank_counts[i] == 3) {
+      three_of_a_kind_rank = static_cast<int>(i);
+    } else if (rank_counts[i] == 2) {
+      pair_rank = static_cast<int>(i);
+    }
+  }
+
+  if (three_of_a_kind_rank != -1 && pair_rank != -1) {
+    return {HandRank::FULL_HOUSE, {three_of_a_kind_rank, pair_rank}};
+  }
+
+  if (flush) {
+    return {HandRank::FLUSH, ranks};
+  }
+
+  if (straight) {
+    return {HandRank::STRAIGHT, {ranks[0]}};
+  }
+
+  if (three_of_a_kind_rank != -1) {
+    std::vector<int> kickers = {three_of_a_kind_rank};
+    for (int rank : ranks) {
+      if (rank != three_of_a_kind_rank) {
+        kickers.push_back(rank);
+      }
+    }
+    return {HandRank::THREE_OF_A_KIND, kickers};
+  }
+
+  std::vector<int> pairs;
+  for (size_t i = 1; i < rank_counts.size(); ++i) {
+    if (rank_counts[i] == 2) {
+      pairs.push_back(static_cast<int>(i));
+    }
+  }
+
+  if (pairs.size() >= 2) {
+    std::sort(pairs.begin(), pairs.end(), std::greater<int>());
+    std::vector<int> kickers = {pairs[0], pairs[1]};
+    for (int rank : ranks) {
+      if (rank != pairs[0] && rank != pairs[1]) {
+        kickers.push_back(rank);
+        break;
+      }
+    }
+    return {HandRank::TWO_PAIR, kickers};
+  }
+
+  if (!pairs.empty()) {
+    std::vector<int> kickers = {pairs[0]};
+    for (int rank : ranks) {
+      if (rank != pairs[0]) {
+        kickers.push_back(rank);
+      }
+    }
+    return {HandRank::PAIR, kickers};
+  }
+
+  return {HandRank::HIGH_CARD, ranks};
+}
+
+}  // namespace
 
 // Move implementations from HandEvaluator to HandEvaluation as static methods
 bool HandEvaluation::is_flush(const std::vector<Card>& cards) {
@@ -103,109 +225,10 @@ HandEvaluation HandEvaluator::evaluate(const Hand& hand) const {
   if (cards.size() != 5) {
     throw std::invalid_argument("Hand evaluation requires exactly 5 cards");
   }
-  
-  // Extract ranks and create a sorted copy
-  std::vector<int> ranks;
-  for (const auto& card : cards) {
-    ranks.push_back(card.rank());
-  }
-  std::sort(ranks.begin(), ranks.end(), std::greater<int>());
-  
-  // Check for royal flush, straight flush, flush, straight
-  if (HandEvaluation::is_royal_flush(cards)) {
-    return {HandRank::ROYAL_FLUSH, {}};
-  }
-  
-  if (HandEvaluation::is_straight_flush(cards)) {
-    return {HandRank::STRAIGHT_FLUSH, {ranks[0]}};
-  }
-  
-  // Count occurrences of each rank
-  std::vector<int> rankCounts = HandEvaluation::get_rank_counts(ranks);
-  
-  // Four of a kind
-  for (size_t i = 0; i < rankCounts.size(); ++i) {
-    if (rankCounts[i] == 4) {
-      std::vector<int> kickers = {static_cast<int>(i + 1)};
-      for (int rank : ranks) {
-        if (rank != static_cast<int>(i + 1)) {
-          kickers.push_back(rank);
-          break;
-        }
-      }
-      return {HandRank::FOUR_OF_A_KIND, kickers};
-    }
-  }
-  
-  // Full house
-  int threeOfAKindRank = -1;
-  int pairRank = -1;
-  for (size_t i = 0; i < rankCounts.size(); ++i) {
-    if (rankCounts[i] == 3) {
-      threeOfAKindRank = static_cast<int>(i + 1);
-    } else if (rankCounts[i] == 2) {
-      pairRank = static_cast<int>(i + 1);
-    }
-  }
-  
-  if (threeOfAKindRank != -1 && pairRank != -1) {
-    return {HandRank::FULL_HOUSE, {threeOfAKindRank, pairRank}};
-  }
-  
-  // Flush
-  if (HandEvaluation::is_flush(cards)) {
-    return {HandRank::FLUSH, ranks};
-  }
-  
-  // Straight
-  if (HandEvaluation::is_straight(ranks)) {
-    return {HandRank::STRAIGHT, {ranks[0]}};
-  }
-  
-  // Three of a kind
-  if (threeOfAKindRank != -1) {
-    std::vector<int> kickers = {threeOfAKindRank};
-    for (int rank : ranks) {
-      if (rank != threeOfAKindRank) {
-        kickers.push_back(rank);
-      }
-    }
-    return {HandRank::THREE_OF_A_KIND, kickers};
-  }
-  
-  // Two pair
-  std::vector<int> pairs;
-  for (size_t i = 0; i < rankCounts.size(); ++i) {
-    if (rankCounts[i] == 2) {
-      pairs.push_back(static_cast<int>(i + 1));
-    }
-  }
-  
-  if (pairs.size() >= 2) {
-    std::sort(pairs.begin(), pairs.end(), std::greater<int>());
-    std::vector<int> kickers = {pairs[0], pairs[1]};
-    for (int rank : ranks) {
-      if (rank != pairs[0] && rank != pairs[1]) {
-        kickers.push_back(rank);
-        break;
-      }
-    }
-    return {HandRank::TWO_PAIR, kickers};
-  }
-  
-  // Pair
-  if (!pairs.empty()) {
-    std::vector<int> kickers = {pairs[0]};
-    for (int rank : ranks) {
-      if (rank != pairs[0]) {
-        kickers.push_back(rank);
-      }
-    }
-    return {HandRank::PAIR, kickers};
-  }
-  
-  // High card
-  return {HandRank::HIGH_CARD, ranks};
+
+  std::array<Card, 5> five_cards;
+  std::copy(cards.begin(), cards.end(), five_cards.begin());
+  return EvaluateFiveCards(five_cards);
 }
 
 HandEvaluation HandEvaluator::evaluate_hand(const Hand& hole_cards, const BoardState& board_state) const {
@@ -251,38 +274,26 @@ HandEvaluation HandEvaluator::find_best_hand(const std::vector<Card>& cards) con
   if (cards.size() < 5) {
     throw std::invalid_argument("Need at least 5 cards to find best hand");
   }
-  
-  // Generate all 5-card combinations
-  std::vector<std::vector<Card>> combinations;
-  std::vector<Card> currentCombo(5);
-  
-  // Helper function to generate combinations
-  std::function<void(size_t, size_t)> generateCombos = [&](size_t start, size_t depth) {
-    if (depth == 5) {
-      combinations.push_back(currentCombo);
-      return;
-    }
-    
-    for (size_t i = start; i < cards.size(); ++i) {
-      currentCombo[depth] = cards[i];
-      generateCombos(i + 1, depth + 1);
-    }
-  };
-  
-  generateCombos(0, 0);
-  
-  // Find the best hand among all combinations
+
   HandEvaluation bestEval = {HandRank::HIGH_CARD, {}};
-  for (const auto& combo : combinations) {
-    // Convert vector to Hand proto for evaluation
-    Hand hand;
-    for (const auto& card : combo) {
-      *hand.add_cards() = card;
-    }
-    
-    HandEvaluation currentEval = evaluate(hand);
-    if (currentEval > bestEval) {
-      bestEval = currentEval;
+  std::array<Card, 5> combo;
+  for (size_t a = 0; a + 4 < cards.size(); ++a) {
+    combo[0] = cards[a];
+    for (size_t b = a + 1; b + 3 < cards.size(); ++b) {
+      combo[1] = cards[b];
+      for (size_t c = b + 1; c + 2 < cards.size(); ++c) {
+        combo[2] = cards[c];
+        for (size_t d = c + 1; d + 1 < cards.size(); ++d) {
+          combo[3] = cards[d];
+          for (size_t e = d + 1; e < cards.size(); ++e) {
+            combo[4] = cards[e];
+            HandEvaluation currentEval = EvaluateFiveCards(combo);
+            if (currentEval > bestEval) {
+              bestEval = currentEval;
+            }
+          }
+        }
+      }
     }
   }
   

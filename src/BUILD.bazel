@@ -23,6 +23,14 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+cc_test(
+    name = "hand_evaluator_test",
+    srcs = ["hand_evaluator_test.cc"],
+    deps = [
+        ":hand_evaluator",
+    ],
+)
+
 cc_library(
     name = "card_utils",
     srcs = ["card_utils.cc"],
