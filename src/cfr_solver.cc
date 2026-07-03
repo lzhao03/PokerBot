@@ -144,35 +144,6 @@ int RoundedContribution(const BoardState& state, int player) {
              : 0;
 }
 
-CanonicalPublicStateKey MakeCanonicalPublicStateKey(const BoardState& state) {
-  CanonicalPublicStateKey key;
-  key.street = static_cast<int>(state.street());
-  key.pot = state.pot();
-  key.stack_a = state.stack_a();
-  key.stack_b = state.stack_b();
-  key.all_in = state.all_in() ? 1 : 0;
-  key.folded_player = state.folded_player();
-  key.player_to_act = state.player_to_act();
-  key.player_contributions[0] = RoundedContribution(state, 0);
-  key.player_contributions[1] = RoundedContribution(state, 1);
-  key.board_size = state.cards_size();
-  for (int i = 0; i < state.cards_size(); ++i) {
-    key.board_cards[i] = EncodedCard(state.cards(i));
-  }
-
-  const int history_size = state.history().actions_size();
-  if (history_size == 0) {
-    return key;
-  }
-
-  key.history_bucket = history_size > 1 ? 2 : 1;
-  const Action& last = state.history().actions(history_size - 1);
-  key.last_player = last.player();
-  key.last_action = static_cast<int>(last.action());
-  key.last_amount = static_cast<int>(std::lround(last.amount()));
-  return key;
-}
-
 void HashCombine(size_t& seed, int value) {
   seed ^= std::hash<int>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 }
@@ -295,39 +266,6 @@ BoardState DefaultInitialState(const PokerConfig& config) {
 }
 
 }  // namespace
-
-bool CanonicalPublicStateKey::operator==(
-    const CanonicalPublicStateKey& other) const {
-  return street == other.street && pot == other.pot &&
-         stack_a == other.stack_a && stack_b == other.stack_b &&
-         all_in == other.all_in && folded_player == other.folded_player &&
-         player_to_act == other.player_to_act &&
-         player_contributions == other.player_contributions &&
-         board_size == other.board_size && board_cards == other.board_cards &&
-         history_bucket == other.history_bucket &&
-         last_player == other.last_player && last_action == other.last_action &&
-         last_amount == other.last_amount;
-}
-
-size_t CanonicalPublicStateKeyHash::operator()(
-    const CanonicalPublicStateKey& key) const {
-  size_t seed = 0;
-  HashCombine(seed, key.street);
-  HashCombine(seed, key.pot);
-  HashCombine(seed, key.stack_a);
-  HashCombine(seed, key.stack_b);
-  HashCombine(seed, key.all_in);
-  HashCombine(seed, key.folded_player);
-  HashCombine(seed, key.player_to_act);
-  HashArray(seed, key.player_contributions);
-  HashCombine(seed, key.board_size);
-  HashArray(seed, key.board_cards);
-  HashCombine(seed, key.history_bucket);
-  HashCombine(seed, key.last_player);
-  HashCombine(seed, key.last_action);
-  HashCombine(seed, key.last_amount);
-  return seed;
-}
 
 bool CFRSolver::InfoSetKey::operator==(const InfoSetKey& other) const {
   return player == other.player && street == other.street &&
@@ -854,15 +792,6 @@ double CFRSolver::cfr_with_ranges(
   if (player == 0 || player == 1) {
     ++cfr_update_count_;
     ++traversal_stats_.cfr_updates;
-    ++traversal_stats_.canonical_state_visits;
-    if (config_.enable_logging()) {
-      if (visited_canonical_states_.insert(
-              MakeCanonicalPublicStateKey(node.state)).second) {
-        ++traversal_stats_.unique_canonical_states;
-      } else {
-        ++traversal_stats_.duplicate_canonical_state_visits;
-      }
-    }
     traversal_stats_.max_decision_depth =
         std::max(traversal_stats_.max_decision_depth, depth);
     switch (node.state.street()) {
