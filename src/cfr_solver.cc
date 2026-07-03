@@ -41,6 +41,29 @@ Action ActionFromKey(int action_key) {
   return action;
 }
 
+double PositiveRegretForAction(const std::vector<int>& action_ids,
+                               const std::vector<double>& cumulative_regrets,
+                               int action_id) {
+  auto action = std::find(action_ids.begin(), action_ids.end(), action_id);
+  if (action == action_ids.end()) {
+    return 0.0;
+  }
+  const size_t index = static_cast<size_t>(action - action_ids.begin());
+  return std::max(0.0, cumulative_regrets[index]);
+}
+
+double PositiveRegretSumForLegalActions(
+    const std::vector<int>& legal_action_ids,
+    const std::vector<int>& action_ids,
+    const std::vector<double>& cumulative_regrets) {
+  double sum_positive_regrets = 0.0;
+  for (int legal_action_id : legal_action_ids) {
+    sum_positive_regrets +=
+        PositiveRegretForAction(action_ids, cumulative_regrets, legal_action_id);
+  }
+  return sum_positive_regrets;
+}
+
 bool HandsOverlap(const Hand& left, const Hand& right) {
   for (const Card& left_card : left.cards()) {
     for (const Card& right_card : right.cards()) {
@@ -892,6 +915,16 @@ double CFRSolver::cfr_with_ranges(
   for (const ActionChoice& choice : action_choices) {
     legal_action_ids.push_back(choice.action_id);
   }
+  const WeightedHandRange* acting_range = nullptr;
+  if (player == 0) {
+    acting_range = player_a_range;
+  } else if (player == 1) {
+    acting_range = player_b_range;
+  }
+  RegretMatchCache regret_match_cache;
+  if (acting_range != nullptr) {
+    regret_match_cache.reset(acting_range->size());
+  }
   
   // For each action, recursively call CFR and compute the expected value
   for (ActionChoice& choice : action_choices) {
@@ -914,12 +947,12 @@ double CFRSolver::cfr_with_ranges(
     if (player == 0 && player_a_range != nullptr) {
       condition_range_for_action(
           *player_a_range, node->state, player, legal_action_ids,
-          action_id, &conditioned_player_range);
+          action_id, &regret_match_cache, &conditioned_player_range);
       child_player_a_range = &conditioned_player_range;
     } else if (player == 1 && player_b_range != nullptr) {
       condition_range_for_action(
           *player_b_range, node->state, player, legal_action_ids,
-          action_id, &conditioned_player_range);
+          action_id, &regret_match_cache, &conditioned_player_range);
       child_player_b_range = &conditioned_player_range;
     }
     
@@ -1018,7 +1051,9 @@ double CFRSolver::action_probability_for_hand(
     int player,
     const Hand& hand,
     const std::vector<int>& legal_action_ids,
-    int action_id) const {
+    int action_id,
+    size_t hand_index,
+    RegretMatchCache* regret_match_cache) const {
   if (legal_action_ids.empty()) {
     return 0.0;
   }
@@ -1034,29 +1069,24 @@ double CFRSolver::action_probability_for_hand(
         find_legacy_info_set(info_set_key);
     if (legacy_info_set != nullptr) {
       double sum_positive_regrets = 0.0;
-      for (int legal_action_id : legal_action_ids) {
-        auto action = std::find(legacy_info_set->action_ids.begin(),
-                                legacy_info_set->action_ids.end(),
-                                legal_action_id);
-        if (action != legacy_info_set->action_ids.end()) {
-          const size_t index =
-              static_cast<size_t>(action - legacy_info_set->action_ids.begin());
-          sum_positive_regrets +=
-              std::max(0.0, legacy_info_set->cumulative_regrets[index]);
+      if (regret_match_cache != nullptr &&
+          regret_match_cache->has_sum(hand_index)) {
+        sum_positive_regrets = regret_match_cache->sum(hand_index);
+      } else {
+        sum_positive_regrets = PositiveRegretSumForLegalActions(
+            legal_action_ids, legacy_info_set->action_ids,
+            legacy_info_set->cumulative_regrets);
+        if (regret_match_cache != nullptr) {
+          regret_match_cache->set_sum(hand_index, sum_positive_regrets);
         }
       }
       if (sum_positive_regrets <= 0.0) {
         return 1.0 / legal_action_ids.size();
       }
 
-      auto action = std::find(legacy_info_set->action_ids.begin(),
-                              legacy_info_set->action_ids.end(), action_id);
-      if (action == legacy_info_set->action_ids.end()) {
-        return 0.0;
-      }
-      const size_t index =
-          static_cast<size_t>(action - legacy_info_set->action_ids.begin());
-      return std::max(0.0, legacy_info_set->cumulative_regrets[index]) /
+      return PositiveRegretForAction(legacy_info_set->action_ids,
+                                     legacy_info_set->cumulative_regrets,
+                                     action_id) /
              sum_positive_regrets;
     }
   }
@@ -1065,28 +1095,23 @@ double CFRSolver::action_probability_for_hand(
   const InfoSetData* info_set = find_info_set(key);
   if (info_set != nullptr) {
     double sum_positive_regrets = 0.0;
-    for (int legal_action_id : legal_action_ids) {
-      auto action = std::find(info_set->action_ids.begin(),
-                              info_set->action_ids.end(), legal_action_id);
-      if (action != info_set->action_ids.end()) {
-        const size_t index =
-            static_cast<size_t>(action - info_set->action_ids.begin());
-        sum_positive_regrets +=
-            std::max(0.0, info_set->cumulative_regrets[index]);
+    if (regret_match_cache != nullptr &&
+        regret_match_cache->has_sum(hand_index)) {
+      sum_positive_regrets = regret_match_cache->sum(hand_index);
+    } else {
+      sum_positive_regrets = PositiveRegretSumForLegalActions(
+          legal_action_ids, info_set->action_ids,
+          info_set->cumulative_regrets);
+      if (regret_match_cache != nullptr) {
+        regret_match_cache->set_sum(hand_index, sum_positive_regrets);
       }
     }
     if (sum_positive_regrets <= 0.0) {
       return 1.0 / legal_action_ids.size();
     }
 
-    auto action = std::find(info_set->action_ids.begin(),
-                            info_set->action_ids.end(), action_id);
-    if (action == info_set->action_ids.end()) {
-      return 0.0;
-    }
-    const size_t index =
-        static_cast<size_t>(action - info_set->action_ids.begin());
-    return std::max(0.0, info_set->cumulative_regrets[index]) /
+    return PositiveRegretForAction(info_set->action_ids,
+                                   info_set->cumulative_regrets, action_id) /
            sum_positive_regrets;
   }
 
@@ -1099,15 +1124,18 @@ void CFRSolver::condition_range_for_action(
     int player,
     const std::vector<int>& legal_action_ids,
     int action_id,
+    RegretMatchCache* regret_match_cache,
     WeightedHandRange* conditioned_range) const {
   conditioned_range->clear();
   conditioned_range->reserve(range.size());
-  for (const auto& hand : range) {
+  for (size_t hand_index = 0; hand_index < range.size(); ++hand_index) {
+    const auto& hand = range[hand_index];
     if (hand.second <= 0.0) {
       continue;
     }
     double probability = action_probability_for_hand(
-        state, player, hand.first, legal_action_ids, action_id);
+        state, player, hand.first, legal_action_ids, action_id, hand_index,
+        regret_match_cache);
     double conditioned_weight = hand.second * probability;
     if (conditioned_weight > 0.0) {
       conditioned_range->emplace_back(hand.first, conditioned_weight);
