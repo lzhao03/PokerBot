@@ -63,7 +63,7 @@ bool HandOverlapsBoard(const Hand& hand, const BoardState& state) {
   return false;
 }
 
-double TotalWeight(const std::vector<std::pair<Hand, double>>& hands) {
+double TotalWeight(const WeightedHandRange& hands) {
   double total = 0.0;
   for (const auto& hand : hands) {
     total += hand.second;
@@ -71,11 +71,11 @@ double TotalWeight(const std::vector<std::pair<Hand, double>>& hands) {
   return total;
 }
 
-std::vector<std::pair<Hand, double>> CompatibleHands(
-    const std::vector<std::pair<Hand, double>>& hands,
+WeightedHandRange CompatibleHands(
+    const WeightedHandRange& hands,
     const Hand& known_hand,
     const BoardState& state) {
-  std::vector<std::pair<Hand, double>> compatible_hands;
+  WeightedHandRange compatible_hands;
   for (const auto& hand : hands) {
     if (!HandsOverlap(hand.first, known_hand) &&
         !HandOverlapsBoard(hand.first, state)) {
@@ -85,10 +85,10 @@ std::vector<std::pair<Hand, double>> CompatibleHands(
   return compatible_hands;
 }
 
-std::vector<std::pair<Hand, double>> PublicCompatibleRange(
-    const std::vector<std::pair<Hand, double>>& hands,
+WeightedHandRange PublicCompatibleRange(
+    const WeightedHandRange& hands,
     const BoardState& state) {
-  std::vector<std::pair<Hand, double>> compatible_hands;
+  WeightedHandRange compatible_hands;
   compatible_hands.reserve(hands.size());
   for (const auto& hand : hands) {
     if (hand.second > 0.0 && !HandOverlapsBoard(hand.first, state)) {
@@ -99,7 +99,7 @@ std::vector<std::pair<Hand, double>> PublicCompatibleRange(
 }
 
 std::vector<double> WeightsFor(
-    const std::vector<std::pair<Hand, double>>& hands) {
+    const WeightedHandRange& hands) {
   std::vector<double> weights;
   weights.reserve(hands.size());
   for (const auto& hand : hands) {
@@ -213,11 +213,11 @@ void AppendEncodedCard(std::string* out, int encoded_card) {
 }
 
 struct WeightedHands {
-  std::vector<std::pair<Hand, double>> hands;
+  WeightedHandRange hands;
   std::vector<double> weights;
   std::discrete_distribution<size_t> distribution;
 
-  void reset(std::vector<std::pair<Hand, double>> new_hands) {
+  void reset(WeightedHandRange new_hands) {
     hands = std::move(new_hands);
     weights = WeightsFor(hands);
     distribution =
@@ -436,8 +436,8 @@ GameTree::Node* CFRSolver::get_or_build_root() {
 }
 
 std::vector<CFRSolver::RangeDeal> CFRSolver::build_compatible_range_deals(
-    const std::vector<std::pair<Hand, double>>& player_a_hands,
-    const std::vector<std::pair<Hand, double>>& player_b_hands) {
+    const WeightedHandRange& player_a_hands,
+    const WeightedHandRange& player_b_hands) {
   std::vector<RangeDeal> deals;
   for (const auto& player_a_hand : player_a_hands) {
     if (player_a_hand.second <= 0.0) {
@@ -727,8 +727,8 @@ void CFRSolver::run(int iterations, const HandRange& player_a_range,
 void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
                                const HandRange* player_b_range,
                                bool train_swapped) {
-  std::vector<std::pair<Hand, double>> player_a_hands;
-  std::vector<std::pair<Hand, double>> player_b_hands;
+  WeightedHandRange player_a_hands;
+  WeightedHandRange player_b_hands;
   std::vector<RangeDeal> range_deals;
   std::vector<double> range_deal_weights;
   std::discrete_distribution<size_t> range_deal_distribution;
@@ -790,9 +790,9 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
     }
     int cfr_iteration = iterations_run_;
     std::vector<double> reach_probabilities(2, 1.0);
-    const std::vector<std::pair<Hand, double>>* player_a_context_range =
+    const WeightedHandRange* player_a_context_range =
         max_depth > 0 && player_a_range != nullptr ? &player_a_hands : nullptr;
-    const std::vector<std::pair<Hand, double>>* player_b_context_range =
+    const WeightedHandRange* player_b_context_range =
         max_depth > 0 && player_b_range != nullptr ? &player_b_hands : nullptr;
     double dealt_value = cfr_with_ranges(
         root, player_a_hand, player_b_hand, reach_probabilities,
@@ -841,8 +841,8 @@ double CFRSolver::cfr_with_ranges(
     int iteration,
     int depth,
     int max_depth,
-    const std::vector<std::pair<Hand, double>>* player_a_range,
-    const std::vector<std::pair<Hand, double>>* player_b_range) {
+    const WeightedHandRange* player_a_range,
+    const WeightedHandRange* player_b_range) {
   // If the node is a terminal node, return the utility
   if (node->is_terminal) {
     ++traversal_stats_.terminal_utility_calls;
@@ -886,7 +886,7 @@ double CFRSolver::cfr_with_ranges(
   
   // Initialize the expected value for the player
   double node_value = 0.0;
-  std::vector<std::pair<Hand, double>> conditioned_player_range;
+  WeightedHandRange conditioned_player_range;
   std::vector<int> legal_action_ids;
   legal_action_ids.reserve(action_choices.size());
   for (const ActionChoice& choice : action_choices) {
@@ -907,9 +907,9 @@ double CFRSolver::cfr_with_ranges(
     reach_probabilities[player] =
         previous_reach_probability * choice.probability;
 
-    const std::vector<std::pair<Hand, double>>* child_player_a_range =
+    const WeightedHandRange* child_player_a_range =
         player_a_range;
-    const std::vector<std::pair<Hand, double>>* child_player_b_range =
+    const WeightedHandRange* child_player_b_range =
         player_b_range;
     if (player == 0 && player_a_range != nullptr) {
       condition_range_for_action(
@@ -999,8 +999,8 @@ double CFRSolver::chance_sampling_cfr(GameTree::Node* node,
                       int iteration,
                       int depth,
                       int max_depth,
-                      const std::vector<std::pair<Hand, double>>* player_a_range,
-                      const std::vector<std::pair<Hand, double>>* player_b_range) {
+                      const WeightedHandRange* player_a_range,
+                      const WeightedHandRange* player_b_range) {
   int samples = ChanceSamples(config_);
   traversal_stats_.chance_samples += samples;
   return SampleChanceValue(
@@ -1094,12 +1094,12 @@ double CFRSolver::action_probability_for_hand(
 }
 
 void CFRSolver::condition_range_for_action(
-    const std::vector<std::pair<Hand, double>>& range,
+    const WeightedHandRange& range,
     const BoardState& state,
     int player,
     const std::vector<int>& legal_action_ids,
     int action_id,
-    std::vector<std::pair<Hand, double>>* conditioned_range) const {
+    WeightedHandRange* conditioned_range) const {
   conditioned_range->clear();
   conditioned_range->reserve(range.size());
   for (const auto& hand : range) {
@@ -1119,8 +1119,8 @@ ContinuationContext CFRSolver::build_continuation_context(
     const BoardState& state,
     const Hand& player_a_hand,
     const Hand& player_b_hand,
-    const std::vector<std::pair<Hand, double>>* player_a_range,
-    const std::vector<std::pair<Hand, double>>* player_b_range) const {
+    const WeightedHandRange* player_a_range,
+    const WeightedHandRange* player_b_range) const {
   ContinuationContext context =
       ContinuationContext::ExactHands(state, player_a_hand, player_b_hand);
   if (player_a_range != nullptr && player_b_range != nullptr) {
@@ -1410,7 +1410,7 @@ double CFRSolver::best_response_value(GameTree::Node* node,
 double CFRSolver::best_response_value_against_range(
     GameTree::Node* node,
     const Hand& best_response_hand,
-    const std::vector<std::pair<Hand, double>>& opponent_hands,
+    const WeightedHandRange& opponent_hands,
     const Strategy& strategy,
     int best_response_player) {
   double total_weight = TotalWeight(opponent_hands);
@@ -1448,7 +1448,7 @@ double CFRSolver::best_response_value_against_range(
           SampleStreetCards(node->state, player_a_hand, player_b_hand, &rng_);
       GameTree::Node* child_node =
           CachedChanceChild(game_tree_, node, cards, nullptr);
-      std::vector<std::pair<Hand, double>> child_opponents = {
+      WeightedHandRange child_opponents = {
           {sampled_opponent, 1.0}};
       value += best_response_value_against_range(
           child_node, best_response_hand, child_opponents, strategy,
@@ -1486,7 +1486,7 @@ double CFRSolver::best_response_value_against_range(
     GameTree::Node* child_node =
         CachedActionChild(game_tree_, node, action, action_id, nullptr);
 
-    std::vector<std::pair<Hand, double>> child_opponents;
+    WeightedHandRange child_opponents;
     for (const auto& opponent_hand : opponent_hands) {
       std::string info_set_key = info_set_abstraction_->state_to_info_set(
           node->state, player, opponent_hand.first);
@@ -1519,9 +1519,9 @@ double CFRSolver::sampled_range_best_response_value(
     return 0.0;
   }
 
-  std::vector<std::pair<Hand, double>> best_response_hands =
+  WeightedHandRange best_response_hands =
       best_response_range.get_all_weighted_combos();
-  std::vector<std::pair<Hand, double>> opponent_hands =
+  WeightedHandRange opponent_hands =
       opponent_range.get_all_weighted_combos();
   if (best_response_hands.empty() || opponent_hands.empty()) {
     throw std::invalid_argument(
@@ -1582,8 +1582,8 @@ double CFRSolver::sampled_range_best_response_value(
 
 double CFRSolver::sampled_range_best_response_samples(
     int samples,
-    const std::vector<std::pair<Hand, double>>& best_response_hands,
-    const std::vector<std::pair<Hand, double>>& opponent_hands,
+    const WeightedHandRange& best_response_hands,
+    const WeightedHandRange& opponent_hands,
     const Strategy& strategy,
     int best_response_player) {
   if (samples <= 0) {
@@ -1597,7 +1597,7 @@ double CFRSolver::sampled_range_best_response_samples(
   for (int i = 0; i < samples; ++i) {
     Hand best_response_hand =
         SampleWeightedHand(&weighted_best_response_hands, &rng_);
-    std::vector<std::pair<Hand, double>> compatible_opponents =
+    WeightedHandRange compatible_opponents =
         CompatibleHands(opponent_hands, best_response_hand, root->state);
     if (compatible_opponents.empty()) {
       throw std::invalid_argument(

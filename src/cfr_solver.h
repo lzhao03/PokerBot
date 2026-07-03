@@ -23,6 +23,9 @@ struct ContinuationContext;
 class ContinuationValueProvider;
 class TerminalUtilityCache;
 
+using WeightedHand = std::pair<Hand, double>;
+using WeightedHandRange = std::vector<WeightedHand>;
+
 struct CanonicalPublicStateKey {
   int street = 0;
   int pot = 0;
@@ -231,8 +234,8 @@ private:
   // Helper methods
   GameTree::Node* get_or_build_root();
   static std::vector<RangeDeal> build_compatible_range_deals(
-      const std::vector<std::pair<Hand, double>>& player_a_hands,
-      const std::vector<std::pair<Hand, double>>& player_b_hands);
+      const WeightedHandRange& player_a_hands,
+      const WeightedHandRange& player_b_hands);
   void run_iterations(int iterations, const HandRange* player_a_range,
                       const HandRange* player_b_range, bool train_swapped);
   double cfr_with_ranges(
@@ -243,8 +246,8 @@ private:
       int iteration,
       int depth,
       int max_depth,
-      const std::vector<std::pair<Hand, double>>* player_a_range,
-      const std::vector<std::pair<Hand, double>>* player_b_range);
+      const WeightedHandRange* player_a_range,
+      const WeightedHandRange* player_b_range);
   double action_probability_for_hand(
       const BoardState& state,
       int player,
@@ -252,12 +255,12 @@ private:
       const std::vector<int>& legal_action_ids,
       int action_id) const;
   void condition_range_for_action(
-      const std::vector<std::pair<Hand, double>>& range,
+      const WeightedHandRange& range,
       const BoardState& state,
       int player,
       const std::vector<int>& legal_action_ids,
       int action_id,
-      std::vector<std::pair<Hand, double>>* conditioned_range) const;
+      WeightedHandRange* conditioned_range) const;
   InfoSetKey make_info_set_key(const BoardState& state,
                                int player,
                                const Hand& hand) const;
@@ -284,8 +287,8 @@ private:
       const BoardState& state,
       const Hand& player_a_hand,
       const Hand& player_b_hand,
-      const std::vector<std::pair<Hand, double>>* player_a_range,
-      const std::vector<std::pair<Hand, double>>* player_b_range) const;
+      const WeightedHandRange* player_a_range,
+      const WeightedHandRange* player_b_range) const;
   double utility(const BoardState& state,
                  const Hand& player_a_hand,
                  const Hand& player_b_hand);
@@ -306,7 +309,7 @@ private:
   double best_response_value_against_range(
       GameTree::Node* node,
       const Hand& best_response_hand,
-      const std::vector<std::pair<Hand, double>>& opponent_hands,
+      const WeightedHandRange& opponent_hands,
       const Strategy& strategy,
       int best_response_player);
   double sampled_range_best_response_value(
@@ -317,8 +320,8 @@ private:
       int best_response_player);
   double sampled_range_best_response_samples(
       int samples,
-      const std::vector<std::pair<Hand, double>>& best_response_hands,
-      const std::vector<std::pair<Hand, double>>& opponent_hands,
+      const WeightedHandRange& best_response_hands,
+      const WeightedHandRange& opponent_hands,
       const Strategy& strategy,
       int best_response_player);
   Strategy::ActionProbabilities get_strategy(
@@ -345,8 +348,8 @@ private:
       int iteration,
       int depth,
       int max_depth,
-      const std::vector<std::pair<Hand, double>>* player_a_range,
-      const std::vector<std::pair<Hand, double>>* player_b_range);
+      const WeightedHandRange* player_a_range,
+      const WeightedHandRange* player_b_range);
 };
 
 } // namespace poker
