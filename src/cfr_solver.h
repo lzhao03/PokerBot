@@ -97,6 +97,8 @@ public:
   int64_t get_cfr_update_count() const { return cfr_update_count_; }
   TraversalStats get_traversal_stats() const { return traversal_stats_; }
   UtilityCacheStats get_utility_cache_stats() const;
+  void set_continuation_value_provider(
+      std::shared_ptr<ContinuationValueProvider> provider);
 
 private:
   friend class CFRSolverRegretTestPeer;

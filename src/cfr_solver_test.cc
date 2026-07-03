@@ -64,12 +64,6 @@ class CFRSolverRegretTestPeer {
     return solver.utility(state, player_a_hand, player_b_hand);
   }
 
-  static void SetContinuationValueProvider(
-      CFRSolver& solver,
-      std::shared_ptr<ContinuationValueProvider> provider) {
-    solver.continuation_value_provider_ = std::move(provider);
-  }
-
   static std::vector<double> CompatibleDealWeights(
       const HandRange& player_a_range,
       const HandRange& player_b_range) {
@@ -1088,8 +1082,8 @@ void CheckDepthLimitUsesContinuationValueProvider() {
   config.set_starting_stack_size(20);
 
   CFRSolver solver(config);
-  CFRSolverRegretTestPeer::SetContinuationValueProvider(
-      solver, std::make_shared<FixedContinuationValueProvider>(7.0));
+  solver.set_continuation_value_provider(
+      std::make_shared<FixedContinuationValueProvider>(7.0));
 
   GameTree::Node node;
   node.state.set_player_to_act(0);

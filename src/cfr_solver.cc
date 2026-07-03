@@ -230,6 +230,14 @@ CFRSolver::~CFRSolver() {
   delete info_set_abstraction_;
 }
 
+void CFRSolver::set_continuation_value_provider(
+    std::shared_ptr<ContinuationValueProvider> provider) {
+  if (provider == nullptr) {
+    throw std::invalid_argument("Continuation value provider cannot be null");
+  }
+  continuation_value_provider_ = std::move(provider);
+}
+
 GameTree::Node* CFRSolver::get_or_build_root() {
   const int small_blind = config_.small_blind() > 0 ? config_.small_blind() : 1;
   const int big_blind = config_.big_blind() > 0 ? config_.big_blind() : 2;
