@@ -79,24 +79,6 @@ cc_library(
 )
 
 cc_library(
-    name = "info_set",
-    srcs = ["info_set.cc"],
-    hdrs = ["info_set.h"],
-    deps = [
-        ":poker_cc_proto",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_test(
-    name = "info_set_test",
-    srcs = ["info_set_test.cc"],
-    deps = [
-        ":info_set",
-    ],
-)
-
-cc_library(
     name = "hand_range",
     srcs = ["hand_range.cc"],
     hdrs = ["hand_range.h"],
@@ -188,7 +170,6 @@ cc_test(
     deps = [
         ":cfr_solver",
         ":continuation_value",
-        ":info_set",
         ":subgame_value",
     ],
 )

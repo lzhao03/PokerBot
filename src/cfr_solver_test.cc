@@ -1,7 +1,6 @@
 #include "src/cfr_solver.h"
 #include "src/continuation_value.h"
 #include "src/hand_range.h"
-#include "src/info_set.h"
 #include "src/subgame_value.h"
 
 #include <algorithm>
@@ -25,6 +24,14 @@ class CFRSolverRegretTestPeer {
   static double Regret(const CFRSolver& solver, const std::string& info_set_key,
                        int action_id) {
     return solver.regret_for_info_set(info_set_key, action_id);
+  }
+
+  static std::string InfoSetKey(const CFRSolver& solver,
+                                const BoardState& state,
+                                int player,
+                                const Hand& hand) {
+    return solver.info_set_key_to_string(
+        solver.make_info_set_key(state, player, hand));
   }
 
   static double EvaluateNode(CFRSolver& solver, GameTree::Node* node,
@@ -229,14 +236,6 @@ double TestTotalWeightForRank(const WeightedHandRange& hands, int rank) {
     }
   }
   return total;
-}
-
-Hand MakeHandFromCards(const std::vector<Card>& cards) {
-  Hand hand;
-  for (const Card& card : cards) {
-    *hand.add_cards() = card;
-  }
-  return hand;
 }
 
 BoardState InitialRootState(const PokerConfig& config) {
@@ -465,9 +464,9 @@ void CheckEvaluateLoadedStrategy() {
 
   Hand player_a_hand = MakeHand(14, Suit::SPADES, 13, Suit::SPADES);
   Hand player_b_hand = MakeHand(12, Suit::HEARTS, 11, Suit::HEARTS);
-  InfoSetAbstraction abstraction;
-  std::string root_info_set =
-      abstraction.state_to_info_set(InitialRootState(config), 0, player_a_hand);
+  CFRSolver solver(config);
+  std::string root_info_set = CFRSolverRegretTestPeer::InfoSetKey(
+      solver, InitialRootState(config), 0, player_a_hand);
 
   const char* test_tmpdir = std::getenv("TEST_TMPDIR");
   std::string path =
@@ -475,7 +474,6 @@ void CheckEvaluateLoadedStrategy() {
   WriteStrategySnapshot(path, root_info_set,
                         {{MakeAction(ActionType::FOLD), 1.0}});
 
-  CFRSolver solver(config);
   solver.load_strategy(path);
   double value = solver.evaluate_strategy(player_a_hand, player_b_hand);
   Expect(std::abs(value + 1.0) < 0.000001,
@@ -501,13 +499,14 @@ void CheckEvaluateRangeStrategy() {
   HandRange player_b_range;
   player_b_range.add_hand_by_index(HandRange::string_to_index("KK"), 1.0);
 
-  InfoSetAbstraction abstraction;
+  CFRSolver solver(config);
   BoardState root_state = InitialRootState(config);
   StrategySnapshot snapshot;
   WeightedHandRange player_a_combos = player_a_range.get_all_weighted_combos();
   for (const Hand& hand : player_a_combos.hands) {
     AddStrategyInfoSet(
-        &snapshot, abstraction.state_to_info_set(root_state, 0, hand),
+        &snapshot,
+        CFRSolverRegretTestPeer::InfoSetKey(solver, root_state, 0, hand),
         {{MakeAction(ActionType::FOLD), 1.0}});
   }
 
@@ -520,7 +519,6 @@ void CheckEvaluateRangeStrategy() {
            "range strategy snapshot should write");
   }
 
-  CFRSolver solver(config);
   solver.load_strategy(path);
 
   WeightedHandRange player_b_combos =
@@ -553,9 +551,8 @@ void CheckSingletonRangeMatchesExactEvaluationAndBestResponse() {
   player_b_range.add_hand(player_b_hand, 1.0);
 
   CFRSolver solver(config);
-  InfoSetAbstraction abstraction;
-  std::string root_info_set =
-      abstraction.state_to_info_set(InitialRootState(config), 0, player_a_hand);
+  std::string root_info_set = CFRSolverRegretTestPeer::InfoSetKey(
+      solver, InitialRootState(config), 0, player_a_hand);
   const char* test_tmpdir = std::getenv("TEST_TMPDIR");
   std::string path =
       std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/singleton_strategy.pb";
@@ -610,9 +607,9 @@ void CheckExploitabilityDetectsFoldStrategy() {
 
   Hand player_a_hand = MakeHand(14, Suit::SPADES, 13, Suit::SPADES);
   Hand player_b_hand = MakeHand(12, Suit::HEARTS, 11, Suit::HEARTS);
-  InfoSetAbstraction abstraction;
-  std::string root_info_set =
-      abstraction.state_to_info_set(InitialRootState(config), 0, player_a_hand);
+  CFRSolver solver(config);
+  std::string root_info_set = CFRSolverRegretTestPeer::InfoSetKey(
+      solver, InitialRootState(config), 0, player_a_hand);
 
   const char* test_tmpdir = std::getenv("TEST_TMPDIR");
   std::string path =
@@ -620,7 +617,6 @@ void CheckExploitabilityDetectsFoldStrategy() {
   WriteStrategySnapshot(path, root_info_set,
                         {{MakeAction(ActionType::FOLD), 1.0}});
 
-  CFRSolver solver(config);
   solver.load_strategy(path);
   double exploitability =
       solver.calculate_exploitability(player_a_hand, player_b_hand);
@@ -767,15 +763,12 @@ void CheckRunUsesProvidedPrivateRanges() {
   CFRSolver solver(config);
   solver.run(1, player_a_range, player_b_range);
 
-  InfoSetAbstraction abstraction;
   const Strategy strategy = solver.get_equilibrium_strategy();
   Expect(strategy.get_info_sets().size() == 1,
          "range run should not swap asymmetric player ranges");
-  InfoSetAbstraction::InfoSetComponents components =
-      abstraction.parse_info_set(strategy.get_info_sets()[0]);
-  Hand trained_hand = MakeHandFromCards(components.player_cards);
-  Expect(HandRange::hand_to_index(trained_hand) ==
-             HandRange::hand_to_index(player_a_hand),
+  const std::string expected_info_set = CFRSolverRegretTestPeer::InfoSetKey(
+      solver, InitialRootState(config), 0, player_a_hand);
+  Expect(strategy.has_info_set(expected_info_set),
          "range run should train the supplied player A hand class");
 }
 
@@ -949,15 +942,12 @@ void CheckRangeSamplingSkipsOverlappingDeals() {
   CFRSolver solver(config);
   solver.run(3, player_a_range, player_b_range);
 
-  InfoSetAbstraction abstraction;
   const Strategy strategy = solver.get_equilibrium_strategy();
   Expect(strategy.get_info_sets().size() == 1,
          "range sampling should only train compatible private deals");
-  InfoSetAbstraction::InfoSetComponents components =
-      abstraction.parse_info_set(strategy.get_info_sets()[0]);
-  Hand trained_hand = MakeHandFromCards(components.player_cards);
-  Expect(HandRange::hand_to_index(trained_hand) ==
-             HandRange::hand_to_index(compatible),
+  const std::string expected_info_set = CFRSolverRegretTestPeer::InfoSetKey(
+      solver, InitialRootState(config), 0, compatible);
+  Expect(strategy.has_info_set(expected_info_set),
          "range sampling should skip overlapping private-card deals");
 }
 
@@ -1760,9 +1750,8 @@ void CheckCfrPlusClipsNegativeRegrets() {
 
   Hand player_a_hand;
   Hand player_b_hand;
-  InfoSetAbstraction abstraction;
   std::string info_set_key =
-      abstraction.state_to_info_set(node.state, 0, player_a_hand);
+      CFRSolverRegretTestPeer::InfoSetKey(solver, node.state, 0, player_a_hand);
   std::vector<double> reach_probabilities = {1.0, 1.0};
   solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
 

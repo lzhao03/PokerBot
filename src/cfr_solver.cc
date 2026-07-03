@@ -24,7 +24,7 @@ namespace poker {
 namespace {
 
 constexpr int kActionKeyMultiplier = 1000000;
-constexpr char kInfoSetAbstractionVersion[] = "exact_cards_v1";
+constexpr char kInfoSetKeyVersion[] = "exact_cards_v1";
 constexpr int kParallelEvaluationSampleThreshold = 32;
 constexpr int kParallelBestResponseSampleThreshold = 32;
 
@@ -1588,7 +1588,7 @@ void CFRSolver::save_strategy(const std::string& filename) const {
   StrategySnapshot snapshot;
   *snapshot.mutable_config() = config_;
   snapshot.set_iterations_run(iterations_run_);
-  snapshot.set_abstraction_version(kInfoSetAbstractionVersion);
+  snapshot.set_abstraction_version(kInfoSetKeyVersion);
 
   for (const std::string& info_set_key : equilibrium_strategy.get_info_sets()) {
     StrategyInfoSetSnapshot* info_set = snapshot.add_info_sets();
