@@ -138,6 +138,11 @@ private:
   friend class CFRSolverRegretTestPeer;
 
   struct RangeDeal {
+    RangeDeal(size_t player_a_index, size_t player_b_index, double weight)
+        : player_a_index(player_a_index),
+          player_b_index(player_b_index),
+          weight(weight) {}
+
     size_t player_a_index = 0;
     size_t player_b_index = 0;
     double weight = 0.0;

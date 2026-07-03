@@ -433,8 +433,8 @@ std::vector<CFRSolver::RangeDeal> CFRSolver::build_compatible_range_deals(
           HandsOverlap(player_a_hands.hands[a], player_b_hands.hands[b])) {
         continue;
       }
-      deals.push_back(
-          {a, b, player_a_hands.weights[a] * player_b_hands.weights[b]});
+      deals.emplace_back(
+          a, b, player_a_hands.weights[a] * player_b_hands.weights[b]);
     }
   }
   return deals;
