@@ -217,15 +217,8 @@ cc_binary(
     name = "poker_solver",
     srcs = ["main.cc"],
     deps = [
-        ":poker_cc_proto",
-        ":hand_evaluator",
-        ":game_tree",
-        ":strategy",
-        ":info_set",
-        ":hand_range",
-        ":utility_calculator",
         ":cfr_solver",
-        "@protobuf//:protobuf",
+        ":poker_cc_proto",
     ],
 )
 
