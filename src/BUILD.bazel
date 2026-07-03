@@ -164,6 +164,19 @@ cc_library(
 )
 
 cc_library(
+    name = "subgame_value",
+    srcs = ["subgame_value.cc"],
+    hdrs = ["subgame_value.h"],
+    deps = [
+        ":cfr_solver",
+        ":continuation_value",
+        ":game_tree",
+        ":poker_cc_proto",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "cfr_solver",
     srcs = ["cfr_solver.cc"],
     hdrs = ["cfr_solver.h"],
@@ -189,6 +202,7 @@ cc_test(
     deps = [
         ":cfr_solver",
         ":continuation_value",
+        ":subgame_value",
     ],
 )
 

@@ -1,6 +1,7 @@
 #include "src/cfr_solver.h"
 #include "src/continuation_value.h"
 #include "src/hand_range.h"
+#include "src/subgame_value.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1009,6 +1010,41 @@ BoardState ShowdownState(const std::vector<Card>& board_cards) {
   return state;
 }
 
+BoardState RiverFacingCallState() {
+  BoardState state;
+  state.set_stack_a(5);
+  state.set_stack_b(0);
+  state.set_pot(15);
+  state.set_street(Street::RIVER);
+  state.set_all_in(true);
+  state.set_folded_player(-1);
+  state.set_player_to_act(0);
+  state.add_player_contribution(5);
+  state.add_player_contribution(10);
+  *state.mutable_history()->add_actions() = MakeAction(ActionType::BET, 5);
+  AddCard(&state, 2, Suit::HEARTS);
+  AddCard(&state, 7, Suit::DIAMONDS);
+  AddCard(&state, 9, Suit::CLUBS);
+  AddCard(&state, 11, Suit::SPADES);
+  AddCard(&state, 12, Suit::DIAMONDS);
+  return state;
+}
+
+void CheckNestedCfrContinuationSolvesRiverCallSubgame() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+
+  NestedCFRContinuationValueProvider provider(config, 1);
+  GameTree game_tree(config);
+  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
+  Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
+  double value = provider.value(&game_tree, RiverFacingCallState(),
+                                player_a_hand, player_b_hand);
+
+  Expect(std::abs(value - 2.5) < 0.000001,
+         "nested CFR continuation should solve from the cutoff state");
+}
+
 GameTree::Node* TerminalShowdownNode(const std::vector<Card>& board_cards) {
   GameTree::Node* node = new GameTree::Node();
   node->state = ShowdownState(board_cards);
@@ -1544,6 +1580,7 @@ int main() {
   CheckDepthLimitUsesShowdownUtility();
   CheckDepthLimitDoesNotScoreUncalledBet();
   CheckDepthLimitUsesContinuationValueProvider();
+  CheckNestedCfrContinuationSolvesRiverCallSubgame();
   CheckZeroMaxDepthDoesNotCutOff();
   CheckChanceDoesNotConsumeDepth();
   CheckChanceSamplesVisitMultipleBoards();
