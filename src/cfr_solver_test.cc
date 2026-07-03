@@ -1030,11 +1030,11 @@ BoardState RiverFacingCallState() {
   return state;
 }
 
-void CheckNestedCfrContinuationSolvesRiverCallSubgame() {
+void CheckExactHandNestedCfrContinuationSolvesRiverCallSubgame() {
   PokerConfig config;
   config.set_starting_stack_size(10);
 
-  NestedCFRContinuationValueProvider provider(config, 1);
+  ExactHandNestedCFRContinuationValueProvider provider(config, 1);
   GameTree game_tree(config);
   Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
@@ -1042,23 +1042,25 @@ void CheckNestedCfrContinuationSolvesRiverCallSubgame() {
                                 player_a_hand, player_b_hand);
 
   Expect(std::abs(value - 2.5) < 0.000001,
-         "nested CFR continuation should solve from the cutoff state");
+         "exact-hand nested CFR continuation should solve from the cutoff state");
 }
 
-void CheckNestedCfrContinuationCachesSubgames() {
+void CheckExactHandNestedCfrContinuationCachesSubgames() {
   PokerConfig config;
   config.set_starting_stack_size(10);
 
-  NestedCFRContinuationValueProvider provider(config, 1);
+  ExactHandNestedCFRContinuationValueProvider provider(config, 1);
   GameTree game_tree(config);
   Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   BoardState state = RiverFacingCallState();
 
   double first = provider.value(&game_tree, state, player_a_hand, player_b_hand);
-  NestedCFRContinuationValueProvider::Stats first_stats = provider.stats();
+  ExactHandNestedCFRContinuationValueProvider::Stats first_stats =
+      provider.stats();
   double second = provider.value(&game_tree, state, player_a_hand, player_b_hand);
-  NestedCFRContinuationValueProvider::Stats second_stats = provider.stats();
+  ExactHandNestedCFRContinuationValueProvider::Stats second_stats =
+      provider.stats();
 
   Expect(first == second, "cached subgame value should match the first solve");
   Expect(first_stats.misses == 1 && first_stats.hits == 0 &&
@@ -1069,12 +1071,37 @@ void CheckNestedCfrContinuationCachesSubgames() {
          "second subgame lookup should hit the cache");
 }
 
-void CheckCfrDepthLimitUsesNestedContinuationProvider() {
+void CheckExactHandNestedCfrContinuationSeparatesPrivateHands() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+
+  ExactHandNestedCFRContinuationValueProvider provider(config, 1);
+  GameTree game_tree(config);
+  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
+  Hand losing_player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
+  Hand winning_player_b_hand = MakeHand(2, Suit::SPADES, 2, Suit::CLUBS);
+  BoardState state = RiverFacingCallState();
+
+  double value_against_loser =
+      provider.value(&game_tree, state, player_a_hand, losing_player_b_hand);
+  double value_against_winner =
+      provider.value(&game_tree, state, player_a_hand, winning_player_b_hand);
+  ExactHandNestedCFRContinuationValueProvider::Stats stats = provider.stats();
+
+  Expect(std::abs(value_against_loser - 2.5) < 0.000001,
+         "exact-hand continuation should value player A's winning showdown");
+  Expect(std::abs(value_against_winner + 7.5) < 0.000001,
+         "exact-hand continuation should value player A's losing showdown");
+  Expect(stats.misses == 2 && stats.hits == 0 && stats.entries == 2,
+         "exact-hand continuation should cache different private hands separately");
+}
+
+void CheckCfrDepthLimitUsesExactHandNestedContinuationProvider() {
   PokerConfig config;
   config.set_starting_stack_size(10);
 
   auto provider =
-      std::make_shared<NestedCFRContinuationValueProvider>(config, 1);
+      std::make_shared<ExactHandNestedCFRContinuationValueProvider>(config, 1);
   CFRSolver solver(config);
   solver.set_continuation_value_provider(provider);
 
@@ -1089,13 +1116,13 @@ void CheckCfrDepthLimitUsesNestedContinuationProvider() {
                             reach_probabilities, 0, 1, 1);
   double second = solver.cfr(&node, player_a_hand, player_b_hand,
                              reach_probabilities, 1, 1, 1);
-  NestedCFRContinuationValueProvider::Stats stats = provider->stats();
+  ExactHandNestedCFRContinuationValueProvider::Stats stats = provider->stats();
 
   Expect(std::abs(first - 2.5) < 0.000001 &&
              std::abs(second - 2.5) < 0.000001,
-         "CFR depth cutoff should use nested continuation values");
+         "CFR depth cutoff should use exact-hand nested continuation values");
   Expect(stats.misses == 1 && stats.hits == 1 && stats.entries == 1,
-         "CFR depth cutoff should reuse nested continuation values");
+         "CFR depth cutoff should reuse exact-hand nested continuation values");
 }
 
 GameTree::Node* TerminalShowdownNode(const std::vector<Card>& board_cards) {
@@ -1633,9 +1660,10 @@ int main() {
   CheckDepthLimitUsesShowdownUtility();
   CheckDepthLimitDoesNotScoreUncalledBet();
   CheckDepthLimitUsesContinuationValueProvider();
-  CheckNestedCfrContinuationSolvesRiverCallSubgame();
-  CheckNestedCfrContinuationCachesSubgames();
-  CheckCfrDepthLimitUsesNestedContinuationProvider();
+  CheckExactHandNestedCfrContinuationSolvesRiverCallSubgame();
+  CheckExactHandNestedCfrContinuationCachesSubgames();
+  CheckExactHandNestedCfrContinuationSeparatesPrivateHands();
+  CheckCfrDepthLimitUsesExactHandNestedContinuationProvider();
   CheckZeroMaxDepthDoesNotCutOff();
   CheckChanceDoesNotConsumeDepth();
   CheckChanceSamplesVisitMultipleBoards();

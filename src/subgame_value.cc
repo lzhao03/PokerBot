@@ -32,7 +32,8 @@ std::string CacheKey(const BoardState& state,
 
 }  // namespace
 
-NestedCFRContinuationValueProvider::NestedCFRContinuationValueProvider(
+ExactHandNestedCFRContinuationValueProvider::
+    ExactHandNestedCFRContinuationValueProvider(
     PokerConfig config,
     int iterations)
     : config_(std::move(config)), iterations_(iterations) {
@@ -41,7 +42,7 @@ NestedCFRContinuationValueProvider::NestedCFRContinuationValueProvider(
   }
 }
 
-double NestedCFRContinuationValueProvider::value(
+double ExactHandNestedCFRContinuationValueProvider::value(
     GameTree* game_tree,
     const BoardState& state,
     const Hand& player_a_hand,
@@ -75,13 +76,13 @@ double NestedCFRContinuationValueProvider::value(
   }
 }
 
-NestedCFRContinuationValueProvider::Stats
-NestedCFRContinuationValueProvider::stats() const {
+ExactHandNestedCFRContinuationValueProvider::Stats
+ExactHandNestedCFRContinuationValueProvider::stats() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return {hits_, misses_, static_cast<int64_t>(values_.size())};
 }
 
-double NestedCFRContinuationValueProvider::compute_value(
+double ExactHandNestedCFRContinuationValueProvider::compute_value(
     GameTree* game_tree,
     const BoardState& state,
     const Hand& player_a_hand,

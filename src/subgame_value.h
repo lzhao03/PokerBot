@@ -11,7 +11,11 @@
 
 namespace poker {
 
-class NestedCFRContinuationValueProvider : public ContinuationValueProvider {
+// Solves a cutoff state for one exact private-hand assignment.
+// This is useful as continuation-value plumbing, but it is not range-aware
+// poker subgame solving.
+class ExactHandNestedCFRContinuationValueProvider
+    : public ContinuationValueProvider {
  public:
   struct Stats {
     int64_t hits = 0;
@@ -19,7 +23,8 @@ class NestedCFRContinuationValueProvider : public ContinuationValueProvider {
     int64_t entries = 0;
   };
 
-  NestedCFRContinuationValueProvider(PokerConfig config, int iterations);
+  ExactHandNestedCFRContinuationValueProvider(PokerConfig config,
+                                              int iterations);
 
   double value(GameTree* game_tree,
                const BoardState& state,
