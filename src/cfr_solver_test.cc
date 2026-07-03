@@ -65,6 +65,13 @@ class CFRSolverRegretTestPeer {
     return solver.utility(state, player_a_hand, player_b_hand);
   }
 
+  static void SetRegret(CFRSolver& solver,
+                        const std::string& info_set_key,
+                        int action_id,
+                        double regret) {
+    solver.cumulative_regrets_[info_set_key][action_id] = regret;
+  }
+
   static std::vector<double> CompatibleDealWeights(
       const HandRange& player_a_range,
       const HandRange& player_b_range) {
@@ -106,6 +113,14 @@ class FixedContinuationValueProvider : public ContinuationValueProvider {
       saw_ranges_ = true;
       last_player_a_range_size_ = context.player_a_range.size();
       last_player_b_range_size_ = context.player_b_range.size();
+      last_player_a_range_weight_ = 0.0;
+      last_player_b_range_weight_ = 0.0;
+      for (const auto& hand : context.player_a_range) {
+        last_player_a_range_weight_ += hand.second;
+      }
+      for (const auto& hand : context.player_b_range) {
+        last_player_b_range_weight_ += hand.second;
+      }
     }
     return value_;
   }
@@ -119,6 +134,12 @@ class FixedContinuationValueProvider : public ContinuationValueProvider {
   size_t last_player_b_range_size() const {
     return last_player_b_range_size_;
   }
+  double last_player_a_range_weight() const {
+    return last_player_a_range_weight_;
+  }
+  double last_player_b_range_weight() const {
+    return last_player_b_range_weight_;
+  }
 
  private:
   double value_;
@@ -127,6 +148,8 @@ class FixedContinuationValueProvider : public ContinuationValueProvider {
   mutable bool saw_ranges_ = false;
   mutable size_t last_player_a_range_size_ = 0;
   mutable size_t last_player_b_range_size_ = 0;
+  mutable double last_player_a_range_weight_ = 0.0;
+  mutable double last_player_b_range_weight_ = 0.0;
 };
 
 Action MakeAction(ActionType type, int amount = 0) {
@@ -174,6 +197,28 @@ bool TestHandsOverlap(const Hand& left, const Hand& right) {
     }
   }
   return false;
+}
+
+double TestTotalWeight(const std::vector<std::pair<Hand, double>>& hands) {
+  double total = 0.0;
+  for (const auto& hand : hands) {
+    total += hand.second;
+  }
+  return total;
+}
+
+double TestTotalWeightForRank(
+    const std::vector<std::pair<Hand, double>>& hands,
+    int rank) {
+  double total = 0.0;
+  for (const auto& hand : hands) {
+    if (hand.first.cards_size() == 2 &&
+        hand.first.cards(0).rank() == rank &&
+        hand.first.cards(1).rank() == rank) {
+      total += hand.second;
+    }
+  }
+  return total;
 }
 
 Hand MakeHandFromCards(const std::vector<Card>& cards) {
@@ -1297,6 +1342,52 @@ void CheckRangeRunPassesContinuationRanges() {
   Expect(provider->last_player_b_range_size() ==
              player_b_range.get_all_weighted_combos().size(),
          "player B continuation range should include compatible configured hands");
+  Expect(std::abs(provider->last_player_a_range_weight() -
+                  TestTotalWeight(player_a_range.get_all_weighted_combos())) <
+             0.000001,
+         "non-acting player range weights should pass through unchanged");
+  Expect(std::abs(provider->last_player_b_range_weight() -
+                  (TestTotalWeight(player_b_range.get_all_weighted_combos()) /
+                   2.0)) < 0.000001,
+         "acting player range weights should be conditioned by action probability");
+}
+
+void CheckRangeRunActionConditionsRangesByHandStrategy() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+
+  BoardState root_state = FlopRangeCutoffState();
+  HandRange player_a_range;
+  player_a_range.set_from_string("AA");
+  HandRange player_b_range;
+  player_b_range.set_from_string("QQ,JJ");
+
+  CFRSolver solver(config, root_state);
+  auto provider = std::make_shared<FixedContinuationValueProvider>(7.0);
+  solver.set_continuation_value_provider(provider);
+
+  InfoSetAbstraction abstraction;
+  for (const auto& hand : player_b_range.get_all_weighted_combos()) {
+    std::string info_set_key =
+        abstraction.state_to_info_set(root_state, 1, hand.first);
+    int preferred_action =
+        hand.first.cards(0).rank() == 12
+            ? TestActionKey(ActionType::ALL_IN, 20)
+            : TestActionKey(ActionType::CHECK);
+    CFRSolverRegretTestPeer::SetRegret(
+        solver, info_set_key, preferred_action, 1.0);
+  }
+
+  solver.run(1, player_a_range, player_b_range);
+
+  double queens_weight =
+      TestTotalWeightForRank(player_b_range.get_all_weighted_combos(), 12);
+  Expect(provider->last_player_b_range_size() == 6,
+         "all-in branch should keep only hands that choose all-in");
+  Expect(std::abs(provider->last_player_b_range_weight() - queens_weight) <
+             0.000001,
+         "all-in branch should preserve only all-in hand weights");
 }
 
 void CheckZeroMaxDepthDoesNotCutOff() {
@@ -1728,6 +1819,7 @@ int main() {
   CheckDepthLimitDoesNotScoreUncalledBet();
   CheckDepthLimitUsesContinuationValueProvider();
   CheckRangeRunPassesContinuationRanges();
+  CheckRangeRunActionConditionsRangesByHandStrategy();
   CheckExactHandNestedCfrContinuationSolvesRiverCallSubgame();
   CheckExactHandNestedCfrContinuationCachesSubgames();
   CheckExactHandNestedCfrContinuationSeparatesPrivateHands();

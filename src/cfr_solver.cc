@@ -33,6 +33,19 @@ int ActionKey(const Action& action) {
          static_cast<int>(std::lround(action.amount()));
 }
 
+std::vector<int> UniqueActionIds(const std::vector<Action>& legal_actions) {
+  std::vector<int> action_ids;
+  action_ids.reserve(legal_actions.size());
+  for (const Action& action : legal_actions) {
+    int action_id = ActionKey(action);
+    if (std::find(action_ids.begin(), action_ids.end(), action_id) ==
+        action_ids.end()) {
+      action_ids.push_back(action_id);
+    }
+  }
+  return action_ids;
+}
+
 Action ActionFromKey(int action_key) {
   Action action;
   action.set_action(static_cast<ActionType>(action_key / kActionKeyMultiplier));
@@ -387,15 +400,6 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
   if (log) {
     std::cout << "Starting CFR iterations..." << std::endl;
   }
-  if (player_a_range != nullptr && player_b_range != nullptr) {
-    active_player_a_range_ = player_a_hands;
-    active_player_b_range_ = player_b_hands;
-    active_ranges_enabled_ = true;
-  } else {
-    active_player_a_range_.clear();
-    active_player_b_range_.clear();
-    active_ranges_enabled_ = false;
-  }
   for (int i = 0; i < iterations; ++i) {
     Hand player_a_hand;
     Hand player_b_hand;
@@ -416,24 +420,27 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
     }
     int cfr_iteration = iterations_run_;
     std::vector<double> reach_probabilities(2, 1.0);
-    double dealt_value = cfr(root, player_a_hand, player_b_hand,
-                             reach_probabilities, cfr_iteration, 0, max_depth);
+    const std::vector<std::pair<Hand, double>>* player_a_context_range =
+        player_a_range == nullptr ? nullptr : &player_a_hands;
+    const std::vector<std::pair<Hand, double>>* player_b_context_range =
+        player_b_range == nullptr ? nullptr : &player_b_hands;
+    double dealt_value = cfr_with_ranges(
+        root, player_a_hand, player_b_hand, reach_probabilities,
+        cfr_iteration, 0, max_depth, player_a_context_range,
+        player_b_context_range);
 
     if (train_swapped) {
       // Train both private-card assignments for the sampled heads-up deal.
       std::vector<double> swapped_reach_probabilities(2, 1.0);
-      double swapped_value = cfr(root, player_b_hand, player_a_hand,
-                                 swapped_reach_probabilities, cfr_iteration, 0,
-                                 max_depth);
+      double swapped_value = cfr_with_ranges(
+          root, player_b_hand, player_a_hand, swapped_reach_probabilities,
+          cfr_iteration, 0, max_depth, nullptr, nullptr);
       cumulative_root_utility_ += (dealt_value + swapped_value) / 2.0;
     } else {
       cumulative_root_utility_ += dealt_value;
     }
     ++iterations_run_;
   }
-  active_player_a_range_.clear();
-  active_player_b_range_.clear();
-  active_ranges_enabled_ = false;
   
   if (log) {
     std::cout << "CFR iterations completed" << std::endl;
@@ -451,6 +458,21 @@ double CFRSolver::cfr(GameTree::Node* node,
                       int iteration,
                       int depth,
                       int max_depth) {
+  return cfr_with_ranges(node, player_a_hand, player_b_hand,
+                         reach_probabilities, iteration, depth, max_depth,
+                         nullptr, nullptr);
+}
+
+double CFRSolver::cfr_with_ranges(
+    GameTree::Node* node,
+    const Hand& player_a_hand,
+    const Hand& player_b_hand,
+    std::vector<double>& reach_probabilities,
+    int iteration,
+    int depth,
+    int max_depth,
+    const std::vector<std::pair<Hand, double>>* player_a_range,
+    const std::vector<std::pair<Hand, double>>* player_b_range) {
   // If the node is a terminal node, return the utility
   if (node->is_terminal) {
     if (max_depth > 0) {
@@ -462,21 +484,15 @@ double CFRSolver::cfr(GameTree::Node* node,
   // Chance card deals are not player decisions, so they do not consume CFR depth.
   if (node->is_chance_node) {
     return chance_sampling_cfr(node, player_a_hand, player_b_hand,
-                               reach_probabilities, iteration, depth, max_depth);
+                               reach_probabilities, iteration, depth, max_depth,
+                               player_a_range, player_b_range);
   }
 
   // Check depth limit to prevent infinite recursion
   if (max_depth > 0 && depth >= max_depth) {
-    ContinuationContext context = ContinuationContext::ExactHands(
-        node->state, player_a_hand, player_b_hand);
-    if (active_ranges_enabled_) {
-      // These ranges are public-card filtered configured ranges. They are not
-      // action-conditioned beliefs yet.
-      context.player_a_range =
-          PublicCompatibleRange(active_player_a_range_, node->state);
-      context.player_b_range =
-          PublicCompatibleRange(active_player_b_range_, node->state);
-    }
+    ContinuationContext context = build_continuation_context(
+        node->state, player_a_hand, player_b_hand, player_a_range,
+        player_b_range);
     return continuation_value_provider_->value(game_tree_, context);
   }
   
@@ -514,9 +530,29 @@ double CFRSolver::cfr(GameTree::Node* node,
     // Update reach probabilities for the recursive call
     std::vector<double> new_reach_probabilities = reach_probabilities;
     new_reach_probabilities[player] *= strategy[action_id];
+
+    const std::vector<std::pair<Hand, double>>* child_player_a_range =
+        player_a_range;
+    const std::vector<std::pair<Hand, double>>* child_player_b_range =
+        player_b_range;
+    std::vector<std::pair<Hand, double>> conditioned_player_range;
+    if (player == 0 && player_a_range != nullptr) {
+      conditioned_player_range = condition_range_for_action(
+          *player_a_range, node->state, player, node->legal_actions,
+          action_id);
+      child_player_a_range = &conditioned_player_range;
+    } else if (player == 1 && player_b_range != nullptr) {
+      conditioned_player_range = condition_range_for_action(
+          *player_b_range, node->state, player, node->legal_actions,
+          action_id);
+      child_player_b_range = &conditioned_player_range;
+    }
     
     // Recursive call to get the expected value of this action
-    double action_value = cfr(child_node, player_a_hand, player_b_hand, new_reach_probabilities, iteration, depth + 1, max_depth);
+    double action_value = cfr_with_ranges(
+        child_node, player_a_hand, player_b_hand, new_reach_probabilities,
+        iteration, depth + 1, max_depth, child_player_a_range,
+        child_player_b_range);
     
     // Store the action value
     action_values[action_id] = action_value;
@@ -587,13 +623,93 @@ double CFRSolver::chance_sampling_cfr(GameTree::Node* node,
                       std::vector<double>& reach_probabilities, 
                       int iteration,
                       int depth,
-                      int max_depth) {
+                      int max_depth,
+                      const std::vector<std::pair<Hand, double>>* player_a_range,
+                      const std::vector<std::pair<Hand, double>>* player_b_range) {
   return SampleChanceValue(
       game_tree_, node, player_a_hand, player_b_hand, ChanceSamples(config_),
       &rng_, [&](GameTree::Node* child_node) {
-        return cfr(child_node, player_a_hand, player_b_hand,
-                   reach_probabilities, iteration, depth, max_depth);
+        return cfr_with_ranges(child_node, player_a_hand, player_b_hand,
+                               reach_probabilities, iteration, depth,
+                               max_depth, player_a_range, player_b_range);
       });
+}
+
+double CFRSolver::action_probability_for_hand(
+    const BoardState& state,
+    int player,
+    const Hand& hand,
+    const std::vector<Action>& legal_actions,
+    int action_id) const {
+  std::vector<int> action_ids = UniqueActionIds(legal_actions);
+  if (std::find(action_ids.begin(), action_ids.end(), action_id) ==
+      action_ids.end()) {
+    return 0.0;
+  }
+  if (action_ids.empty()) {
+    return 0.0;
+  }
+
+  std::string info_set_key =
+      info_set_abstraction_->state_to_info_set(state, player, hand);
+  auto info_set_it = cumulative_regrets_.find(info_set_key);
+  if (info_set_it == cumulative_regrets_.end()) {
+    return 1.0 / action_ids.size();
+  }
+
+  double sum_positive_regrets = 0.0;
+  for (int legal_action_id : action_ids) {
+    auto action_it = info_set_it->second.find(legal_action_id);
+    if (action_it != info_set_it->second.end()) {
+      sum_positive_regrets += std::max(0.0, action_it->second);
+    }
+  }
+  if (sum_positive_regrets <= 0.0) {
+    return 1.0 / action_ids.size();
+  }
+
+  auto action_it = info_set_it->second.find(action_id);
+  if (action_it == info_set_it->second.end()) {
+    return 0.0;
+  }
+  return std::max(0.0, action_it->second) / sum_positive_regrets;
+}
+
+std::vector<std::pair<Hand, double>> CFRSolver::condition_range_for_action(
+    const std::vector<std::pair<Hand, double>>& range,
+    const BoardState& state,
+    int player,
+    const std::vector<Action>& legal_actions,
+    int action_id) const {
+  std::vector<std::pair<Hand, double>> conditioned_range;
+  conditioned_range.reserve(range.size());
+  for (const auto& hand : range) {
+    if (hand.second <= 0.0) {
+      continue;
+    }
+    double probability = action_probability_for_hand(
+        state, player, hand.first, legal_actions, action_id);
+    double conditioned_weight = hand.second * probability;
+    if (conditioned_weight > 0.0) {
+      conditioned_range.emplace_back(hand.first, conditioned_weight);
+    }
+  }
+  return conditioned_range;
+}
+
+ContinuationContext CFRSolver::build_continuation_context(
+    const BoardState& state,
+    const Hand& player_a_hand,
+    const Hand& player_b_hand,
+    const std::vector<std::pair<Hand, double>>* player_a_range,
+    const std::vector<std::pair<Hand, double>>* player_b_range) const {
+  ContinuationContext context =
+      ContinuationContext::ExactHands(state, player_a_hand, player_b_hand);
+  if (player_a_range != nullptr && player_b_range != nullptr) {
+    context.player_a_range = PublicCompatibleRange(*player_a_range, state);
+    context.player_b_range = PublicCompatibleRange(*player_b_range, state);
+  }
+  return context;
 }
 
 Strategy CFRSolver::get_equilibrium_strategy() const {

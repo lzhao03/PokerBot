@@ -17,6 +17,7 @@
 namespace poker {
 
 class HandRange;
+struct ContinuationContext;
 class ContinuationValueProvider;
 class TerminalUtilityCache;
 
@@ -135,9 +136,6 @@ private:
   std::unordered_set<std::string> visited_canonical_states_;
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
-  std::vector<std::pair<Hand, double>> active_player_a_range_;
-  std::vector<std::pair<Hand, double>> active_player_b_range_;
-  bool active_ranges_enabled_ = false;
   
   // CFR+ clipped regret tracking for each information set and action.
   std::unordered_map<std::string, std::unordered_map<int, double>> cumulative_regrets_;
@@ -155,6 +153,34 @@ private:
       const std::vector<std::pair<Hand, double>>& player_b_hands);
   void run_iterations(int iterations, const HandRange* player_a_range,
                       const HandRange* player_b_range, bool train_swapped);
+  double cfr_with_ranges(
+      GameTree::Node* node,
+      const Hand& player_a_hand,
+      const Hand& player_b_hand,
+      std::vector<double>& reach_probabilities,
+      int iteration,
+      int depth,
+      int max_depth,
+      const std::vector<std::pair<Hand, double>>* player_a_range,
+      const std::vector<std::pair<Hand, double>>* player_b_range);
+  double action_probability_for_hand(
+      const BoardState& state,
+      int player,
+      const Hand& hand,
+      const std::vector<Action>& legal_actions,
+      int action_id) const;
+  std::vector<std::pair<Hand, double>> condition_range_for_action(
+      const std::vector<std::pair<Hand, double>>& range,
+      const BoardState& state,
+      int player,
+      const std::vector<Action>& legal_actions,
+      int action_id) const;
+  ContinuationContext build_continuation_context(
+      const BoardState& state,
+      const Hand& player_a_hand,
+      const Hand& player_b_hand,
+      const std::vector<std::pair<Hand, double>>* player_a_range,
+      const std::vector<std::pair<Hand, double>>* player_b_range) const;
   double utility(const BoardState& state,
                  const Hand& player_a_hand,
                  const Hand& player_b_hand);
@@ -194,7 +220,16 @@ private:
       const std::string& info_set_key,
       const std::vector<Action>& legal_actions);
   void update_strategy(const std::string& info_set_key, const Strategy::ActionProbabilities& strategy, double reach_prob);
-  double chance_sampling_cfr(GameTree::Node* node, const Hand& player_a_hand, const Hand& player_b_hand, std::vector<double>& reach_probabilities, int iteration, int depth, int max_depth);
+  double chance_sampling_cfr(
+      GameTree::Node* node,
+      const Hand& player_a_hand,
+      const Hand& player_b_hand,
+      std::vector<double>& reach_probabilities,
+      int iteration,
+      int depth,
+      int max_depth,
+      const std::vector<std::pair<Hand, double>>* player_a_range,
+      const std::vector<std::pair<Hand, double>>* player_b_range);
 };
 
 } // namespace poker
