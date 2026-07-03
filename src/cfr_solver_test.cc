@@ -980,6 +980,21 @@ BoardState FoldedState(int folded_player) {
   return state;
 }
 
+void CheckRunFixedHandsUsesCustomInitialState() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+
+  CFRSolver solver(config, FoldedState(1));
+  Hand player_a_hand;
+  Hand player_b_hand;
+  solver.run(1, player_a_hand, player_b_hand);
+
+  Expect(solver.get_iterations_run() == 1,
+         "fixed-hand run should count iterations");
+  Expect(solver.get_expected_value(0) == 5.0,
+         "fixed-hand run should use the custom initial state");
+}
+
 BoardState ShowdownState(const std::vector<Card>& board_cards) {
   BoardState state;
   state.set_pot(20);
@@ -1515,6 +1530,7 @@ int main() {
   CheckRunUpdatesExpectedValue();
   CheckRunTrainsSwappedPrivateHands();
   CheckRunUsesProvidedPrivateRanges();
+  CheckRunFixedHandsUsesCustomInitialState();
   CheckRunWithoutDepthCutoffTerminates();
   CheckRangeExpansionUsesExactCombos();
   CheckRangeSamplingRejectsEmptyRange();

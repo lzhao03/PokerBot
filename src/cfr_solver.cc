@@ -196,10 +196,35 @@ double SampleChanceValue(GameTree* game_tree,
   return value / samples;
 }
 
+BoardState DefaultInitialState(const PokerConfig& config) {
+  const int small_blind = config.small_blind() > 0 ? config.small_blind() : 1;
+  const int big_blind = config.big_blind() > 0 ? config.big_blind() : 2;
+  const int starting_stack = config.starting_stack_size();
+
+  BoardState initial_state;
+  initial_state.set_stack_a(std::max(0, starting_stack - small_blind));
+  initial_state.set_stack_b(std::max(0, starting_stack - big_blind));
+  initial_state.set_pot(small_blind + big_blind);
+  initial_state.set_folded_player(-1);
+  initial_state.set_street(Street::PREFLOP);
+  initial_state.set_all_in(false);
+  initial_state.set_player_to_act(0);
+  initial_state.add_player_contribution(small_blind);
+  initial_state.add_player_contribution(big_blind);
+  return initial_state;
+}
+
 }  // namespace
 
 CFRSolver::CFRSolver(const PokerConfig& config)
     : CFRSolver(config, std::make_shared<TerminalUtilityCache>()) {
+}
+
+CFRSolver::CFRSolver(const PokerConfig& config,
+                     const BoardState& initial_state)
+    : CFRSolver(config, std::make_shared<TerminalUtilityCache>(),
+                std::make_shared<BettingRoundTerminalValueProvider>(),
+                initial_state) {
 }
 
 CFRSolver::CFRSolver(const PokerConfig& config,
@@ -212,7 +237,18 @@ CFRSolver::CFRSolver(
     const PokerConfig& config,
     std::shared_ptr<TerminalUtilityCache> utility_cache,
     std::shared_ptr<ContinuationValueProvider> continuation_value_provider)
+    : CFRSolver(config, std::move(utility_cache),
+                std::move(continuation_value_provider),
+                DefaultInitialState(config)) {
+}
+
+CFRSolver::CFRSolver(
+    const PokerConfig& config,
+    std::shared_ptr<TerminalUtilityCache> utility_cache,
+    std::shared_ptr<ContinuationValueProvider> continuation_value_provider,
+    BoardState initial_state)
   : config_(config),
+    initial_state_(std::move(initial_state)),
     game_tree_(new GameTree(config)),
     hand_evaluator_(new HandEvaluator()),
     info_set_abstraction_(new InfoSetAbstraction()),
@@ -239,26 +275,9 @@ void CFRSolver::set_continuation_value_provider(
 }
 
 GameTree::Node* CFRSolver::get_or_build_root() {
-  const int small_blind = config_.small_blind() > 0 ? config_.small_blind() : 1;
-  const int big_blind = config_.big_blind() > 0 ? config_.big_blind() : 2;
-  const int starting_stack = config_.starting_stack_size();
-
-  BoardState initial_state;
-  initial_state.set_stack_a(std::max(0, starting_stack - small_blind));
-  initial_state.set_stack_b(std::max(0, starting_stack - big_blind));
-  initial_state.set_pot(small_blind + big_blind);
-  initial_state.set_folded_player(-1); // No player has folded
-  initial_state.set_street(Street::PREFLOP);
-  initial_state.set_all_in(false);
-  initial_state.set_player_to_act(0); // Player 0 acts first
-  
-  // Add initial player contributions (blinds)
-  initial_state.add_player_contribution(small_blind);
-  initial_state.add_player_contribution(big_blind);
-
   GameTree::Node* root = game_tree_->get_root();
   if (root == nullptr) {
-    return game_tree_->build_tree(initial_state);
+    return game_tree_->build_tree(initial_state_);
   }
   return root;
 }
@@ -285,6 +304,23 @@ std::vector<CFRSolver::RangeDeal> CFRSolver::build_compatible_range_deals(
 
 void CFRSolver::run(int iterations) {
   run_iterations(iterations, nullptr, nullptr, true);
+}
+
+void CFRSolver::run(int iterations, const Hand& player_a_hand,
+                    const Hand& player_b_hand) {
+  if (iterations <= 0) {
+    return;
+  }
+
+  GameTree::Node* root = get_or_build_root();
+  const int max_depth = config_.max_depth();
+  for (int i = 0; i < iterations; ++i) {
+    std::vector<double> reach_probabilities(2, 1.0);
+    cumulative_root_utility_ += cfr(root, player_a_hand, player_b_hand,
+                                    reach_probabilities, iterations_run_, 0,
+                                    max_depth);
+    ++iterations_run_;
+  }
 }
 
 void CFRSolver::run(int iterations, const HandRange& player_a_range,

@@ -41,10 +41,13 @@ public:
   };
 
   CFRSolver(const PokerConfig& config);
+  CFRSolver(const PokerConfig& config, const BoardState& initial_state);
   ~CFRSolver();
   
   // Run CFR for a specified number of iterations
   void run(int iterations);
+  void run(int iterations, const Hand& player_a_hand,
+           const Hand& player_b_hand);
   void run(int iterations, const HandRange& player_a_range,
            const HandRange& player_b_range);
   
@@ -114,8 +117,13 @@ private:
   CFRSolver(const PokerConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache,
             std::shared_ptr<ContinuationValueProvider> continuation_value_provider);
+  CFRSolver(const PokerConfig& config,
+            std::shared_ptr<TerminalUtilityCache> utility_cache,
+            std::shared_ptr<ContinuationValueProvider> continuation_value_provider,
+            BoardState initial_state);
 
   PokerConfig config_;
+  BoardState initial_state_;
   GameTree* game_tree_;
   HandEvaluator* hand_evaluator_;
   InfoSetAbstraction* info_set_abstraction_;
