@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <random>
@@ -20,6 +22,29 @@ class HandRange;
 struct ContinuationContext;
 class ContinuationValueProvider;
 class TerminalUtilityCache;
+
+struct CanonicalPublicStateKey {
+  int street = 0;
+  int pot = 0;
+  int stack_a = 0;
+  int stack_b = 0;
+  int all_in = 0;
+  int folded_player = 0;
+  int player_to_act = 0;
+  std::array<int, 2> player_contributions = {0, 0};
+  int board_size = 0;
+  std::array<int, 5> board_cards = {-1, -1, -1, -1, -1};
+  int history_bucket = 0;
+  int last_player = -1;
+  int last_action = 0;
+  int last_amount = 0;
+
+  bool operator==(const CanonicalPublicStateKey& other) const;
+};
+
+struct CanonicalPublicStateKeyHash {
+  size_t operator()(const CanonicalPublicStateKey& key) const;
+};
 
 class CFRSolver {
 public:
@@ -133,7 +158,8 @@ private:
   int iterations_run_;
   int64_t cfr_update_count_;
   TraversalStats traversal_stats_;
-  std::unordered_set<std::string> visited_canonical_states_;
+  std::unordered_set<CanonicalPublicStateKey, CanonicalPublicStateKeyHash>
+      visited_canonical_states_;
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
   
