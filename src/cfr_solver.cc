@@ -433,8 +433,8 @@ std::vector<CFRSolver::RangeDeal> CFRSolver::build_compatible_range_deals(
           HandsOverlap(player_a_hands.hands[a], player_b_hands.hands[b])) {
         continue;
       }
-      deals.push_back({player_a_hands.hands[a], player_b_hands.hands[b],
-                       player_a_hands.weights[a] * player_b_hands.weights[b]});
+      deals.push_back(
+          {a, b, player_a_hands.weights[a] * player_b_hands.weights[b]});
     }
   }
   return deals;
@@ -765,8 +765,8 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
       player_b_hand = DealHand(&deck);
     } else {
       const RangeDeal& deal = range_deals[range_deal_distribution(rng_)];
-      player_a_hand = deal.player_a_hand;
-      player_b_hand = deal.player_b_hand;
+      player_a_hand = player_a_hands->hands[deal.player_a_index];
+      player_b_hand = player_b_hands->hands[deal.player_b_index];
     }
     
     const int max_depth = config_.max_depth();
@@ -1180,9 +1180,12 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
     return 0.0;
   }
 
+  const WeightedHandRange& player_a_hands =
+      player_a_range.get_all_weighted_combos();
+  const WeightedHandRange& player_b_hands =
+      player_b_range.get_all_weighted_combos();
   std::vector<RangeDeal> range_deals = build_compatible_range_deals(
-      player_a_range.get_all_weighted_combos(),
-      player_b_range.get_all_weighted_combos());
+      player_a_hands, player_b_hands);
   if (range_deals.empty()) {
     throw std::invalid_argument(
         "Could not sample non-overlapping hands from ranges");
@@ -1196,14 +1199,14 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
 
   Strategy strategy = get_equilibrium_strategy();
   if (samples < kParallelEvaluationSampleThreshold) {
-    return evaluate_strategy_samples(samples, range_deals, range_deal_weights,
-                                     strategy);
+    return evaluate_strategy_samples(samples, player_a_hands, player_b_hands,
+                                     range_deals, range_deal_weights, strategy);
   }
 
   int worker_count = WorkerCountForSamples(samples);
   if (worker_count <= 1) {
-    return evaluate_strategy_samples(samples, range_deals, range_deal_weights,
-                                     strategy);
+    return evaluate_strategy_samples(samples, player_a_hands, player_b_hands,
+                                     range_deals, range_deal_weights, strategy);
   }
 
   ThreadPoolExecutor executor(worker_count);
@@ -1225,14 +1228,16 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
     int shard_samples = samples_remaining / (worker_count - i);
     samples_remaining -= shard_samples;
     unsigned int seed = worker_seeds[i];
-    futures.push_back(executor.submit([config, &range_deals,
+    futures.push_back(executor.submit([config, &player_a_hands,
+                                       &player_b_hands, &range_deals,
                                        &range_deal_weights, &strategy,
                                        utility_cache, continuation_value_provider,
                                        shard_samples, seed]() {
       CFRSolver worker(config, utility_cache, continuation_value_provider);
       worker.rng_.seed(seed);
       return worker.evaluate_strategy_samples(
-                 shard_samples, range_deals, range_deal_weights, strategy) *
+                 shard_samples, player_a_hands, player_b_hands, range_deals,
+                 range_deal_weights, strategy) *
              shard_samples;
     }));
   }
@@ -1246,6 +1251,8 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
 
 double CFRSolver::evaluate_strategy_samples(
     int samples,
+    const WeightedHandRange& player_a_hands,
+    const WeightedHandRange& player_b_hands,
     const std::vector<RangeDeal>& range_deals,
     const std::vector<double>& range_deal_weights,
     const Strategy& strategy) {
@@ -1260,8 +1267,9 @@ double CFRSolver::evaluate_strategy_samples(
   double total = 0.0;
   for (int i = 0; i < samples; ++i) {
     const RangeDeal& deal = range_deals[range_deal_distribution(rng_)];
-    total += evaluate_strategy_node(root, deal.player_a_hand, deal.player_b_hand,
-                                    strategy);
+    total += evaluate_strategy_node(
+        root, player_a_hands.hands[deal.player_a_index],
+        player_b_hands.hands[deal.player_b_index], strategy);
   }
   return total / samples;
 }

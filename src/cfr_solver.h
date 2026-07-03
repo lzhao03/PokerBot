@@ -138,9 +138,9 @@ private:
   friend class CFRSolverRegretTestPeer;
 
   struct RangeDeal {
-    Hand player_a_hand;
-    Hand player_b_hand;
-    double weight;
+    size_t player_a_index = 0;
+    size_t player_b_index = 0;
+    double weight = 0.0;
   };
 
   struct ActionChoice {
@@ -295,6 +295,8 @@ private:
                                 const Strategy& strategy);
   double evaluate_strategy_samples(
       int samples,
+      const WeightedHandRange& player_a_hands,
+      const WeightedHandRange& player_b_hands,
       const std::vector<RangeDeal>& range_deals,
       const std::vector<double>& range_deal_weights,
       const Strategy& strategy);
