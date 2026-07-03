@@ -222,8 +222,9 @@ private:
   std::unordered_map<InfoSetKey, int, InfoSetKeyHash> info_set_ids_;
   std::vector<InfoSetData> info_sets_;
   
-  // Current iteration strategy
-  Strategy current_strategy_;
+  // String-keyed strategy loaded from snapshots. Trained CFR state lives in
+  // info_sets_ above.
+  Strategy loaded_strategy_;
   
   // Helper methods
   GameTree::Node& get_or_build_root();
@@ -255,6 +256,17 @@ private:
       const std::vector<ActionChoice>& legal_action_choices,
       const ActionChoice& action_choice,
       double fallback_probability) const;
+  double average_strategy_action_probability(
+      const BoardState& state,
+      int player,
+      const Hand& hand,
+      const std::vector<Action>& legal_actions,
+      int action_id) const;
+  double average_strategy_action_probability(
+      const InfoSetData& info_set,
+      const std::vector<Action>& legal_actions,
+      int action_id,
+      double fallback_probability) const;
   void condition_range_for_action(
       const WeightedHandRangeView& range,
       const BoardState& state,
@@ -283,37 +295,31 @@ private:
                  const Hand& player_b_hand);
   double evaluate_strategy_node(GameTree::Node& node,
                                 const Hand& player_a_hand,
-                                const Hand& player_b_hand,
-                                const Strategy& strategy);
+                                const Hand& player_b_hand);
   double evaluate_strategy_samples(
       int samples,
       const WeightedHandRange& player_a_hands,
       const WeightedHandRange& player_b_hands,
       const std::vector<RangeDeal>& range_deals,
-      const std::vector<double>& range_deal_weights,
-      const Strategy& strategy);
+      const std::vector<double>& range_deal_weights);
   double best_response_value(GameTree::Node& node,
                              const Hand& player_a_hand,
                              const Hand& player_b_hand,
-                             const Strategy& strategy,
                              int best_response_player);
   double best_response_value_against_range(
       GameTree::Node& node,
       const Hand& best_response_hand,
       const WeightedHandRangeView& opponent_hands,
-      const Strategy& strategy,
       int best_response_player);
   double sampled_range_best_response_value(
       int samples,
       const HandRange& best_response_range,
       const HandRange& opponent_range,
-      const Strategy& strategy,
       int best_response_player);
   double sampled_range_best_response_samples(
       int samples,
       const WeightedHandRange& best_response_hands,
       const WeightedHandRange& opponent_hands,
-      const Strategy& strategy,
       int best_response_player);
   std::vector<ActionChoice> get_action_choices(
       int info_set_id,

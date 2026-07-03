@@ -116,6 +116,10 @@ bool Strategy::has_info_set(const std::string& info_set_key) const {
   return info_set_ids_.find(info_set_key) != info_set_ids_.end();
 }
 
+bool Strategy::empty() const {
+  return info_sets_.empty();
+}
+
 void Strategy::clear() {
   info_set_ids_.clear();
   info_sets_.clear();

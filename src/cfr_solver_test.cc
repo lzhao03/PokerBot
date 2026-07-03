@@ -37,18 +37,15 @@ class CFRSolverRegretTestPeer {
   static double EvaluateNode(CFRSolver& solver, GameTree::Node& node,
                              const Hand& player_a_hand,
                              const Hand& player_b_hand) {
-    Strategy strategy;
-    return solver.evaluate_strategy_node(node, player_a_hand, player_b_hand,
-                                         strategy);
+    return solver.evaluate_strategy_node(node, player_a_hand, player_b_hand);
   }
 
   static double BestResponseNode(CFRSolver& solver, GameTree::Node& node,
                                  const Hand& player_a_hand,
                                  const Hand& player_b_hand,
                                  int best_response_player) {
-    Strategy strategy;
     return solver.best_response_value(node, player_a_hand, player_b_hand,
-                                      strategy, best_response_player);
+                                      best_response_player);
   }
 
   static double BestResponseRangeNode(
@@ -56,10 +53,9 @@ class CFRSolverRegretTestPeer {
       const Hand& best_response_hand,
       const WeightedHandRange& opponent_hands,
       int best_response_player) {
-    Strategy strategy;
     WeightedHandRangeView opponent_view(opponent_hands);
     return solver.best_response_value_against_range(
-        node, best_response_hand, opponent_view, strategy, best_response_player);
+        node, best_response_hand, opponent_view, best_response_player);
   }
 
   static double Utility(CFRSolver& solver,

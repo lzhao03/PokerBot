@@ -1018,6 +1018,64 @@ double CFRSolver::regret_matched_probability_for_action(
   return action_positive_regret / positive_regret_sum;
 }
 
+double CFRSolver::average_strategy_action_probability(
+    const BoardState& state,
+    int player,
+    const Hand& hand,
+    const std::vector<Action>& legal_actions,
+    int action_id) const {
+  if (legal_actions.empty()) {
+    return 0.0;
+  }
+  const double uniform_probability = 1.0 / legal_actions.size();
+
+  InfoSetKey key = make_info_set_key(state, player, hand);
+  auto existing_info_set = info_set_ids_.find(key);
+  if (existing_info_set != info_set_ids_.end()) {
+    return average_strategy_action_probability(
+        info_sets_[existing_info_set->second], legal_actions, action_id,
+        uniform_probability);
+  }
+
+  if (!loaded_strategy_.empty()) {
+    return StrategyActionProbability(
+        loaded_strategy_, info_set_key_to_string(key), legal_actions,
+        action_id);
+  }
+  return uniform_probability;
+}
+
+double CFRSolver::average_strategy_action_probability(
+    const InfoSetData& info_set,
+    const std::vector<Action>& legal_actions,
+    int action_id,
+    double fallback_probability) const {
+  double probability_sum = 0.0;
+  double action_probability = 0.0;
+
+  for (const Action& legal_action : legal_actions) {
+    const int legal_action_id = ActionKey(legal_action);
+    auto action = std::find(info_set.action_ids.begin(),
+                            info_set.action_ids.end(), legal_action_id);
+    if (action == info_set.action_ids.end()) {
+      continue;
+    }
+
+    const size_t index =
+        static_cast<size_t>(action - info_set.action_ids.begin());
+    const double probability = info_set.cumulative_strategy[index];
+    probability_sum += probability;
+    if (legal_action_id == action_id) {
+      action_probability = probability;
+    }
+  }
+
+  if (probability_sum <= 0.0) {
+    return fallback_probability;
+  }
+  return action_probability / probability_sum;
+}
+
 void CFRSolver::condition_range_for_action(
     const WeightedHandRangeView& range,
     const BoardState& state,
@@ -1061,7 +1119,7 @@ ContinuationContext CFRSolver::build_continuation_context(
 }
 
 Strategy CFRSolver::get_equilibrium_strategy() const {
-  Strategy equilibrium_strategy = current_strategy_;
+  Strategy equilibrium_strategy = loaded_strategy_;
 
   for (const InfoSetData& info_set : info_sets_) {
     double sum = 0.0;
@@ -1092,9 +1150,8 @@ Strategy CFRSolver::get_equilibrium_strategy() const {
 
 double CFRSolver::evaluate_strategy(const Hand& player_a_hand,
                                     const Hand& player_b_hand) {
-  Strategy strategy = get_equilibrium_strategy();
-  return evaluate_strategy_node(get_or_build_root(), player_a_hand, player_b_hand,
-                                strategy);
+  return evaluate_strategy_node(get_or_build_root(), player_a_hand,
+                                player_b_hand);
 }
 
 double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range,
@@ -1120,16 +1177,15 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
     range_deal_weights.push_back(deal.weight);
   }
 
-  Strategy strategy = get_equilibrium_strategy();
   if (samples < kParallelEvaluationSampleThreshold) {
     return evaluate_strategy_samples(samples, player_a_hands, player_b_hands,
-                                     range_deals, range_deal_weights, strategy);
+                                     range_deals, range_deal_weights);
   }
 
   int worker_count = WorkerCountForSamples(samples);
   if (worker_count <= 1) {
     return evaluate_strategy_samples(samples, player_a_hands, player_b_hands,
-                                     range_deals, range_deal_weights, strategy);
+                                     range_deals, range_deal_weights);
   }
 
   ThreadPoolExecutor executor(worker_count);
@@ -1144,6 +1200,9 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   std::shared_ptr<TerminalUtilityCache> utility_cache = utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider =
       continuation_value_provider_;
+  auto strategy_info_set_ids = info_set_ids_;
+  auto strategy_info_sets = info_sets_;
+  Strategy loaded_strategy_copy = loaded_strategy_;
   std::vector<std::future<double>> futures;
   futures.reserve(worker_count);
   int samples_remaining = samples;
@@ -1153,14 +1212,20 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
     unsigned int seed = worker_seeds[i];
     futures.push_back(executor.submit([config, &player_a_hands,
                                        &player_b_hands, &range_deals,
-                                       &range_deal_weights, &strategy,
+                                       &range_deal_weights,
+                                       &loaded_strategy_copy,
+                                       &strategy_info_set_ids,
+                                       &strategy_info_sets,
                                        utility_cache, continuation_value_provider,
                                        shard_samples, seed]() {
       CFRSolver worker(config, utility_cache, continuation_value_provider);
+      worker.info_set_ids_ = strategy_info_set_ids;
+      worker.info_sets_ = strategy_info_sets;
+      worker.loaded_strategy_ = loaded_strategy_copy;
       worker.rng_.seed(seed);
       return worker.evaluate_strategy_samples(
                  shard_samples, player_a_hands, player_b_hands, range_deals,
-                 range_deal_weights, strategy) *
+                 range_deal_weights) *
              shard_samples;
     }));
   }
@@ -1177,8 +1242,7 @@ double CFRSolver::evaluate_strategy_samples(
     const WeightedHandRange& player_a_hands,
     const WeightedHandRange& player_b_hands,
     const std::vector<RangeDeal>& range_deals,
-    const std::vector<double>& range_deal_weights,
-    const Strategy& strategy) {
+    const std::vector<double>& range_deal_weights) {
   if (samples <= 0) {
     return 0.0;
   }
@@ -1192,15 +1256,14 @@ double CFRSolver::evaluate_strategy_samples(
     const RangeDeal& deal = range_deals[range_deal_distribution(rng_)];
     total += evaluate_strategy_node(
         root, player_a_hands.hands[deal.player_a_index],
-        player_b_hands.hands[deal.player_b_index], strategy);
+        player_b_hands.hands[deal.player_b_index]);
   }
   return total / samples;
 }
 
 double CFRSolver::evaluate_strategy_node(GameTree::Node& node,
                                          const Hand& player_a_hand,
-                                         const Hand& player_b_hand,
-                                         const Strategy& strategy) {
+                                         const Hand& player_b_hand) {
   if (node.is_terminal) {
     return utility(node.state, player_a_hand, player_b_hand);
   }
@@ -1209,8 +1272,8 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node& node,
     return SampleChanceValue(
         *game_tree_, node, player_a_hand, player_b_hand, ChanceSamples(config_),
         rng_, ignored_created_nodes, [&](GameTree::Node& child_node) {
-          return evaluate_strategy_node(child_node, player_a_hand, player_b_hand,
-                                        strategy);
+          return evaluate_strategy_node(child_node, player_a_hand,
+                                        player_b_hand);
         });
   }
   if (node.legal_actions.empty()) {
@@ -1223,33 +1286,18 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node& node,
   }
 
   const Hand& player_hand = player == 0 ? player_a_hand : player_b_hand;
-  std::string info_set_key = info_set_key_to_string(
-      make_info_set_key(node.state, player, player_hand));
-
-  std::vector<int> action_ids;
-  action_ids.reserve(node.legal_actions.size());
-  double probability_sum = 0.0;
-  for (const Action& action : node.legal_actions) {
-    int action_id = ActionKey(action);
-    action_ids.push_back(action_id);
-    probability_sum += strategy.get_action_probability(info_set_key, action_id);
-  }
 
   double value = 0.0;
   int64_t ignored_created_nodes = 0;
-  for (size_t i = 0; i < node.legal_actions.size(); ++i) {
-    const Action& action = node.legal_actions[i];
-    int action_id = action_ids[i];
-    double probability = probability_sum > 0.0
-                             ? strategy.get_action_probability(info_set_key, action_id) /
-                                   probability_sum
-                             : 1.0 / node.legal_actions.size();
+  for (const Action& action : node.legal_actions) {
+    int action_id = ActionKey(action);
+    double probability = average_strategy_action_probability(
+        node.state, player, player_hand, node.legal_actions, action_id);
     GameTree::Node& child_node =
         CachedActionChild(*game_tree_, node, action, action_id,
                           ignored_created_nodes);
     value += probability * evaluate_strategy_node(
-                              child_node, player_a_hand, player_b_hand,
-                              strategy);
+                              child_node, player_a_hand, player_b_hand);
   }
   return value;
 }
@@ -1257,7 +1305,6 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node& node,
 double CFRSolver::best_response_value(GameTree::Node& node,
                                       const Hand& player_a_hand,
                                       const Hand& player_b_hand,
-                                      const Strategy& strategy,
                                       int best_response_player) {
   if (node.is_terminal) {
     double player_a_value =
@@ -1270,7 +1317,7 @@ double CFRSolver::best_response_value(GameTree::Node& node,
         *game_tree_, node, player_a_hand, player_b_hand, ChanceSamples(config_),
         rng_, ignored_created_nodes, [&](GameTree::Node& child_node) {
           return best_response_value(child_node, player_a_hand, player_b_hand,
-                                     strategy, best_response_player);
+                                     best_response_player);
         });
   }
   if (node.legal_actions.empty()) {
@@ -1283,48 +1330,33 @@ double CFRSolver::best_response_value(GameTree::Node& node,
   }
 
   const Hand& player_hand = player == 0 ? player_a_hand : player_b_hand;
-  std::string info_set_key = info_set_key_to_string(
-      make_info_set_key(node.state, player, player_hand));
-
-  std::vector<int> action_ids;
-  action_ids.reserve(node.legal_actions.size());
-  double probability_sum = 0.0;
-  for (const Action& action : node.legal_actions) {
-    int action_id = ActionKey(action);
-    action_ids.push_back(action_id);
-    probability_sum += strategy.get_action_probability(info_set_key, action_id);
-  }
 
   int64_t ignored_created_nodes = 0;
   if (player == best_response_player) {
     double value = -std::numeric_limits<double>::infinity();
-    for (size_t i = 0; i < node.legal_actions.size(); ++i) {
-      const Action& action = node.legal_actions[i];
-      int action_id = action_ids[i];
+    for (const Action& action : node.legal_actions) {
+      int action_id = ActionKey(action);
       GameTree::Node& child_node =
           CachedActionChild(*game_tree_, node, action, action_id,
                             ignored_created_nodes);
       value = std::max(value, best_response_value(
                                   child_node, player_a_hand, player_b_hand,
-                                  strategy, best_response_player));
+                                  best_response_player));
     }
     return value;
   }
 
   double value = 0.0;
-  for (size_t i = 0; i < node.legal_actions.size(); ++i) {
-    const Action& action = node.legal_actions[i];
-    int action_id = action_ids[i];
-    double probability = probability_sum > 0.0
-                             ? strategy.get_action_probability(info_set_key, action_id) /
-                                   probability_sum
-                             : 1.0 / node.legal_actions.size();
+  for (const Action& action : node.legal_actions) {
+    int action_id = ActionKey(action);
+    double probability = average_strategy_action_probability(
+        node.state, player, player_hand, node.legal_actions, action_id);
     GameTree::Node& child_node =
         CachedActionChild(*game_tree_, node, action, action_id,
                           ignored_created_nodes);
     value += probability * best_response_value(
                                child_node, player_a_hand, player_b_hand,
-                               strategy, best_response_player);
+                               best_response_player);
   }
   return value;
 }
@@ -1333,7 +1365,6 @@ double CFRSolver::best_response_value_against_range(
     GameTree::Node& node,
     const Hand& best_response_hand,
     const WeightedHandRangeView& opponent_hands,
-    const Strategy& strategy,
     int best_response_player) {
   double total_weight = TotalWeight(opponent_hands);
   if (total_weight <= 0.0) {
@@ -1379,8 +1410,7 @@ double CFRSolver::best_response_value_against_range(
       child_opponents.reset_to_filtered(opponent_hands.source_range());
       child_opponents.add(sampled_opponent_index, 1.0);
       value += best_response_value_against_range(
-          child_node, best_response_hand, child_opponents, strategy,
-          best_response_player);
+          child_node, best_response_hand, child_opponents, best_response_player);
     }
     return value / samples;
   }
@@ -1404,8 +1434,7 @@ double CFRSolver::best_response_value_against_range(
                             ignored_created_nodes);
       value = std::max(value, best_response_value_against_range(
                                   child_node, best_response_hand,
-                                  opponent_hands, strategy,
-                                  best_response_player));
+                                  opponent_hands, best_response_player));
     }
     return value;
   }
@@ -1421,10 +1450,9 @@ double CFRSolver::best_response_value_against_range(
     child_opponents.reset_to_filtered(opponent_hands.source_range());
     child_opponents.reserve(opponent_hands.size());
     for (size_t i = 0; i < opponent_hands.size(); ++i) {
-      std::string info_set_key = info_set_key_to_string(
-          make_info_set_key(node.state, player, opponent_hands.hand(i)));
-      double probability = StrategyActionProbability(
-          strategy, info_set_key, node.legal_actions, action_id);
+      double probability = average_strategy_action_probability(
+          node.state, player, opponent_hands.hand(i), node.legal_actions,
+          action_id);
       if (probability > 0.0) {
         child_opponents.add(opponent_hands.source_index(i),
                             opponent_hands.weight(i) * probability);
@@ -1435,7 +1463,7 @@ double CFRSolver::best_response_value_against_range(
     if (child_weight > 0.0) {
       value += (child_weight / total_weight) *
                best_response_value_against_range(
-                   child_node, best_response_hand, child_opponents, strategy,
+                   child_node, best_response_hand, child_opponents,
                    best_response_player);
     }
   }
@@ -1446,7 +1474,6 @@ double CFRSolver::sampled_range_best_response_value(
     int samples,
     const HandRange& best_response_range,
     const HandRange& opponent_range,
-    const Strategy& strategy,
     int best_response_player) {
   if (samples <= 0) {
     return 0.0;
@@ -1463,15 +1490,13 @@ double CFRSolver::sampled_range_best_response_value(
 
   if (samples < kParallelBestResponseSampleThreshold) {
     return sampled_range_best_response_samples(
-        samples, best_response_hands, opponent_hands, strategy,
-        best_response_player);
+        samples, best_response_hands, opponent_hands, best_response_player);
   }
 
   int worker_count = WorkerCountForSamples(samples);
   if (worker_count <= 1) {
     return sampled_range_best_response_samples(
-        samples, best_response_hands, opponent_hands, strategy,
-        best_response_player);
+        samples, best_response_hands, opponent_hands, best_response_player);
   }
 
   ThreadPoolExecutor executor(worker_count);
@@ -1486,6 +1511,9 @@ double CFRSolver::sampled_range_best_response_value(
   std::shared_ptr<TerminalUtilityCache> utility_cache = utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider =
       continuation_value_provider_;
+  auto strategy_info_set_ids = info_set_ids_;
+  auto strategy_info_sets = info_sets_;
+  Strategy loaded_strategy_copy = loaded_strategy_;
   std::vector<std::future<double>> futures;
   futures.reserve(worker_count);
   int samples_remaining = samples;
@@ -1494,13 +1522,18 @@ double CFRSolver::sampled_range_best_response_value(
     samples_remaining -= shard_samples;
     unsigned int seed = worker_seeds[i];
     futures.push_back(executor.submit([config, &best_response_hands,
-                                       &opponent_hands, &strategy,
+                                       &opponent_hands, &loaded_strategy_copy,
+                                       &strategy_info_set_ids,
+                                       &strategy_info_sets,
                                        utility_cache, continuation_value_provider,
                                        shard_samples, seed, best_response_player]() {
       CFRSolver worker(config, utility_cache, continuation_value_provider);
+      worker.info_set_ids_ = strategy_info_set_ids;
+      worker.info_sets_ = strategy_info_sets;
+      worker.loaded_strategy_ = loaded_strategy_copy;
       worker.rng_.seed(seed);
       return worker.sampled_range_best_response_samples(
-                 shard_samples, best_response_hands, opponent_hands, strategy,
+                 shard_samples, best_response_hands, opponent_hands,
                  best_response_player) *
              shard_samples;
     }));
@@ -1517,7 +1550,6 @@ double CFRSolver::sampled_range_best_response_samples(
     int samples,
     const WeightedHandRange& best_response_hands,
     const WeightedHandRange& opponent_hands,
-    const Strategy& strategy,
     int best_response_player) {
   if (samples <= 0) {
     return 0.0;
@@ -1538,7 +1570,7 @@ double CFRSolver::sampled_range_best_response_samples(
           "Could not sample non-overlapping hands from ranges");
     }
     total += best_response_value_against_range(root, best_response_hand,
-                                               compatible_opponents, strategy,
+                                               compatible_opponents,
                                                best_response_player);
   }
   return total / samples;
@@ -1571,16 +1603,15 @@ double CFRSolver::calculate_exploitability(int samples,
     return 0.0;
   }
 
-  Strategy strategy = get_equilibrium_strategy();
   double strategy_player_a_value =
       evaluate_strategy(samples, player_a_range, player_b_range);
   double player_a_gap =
       sampled_range_best_response_value(samples, player_a_range, player_b_range,
-                                        strategy, 0) -
+                                        0) -
       strategy_player_a_value;
   double player_b_gap =
       sampled_range_best_response_value(samples, player_b_range, player_a_range,
-                                        strategy, 1) +
+                                        1) +
       strategy_player_a_value;
   return (std::max(0.0, player_a_gap) + std::max(0.0, player_b_gap)) / 2.0;
 }
@@ -1589,31 +1620,28 @@ double CFRSolver::calculate_player_a_best_response_value(
     int samples,
     const HandRange& player_a_range,
     const HandRange& player_b_range) {
-  Strategy strategy = get_equilibrium_strategy();
   return sampled_range_best_response_value(samples, player_a_range,
-                                           player_b_range, strategy, 0);
+                                           player_b_range, 0);
 }
 
 double CFRSolver::calculate_player_b_best_response_value(
     int samples,
     const HandRange& player_a_range,
     const HandRange& player_b_range) {
-  Strategy strategy = get_equilibrium_strategy();
   return sampled_range_best_response_value(samples, player_b_range,
-                                           player_a_range, strategy, 1);
+                                           player_a_range, 1);
 }
 
 double CFRSolver::calculate_exploitability(const Hand& player_a_hand,
                                            const Hand& player_b_hand) {
-  Strategy strategy = get_equilibrium_strategy();
   GameTree::Node& root = get_or_build_root();
   double strategy_player_a_value =
-      evaluate_strategy_node(root, player_a_hand, player_b_hand, strategy);
+      evaluate_strategy_node(root, player_a_hand, player_b_hand);
   double player_a_gap =
-      best_response_value(root, player_a_hand, player_b_hand, strategy, 0) -
+      best_response_value(root, player_a_hand, player_b_hand, 0) -
       strategy_player_a_value;
   double player_b_gap =
-      best_response_value(root, player_a_hand, player_b_hand, strategy, 1) +
+      best_response_value(root, player_a_hand, player_b_hand, 1) +
       strategy_player_a_value;
   return (std::max(0.0, player_a_gap) + std::max(0.0, player_b_gap)) / 2.0;
 }
@@ -1629,7 +1657,6 @@ Action CFRSolver::get_best_response_action(GameTree::Node& node,
     return no_action;
   }
 
-  Strategy strategy = get_equilibrium_strategy();
   double best_value = -std::numeric_limits<double>::infinity();
   Action best_action = no_action;
   int64_t ignored_created_nodes = 0;
@@ -1639,8 +1666,7 @@ Action CFRSolver::get_best_response_action(GameTree::Node& node,
         CachedActionChild(*game_tree_, node, action, action_id,
                           ignored_created_nodes);
     double value = best_response_value(child_node, player_a_hand,
-                                       player_b_hand, strategy,
-                                       best_response_player);
+                                       player_b_hand, best_response_player);
     if (value > best_value) {
       best_value = value;
       best_action = action;
@@ -1695,7 +1721,7 @@ void CFRSolver::load_strategy(const std::string& filename) {
     return;
   }
 
-  current_strategy_.clear();
+  loaded_strategy_.clear();
   info_set_ids_.clear();
   info_sets_.clear();
 
@@ -1707,7 +1733,7 @@ void CFRSolver::load_strategy(const std::string& filename) {
         action_probs[action_id] = action.probability();
       }
     }
-    current_strategy_.update(info_set.info_set_key(), action_probs);
+    loaded_strategy_.update(info_set.info_set_key(), action_probs);
   }
 }
 

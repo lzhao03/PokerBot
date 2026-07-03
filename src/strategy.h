@@ -36,6 +36,7 @@ public:
   std::vector<std::string> get_info_sets() const;
   
   bool has_info_set(const std::string& info_set_key) const;
+  bool empty() const;
   
   void clear();
   
