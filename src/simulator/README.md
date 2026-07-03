@@ -39,16 +39,16 @@ BoardState state;
 Hand p0_hole, p1_hole;
 
 // Start a new hand
-simulator.StartNewHand(config, &state, &p0_hole, &p1_hole);
+simulator.StartNewHand(config, state, p0_hole, p1_hole);
 
 // Apply actions
 Action action;
 action.set_action(ActionType::CALL);
 action.set_amount(2);
-simulator.ApplyAction(action, &state);
+simulator.ApplyAction(action, state);
 
 // Advance streets when betting is complete
-simulator.AdvanceIfReady(&state);
+simulator.AdvanceIfReady(state);
 
 // Check if hand is finished
 if (simulator.IsTerminal(state)) {

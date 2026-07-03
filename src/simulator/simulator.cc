@@ -1,16 +1,18 @@
 #include "simulator.h"
 
+#include "src/card.h"
+
 #include <algorithm>
 #include <unordered_map>
 
 namespace poker {
 
 namespace {
-void SetStack(BoardState* s, int player, int value) {
+void SetStack(BoardState& s, int player, int value) {
   if (player == 0) {
-    s->set_stack_a(value);
+    s.set_stack_a(value);
   } else {
-    s->set_stack_b(value);
+    s.set_stack_b(value);
   }
 }
 
@@ -21,49 +23,47 @@ int GetStack(const BoardState& s, int player) {
 int Opp(int p) { return 1 - p; }
 }
 
-bool NoLimitHoldemSimulator::StartNewHand(const Config& cfg, BoardState* state,
-                                          Hand* p0_hole, Hand* p1_hole) {
-  if (!state || !p0_hole || !p1_hole) return false;
-
+bool NoLimitHoldemSimulator::StartNewHand(const Config& cfg, BoardState& state,
+                                          Hand& p0_hole, Hand& p1_hole) {
   // Reset state
-  state->Clear();
-  state->set_stack_a(cfg.starting_stack);
-  state->set_stack_b(cfg.starting_stack);
-  state->set_pot(0);
-  state->mutable_cards()->Clear();
-  state->mutable_history()->mutable_actions()->Clear();
-  state->set_street(Street::PREFLOP);
-  state->set_all_in(false);
-  state->set_folded_player(-1);
-  state->mutable_player_contribution()->Clear();
-  state->add_player_contribution(0.0);
-  state->add_player_contribution(0.0);
-  state->set_player_to_act(0);  // SB acts first preflop in heads-up
+  state.Clear();
+  state.set_stack_a(cfg.starting_stack);
+  state.set_stack_b(cfg.starting_stack);
+  state.set_pot(0);
+  state.mutable_cards()->Clear();
+  state.mutable_history()->mutable_actions()->Clear();
+  state.set_street(Street::PREFLOP);
+  state.set_all_in(false);
+  state.set_folded_player(-1);
+  state.mutable_player_contribution()->Clear();
+  state.add_player_contribution(0.0);
+  state.add_player_contribution(0.0);
+  state.set_player_to_act(0);  // SB acts first preflop in heads-up
 
   BuildFreshDeck();
   ShuffleDeck();
   DealHoles(p0_hole, p1_hole);
 
   // Post blinds: player 0 = SB, player 1 = BB
-  int sb = std::min(cfg.small_blind, GetStack(*state, 0));
-  int bb = std::min(cfg.big_blind, GetStack(*state, 1));
-  SetStack(state, 0, GetStack(*state, 0) - sb);
-  SetStack(state, 1, GetStack(*state, 1) - bb);
-  state->set_pot(state->pot() + sb + bb);
-  (*state->mutable_player_contribution())[0] += sb;
-  (*state->mutable_player_contribution())[1] += bb;
+  int sb = std::min(cfg.small_blind, GetStack(state, 0));
+  int bb = std::min(cfg.big_blind, GetStack(state, 1));
+  SetStack(state, 0, GetStack(state, 0) - sb);
+  SetStack(state, 1, GetStack(state, 1) - bb);
+  state.set_pot(state.pot() + sb + bb);
+  (*state.mutable_player_contribution())[0] += sb;
+  (*state.mutable_player_contribution())[1] += bb;
 
   // Record blind actions (as BET for simplicity)
   Action a_sb; a_sb.set_action(ActionType::BET); a_sb.set_amount(sb);
   Action a_bb; a_bb.set_action(ActionType::BET); a_bb.set_amount(bb);
   a_sb.set_player(0);
   a_bb.set_player(1);
-  *state->mutable_history()->add_actions() = a_sb;
-  *state->mutable_history()->add_actions() = a_bb;
+  *state.mutable_history()->add_actions() = a_sb;
+  *state.mutable_history()->add_actions() = a_bb;
 
   // If either blind is all-in (short stack), mark all_in
-  if (GetStack(*state, 0) == 0 || GetStack(*state, 1) == 0) {
-    state->set_all_in(true);
+  if (GetStack(state, 0) == 0 || GetStack(state, 1) == 0) {
+    state.set_all_in(true);
   }
 
   return true;
@@ -74,8 +74,7 @@ void NoLimitHoldemSimulator::BuildFreshDeck() {
   deck_.reserve(52);
   for (int suit = Suit::HEARTS; suit <= Suit::SPADES; ++suit) {
     for (int rank = 1; rank <= 13; ++rank) {  // 1=Ace ... 13=King
-      Card c; c.set_rank(rank); c.set_suit(static_cast<Suit>(suit));
-      deck_.push_back(c);
+      deck_.push_back(MakeCard(rank, static_cast<Suit>(suit)));
     }
   }
   deck_index_ = 0;
@@ -83,19 +82,19 @@ void NoLimitHoldemSimulator::BuildFreshDeck() {
 
 void NoLimitHoldemSimulator::ShuffleDeck() { std::shuffle(deck_.begin(), deck_.end(), rng_); }
 
-void NoLimitHoldemSimulator::DealHoles(Hand* p0_hole, Hand* p1_hole) {
-  p0_hole->mutable_cards()->Clear();
-  p1_hole->mutable_cards()->Clear();
+void NoLimitHoldemSimulator::DealHoles(Hand& p0_hole, Hand& p1_hole) {
+  p0_hole.mutable_cards()->Clear();
+  p1_hole.mutable_cards()->Clear();
   // Deal two cards each alternating
   for (int i = 0; i < 2; ++i) {
-    *p0_hole->add_cards() = deck_[deck_index_++];
-    *p1_hole->add_cards() = deck_[deck_index_++];
+    *p0_hole.add_cards() = deck_[deck_index_++];
+    *p1_hole.add_cards() = deck_[deck_index_++];
   }
 }
 
-void NoLimitHoldemSimulator::DealCommunity(BoardState* state, int n) {
+void NoLimitHoldemSimulator::DealCommunity(BoardState& state, int n) {
   for (int i = 0; i < n; ++i) {
-    *state->add_cards() = deck_[deck_index_++];
+    *state.add_cards() = deck_[deck_index_++];
   }
 }
 
@@ -124,9 +123,9 @@ bool NoLimitHoldemSimulator::BettingRoundOver(const BoardState& state) const {
   return false;
 }
 
-bool NoLimitHoldemSimulator::ApplyAction(const Action& action, BoardState* state) {
-  if (!state || IsTerminal(*state)) return false;
-  int p = state->player_to_act();
+bool NoLimitHoldemSimulator::ApplyAction(const Action& action, BoardState& state) {
+  if (IsTerminal(state)) return false;
+  int p = state.player_to_act();
   int opp = Opp(p);
 
   Action applied = action;  // we'll clamp/adjust amount
@@ -134,37 +133,37 @@ bool NoLimitHoldemSimulator::ApplyAction(const Action& action, BoardState* state
 
   switch (action.action()) {
     case ActionType::FOLD: {
-      state->set_folded_player(p);
-      *state->mutable_history()->add_actions() = applied;
+      state.set_folded_player(p);
+      *state.mutable_history()->add_actions() = applied;
       return true;  // terminal via fold
     }
     case ActionType::CHECK: {
-      if (OutstandingToCall(*state, p) != 0) return false;  // illegal check facing bet
+      if (OutstandingToCall(state, p) != 0) return false;  // illegal check facing bet
       applied.set_amount(0);
-      *state->mutable_history()->add_actions() = applied;
-      state->set_player_to_act(opp);
+      *state.mutable_history()->add_actions() = applied;
+      state.set_player_to_act(opp);
       return true;
     }
     case ActionType::CALL: {
-      int to_call = OutstandingToCall(*state, p);
+      int to_call = OutstandingToCall(state, p);
       if (to_call == 0) return false;  // nothing to call
-      int pay = std::min(to_call, GetStack(*state, p));
+      int pay = std::min(to_call, GetStack(state, p));
       // Update contributions, stacks, pot
-      (*state->mutable_player_contribution())[p] += pay;
-      SetStack(state, p, GetStack(*state, p) - pay);
-      state->set_pot(state->pot() + pay);
+      (*state.mutable_player_contribution())[p] += pay;
+      SetStack(state, p, GetStack(state, p) - pay);
+      state.set_pot(state.pot() + pay);
       applied.set_amount(pay);
-      *state->mutable_history()->add_actions() = applied;
-      if (GetStack(*state, p) == 0) state->set_all_in(true);
-      state->set_player_to_act(opp);
+      *state.mutable_history()->add_actions() = applied;
+      if (GetStack(state, p) == 0) state.set_all_in(true);
+      state.set_player_to_act(opp);
       return true;
     }
     case ActionType::BET:
     case ActionType::RAISE:
     case ActionType::ALL_IN: {
-      int stack = GetStack(*state, p);
+      int stack = GetStack(state, p);
       if (stack <= 0) return false;
-      int to_call = OutstandingToCall(*state, p);
+      int to_call = OutstandingToCall(state, p);
       int commit = 0;
       if (action.action() == ActionType::ALL_IN) {
         commit = stack;  // push all remaining
@@ -177,13 +176,13 @@ bool NoLimitHoldemSimulator::ApplyAction(const Action& action, BoardState* state
         commit = std::min(stack, to_call + 1);
       }
       // Apply commit
-      (*state->mutable_player_contribution())[p] += commit;
-      SetStack(state, p, GetStack(*state, p) - commit);
-      state->set_pot(state->pot() + commit);
+      (*state.mutable_player_contribution())[p] += commit;
+      SetStack(state, p, GetStack(state, p) - commit);
+      state.set_pot(state.pot() + commit);
       applied.set_amount(commit);
-      *state->mutable_history()->add_actions() = applied;
-      if (GetStack(*state, p) == 0) state->set_all_in(true);
-      state->set_player_to_act(opp);
+      *state.mutable_history()->add_actions() = applied;
+      if (GetStack(state, p) == 0) state.set_all_in(true);
+      state.set_player_to_act(opp);
       return true;
     }
     default:
@@ -191,29 +190,28 @@ bool NoLimitHoldemSimulator::ApplyAction(const Action& action, BoardState* state
   }
 }
 
-bool NoLimitHoldemSimulator::AdvanceIfReady(BoardState* state) {
-  if (!state) return false;
-  if (IsTerminal(*state)) return false;
+bool NoLimitHoldemSimulator::AdvanceIfReady(BoardState& state) {
+  if (IsTerminal(state)) return false;
 
-  if (!BettingRoundOver(*state)) return false;
+  if (!BettingRoundOver(state)) return false;
 
   // If we are on river and betting is over, hand is terminal (showdown or fold already handled).
-  if (state->street() == Street::RIVER) {
+  if (state.street() == Street::RIVER) {
     return true;  // nothing to deal; terminal achieved
   }
 
   // Advance street and deal community cards
-  switch (state->street()) {
+  switch (state.street()) {
     case Street::PREFLOP:
-      state->set_street(Street::FLOP);
+      state.set_street(Street::FLOP);
       DealCommunity(state, 3);
       break;
     case Street::FLOP:
-      state->set_street(Street::TURN);
+      state.set_street(Street::TURN);
       DealCommunity(state, 1);
       break;
     case Street::TURN:
-      state->set_street(Street::RIVER);
+      state.set_street(Street::RIVER);
       DealCommunity(state, 1);
       break;
     default:
@@ -221,7 +219,7 @@ bool NoLimitHoldemSimulator::AdvanceIfReady(BoardState* state) {
   }
 
   // Reset action context for next street: the next player to act is SB? In heads-up, first postflop actor is player 1 (BB)
-  state->set_player_to_act(1);
+  state.set_player_to_act(1);
   // No need to reset contributions since we store total; betting logic relies on equality only.
 
   return true;

@@ -35,15 +35,15 @@ class NoLimitHoldemSimulator {
 
   // Starts a new hand: shuffles, deals hole cards, posts blinds, and initializes state.
   // Returns true on success.
-  bool StartNewHand(const Config& cfg, BoardState* state, Hand* p0_hole,
-                    Hand* p1_hole);
+  bool StartNewHand(const Config& cfg, BoardState& state, Hand& p0_hole,
+                    Hand& p1_hole);
 
   // Apply an action for the current player_to_act. Returns false if illegal.
-  bool ApplyAction(const Action& action, BoardState* state);
+  bool ApplyAction(const Action& action, BoardState& state);
 
   // If the betting round is complete and hand not terminal, advance to next street
   // and deal community cards. Returns true if advanced.
-  bool AdvanceIfReady(BoardState* state);
+  bool AdvanceIfReady(BoardState& state);
 
   // Returns whether the hand is finished (fold or completed showdown logic pending).
   bool IsTerminal(const BoardState& state) const;
@@ -76,8 +76,8 @@ class NoLimitHoldemSimulator {
   // Deck helpers
   void BuildFreshDeck();
   void ShuffleDeck();
-  void DealCommunity(BoardState* state, int n);
-  void DealHoles(Hand* p0_hole, Hand* p1_hole);
+  void DealCommunity(BoardState& state, int n);
+  void DealHoles(Hand& p0_hole, Hand& p1_hole);
 
   // Betting helpers
   bool BettingRoundOver(const BoardState& state) const;

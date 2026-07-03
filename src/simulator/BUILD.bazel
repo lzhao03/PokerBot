@@ -11,6 +11,7 @@ cc_library(
     srcs = ["simulator.cc"],
     hdrs = ["simulator.h"],
     deps = [
+        "//src:card",
         ":poker_cc_proto",
     ],
     visibility = ["//visibility:public"],

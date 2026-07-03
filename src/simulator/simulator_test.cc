@@ -1,13 +1,17 @@
 #include "simulator.h"
 
-#include <iostream>
+#include <array>
 #include <iomanip>
+#include <iostream>
+#include <string_view>
 
 namespace poker {
 
 void PrintCard(const Card& card) {
-  const char* ranks[] = {"", "A", "2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"};
-  const char* suits[] = {"?", "♥", "♦", "♣", "♠"};
+  constexpr std::array<std::string_view, 15> ranks = {
+      "", "A", "2", "3", "4", "5", "6", "7",
+      "8", "9", "T", "J", "Q", "K", "A"};
+  constexpr std::array<std::string_view, 5> suits = {"?", "♥", "♦", "♣", "♠"};
   
   if (card.rank() >= 1 && card.rank() <= 13) {
     std::cout << ranks[card.rank()] << suits[static_cast<int>(card.suit())];
@@ -74,7 +78,7 @@ void RunSimpleGame() {
   Hand p0_hole, p1_hole;
   
   // Start new hand
-  if (!simulator.StartNewHand(config, &state, &p0_hole, &p1_hole)) {
+  if (!simulator.StartNewHand(config, state, p0_hole, p1_hole)) {
     std::cout << "Failed to start hand!" << std::endl;
     return;
   }
@@ -92,7 +96,7 @@ void RunSimpleGame() {
   call.set_action(ActionType::CALL);
   call.set_amount(1);  // Call the remaining 1 to match BB
   
-  if (simulator.ApplyAction(call, &state)) {
+  if (simulator.ApplyAction(call, state)) {
     PrintAction(call, 0);
     PrintBoard(state);
   }
@@ -102,13 +106,13 @@ void RunSimpleGame() {
   check.set_action(ActionType::CHECK);
   check.set_amount(0);
   
-  if (simulator.ApplyAction(check, &state)) {
+  if (simulator.ApplyAction(check, state)) {
     PrintAction(check, 1);
     PrintBoard(state);
   }
   
   // Advance to flop
-  if (simulator.AdvanceIfReady(&state)) {
+  if (simulator.AdvanceIfReady(state)) {
     std::cout << "\n--- Flop ---" << std::endl;
     PrintBoard(state);
   }
@@ -118,7 +122,7 @@ void RunSimpleGame() {
   bet.set_action(ActionType::BET);
   bet.set_amount(5);
   
-  if (simulator.ApplyAction(bet, &state)) {
+  if (simulator.ApplyAction(bet, state)) {
     PrintAction(bet, 1);
     PrintBoard(state);
   }
@@ -128,13 +132,13 @@ void RunSimpleGame() {
   call_flop.set_action(ActionType::CALL);
   call_flop.set_amount(5);
   
-  if (simulator.ApplyAction(call_flop, &state)) {
+  if (simulator.ApplyAction(call_flop, state)) {
     PrintAction(call_flop, 0);
     PrintBoard(state);
   }
   
   // Advance to turn
-  if (simulator.AdvanceIfReady(&state)) {
+  if (simulator.AdvanceIfReady(state)) {
     std::cout << "\n--- Turn ---" << std::endl;
     PrintBoard(state);
   }
@@ -142,18 +146,18 @@ void RunSimpleGame() {
   // Both check
   Action check_turn1;
   check_turn1.set_action(ActionType::CHECK);
-  if (simulator.ApplyAction(check_turn1, &state)) {
+  if (simulator.ApplyAction(check_turn1, state)) {
     PrintAction(check_turn1, 1);
   }
   
   Action check_turn2;
   check_turn2.set_action(ActionType::CHECK);
-  if (simulator.ApplyAction(check_turn2, &state)) {
+  if (simulator.ApplyAction(check_turn2, state)) {
     PrintAction(check_turn2, 0);
   }
   
   // Advance to river
-  if (simulator.AdvanceIfReady(&state)) {
+  if (simulator.AdvanceIfReady(state)) {
     std::cout << "\n--- River ---" << std::endl;
     PrintBoard(state);
   }
@@ -161,13 +165,13 @@ void RunSimpleGame() {
   // Both check to showdown
   Action check_river1;
   check_river1.set_action(ActionType::CHECK);
-  if (simulator.ApplyAction(check_river1, &state)) {
+  if (simulator.ApplyAction(check_river1, state)) {
     PrintAction(check_river1, 1);
   }
   
   Action check_river2;
   check_river2.set_action(ActionType::CHECK);
-  if (simulator.ApplyAction(check_river2, &state)) {
+  if (simulator.ApplyAction(check_river2, state)) {
     PrintAction(check_river2, 0);
   }
   
