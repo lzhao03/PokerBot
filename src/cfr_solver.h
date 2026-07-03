@@ -17,6 +17,7 @@
 namespace poker {
 
 class HandRange;
+class ContinuationValueProvider;
 class TerminalUtilityCache;
 
 class CFRSolver {
@@ -108,6 +109,9 @@ private:
 
   CFRSolver(const PokerConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache);
+  CFRSolver(const PokerConfig& config,
+            std::shared_ptr<TerminalUtilityCache> utility_cache,
+            std::shared_ptr<ContinuationValueProvider> continuation_value_provider);
 
   PokerConfig config_;
   GameTree* game_tree_;
@@ -120,6 +124,7 @@ private:
   TraversalStats traversal_stats_;
   std::unordered_set<std::string> visited_canonical_states_;
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
+  std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
   
   // CFR+ clipped regret tracking for each information set and action.
   std::unordered_map<std::string, std::unordered_map<int, double>> cumulative_regrets_;

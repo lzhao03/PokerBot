@@ -1,4 +1,5 @@
 #include "src/cfr_solver.h"
+#include "src/continuation_value.h"
 #include "src/hand_range.h"
 
 #include <algorithm>
@@ -6,6 +7,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -62,6 +64,12 @@ class CFRSolverRegretTestPeer {
     return solver.utility(state, player_a_hand, player_b_hand);
   }
 
+  static void SetContinuationValueProvider(
+      CFRSolver& solver,
+      std::shared_ptr<ContinuationValueProvider> provider) {
+    solver.continuation_value_provider_ = std::move(provider);
+  }
+
   static std::vector<double> CompatibleDealWeights(
       const HandRange& player_a_range,
       const HandRange& player_b_range) {
@@ -87,6 +95,25 @@ void Expect(bool condition, const char* message) {
     throw std::runtime_error(message);
   }
 }
+
+class FixedContinuationValueProvider : public ContinuationValueProvider {
+ public:
+  explicit FixedContinuationValueProvider(double value) : value_(value) {}
+
+  double value(GameTree* game_tree,
+               const BoardState& state,
+               const Hand& player_a_hand,
+               const Hand& player_b_hand) const override {
+    (void)game_tree;
+    (void)state;
+    (void)player_a_hand;
+    (void)player_b_hand;
+    return value_;
+  }
+
+ private:
+  double value_;
+};
 
 Action MakeAction(ActionType type, int amount = 0) {
   Action action;
@@ -1056,6 +1083,30 @@ void CheckDepthLimitDoesNotScoreUncalledBet() {
   Expect(value == 0.0, "depth cutoff should not score unresolved bets");
 }
 
+void CheckDepthLimitUsesContinuationValueProvider() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+
+  CFRSolver solver(config);
+  CFRSolverRegretTestPeer::SetContinuationValueProvider(
+      solver, std::make_shared<FixedContinuationValueProvider>(7.0));
+
+  GameTree::Node node;
+  node.state.set_player_to_act(0);
+  node.state.set_folded_player(-1);
+  node.player_to_act = 0;
+  node.legal_actions.push_back(MakeAction(ActionType::CHECK));
+
+  Hand player_a_hand;
+  Hand player_b_hand;
+  std::vector<double> reach_probabilities = {1.0, 1.0};
+  double value =
+      solver.cfr(&node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
+
+  Expect(value == 7.0,
+         "depth cutoff should use the continuation value provider");
+}
+
 void CheckZeroMaxDepthDoesNotCutOff() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -1482,6 +1533,7 @@ int main() {
   CheckTerminalUtilityBeatsDepthLimit();
   CheckDepthLimitUsesShowdownUtility();
   CheckDepthLimitDoesNotScoreUncalledBet();
+  CheckDepthLimitUsesContinuationValueProvider();
   CheckZeroMaxDepthDoesNotCutOff();
   CheckChanceDoesNotConsumeDepth();
   CheckChanceSamplesVisitMultipleBoards();

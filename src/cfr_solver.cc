@@ -1,5 +1,6 @@
 #include "src/cfr_solver.h"
 #include "src/card_utils.h"
+#include "src/continuation_value.h"
 #include "src/hand_range.h"
 #include "src/terminal_utility_cache.h"
 #include "src/thread_pool.h"
@@ -203,6 +204,14 @@ CFRSolver::CFRSolver(const PokerConfig& config)
 
 CFRSolver::CFRSolver(const PokerConfig& config,
                      std::shared_ptr<TerminalUtilityCache> utility_cache)
+    : CFRSolver(config, std::move(utility_cache),
+                std::make_shared<BettingRoundTerminalValueProvider>()) {
+}
+
+CFRSolver::CFRSolver(
+    const PokerConfig& config,
+    std::shared_ptr<TerminalUtilityCache> utility_cache,
+    std::shared_ptr<ContinuationValueProvider> continuation_value_provider)
   : config_(config),
     game_tree_(new GameTree(config)),
     hand_evaluator_(new HandEvaluator()),
@@ -211,7 +220,8 @@ CFRSolver::CFRSolver(const PokerConfig& config,
     cumulative_root_utility_(0.0),
     iterations_run_(0),
     cfr_update_count_(0),
-    utility_cache_(std::move(utility_cache)) {
+    utility_cache_(std::move(utility_cache)),
+    continuation_value_provider_(std::move(continuation_value_provider)) {
 }
 
 CFRSolver::~CFRSolver() {
@@ -385,10 +395,8 @@ double CFRSolver::cfr(GameTree::Node* node,
 
   // Check depth limit to prevent infinite recursion
   if (max_depth > 0 && depth >= max_depth) {
-    if (game_tree_->is_betting_round_over(node->state)) {
-      return game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
-    }
-    return 0.0;
+    return continuation_value_provider_->value(
+        game_tree_, node->state, player_a_hand, player_b_hand);
   }
   
   // Get the player to act at this node
@@ -591,6 +599,8 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
 
   PokerConfig config = config_;
   std::shared_ptr<TerminalUtilityCache> utility_cache = utility_cache_;
+  std::shared_ptr<ContinuationValueProvider> continuation_value_provider =
+      continuation_value_provider_;
   std::vector<std::future<double>> futures;
   futures.reserve(worker_count);
   int samples_remaining = samples;
@@ -600,8 +610,9 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
     unsigned int seed = worker_seeds[i];
     futures.push_back(executor.submit([config, &range_deals,
                                        &range_deal_weights, &strategy,
-                                       utility_cache, shard_samples, seed]() {
-      CFRSolver worker(config, utility_cache);
+                                       utility_cache, continuation_value_provider,
+                                       shard_samples, seed]() {
+      CFRSolver worker(config, utility_cache, continuation_value_provider);
       worker.rng_.seed(seed);
       return worker.evaluate_strategy_samples(
                  shard_samples, range_deals, range_deal_weights, strategy) *
@@ -913,6 +924,8 @@ double CFRSolver::sampled_range_best_response_value(
 
   PokerConfig config = config_;
   std::shared_ptr<TerminalUtilityCache> utility_cache = utility_cache_;
+  std::shared_ptr<ContinuationValueProvider> continuation_value_provider =
+      continuation_value_provider_;
   std::vector<std::future<double>> futures;
   futures.reserve(worker_count);
   int samples_remaining = samples;
@@ -922,9 +935,9 @@ double CFRSolver::sampled_range_best_response_value(
     unsigned int seed = worker_seeds[i];
     futures.push_back(executor.submit([config, &best_response_hands,
                                        &opponent_hands, &strategy,
-                                       utility_cache, shard_samples, seed,
-                                       best_response_player]() {
-      CFRSolver worker(config, utility_cache);
+                                       utility_cache, continuation_value_provider,
+                                       shard_samples, seed, best_response_player]() {
+      CFRSolver worker(config, utility_cache, continuation_value_provider);
       worker.rng_.seed(seed);
       return worker.sampled_range_best_response_samples(
                  shard_samples, best_response_hands, opponent_hands, strategy,

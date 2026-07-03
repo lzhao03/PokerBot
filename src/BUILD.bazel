@@ -143,6 +143,17 @@ cc_test(
 )
 
 cc_library(
+    name = "continuation_value",
+    srcs = ["continuation_value.cc"],
+    hdrs = ["continuation_value.h"],
+    deps = [
+        ":game_tree",
+        ":poker_cc_proto",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "terminal_utility_cache",
     srcs = ["terminal_utility_cache.cc"],
     hdrs = ["terminal_utility_cache.h"],
@@ -158,6 +169,7 @@ cc_library(
     hdrs = ["cfr_solver.h"],
     deps = [
         ":card_utils",
+        ":continuation_value",
         ":poker_cc_proto",
         ":hand_evaluator",
         ":game_tree",
@@ -176,6 +188,7 @@ cc_test(
     srcs = ["cfr_solver_test.cc"],
     deps = [
         ":cfr_solver",
+        ":continuation_value",
     ],
 )
 
