@@ -135,6 +135,9 @@ private:
   std::unordered_set<std::string> visited_canonical_states_;
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
+  std::vector<std::pair<Hand, double>> active_player_a_range_;
+  std::vector<std::pair<Hand, double>> active_player_b_range_;
+  bool active_ranges_enabled_ = false;
   
   // CFR+ clipped regret tracking for each information set and action.
   std::unordered_map<std::string, std::unordered_map<int, double>> cumulative_regrets_;

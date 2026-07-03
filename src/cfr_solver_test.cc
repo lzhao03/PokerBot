@@ -102,16 +102,31 @@ class FixedContinuationValueProvider : public ContinuationValueProvider {
     (void)game_tree;
     ++calls_;
     saw_empty_ranges_ = !context.has_ranges();
+    if (context.has_ranges()) {
+      saw_ranges_ = true;
+      last_player_a_range_size_ = context.player_a_range.size();
+      last_player_b_range_size_ = context.player_b_range.size();
+    }
     return value_;
   }
 
   int calls() const { return calls_; }
   bool saw_empty_ranges() const { return saw_empty_ranges_; }
+  bool saw_ranges() const { return saw_ranges_; }
+  size_t last_player_a_range_size() const {
+    return last_player_a_range_size_;
+  }
+  size_t last_player_b_range_size() const {
+    return last_player_b_range_size_;
+  }
 
  private:
   double value_;
   mutable int calls_ = 0;
   mutable bool saw_empty_ranges_ = false;
+  mutable bool saw_ranges_ = false;
+  mutable size_t last_player_a_range_size_ = 0;
+  mutable size_t last_player_b_range_size_ = 0;
 };
 
 Action MakeAction(ActionType type, int amount = 0) {
@@ -985,6 +1000,23 @@ BoardState FoldedState(int folded_player) {
   return state;
 }
 
+BoardState FlopRangeCutoffState() {
+  BoardState state;
+  state.set_stack_a(20);
+  state.set_stack_b(20);
+  state.set_pot(0);
+  state.set_street(Street::FLOP);
+  state.set_all_in(false);
+  state.set_folded_player(-1);
+  state.set_player_to_act(1);
+  state.add_player_contribution(0);
+  state.add_player_contribution(0);
+  AddCard(&state, 2, Suit::HEARTS);
+  AddCard(&state, 7, Suit::DIAMONDS);
+  AddCard(&state, 9, Suit::CLUBS);
+  return state;
+}
+
 void CheckRunFixedHandsUsesCustomInitialState() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -1238,6 +1270,33 @@ void CheckDepthLimitUsesContinuationValueProvider() {
          "depth cutoff should pass through the continuation provider");
   Expect(provider->saw_empty_ranges(),
          "exact-hand CFR cutoff context should not include ranges yet");
+}
+
+void CheckRangeRunPassesContinuationRanges() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+
+  HandRange player_a_range;
+  player_a_range.set_from_string("AA,KK");
+  HandRange player_b_range;
+  player_b_range.set_from_string("QQ,JJ");
+
+  CFRSolver solver(config, FlopRangeCutoffState());
+  auto provider = std::make_shared<FixedContinuationValueProvider>(7.0);
+  solver.set_continuation_value_provider(provider);
+  solver.run(1, player_a_range, player_b_range);
+
+  Expect(provider->calls() > 0,
+         "range-trained run should hit the continuation provider");
+  Expect(provider->saw_ranges(),
+         "range-trained cutoff context should include configured ranges");
+  Expect(provider->last_player_a_range_size() ==
+             player_a_range.get_all_weighted_combos().size(),
+         "player A continuation range should include compatible configured hands");
+  Expect(provider->last_player_b_range_size() ==
+             player_b_range.get_all_weighted_combos().size(),
+         "player B continuation range should include compatible configured hands");
 }
 
 void CheckZeroMaxDepthDoesNotCutOff() {
@@ -1668,6 +1727,7 @@ int main() {
   CheckDepthLimitUsesShowdownUtility();
   CheckDepthLimitDoesNotScoreUncalledBet();
   CheckDepthLimitUsesContinuationValueProvider();
+  CheckRangeRunPassesContinuationRanges();
   CheckExactHandNestedCfrContinuationSolvesRiverCallSubgame();
   CheckExactHandNestedCfrContinuationCachesSubgames();
   CheckExactHandNestedCfrContinuationSeparatesPrivateHands();

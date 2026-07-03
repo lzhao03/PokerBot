@@ -84,6 +84,19 @@ std::vector<std::pair<Hand, double>> CompatibleHands(
   return compatible_hands;
 }
 
+std::vector<std::pair<Hand, double>> PublicCompatibleRange(
+    const std::vector<std::pair<Hand, double>>& hands,
+    const BoardState& state) {
+  std::vector<std::pair<Hand, double>> compatible_hands;
+  compatible_hands.reserve(hands.size());
+  for (const auto& hand : hands) {
+    if (hand.second > 0.0 && !HandOverlapsBoard(hand.first, state)) {
+      compatible_hands.push_back(hand);
+    }
+  }
+  return compatible_hands;
+}
+
 std::vector<double> WeightsFor(
     const std::vector<std::pair<Hand, double>>& hands) {
   std::vector<double> weights;
@@ -331,14 +344,17 @@ void CFRSolver::run(int iterations, const HandRange& player_a_range,
 void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
                                const HandRange* player_b_range,
                                bool train_swapped) {
+  std::vector<std::pair<Hand, double>> player_a_hands;
+  std::vector<std::pair<Hand, double>> player_b_hands;
   std::vector<RangeDeal> range_deals;
   std::vector<double> range_deal_weights;
   std::discrete_distribution<size_t> range_deal_distribution;
   if (iterations > 0 && player_a_range != nullptr &&
       player_b_range != nullptr) {
-    range_deals = build_compatible_range_deals(
-        player_a_range->get_all_weighted_combos(),
-        player_b_range->get_all_weighted_combos());
+    player_a_hands = player_a_range->get_all_weighted_combos();
+    player_b_hands = player_b_range->get_all_weighted_combos();
+    range_deals =
+        build_compatible_range_deals(player_a_hands, player_b_hands);
     if (range_deals.empty()) {
       throw std::invalid_argument(
           "Could not sample non-overlapping hands from ranges");
@@ -370,6 +386,15 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
   // Run iterations of CFR
   if (log) {
     std::cout << "Starting CFR iterations..." << std::endl;
+  }
+  if (player_a_range != nullptr && player_b_range != nullptr) {
+    active_player_a_range_ = player_a_hands;
+    active_player_b_range_ = player_b_hands;
+    active_ranges_enabled_ = true;
+  } else {
+    active_player_a_range_.clear();
+    active_player_b_range_.clear();
+    active_ranges_enabled_ = false;
   }
   for (int i = 0; i < iterations; ++i) {
     Hand player_a_hand;
@@ -406,6 +431,9 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
     }
     ++iterations_run_;
   }
+  active_player_a_range_.clear();
+  active_player_b_range_.clear();
+  active_ranges_enabled_ = false;
   
   if (log) {
     std::cout << "CFR iterations completed" << std::endl;
@@ -441,6 +469,14 @@ double CFRSolver::cfr(GameTree::Node* node,
   if (max_depth > 0 && depth >= max_depth) {
     ContinuationContext context = ContinuationContext::ExactHands(
         node->state, player_a_hand, player_b_hand);
+    if (active_ranges_enabled_) {
+      // These ranges are public-card filtered configured ranges. They are not
+      // action-conditioned beliefs yet.
+      context.player_a_range =
+          PublicCompatibleRange(active_player_a_range_, node->state);
+      context.player_b_range =
+          PublicCompatibleRange(active_player_b_range_, node->state);
+    }
     return continuation_value_provider_->value(game_tree_, context);
   }
   
