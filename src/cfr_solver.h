@@ -187,6 +187,13 @@ private:
     std::vector<double> cumulative_strategy;
   };
 
+  struct LegacyInfoSetData {
+    std::string key;
+    std::vector<int> action_ids;
+    std::vector<double> cumulative_regrets;
+    std::vector<double> cumulative_strategy;
+  };
+
   CFRSolver(const PokerConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache);
   CFRSolver(const PokerConfig& config,
@@ -212,10 +219,9 @@ private:
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
   
-  // Legacy string-keyed storage used for loaded strategies and test-seeded regrets.
-  std::unordered_map<std::string, std::unordered_map<int, double>> cumulative_regrets_;
-  std::unordered_map<std::string, std::unordered_map<int, double>> cumulative_strategy_;
-
+  // Legacy string-keyed lookup used for loaded strategies and test-seeded regrets.
+  std::unordered_map<std::string, int> legacy_info_set_ids_;
+  std::vector<LegacyInfoSetData> legacy_info_sets_;
   std::unordered_map<InfoSetKey, int, InfoSetKeyHash> info_set_ids_;
   std::vector<InfoSetData> info_sets_;
   
@@ -259,9 +265,20 @@ private:
   const InfoSetData* find_info_set(const InfoSetKey& key) const;
   void ensure_info_set_actions(InfoSetData* info_set,
                                const std::vector<Action>& legal_actions);
+  int get_or_create_legacy_info_set_id(const std::string& info_set_key);
+  const LegacyInfoSetData* find_legacy_info_set(
+      const std::string& info_set_key) const;
+  size_t ensure_legacy_info_set_action(LegacyInfoSetData* info_set,
+                                       int action_id);
+  void ensure_legacy_info_set_actions(
+      LegacyInfoSetData* info_set,
+      const std::vector<Action>& legal_actions);
   std::string info_set_key_to_string(const InfoSetKey& key) const;
   double regret_for_info_set(const std::string& info_set_key,
                              int action_id) const;
+  void set_legacy_regret_for_info_set(const std::string& info_set_key,
+                                      int action_id,
+                                      double regret);
   ContinuationContext build_continuation_context(
       const BoardState& state,
       const Hand& player_a_hand,

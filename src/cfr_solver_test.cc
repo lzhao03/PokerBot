@@ -64,7 +64,7 @@ class CFRSolverRegretTestPeer {
                         const std::string& info_set_key,
                         int action_id,
                         double regret) {
-    solver.cumulative_regrets_[info_set_key][action_id] = regret;
+    solver.set_legacy_regret_for_info_set(info_set_key, action_id, regret);
   }
 
   static std::vector<double> CompatibleDealWeights(
