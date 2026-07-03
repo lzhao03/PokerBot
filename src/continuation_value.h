@@ -12,8 +12,8 @@ struct ContinuationContext {
   BoardState state;
   Hand player_a_hand;
   Hand player_b_hand;
-  WeightedHandRange player_a_range;
-  WeightedHandRange player_b_range;
+  WeightedHandRangeView player_a_range;
+  WeightedHandRangeView player_b_range;
 
   static ContinuationContext ExactHands(const BoardState& state,
                                         const Hand& player_a_hand,

@@ -150,7 +150,7 @@ private:
   using OptionalHandRange =
       std::optional<std::reference_wrapper<const HandRange>>;
   using OptionalWeightedHandRange =
-      std::optional<std::reference_wrapper<const WeightedHandRange>>;
+      std::optional<std::reference_wrapper<const WeightedHandRangeView>>;
 
   struct ActionChoice {
     std::reference_wrapper<const Action> action;
@@ -256,12 +256,12 @@ private:
       const ActionChoice& action_choice,
       double fallback_probability) const;
   void condition_range_for_action(
-      const WeightedHandRange& range,
+      const WeightedHandRangeView& range,
       const BoardState& state,
       int player,
       const std::vector<ActionChoice>& legal_action_choices,
       const ActionChoice& action_choice,
-      WeightedHandRange& conditioned_range) const;
+      WeightedHandRangeView& conditioned_range) const;
   InfoSetKey make_info_set_key(const BoardState& state,
                                int player,
                                const Hand& hand) const;
@@ -300,7 +300,7 @@ private:
   double best_response_value_against_range(
       GameTree::Node& node,
       const Hand& best_response_hand,
-      const WeightedHandRange& opponent_hands,
+      const WeightedHandRangeView& opponent_hands,
       const Strategy& strategy,
       int best_response_player);
   double sampled_range_best_response_value(

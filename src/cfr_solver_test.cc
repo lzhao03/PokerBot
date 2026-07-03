@@ -57,8 +57,9 @@ class CFRSolverRegretTestPeer {
       const WeightedHandRange& opponent_hands,
       int best_response_player) {
     Strategy strategy;
+    WeightedHandRangeView opponent_view(opponent_hands);
     return solver.best_response_value_against_range(
-        node, best_response_hand, opponent_hands, strategy, best_response_player);
+        node, best_response_hand, opponent_view, strategy, best_response_player);
   }
 
   static double Utility(CFRSolver& solver,
@@ -134,11 +135,11 @@ class FixedContinuationValueProvider : public ContinuationValueProvider {
       last_player_b_range_size_ = context.player_b_range.size();
       last_player_a_range_weight_ = 0.0;
       last_player_b_range_weight_ = 0.0;
-      for (double weight : context.player_a_range.weights) {
-        last_player_a_range_weight_ += weight;
+      for (size_t i = 0; i < context.player_a_range.size(); ++i) {
+        last_player_a_range_weight_ += context.player_a_range.weight(i);
       }
-      for (double weight : context.player_b_range.weights) {
-        last_player_b_range_weight_ += weight;
+      for (size_t i = 0; i < context.player_b_range.size(); ++i) {
+        last_player_b_range_weight_ += context.player_b_range.weight(i);
       }
     }
     return value_;

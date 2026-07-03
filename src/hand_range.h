@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -28,6 +30,77 @@ struct WeightedHandRange {
   void add(const Hand& hand, double weight) {
     hands.push_back(hand);
     weights.push_back(weight);
+  }
+};
+
+struct WeightedHandRangeView {
+  std::optional<std::reference_wrapper<const WeightedHandRange>> source;
+  bool all_source_hands = false;
+  std::vector<size_t> indices;
+  std::vector<double> weights;
+
+  WeightedHandRangeView() = default;
+
+  explicit WeightedHandRangeView(const WeightedHandRange& source_range) {
+    reset_to_all(source_range);
+  }
+
+  void reset_to_all(const WeightedHandRange& source_range) {
+    source = std::cref(source_range);
+    all_source_hands = true;
+    indices.clear();
+    weights.clear();
+  }
+
+  void reset_to_filtered(const WeightedHandRange& source_range) {
+    source = std::cref(source_range);
+    all_source_hands = false;
+    indices.clear();
+    weights.clear();
+  }
+
+  void clear() {
+    source = std::nullopt;
+    all_source_hands = false;
+    indices.clear();
+    weights.clear();
+  }
+
+  void reserve(size_t count) {
+    indices.reserve(count);
+    weights.reserve(count);
+  }
+
+  void add(size_t source_index, double weight) {
+    all_source_hands = false;
+    indices.push_back(source_index);
+    weights.push_back(weight);
+  }
+
+  bool has_source() const { return source.has_value(); }
+  bool empty() const { return size() == 0; }
+
+  size_t size() const {
+    if (!source.has_value()) {
+      return 0;
+    }
+    return all_source_hands ? source->get().size() : indices.size();
+  }
+
+  const WeightedHandRange& source_range() const {
+    return source->get();
+  }
+
+  size_t source_index(size_t index) const {
+    return all_source_hands ? index : indices[index];
+  }
+
+  const Hand& hand(size_t index) const {
+    return source_range().hands[source_index(index)];
+  }
+
+  double weight(size_t index) const {
+    return all_source_hands ? source_range().weights[index] : weights[index];
   }
 };
 
