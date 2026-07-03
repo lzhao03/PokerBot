@@ -521,6 +521,12 @@ double CFRSolver::cfr_with_ranges(
     const std::vector<std::pair<Hand, double>>* player_b_range) {
   // If the node is a terminal node, return the utility
   if (node->is_terminal) {
+    ++traversal_stats_.terminal_utility_calls;
+    if (node->state.folded_player() >= 0) {
+      ++traversal_stats_.fold_utility_calls;
+    } else {
+      ++traversal_stats_.showdown_utility_calls;
+    }
     if (max_depth > 0) {
       return game_tree_->get_utility(node->state, player_a_hand, player_b_hand);
     }
@@ -568,6 +574,7 @@ double CFRSolver::cfr_with_ranges(
     // Create child node for this action if it doesn't exist
     if (node->children.find(action_id) == node->children.end()) {
       node->children[action_id] = game_tree_->create_child_node(node, action);
+      ++traversal_stats_.child_nodes_created;
     }
     
     // Get the child node for this action
@@ -672,8 +679,10 @@ double CFRSolver::chance_sampling_cfr(GameTree::Node* node,
                       int max_depth,
                       const std::vector<std::pair<Hand, double>>* player_a_range,
                       const std::vector<std::pair<Hand, double>>* player_b_range) {
+  int samples = ChanceSamples(config_);
+  traversal_stats_.chance_samples += samples;
   return SampleChanceValue(
-      game_tree_, node, player_a_hand, player_b_hand, ChanceSamples(config_),
+      game_tree_, node, player_a_hand, player_b_hand, samples,
       &rng_, [&](GameTree::Node* child_node) {
         return cfr_with_ranges(child_node, player_a_hand, player_b_hand,
                                reach_probabilities, iteration, depth,

@@ -111,6 +111,11 @@ void RunBenchmark(const std::string& name,
             << result.traversal_stats.canonical_state_visits << "\t"
             << result.traversal_stats.unique_canonical_states << "\t"
             << result.traversal_stats.duplicate_canonical_state_visits << "\t"
+            << result.traversal_stats.child_nodes_created << "\t"
+            << result.traversal_stats.chance_samples << "\t"
+            << result.traversal_stats.terminal_utility_calls << "\t"
+            << result.traversal_stats.fold_utility_calls << "\t"
+            << result.traversal_stats.showdown_utility_calls << "\t"
             << result.utility_cache_stats.hits << "\t"
             << result.utility_cache_stats.misses << "\t"
             << result.utility_cache_stats.entries << "\n";
@@ -159,6 +164,9 @@ int main(int argc, char** argv) {
               << "\triver_updates\tmax_decision_depth"
               << "\tcanonical_state_visits\tunique_canonical_states"
               << "\tduplicate_canonical_state_visits"
+              << "\tchild_nodes_created\tchance_samples"
+              << "\tterminal_utility_calls\tfold_utility_calls"
+              << "\tshowdown_utility_calls"
               << "\tutility_cache_hits\tutility_cache_misses"
               << "\tutility_cache_entries\n";
 

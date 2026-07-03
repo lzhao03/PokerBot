@@ -801,6 +801,19 @@ void CheckRunWithoutDepthCutoffTerminates() {
          "canonical state diagnostics should track unique public states");
   Expect(stats.duplicate_canonical_state_visits >= 0,
          "canonical state diagnostics should track duplicate public states");
+  Expect(stats.child_nodes_created > 0,
+         "traversal stats should count child node creation");
+  Expect(stats.chance_samples > 0,
+         "traversal stats should count sampled chance outcomes");
+  Expect(stats.terminal_utility_calls > 0,
+         "traversal stats should count terminal utility calls");
+  Expect(stats.fold_utility_calls > 0,
+         "traversal stats should count fold utility calls");
+  Expect(stats.showdown_utility_calls > 0,
+         "traversal stats should count showdown utility calls");
+  Expect(stats.terminal_utility_calls ==
+             stats.fold_utility_calls + stats.showdown_utility_calls,
+         "terminal utility calls should split into fold and showdown calls");
   Expect(!solver.get_equilibrium_strategy().get_info_sets().empty(),
          "zero max-depth range run should produce strategy info sets");
 }

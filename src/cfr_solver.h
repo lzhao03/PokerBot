@@ -58,6 +58,11 @@ public:
     int64_t canonical_state_visits = 0;
     int64_t unique_canonical_states = 0;
     int64_t duplicate_canonical_state_visits = 0;
+    int64_t child_nodes_created = 0;
+    int64_t chance_samples = 0;
+    int64_t terminal_utility_calls = 0;
+    int64_t fold_utility_calls = 0;
+    int64_t showdown_utility_calls = 0;
   };
 
   struct UtilityCacheStats {
