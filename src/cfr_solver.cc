@@ -151,6 +151,24 @@ GameTree::Node* CachedChanceChild(GameTree* game_tree,
   return child_node;
 }
 
+GameTree::Node* CachedActionChild(GameTree* game_tree,
+                                  GameTree::Node* node,
+                                  const Action& action,
+                                  int action_id,
+                                  int64_t* created_nodes) {
+  auto child = node->children.find(action_id);
+  if (child != node->children.end()) {
+    return child->second;
+  }
+
+  GameTree::Node* child_node = game_tree->create_child_node(node, action);
+  node->children.emplace(action_id, child_node);
+  if (created_nodes != nullptr) {
+    ++(*created_nodes);
+  }
+  return child_node;
+}
+
 int RoundedContribution(const BoardState& state, int player) {
   return state.player_contribution_size() > player
              ? static_cast<int>(std::lround(state.player_contribution(player)))
@@ -599,14 +617,9 @@ double CFRSolver::cfr_with_ranges(
   for (const Action& action : node->legal_actions) {
     int action_id = ActionKey(action);
     
-    // Create child node for this action if it doesn't exist
-    if (node->children.find(action_id) == node->children.end()) {
-      node->children[action_id] = game_tree_->create_child_node(node, action);
-      ++traversal_stats_.child_nodes_created;
-    }
-    
-    // Get the child node for this action
-    GameTree::Node* child_node = node->children[action_id];
+    GameTree::Node* child_node = CachedActionChild(
+        game_tree_, node, action, action_id,
+        &traversal_stats_.child_nodes_created);
     
     // Update reach probabilities for the recursive call
     const double action_probability = strategy.at(action_id);
@@ -979,12 +992,11 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node* node,
                              ? strategy.get_action_probability(info_set_key, action_id) /
                                    probability_sum
                              : 1.0 / node->legal_actions.size();
-    if (node->children.find(action_id) == node->children.end()) {
-      node->children[action_id] = game_tree_->create_child_node(node, action);
-    }
+    GameTree::Node* child_node =
+        CachedActionChild(game_tree_, node, action, action_id, nullptr);
     value += probability * evaluate_strategy_node(
-                              node->children[action_id], player_a_hand,
-                              player_b_hand, strategy);
+                              child_node, player_a_hand, player_b_hand,
+                              strategy);
   }
   return value;
 }
@@ -1034,12 +1046,11 @@ double CFRSolver::best_response_value(GameTree::Node* node,
     for (size_t i = 0; i < node->legal_actions.size(); ++i) {
       const Action& action = node->legal_actions[i];
       int action_id = action_ids[i];
-      if (node->children.find(action_id) == node->children.end()) {
-        node->children[action_id] = game_tree_->create_child_node(node, action);
-      }
+      GameTree::Node* child_node =
+          CachedActionChild(game_tree_, node, action, action_id, nullptr);
       value = std::max(value, best_response_value(
-                                  node->children[action_id], player_a_hand,
-                                  player_b_hand, strategy, best_response_player));
+                                  child_node, player_a_hand, player_b_hand,
+                                  strategy, best_response_player));
     }
     return value;
   }
@@ -1052,12 +1063,11 @@ double CFRSolver::best_response_value(GameTree::Node* node,
                              ? strategy.get_action_probability(info_set_key, action_id) /
                                    probability_sum
                              : 1.0 / node->legal_actions.size();
-    if (node->children.find(action_id) == node->children.end()) {
-      node->children[action_id] = game_tree_->create_child_node(node, action);
-    }
+    GameTree::Node* child_node =
+        CachedActionChild(game_tree_, node, action, action_id, nullptr);
     value += probability * best_response_value(
-                               node->children[action_id], player_a_hand,
-                               player_b_hand, strategy, best_response_player);
+                               child_node, player_a_hand, player_b_hand,
+                               strategy, best_response_player);
   }
   return value;
 }
@@ -1125,11 +1135,10 @@ double CFRSolver::best_response_value_against_range(
     double value = -std::numeric_limits<double>::infinity();
     for (const Action& action : node->legal_actions) {
       int action_id = ActionKey(action);
-      if (node->children.find(action_id) == node->children.end()) {
-        node->children[action_id] = game_tree_->create_child_node(node, action);
-      }
+      GameTree::Node* child_node =
+          CachedActionChild(game_tree_, node, action, action_id, nullptr);
       value = std::max(value, best_response_value_against_range(
-                                  node->children[action_id], best_response_hand,
+                                  child_node, best_response_hand,
                                   opponent_hands, strategy,
                                   best_response_player));
     }
@@ -1139,9 +1148,8 @@ double CFRSolver::best_response_value_against_range(
   double value = 0.0;
   for (const Action& action : node->legal_actions) {
     int action_id = ActionKey(action);
-    if (node->children.find(action_id) == node->children.end()) {
-      node->children[action_id] = game_tree_->create_child_node(node, action);
-    }
+    GameTree::Node* child_node =
+        CachedActionChild(game_tree_, node, action, action_id, nullptr);
 
     std::vector<std::pair<Hand, double>> child_opponents;
     for (const auto& opponent_hand : opponent_hands) {
@@ -1159,8 +1167,8 @@ double CFRSolver::best_response_value_against_range(
     if (child_weight > 0.0) {
       value += (child_weight / total_weight) *
                best_response_value_against_range(
-                   node->children[action_id], best_response_hand,
-                   child_opponents, strategy, best_response_player);
+                   child_node, best_response_hand, child_opponents, strategy,
+                   best_response_player);
     }
   }
   return value;
@@ -1357,10 +1365,9 @@ Action CFRSolver::get_best_response_action(GameTree::Node* node,
   Action best_action = no_action;
   for (const Action& action : node->legal_actions) {
     int action_id = ActionKey(action);
-    if (node->children.find(action_id) == node->children.end()) {
-      node->children[action_id] = game_tree_->create_child_node(node, action);
-    }
-    double value = best_response_value(node->children[action_id], player_a_hand,
+    GameTree::Node* child_node =
+        CachedActionChild(game_tree_, node, action, action_id, nullptr);
+    double value = best_response_value(child_node, player_a_hand,
                                        player_b_hand, strategy,
                                        best_response_player);
     if (value > best_value) {
