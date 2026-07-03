@@ -1,4 +1,5 @@
 #include "src/cfr_solver.h"
+#include "absl/log/globals.h"
 #include "absl/log/log_entry.h"
 #include "absl/log/log_sink.h"
 #include "absl/log/log_sink_registry.h"
@@ -231,6 +232,19 @@ class ScopedLogSink {
 
  private:
   std::reference_wrapper<absl::LogSink> sink_;
+};
+
+class ScopedVLogLevel {
+ public:
+  explicit ScopedVLogLevel(int level)
+      : previous_level_(absl::SetGlobalVLogLevel(level)) {}
+
+  ~ScopedVLogLevel() {
+    absl::SetGlobalVLogLevel(previous_level_);
+  }
+
+ private:
+  int previous_level_;
 };
 
 Action MakeAction(ActionType type, int amount = 0) {
@@ -838,7 +852,6 @@ void CheckRunWithoutDepthCutoffTerminates() {
   config.set_max_depth(0);
   config.add_bet_sizes(1.0);
   config.set_chance_samples(1);
-  config.set_enable_logging(true);
 
   HandRange player_a_range;
   player_a_range.set_from_string("AA");
@@ -1003,36 +1016,41 @@ void CheckRangeSamplingSkipsOverlappingDeals() {
          "range sampling should skip overlapping private-card deals");
 }
 
-void CheckRunLoggingUsesConfig() {
+void CheckRunLoggingUsesAbseilLevels() {
   PokerConfig config;
   config.set_starting_stack_size(20);
   config.set_max_depth(1);
 
-  CapturingLogSink quiet_output;
+  CapturingLogSink default_output;
   {
-    ScopedLogSink capture_logs(quiet_output);
-    CFRSolver quiet_solver(config);
-    quiet_solver.run(1);
+    ScopedVLogLevel default_verbosity(0);
+    ScopedLogSink capture_logs(default_output);
+    CFRSolver solver(config);
+    solver.run(1);
   }
-  Expect(quiet_output.messages().empty(), "run should be quiet by default");
-
-  config.set_enable_logging(true);
-  CapturingLogSink logged_output;
-  {
-    ScopedLogSink capture_logs(logged_output);
-    CFRSolver logged_solver(config);
-    logged_solver.run(1);
-  }
-  Expect(logged_output.messages().find("Starting CFR iterations") !=
+  Expect(default_output.messages().find("Starting CFR iterations") !=
              std::string::npos,
-         "run should log when enable_logging is set");
-  Expect(logged_output.messages().find("Iterations run: 1") !=
+         "run should log lifecycle progress at info level");
+  Expect(default_output.messages().find("Iteration 1/1") == std::string::npos,
+         "run should not log per-iteration progress at default verbosity");
+
+  CapturingLogSink verbose_output;
+  {
+    ScopedVLogLevel verbose(1);
+    ScopedLogSink capture_logs(verbose_output);
+    CFRSolver solver(config);
+    solver.run(1);
+  }
+  Expect(verbose_output.messages().find("Iteration 1/1") !=
+             std::string::npos,
+         "run should log per-iteration progress at verbose level");
+  Expect(verbose_output.messages().find("Iterations run: 1") !=
              std::string::npos,
          "run should log completed iteration count");
-  Expect(logged_output.messages().find("Information sets: 2") !=
+  Expect(verbose_output.messages().find("Information sets: 2") !=
              std::string::npos,
          "run should log trained info set count");
-  Expect(logged_output.messages().find("Player A average EV:") !=
+  Expect(verbose_output.messages().find("Player A average EV:") !=
              std::string::npos,
          "run should log average root EV");
 }
@@ -1896,7 +1914,7 @@ int main() {
   CheckCompatibleDealWeightsUseProductWeights();
   CheckRangeSamplingRejectsOnlyOverlappingHands();
   CheckRangeSamplingSkipsOverlappingDeals();
-  CheckRunLoggingUsesConfig();
+  CheckRunLoggingUsesAbseilLevels();
   CheckRunProducesDeterministicStrategyShape();
   CheckRepeatedRunMatchesSingleRun();
   CheckTerminalUtilityBeatsDepthLimit();

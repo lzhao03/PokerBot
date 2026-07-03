@@ -551,20 +551,19 @@ void CFRSolver::run_iterations(int iterations,
         range_deal_weights.begin(), range_deal_weights.end());
   }
 
-  const bool log = config_.enable_logging();
-  LOG_IF(INFO, log) << "Preparing game tree...";
+  VLOG(1) << "Preparing game tree...";
   bool had_root = game_tree_->has_root();
   GameTree::Node& root = get_or_build_root();
   if (!had_root) {
-    LOG_IF(INFO, log) << "Game tree built with " << root.legal_actions.size()
-                      << " legal actions at root";
+    VLOG(1) << "Game tree built with " << root.legal_actions.size()
+            << " legal actions at root";
   } else {
-    LOG_IF(INFO, log) << "Reusing game tree with " << root.legal_actions.size()
-                      << " legal actions at root";
+    VLOG(1) << "Reusing game tree with " << root.legal_actions.size()
+            << " legal actions at root";
   }
   
   // Run iterations of CFR
-  LOG_IF(INFO, log) << "Starting CFR iterations...";
+  LOG(INFO) << "Starting CFR iterations...";
   for (int i = 0; i < iterations; ++i) {
     Hand player_a_hand;
     Hand player_b_hand;
@@ -580,7 +579,7 @@ void CFRSolver::run_iterations(int iterations,
     }
     
     const int max_depth = config_.max_depth();
-    LOG_IF(INFO, log) << "Iteration " << i + 1 << "/" << iterations;
+    VLOG(1) << "Iteration " << i + 1 << "/" << iterations;
     int cfr_iteration = iterations_run_;
     std::vector<double> reach_probabilities(2, 1.0);
     OptionalWeightedHandRange player_a_context_range;
@@ -608,10 +607,10 @@ void CFRSolver::run_iterations(int iterations,
     ++iterations_run_;
   }
   
-  LOG_IF(INFO, log) << "CFR iterations completed";
-  LOG_IF(INFO, log) << "Iterations run: " << iterations_run_;
-  LOG_IF(INFO, log) << "Information sets: " << info_sets_.size();
-  LOG_IF(INFO, log) << "Player A average EV: " << get_expected_value(0);
+  LOG(INFO) << "CFR iterations completed";
+  LOG(INFO) << "Iterations run: " << iterations_run_;
+  LOG(INFO) << "Information sets: " << info_sets_.size();
+  LOG(INFO) << "Player A average EV: " << get_expected_value(0);
 }
 
 double CFRSolver::cfr(GameTree::Node& node,

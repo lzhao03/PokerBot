@@ -1,4 +1,5 @@
 #include "src/cfr_solver.h"
+#include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "src/poker.pb.h"
 
@@ -99,7 +100,7 @@ void PrintUsage(const char* program) {
       << "  --flop-bet-size=X\n"
       << "  --turn-bet-size=X\n"
       << "  --river-bet-size=X\n"
-      << "  --log\n";
+      << "  --log                           show INFO logs and VLOG(1) progress\n";
 }
 
 }  // namespace
@@ -121,7 +122,8 @@ int main(int argc, char** argv) {
         PrintUsage(argv[0]);
         return 0;
       } else if (arg == "--log") {
-        config.set_enable_logging(true);
+        absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
+        absl::SetGlobalVLogLevel(1);
       } else if (ConsumePrefix(arg, "--config=", &value)) {
         LoadConfig(value, &config);
       } else if (ConsumePrefix(arg, "--iterations=", &value)) {

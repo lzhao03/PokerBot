@@ -184,6 +184,7 @@ cc_test(
         ":cfr_solver",
         ":continuation_value",
         ":subgame_value",
+        "@abseil-cpp//absl/log:globals",
         "@abseil-cpp//absl/log:log_entry",
         "@abseil-cpp//absl/log:log_sink",
         "@abseil-cpp//absl/log:log_sink_registry",
@@ -196,6 +197,7 @@ cc_binary(
     deps = [
         ":cfr_solver",
         ":poker_cc_proto",
+        "@abseil-cpp//absl/log:globals",
         "@abseil-cpp//absl/log:initialize",
     ],
 )
