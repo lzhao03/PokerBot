@@ -918,38 +918,48 @@ double CFRSolver::action_probability_for_hand(
                 action_id) == legal_action_ids.end()) {
     return 0.0;
   }
+  const double uniform_probability = 1.0 / legal_action_ids.size();
 
   InfoSetKey key = make_info_set_key(state, player, hand);
   auto existing_info_set = info_set_ids_.find(key);
-  if (existing_info_set != info_set_ids_.end()) {
-    const InfoSetData& info_set = info_sets_[existing_info_set->second];
-    double sum_positive_regrets = 0.0;
-    for (int legal_action_id : legal_action_ids) {
-      auto action = std::find(info_set.action_ids.begin(),
-                              info_set.action_ids.end(), legal_action_id);
-      if (action != info_set.action_ids.end()) {
-        const size_t index =
-            static_cast<size_t>(action - info_set.action_ids.begin());
-        sum_positive_regrets += std::max(0.0,
-                                         info_set.cumulative_regrets[index]);
-      }
-    }
-    if (sum_positive_regrets <= 0.0) {
-      return 1.0 / legal_action_ids.size();
-    }
-
-    auto action = std::find(info_set.action_ids.begin(),
-                            info_set.action_ids.end(), action_id);
-    if (action == info_set.action_ids.end()) {
-      return 0.0;
-    }
-    const size_t index =
-        static_cast<size_t>(action - info_set.action_ids.begin());
-    return std::max(0.0, info_set.cumulative_regrets[index]) /
-           sum_positive_regrets;
+  if (existing_info_set == info_set_ids_.end()) {
+    return uniform_probability;
   }
 
-  return 1.0 / legal_action_ids.size();
+  return regret_matched_probability_for_action(
+      info_sets_[existing_info_set->second], legal_action_ids, action_id,
+      uniform_probability);
+}
+
+double CFRSolver::regret_matched_probability_for_action(
+    const InfoSetData& info_set,
+    const std::vector<int>& legal_action_ids,
+    int action_id,
+    double fallback_probability) const {
+  double positive_regret_sum = 0.0;
+  double action_positive_regret = 0.0;
+
+  for (int legal_action_id : legal_action_ids) {
+    auto action = std::find(info_set.action_ids.begin(),
+                            info_set.action_ids.end(), legal_action_id);
+    if (action == info_set.action_ids.end()) {
+      continue;
+    }
+
+    const size_t index =
+        static_cast<size_t>(action - info_set.action_ids.begin());
+    const double positive_regret =
+        std::max(0.0, info_set.cumulative_regrets[index]);
+    positive_regret_sum += positive_regret;
+    if (legal_action_id == action_id) {
+      action_positive_regret = positive_regret;
+    }
+  }
+
+  if (positive_regret_sum <= 0.0) {
+    return fallback_probability;
+  }
+  return action_positive_regret / positive_regret_sum;
 }
 
 void CFRSolver::condition_range_for_action(

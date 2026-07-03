@@ -250,6 +250,11 @@ private:
       const Hand& hand,
       const std::vector<int>& legal_action_ids,
       int action_id) const;
+  double regret_matched_probability_for_action(
+      const InfoSetData& info_set,
+      const std::vector<int>& legal_action_ids,
+      int action_id,
+      double fallback_probability) const;
   void condition_range_for_action(
       const WeightedHandRange& range,
       const BoardState& state,
