@@ -421,9 +421,9 @@ void CFRSolver::run_iterations(int iterations, const HandRange* player_a_range,
     int cfr_iteration = iterations_run_;
     std::vector<double> reach_probabilities(2, 1.0);
     const std::vector<std::pair<Hand, double>>* player_a_context_range =
-        player_a_range == nullptr ? nullptr : &player_a_hands;
+        max_depth > 0 && player_a_range != nullptr ? &player_a_hands : nullptr;
     const std::vector<std::pair<Hand, double>>* player_b_context_range =
-        player_b_range == nullptr ? nullptr : &player_b_hands;
+        max_depth > 0 && player_b_range != nullptr ? &player_b_hands : nullptr;
     double dealt_value = cfr_with_ranges(
         root, player_a_hand, player_b_hand, reach_probabilities,
         cfr_iteration, 0, max_depth, player_a_context_range,
