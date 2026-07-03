@@ -165,17 +165,17 @@ struct WeightedHands {
 };
 
 struct WeightedHandViewSampler {
-  explicit WeightedHandViewSampler(const WeightedHandRangeView& hands)
-      : hands(hands) {
-    weights.reserve(hands.size());
-    for (size_t i = 0; i < hands.size(); ++i) {
-      weights.push_back(hands.weight(i));
+  explicit WeightedHandViewSampler(const WeightedHandRangeView& hand_view)
+      : hand_view(hand_view) {
+    weights.reserve(hand_view.size());
+    for (size_t i = 0; i < hand_view.size(); ++i) {
+      weights.push_back(hand_view.weight(i));
     }
     distribution =
         std::discrete_distribution<size_t>(weights.begin(), weights.end());
   }
 
-  const WeightedHandRangeView& hands;
+  const WeightedHandRangeView& hand_view;
   std::vector<double> weights;
   std::discrete_distribution<size_t> distribution;
 };
@@ -1319,7 +1319,7 @@ double CFRSolver::best_response_value_against_range(
     int64_t ignored_created_nodes = 0;
     for (int i = 0; i < samples; ++i) {
       size_t sampled_opponent_index =
-          weighted_opponents.hands.source_index(
+          weighted_opponents.hand_view.source_index(
               weighted_opponents.distribution(rng_));
       const Hand& sampled_opponent =
           opponent_hands.source_range().hands[sampled_opponent_index];
