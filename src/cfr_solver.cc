@@ -1183,43 +1183,45 @@ void CFRSolver::condition_ranges_for_actions(
     int player,
     const ActionChoices& action_choices,
     ConditionedRanges& conditioned_ranges) {
-  if (action_choices.empty()) {
+  const size_t action_count = action_choices.size();
+  if (action_count == 0) {
     return;
   }
 
-  if (conditioned_ranges.size() < action_choices.size()) {
-    conditioned_ranges.resize(action_choices.size());
+  if (conditioned_ranges.size() < action_count) {
+    conditioned_ranges.resize(action_count);
   }
-  for (size_t i = 0; i < action_choices.size(); ++i) {
+  for (size_t i = 0; i < action_count; ++i) {
     conditioned_ranges[i].reset_to_filtered();
   }
-  if (range.empty()) {
+  const size_t range_size = range.size();
+  if (range_size == 0) {
     return;
   }
 
-  const double fallback_probability = 1.0 / action_choices.size();
+  const double fallback_probability = 1.0 / action_count;
   const CardMask board_mask = node.state.board_mask;
-  absl::InlinedVector<double, 8> positive_regrets(
-      action_choices.size(), 0.0);
+  absl::InlinedVector<double, 8> positive_regrets(action_count, 0.0);
   const ComboInfoSetIndex& combo_index =
       ensure_combo_info_set_index(&node, player, public_state_id);
-  for (size_t i = 0; i < range.size(); ++i) {
-    if (range.weight(i) <= 0.0 || (range.mask(i) & board_mask) != 0) {
+  for (size_t i = 0; i < range_size; ++i) {
+    const float range_weight = range.weight(i);
+    const ComboId combo_id = range.combo(i);
+    if (range_weight <= 0.0 || (ComboMask(combo_id) & board_mask) != 0) {
       continue;
     }
 
     double positive_regret_sum = 0.0;
-    const int32_t info_set_id =
-        combo_index.info_set_ids[range.combo(i)];
+    const int32_t info_set_id = combo_index.info_set_ids[combo_id];
 
     if (info_set_id >= 0) {
       const InfoSetData& info_set = info_sets_[info_set_id];
       const size_t table_offset = info_set.action_offset;
       std::fill(positive_regrets.begin(), positive_regrets.end(), 0.0);
-      const size_t action_count =
-          std::min(action_choices.size(),
+      const size_t info_set_action_count =
+          std::min(action_count,
                    static_cast<size_t>(info_set.action_count));
-      for (size_t action_index = 0; action_index < action_count;
+      for (size_t action_index = 0; action_index < info_set_action_count;
            ++action_index) {
         const size_t table_index = table_offset + action_index;
         if (action_ids_[table_index] !=
@@ -1237,16 +1239,16 @@ void CFRSolver::condition_ranges_for_actions(
       }
     }
 
-    for (size_t action_index = 0; action_index < action_choices.size();
+    for (size_t action_index = 0; action_index < action_count;
          ++action_index) {
       const double probability =
           positive_regret_sum > 0.0
               ? positive_regrets[action_index] / positive_regret_sum
               : fallback_probability;
-      const double conditioned_weight = range.weight(i) * probability;
+      const double conditioned_weight = range_weight * probability;
       if (conditioned_weight > 0.0) {
         conditioned_ranges[action_index].add(
-            range.combo(i), static_cast<float>(conditioned_weight));
+            combo_id, static_cast<float>(conditioned_weight));
       }
     }
   }
