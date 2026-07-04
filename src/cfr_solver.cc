@@ -490,6 +490,15 @@ uint32_t CFRSolver::get_or_create_public_state_id(const GameState& state,
   return inserted.first->second;
 }
 
+uint32_t CFRSolver::get_or_create_public_state_id(GameTree::Node& node) {
+  if (node.public_state_id != GameTree::Node::kInvalidPublicStateId) {
+    return node.public_state_id;
+  }
+  node.public_state_id = get_or_create_public_state_id(
+      node.state, static_cast<uint32_t>(node.id));
+  return node.public_state_id;
+}
+
 CFRSolver::ComboInfoSetIndex& CFRSolver::get_or_build_combo_info_set_index(
     GameTree::Node& node,
     int player,
@@ -808,8 +817,7 @@ double CFRSolver::cfr_with_ranges(
       (player == 0) ? player_a_cards : player_b_cards;
   
   EnsureLegalActionIds(node);
-  const uint32_t public_state_id = get_or_create_public_state_id(
-      node.state, static_cast<uint32_t>(node.id));
+  const uint32_t public_state_id = get_or_create_public_state_id(node);
   const int info_set_id =
       get_or_create_compact_info_set_id(
           public_state_id, &node, player, player_cards.combo,
@@ -1017,27 +1025,34 @@ void CFRSolver::average_strategy_probabilities(
 
   const double uniform_probability = 1.0 / node.legal_actions.size();
   CompactInfoSetKey compact_key;
-  compact_key.public_state_id = static_cast<uint32_t>(node.id);
   compact_key.private_combo = private_cards.combo;
   compact_key.player = static_cast<uint8_t>(player);
-  auto existing_compact = compact_info_set_ids_.find(compact_key);
-  if (existing_compact != compact_info_set_ids_.end()) {
+  auto try_public_state = [&](uint32_t public_state_id) {
+    compact_key.public_state_id = public_state_id;
+    const auto& compact_info_set_ids = strategy_compact_info_set_ids();
+    auto existing_compact = compact_info_set_ids.find(compact_key);
+    if (existing_compact == compact_info_set_ids.end()) {
+      return false;
+    }
     average_strategy_probabilities(
         strategy_info_sets()[existing_compact->second], node.legal_actions,
         uniform_probability, probabilities);
+    return true;
+  };
+
+  if (node.public_state_id != GameTree::Node::kInvalidPublicStateId) {
+    if (try_public_state(node.public_state_id)) {
+      return;
+    }
+    std::fill(probabilities.begin(), probabilities.end(), uniform_probability);
     return;
   }
 
   const auto& public_state_ids = strategy_public_state_ids();
   auto public_state = public_state_ids.find(make_public_state_key(node.state));
   if (public_state != public_state_ids.end()) {
-    compact_key.public_state_id = public_state->second;
-    const auto& compact_info_set_ids = strategy_compact_info_set_ids();
-    auto strategy_compact = compact_info_set_ids.find(compact_key);
-    if (strategy_compact != compact_info_set_ids.end()) {
-      average_strategy_probabilities(
-          strategy_info_sets()[strategy_compact->second], node.legal_actions,
-          uniform_probability, probabilities);
+    node.public_state_id = public_state->second;
+    if (try_public_state(node.public_state_id)) {
       return;
     }
   }

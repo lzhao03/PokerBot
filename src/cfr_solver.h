@@ -335,6 +335,7 @@ private:
   PublicStateKey make_public_state_key(const GameState& state) const;
   uint32_t get_or_create_public_state_id(const GameState& state,
                                          uint32_t node_id);
+  uint32_t get_or_create_public_state_id(GameTree::Node& node);
   int get_or_create_compact_info_set_id(
       uint32_t public_state_id,
       GameTree::Node* node,

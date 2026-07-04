@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -18,6 +19,9 @@ public:
 
   // Node in the game tree representing a decision point
   struct Node {
+    static constexpr uint32_t kInvalidPublicStateId =
+        std::numeric_limits<uint32_t>::max();
+
     GameState state;
     bool is_terminal;
     bool is_chance_node;
@@ -26,6 +30,7 @@ public:
     std::vector<int> legal_action_ids;
     absl::flat_hash_map<int, NodeId> children; // Action ID -> node arena ID
     std::array<int32_t, 2> combo_info_set_index_ids = {-1, -1};
+    uint32_t public_state_id = kInvalidPublicStateId;
     NodeId id = 0;
     
     // For terminal nodes
