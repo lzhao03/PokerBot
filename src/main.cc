@@ -1,6 +1,7 @@
 #include "src/cfr_solver.h"
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
+#include "src/hand_range.h"
 #include "src/poker.pb.h"
 
 #include <chrono>
@@ -166,9 +167,14 @@ int main(int argc, char** argv) {
       }
     }
 
+    poker::HandRange player_a_range;
+    poker::HandRange player_b_range;
+    player_a_range.set_uniform_range();
+    player_b_range.set_uniform_range();
+
     poker::CFRSolver solver(config);
     auto start = std::chrono::steady_clock::now();
-    solver.run(iterations);
+    solver.run(iterations, player_a_range, player_b_range);
     auto end = std::chrono::steady_clock::now();
 
     poker::Strategy strategy = solver.get_equilibrium_strategy();
@@ -183,7 +189,8 @@ int main(int argc, char** argv) {
 
     if (exploitability_samples > 0) {
       std::cout << "exploitability="
-                << solver.calculate_exploitability(exploitability_samples)
+                << solver.calculate_exploitability(
+                       exploitability_samples, player_a_range, player_b_range)
                 << "\n";
     }
   } catch (const std::exception& error) {

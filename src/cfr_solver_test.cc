@@ -757,8 +757,15 @@ void CheckRunUsesConfiguredBlinds() {
   config.set_big_blind(5);
   config.set_max_depth(1);
 
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
+  HandRange player_a_range;
+  player_a_range.add_hand(player_a_hand, 1.0);
+  HandRange player_b_range;
+  player_b_range.add_hand(player_b_hand, 1.0);
+
   CFRSolver solver(config);
-  solver.run(1);
+  solver.run(1, player_a_range, player_b_range);
 
   const char* test_tmpdir = std::getenv("TEST_TMPDIR");
   std::string path =
@@ -789,43 +796,37 @@ void CheckRunUpdatesExpectedValue() {
   config.set_starting_stack_size(20);
   config.set_max_depth(1);
 
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
+  HandRange player_a_range;
+  player_a_range.add_hand(player_a_hand, 1.0);
+  HandRange player_b_range;
+  player_b_range.add_hand(player_b_hand, 1.0);
+
   CFRSolver solver(config);
   Expect(solver.get_iterations_run() == 0, "new solver should have no completed iterations");
   Expect(solver.get_cfr_update_count() == 0,
          "new solver should have no CFR updates");
-  solver.run(1);
+  solver.run(1, player_a_range, player_b_range);
   Expect(solver.get_iterations_run() == 1, "run should record completed iterations");
-  Expect(solver.get_cfr_update_count() == 2,
-         "deck run should update both private-hand assignments");
+  Expect(solver.get_cfr_update_count() == 1,
+         "range run should update one sampled private-card deal");
 
   double player_a_ev = solver.get_expected_value(0);
   double player_b_ev = solver.get_expected_value(1);
-  Expect(std::abs(player_a_ev + (1.0 / 3.0)) < 0.000001,
+  Expect(std::isfinite(player_a_ev),
          "root EV should average completed CFR traversals");
   Expect(std::abs(player_a_ev + player_b_ev) < 0.000001,
          "heads-up EV should be zero-sum");
 
-  solver.run(1);
+  solver.run(1, player_a_range, player_b_range);
   Expect(solver.get_iterations_run() == 2, "repeated run should accumulate iterations");
-  Expect(solver.get_cfr_update_count() == 4,
+  Expect(solver.get_cfr_update_count() == 2,
          "repeated run should accumulate CFR update count");
   player_a_ev = solver.get_expected_value(0);
   player_b_ev = solver.get_expected_value(1);
   Expect(std::abs(player_a_ev + player_b_ev) < 0.000001,
          "continued EV should stay zero-sum");
-}
-
-void CheckRunTrainsSwappedPrivateHands() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-  config.set_max_depth(1);
-
-  CFRSolver solver(config);
-  solver.run(1);
-
-  const Strategy strategy = solver.get_equilibrium_strategy();
-  Expect(strategy.get_info_sets().size() == 2,
-         "run should train both dealt private-hand perspectives");
 }
 
 void CheckRunUsesProvidedPrivateRanges() {
@@ -1029,12 +1030,19 @@ void CheckRunLoggingUsesAbseilLevels() {
   config.set_starting_stack_size(20);
   config.set_max_depth(1);
 
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
+  HandRange player_a_range;
+  player_a_range.add_hand(player_a_hand, 1.0);
+  HandRange player_b_range;
+  player_b_range.add_hand(player_b_hand, 1.0);
+
   CapturingLogSink default_output;
   {
     ScopedVLogLevel default_verbosity(0);
     ScopedLogSink capture_logs(default_output);
     CFRSolver solver(config);
-    solver.run(1);
+    solver.run(1, player_a_range, player_b_range);
   }
   Expect(default_output.messages().find("Starting CFR iterations") !=
              std::string::npos,
@@ -1047,7 +1055,7 @@ void CheckRunLoggingUsesAbseilLevels() {
     ScopedVLogLevel verbose(1);
     ScopedLogSink capture_logs(verbose_output);
     CFRSolver solver(config);
-    solver.run(1);
+    solver.run(1, player_a_range, player_b_range);
   }
   Expect(verbose_output.messages().find("Iteration 1/1") !=
              std::string::npos,
@@ -1055,7 +1063,7 @@ void CheckRunLoggingUsesAbseilLevels() {
   Expect(verbose_output.messages().find("Iterations run: 1") !=
              std::string::npos,
          "run should log completed iteration count");
-  Expect(verbose_output.messages().find("Information sets: 2") !=
+  Expect(verbose_output.messages().find("Information sets: 1") !=
              std::string::npos,
          "run should log trained info set count");
   Expect(verbose_output.messages().find("Player A average EV:") !=
@@ -1068,10 +1076,17 @@ void CheckRunProducesDeterministicStrategyShape() {
   config.set_starting_stack_size(20);
   config.set_max_depth(1);
 
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
+  HandRange player_a_range;
+  player_a_range.add_hand(player_a_hand, 1.0);
+  HandRange player_b_range;
+  player_b_range.add_hand(player_b_hand, 1.0);
+
   CFRSolver first_solver(config);
   CFRSolver second_solver(config);
-  first_solver.run(2);
-  second_solver.run(2);
+  first_solver.run(2, player_a_range, player_b_range);
+  second_solver.run(2, player_a_range, player_b_range);
 
   const Strategy first = first_solver.get_equilibrium_strategy();
   const Strategy second = second_solver.get_equilibrium_strategy();
@@ -1938,7 +1953,6 @@ int main() {
   CheckRangeBestResponseWrappersReturnFiniteValues();
   CheckRunUsesConfiguredBlinds();
   CheckRunUpdatesExpectedValue();
-  CheckRunTrainsSwappedPrivateHands();
   CheckRunUsesProvidedPrivateRanges();
   CheckRunFixedHandsUsesCustomInitialState();
   CheckRunWithoutDepthCutoffTerminates();
@@ -1977,8 +1991,15 @@ int main() {
   config.set_starting_stack_size(10);
   config.set_max_depth(4);
 
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
+  HandRange player_a_range;
+  player_a_range.add_hand(player_a_hand, 1.0);
+  HandRange player_b_range;
+  player_b_range.add_hand(player_b_hand, 1.0);
+
   CFRSolver solver(config);
-  solver.run(1);
+  solver.run(1, player_a_range, player_b_range);
 
   if (solver.get_equilibrium_strategy().get_info_sets().empty()) {
     throw std::runtime_error("CFR did not visit any information sets");

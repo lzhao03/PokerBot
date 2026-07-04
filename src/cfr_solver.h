@@ -49,7 +49,6 @@ public:
   CFRSolver(const PokerConfig& config, const BoardState& initial_state);
   
   // Run CFR for a specified number of iterations
-  void run(int iterations);
   void run(int iterations, const Hand& player_a_hand,
            const Hand& player_b_hand);
   void run(int iterations, const HandRange& player_a_range,
@@ -121,8 +120,6 @@ private:
     double weight = 0.0;
   };
 
-  using OptionalHandRange =
-      std::optional<std::reference_wrapper<const HandRange>>;
   using OptionalWeightedHandRange =
       std::optional<std::reference_wrapper<const WeightedHandRangeView>>;
 
@@ -208,9 +205,8 @@ private:
       const WeightedHandRange& player_a_hands,
       const WeightedHandRange& player_b_hands);
   void run_iterations(int iterations,
-                      OptionalHandRange player_a_range,
-                      OptionalHandRange player_b_range,
-                      bool train_swapped);
+                      const HandRange& player_a_range,
+                      const HandRange& player_b_range);
   double cfr_with_ranges(
       GameTree::Node& node,
       const Hand& player_a_hand,

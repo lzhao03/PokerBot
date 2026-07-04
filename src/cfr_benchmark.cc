@@ -204,18 +204,6 @@ int main(int argc, char** argv) {
       return BenchmarkResult{static_cast<double>(combos), combos, 0};
     });
 
-    RunBenchmark("train_deck", [&] {
-      poker::CFRSolver solver(config);
-      int64_t start_updates = solver.get_cfr_update_count();
-      solver.run(options.iterations);
-      int64_t updates = solver.get_cfr_update_count() - start_updates;
-      return BenchmarkResult{
-          static_cast<double>(
-              solver.get_equilibrium_strategy().get_info_sets().size()),
-          static_cast<int64_t>(options.iterations) * 2, updates,
-          solver.get_traversal_stats(), solver.get_utility_cache_stats()};
-    });
-
     RunBenchmark("train_range", [&] {
       poker::CFRSolver solver(config);
       int64_t start_updates = solver.get_cfr_update_count();

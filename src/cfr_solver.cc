@@ -494,10 +494,6 @@ double CFRSolver::regret_for_info_set(const std::string& info_set_key,
   return 0.0;
 }
 
-void CFRSolver::run(int iterations) {
-  run_iterations(iterations, std::nullopt, std::nullopt, true);
-}
-
 void CFRSolver::run(int iterations, const Hand& player_a_hand,
                     const Hand& player_b_hand) {
   if (iterations <= 0) {
@@ -517,34 +513,25 @@ void CFRSolver::run(int iterations, const Hand& player_a_hand,
 
 void CFRSolver::run(int iterations, const HandRange& player_a_range,
                     const HandRange& player_b_range) {
-  run_iterations(iterations, std::cref(player_a_range),
-                 std::cref(player_b_range), false);
+  run_iterations(iterations, player_a_range, player_b_range);
 }
 
 void CFRSolver::run_iterations(int iterations,
-                               OptionalHandRange player_a_range,
-                               OptionalHandRange player_b_range,
-                               bool train_swapped) {
-  std::optional<std::reference_wrapper<const WeightedHandRange>>
-      player_a_hands;
-  std::optional<std::reference_wrapper<const WeightedHandRange>>
-      player_b_hands;
+                               const HandRange& player_a_range,
+                               const HandRange& player_b_range) {
   WeightedHandRangeView player_a_hands_view;
   WeightedHandRangeView player_b_hands_view;
   std::vector<RangeDeal> range_deals;
   std::vector<double> range_deal_weights;
   std::discrete_distribution<size_t> range_deal_distribution;
-  if (iterations > 0 && player_a_range.has_value() &&
-      player_b_range.has_value()) {
-    player_a_hands =
-        std::cref(player_a_range->get().get_all_weighted_combos());
-    player_b_hands =
-        std::cref(player_b_range->get().get_all_weighted_combos());
-    player_a_hands_view.reset_to_all(player_a_hands->get());
-    player_b_hands_view.reset_to_all(player_b_hands->get());
-    range_deals =
-        build_compatible_range_deals(player_a_hands->get(),
-                                     player_b_hands->get());
+  if (iterations > 0) {
+    const WeightedHandRange& player_a_hands =
+        player_a_range.get_all_weighted_combos();
+    const WeightedHandRange& player_b_hands =
+        player_b_range.get_all_weighted_combos();
+    player_a_hands_view.reset_to_all(player_a_hands);
+    player_b_hands_view.reset_to_all(player_b_hands);
+    range_deals = build_compatible_range_deals(player_a_hands, player_b_hands);
     if (range_deals.empty()) {
       throw std::invalid_argument(
           "Could not sample non-overlapping hands from ranges");
@@ -571,18 +558,11 @@ void CFRSolver::run_iterations(int iterations,
   // Run iterations of CFR
   LOG(INFO) << "Starting CFR iterations...";
   for (int i = 0; i < iterations; ++i) {
-    Hand player_a_hand;
-    Hand player_b_hand;
-    if (!player_a_range.has_value() || !player_b_range.has_value()) {
-      std::vector<Card> deck = BuildDeck();
-      std::shuffle(deck.begin(), deck.end(), rng_);
-      player_a_hand = DealHand(deck);
-      player_b_hand = DealHand(deck);
-    } else {
-      const RangeDeal& deal = range_deals[range_deal_distribution(rng_)];
-      player_a_hand = player_a_hands->get().hands[deal.player_a_index];
-      player_b_hand = player_b_hands->get().hands[deal.player_b_index];
-    }
+    const RangeDeal& deal = range_deals[range_deal_distribution(rng_)];
+    Hand player_a_hand =
+        player_a_hands_view.source_range().hands[deal.player_a_index];
+    Hand player_b_hand =
+        player_b_hands_view.source_range().hands[deal.player_b_index];
     
     const int max_depth = config_.max_depth();
     VLOG(1) << "Iteration " << i + 1 << "/" << iterations;
@@ -590,8 +570,7 @@ void CFRSolver::run_iterations(int iterations,
     std::vector<double> reach_probabilities(2, 1.0);
     OptionalWeightedHandRange player_a_context_range;
     OptionalWeightedHandRange player_b_context_range;
-    if (max_depth > 0 && player_a_hands.has_value() &&
-        player_b_hands.has_value()) {
+    if (max_depth > 0) {
       player_a_context_range = std::cref(player_a_hands_view);
       player_b_context_range = std::cref(player_b_hands_view);
     }
@@ -600,16 +579,7 @@ void CFRSolver::run_iterations(int iterations,
         cfr_iteration, 0, max_depth, player_a_context_range,
         player_b_context_range);
 
-    if (train_swapped) {
-      // Train both private-card assignments for the sampled heads-up deal.
-      std::vector<double> swapped_reach_probabilities(2, 1.0);
-      double swapped_value = cfr_with_ranges(
-          root, player_b_hand, player_a_hand, swapped_reach_probabilities,
-          cfr_iteration, 0, max_depth, std::nullopt, std::nullopt);
-      cumulative_root_utility_ += (dealt_value + swapped_value) / 2.0;
-    } else {
-      cumulative_root_utility_ += dealt_value;
-    }
+    cumulative_root_utility_ += dealt_value;
     ++iterations_run_;
   }
   
