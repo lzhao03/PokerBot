@@ -326,31 +326,36 @@ GameTree::Node& CFRSolver::get_or_build_root() {
   return game_tree_->root();
 }
 
-CFRSolver::RangeSampler::RangeSampler(
-    const WeightedHandRange& player_a_hands,
-    const WeightedHandRange& player_b_hands)
-    : player_a_hands(player_a_hands),
-      player_b_hands(player_b_hands),
-      compatible_player_b_weight(player_a_hands.size(), 0.0),
-      player_a_sample_weights(player_a_hands.size(), 0.0) {
-  double total_weight = 0.0;
-  for (size_t a = 0; a < player_a_hands.size(); ++a) {
-    if (player_a_hands.weights[a] <= 0.0) {
+CFRSolver::RangeSampler::RangeSampler(const TrainingRange& player_a_range,
+                                       const TrainingRange& player_b_range)
+    : player_a_range(player_a_range),
+      player_b_range(player_b_range),
+      compatible_player_b_weight(kComboCount, 0.0f) {
+  float total_weight = 0.0f;
+  player_a_sample_weights.reserve(player_a_range.active_count);
+  for (uint16_t a = 0; a < player_a_range.active_count; ++a) {
+    const ComboId player_a_combo = player_a_range.active[a];
+    const float player_a_weight = player_a_range.weights[player_a_combo];
+    if (player_a_weight <= 0.0f) {
+      player_a_sample_weights.push_back(0.0f);
       continue;
     }
-    for (size_t b = 0; b < player_b_hands.size(); ++b) {
-      if (player_b_hands.weights[b] <= 0.0 ||
-          (player_a_hands.masks[a] & player_b_hands.masks[b]) != 0) {
+    for (uint16_t b = 0; b < player_b_range.active_count; ++b) {
+      const ComboId player_b_combo = player_b_range.active[b];
+      const float player_b_weight = player_b_range.weights[player_b_combo];
+      if (player_b_weight <= 0.0f ||
+          (ComboMask(player_a_combo) & ComboMask(player_b_combo)) != 0) {
         continue;
       }
-      compatible_player_b_weight[a] += player_b_hands.weights[b];
+      compatible_player_b_weight[player_a_combo] += player_b_weight;
     }
-    player_a_sample_weights[a] =
-        player_a_hands.weights[a] * compatible_player_b_weight[a];
-    total_weight += player_a_sample_weights[a];
+    const float sample_weight =
+        player_a_weight * compatible_player_b_weight[player_a_combo];
+    player_a_sample_weights.push_back(sample_weight);
+    total_weight += sample_weight;
   }
 
-  if (total_weight <= 0.0) {
+  if (total_weight <= 0.0f) {
     throw std::invalid_argument(
         "Could not sample non-overlapping hands from ranges");
   }
@@ -360,32 +365,35 @@ CFRSolver::RangeSampler::RangeSampler(
 }
 
 CFRSolver::RangeDeal CFRSolver::RangeSampler::sample(std::mt19937& rng) {
-  const size_t player_a_index = player_a_distribution(rng);
-  const CardMask blocked_cards = player_a_hands.masks[player_a_index];
-  const double total_player_b_weight =
-      compatible_player_b_weight[player_a_index];
-  std::uniform_real_distribution<double> distribution(
-      0.0, total_player_b_weight);
-  double remaining = distribution(rng);
-  size_t fallback_player_b_index = player_b_hands.size();
+  const size_t player_a_active_index = player_a_distribution(rng);
+  const ComboId player_a_combo = player_a_range.active[player_a_active_index];
+  const CardMask blocked_cards = ComboMask(player_a_combo);
+  const float total_player_b_weight =
+      compatible_player_b_weight[player_a_combo];
+  std::uniform_real_distribution<float> distribution(
+      0.0f, total_player_b_weight);
+  float remaining = distribution(rng);
+  std::optional<ComboId> fallback_player_b_combo;
 
-  for (size_t b = 0; b < player_b_hands.size(); ++b) {
-    if (player_b_hands.weights[b] <= 0.0 ||
-        (player_b_hands.masks[b] & blocked_cards) != 0) {
+  for (uint16_t b = 0; b < player_b_range.active_count; ++b) {
+    const ComboId player_b_combo = player_b_range.active[b];
+    const float player_b_weight = player_b_range.weights[player_b_combo];
+    if (player_b_weight <= 0.0f ||
+        (ComboMask(player_b_combo) & blocked_cards) != 0) {
       continue;
     }
-    fallback_player_b_index = b;
-    remaining -= player_b_hands.weights[b];
-    if (remaining <= 0.0) {
-      return RangeDeal(player_a_index, b);
+    fallback_player_b_combo = player_b_combo;
+    remaining -= player_b_weight;
+    if (remaining <= 0.0f) {
+      return RangeDeal(player_a_combo, player_b_combo);
     }
   }
 
-  if (fallback_player_b_index == player_b_hands.size()) {
+  if (!fallback_player_b_combo.has_value()) {
     throw std::logic_error("Range sampler selected an incompatible hand");
   }
 
-  return RangeDeal(player_a_index, fallback_player_b_index);
+  return RangeDeal(player_a_combo, *fallback_player_b_combo);
 }
 
 CFRSolver::InfoSetKey CFRSolver::make_info_set_key(
@@ -411,6 +419,8 @@ CFRSolver::InfoSetKey CFRSolver::make_info_set_key(
   for (int i = 0; i < key.hand_size; ++i) {
     key.hand_cards[i] = EncodedCard(hand.cards(i));
   }
+  std::sort(key.hand_cards.begin(),
+            key.hand_cards.begin() + key.hand_size);
 
   key.board_size = std::min(state.cards_size(), InfoSetKey::kMaxCards);
   for (int i = 0; i < key.board_size; ++i) {
@@ -568,11 +578,15 @@ void CFRSolver::run_iterations(int iterations,
       player_a_range.get_all_weighted_combos();
   const WeightedHandRange& player_b_hands =
       player_b_range.get_all_weighted_combos();
+  const TrainingRange player_a_training_range =
+      BuildTrainingRange(player_a_range);
+  const TrainingRange player_b_training_range =
+      BuildTrainingRange(player_b_range);
   WeightedHandRangeView player_a_hands_view;
   WeightedHandRangeView player_b_hands_view;
   player_a_hands_view.reset_to_all(player_a_hands);
   player_b_hands_view.reset_to_all(player_b_hands);
-  RangeSampler range_sampler(player_a_hands, player_b_hands);
+  RangeSampler range_sampler(player_a_training_range, player_b_training_range);
 
   VLOG(1) << "Preparing game tree...";
   bool had_root = game_tree_->has_root();
@@ -589,11 +603,9 @@ void CFRSolver::run_iterations(int iterations,
   LOG(INFO) << "Starting CFR iterations...";
   for (int i = 0; i < iterations; ++i) {
     const RangeDeal deal = range_sampler.sample(rng_);
-    Hand player_a_hand =
-        player_a_hands_view.source_range().hands[deal.player_a_index];
-    Hand player_b_hand =
-        player_b_hands_view.source_range().hands[deal.player_b_index];
-    
+    Hand player_a_hand = ComboIdToHand(deal.player_a_combo);
+    Hand player_b_hand = ComboIdToHand(deal.player_b_combo);
+
     const int max_depth = config_.max_depth();
     VLOG(2) << "Iteration " << i + 1 << "/" << iterations;
     int cfr_iteration = iterations_run_;
@@ -1039,11 +1051,11 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
     return 0.0;
   }
 
-  const WeightedHandRange& player_a_hands =
-      player_a_range.get_all_weighted_combos();
-  const WeightedHandRange& player_b_hands =
-      player_b_range.get_all_weighted_combos();
-  RangeSampler range_sampler(player_a_hands, player_b_hands);
+  const TrainingRange player_a_training_range =
+      BuildTrainingRange(player_a_range);
+  const TrainingRange player_b_training_range =
+      BuildTrainingRange(player_b_range);
+  RangeSampler range_sampler(player_a_training_range, player_b_training_range);
 
   if (samples < kParallelEvaluationSampleThreshold) {
     return evaluate_strategy_samples(samples, range_sampler);
@@ -1117,8 +1129,8 @@ double CFRSolver::evaluate_strategy_samples(
   for (int i = 0; i < samples; ++i) {
     const RangeDeal deal = range_sampler.sample(rng_);
     total += evaluate_strategy_node(
-        root, range_sampler.player_a_hands.hands[deal.player_a_index],
-        range_sampler.player_b_hands.hands[deal.player_b_index]);
+        root, ComboIdToHand(deal.player_a_combo),
+        ComboIdToHand(deal.player_b_combo));
   }
   return total / samples;
 }

@@ -16,6 +16,7 @@
 #include "src/game_tree.h"
 #include "src/hand_range.h"
 #include "src/strategy.h"
+#include "src/training_range.h"
 
 namespace poker {
 
@@ -112,24 +113,24 @@ private:
   friend class CFRSolverRegretTestPeer;
 
   struct RangeDeal {
-    RangeDeal(size_t player_a_index, size_t player_b_index)
-        : player_a_index(player_a_index),
-          player_b_index(player_b_index) {}
+    RangeDeal(ComboId player_a_combo, ComboId player_b_combo)
+        : player_a_combo(player_a_combo),
+          player_b_combo(player_b_combo) {}
 
-    size_t player_a_index = 0;
-    size_t player_b_index = 0;
+    ComboId player_a_combo = 0;
+    ComboId player_b_combo = 0;
   };
 
   struct RangeSampler {
-    RangeSampler(const WeightedHandRange& player_a_hands,
-                 const WeightedHandRange& player_b_hands);
+    RangeSampler(const TrainingRange& player_a_range,
+                 const TrainingRange& player_b_range);
 
     RangeDeal sample(std::mt19937& rng);
 
-    const WeightedHandRange& player_a_hands;
-    const WeightedHandRange& player_b_hands;
-    std::vector<double> compatible_player_b_weight;
-    std::vector<double> player_a_sample_weights;
+    const TrainingRange& player_a_range;
+    const TrainingRange& player_b_range;
+    std::vector<float> compatible_player_b_weight;
+    std::vector<float> player_a_sample_weights;
     std::discrete_distribution<size_t> player_a_distribution;
   };
 

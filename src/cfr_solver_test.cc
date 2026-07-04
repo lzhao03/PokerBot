@@ -109,10 +109,14 @@ class CFRSolverRegretTestPeer {
   static std::vector<double> PlayerASampleWeights(
       const HandRange& player_a_range,
       const HandRange& player_b_range) {
+    const TrainingRange player_a_training_range =
+        BuildTrainingRange(player_a_range);
+    const TrainingRange player_b_training_range =
+        BuildTrainingRange(player_b_range);
     CFRSolver::RangeSampler sampler(
-        player_a_range.get_all_weighted_combos(),
-        player_b_range.get_all_weighted_combos());
-    return sampler.player_a_sample_weights;
+        player_a_training_range, player_b_training_range);
+    return std::vector<double>(sampler.player_a_sample_weights.begin(),
+                               sampler.player_a_sample_weights.end());
   }
 
   static WeightedHandRangeView ConditionRangeForAction(
@@ -429,6 +433,18 @@ void CheckCfrDistinguishesActionAmounts() {
     Expect(std::abs(action_prob.second - 0.2) < 0.000001,
            "initial strategy should be uniform over all legal actions");
   }
+}
+
+void CheckInfoSetKeyIgnoresPrivateHandOrder() {
+  PokerConfig config;
+  CFRSolver solver(config);
+  BoardState state = InitialRootState(config);
+  Hand ace_king = MakeHand(14, Suit::SPADES, 13, Suit::SPADES);
+  Hand king_ace = MakeHand(13, Suit::SPADES, 14, Suit::SPADES);
+
+  Expect(CFRSolverRegretTestPeer::InfoSetKey(solver, state, 0, ace_king) ==
+             CFRSolverRegretTestPeer::InfoSetKey(solver, state, 0, king_ace),
+         "infoset key should not depend on private hand card order");
 }
 
 void CheckSaveStrategyUsesProtobufSnapshot() {
@@ -1950,6 +1966,7 @@ void CheckCfrPlusWeightsLaterStrategies() {
 int main() {
   CheckCfrUsesLegalActions();
   CheckCfrDistinguishesActionAmounts();
+  CheckInfoSetKeyIgnoresPrivateHandOrder();
   CheckSaveStrategyUsesProtobufSnapshot();
   CheckLoadStrategyPopulatesEquilibriumStrategy();
   CheckTerminalUtilityCacheReusesScores();

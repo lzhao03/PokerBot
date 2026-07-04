@@ -211,6 +211,7 @@ cc_library(
         ":hand_range",
         ":thread_pool",
         ":terminal_utility_cache",
+        ":training_range",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:inlined_vector",
         "@abseil-cpp//absl/log:log",
