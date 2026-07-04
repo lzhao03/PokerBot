@@ -134,6 +134,10 @@ private:
     const TrainingRange& player_b_range;
     std::vector<float> compatible_player_b_weight;
     std::vector<float> player_a_sample_weights;
+    std::vector<uint32_t> compatible_player_b_offsets;
+    std::vector<uint16_t> compatible_player_b_counts;
+    std::vector<ComboId> compatible_player_b_combos;
+    std::vector<float> compatible_player_b_cumulative_weights;
     std::discrete_distribution<size_t> player_a_distribution;
   };
 

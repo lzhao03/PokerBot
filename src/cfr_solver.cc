@@ -388,9 +388,16 @@ CFRSolver::RangeSampler::RangeSampler(const TrainingRange& player_a_range,
                                        const TrainingRange& player_b_range)
     : player_a_range(player_a_range),
       player_b_range(player_b_range),
-      compatible_player_b_weight(kComboCount, 0.0f) {
+      compatible_player_b_weight(kComboCount, 0.0f),
+      compatible_player_b_offsets(kComboCount, 0),
+      compatible_player_b_counts(kComboCount, 0) {
   float total_weight = 0.0f;
   player_a_sample_weights.reserve(player_a_range.active_count);
+  const size_t max_compatible_pairs =
+      static_cast<size_t>(player_a_range.active_count) *
+      static_cast<size_t>(player_b_range.active_count);
+  compatible_player_b_combos.reserve(max_compatible_pairs);
+  compatible_player_b_cumulative_weights.reserve(max_compatible_pairs);
   for (uint16_t a = 0; a < player_a_range.active_count; ++a) {
     const ComboId player_a_combo = player_a_range.active[a];
     const float player_a_weight = player_a_range.weights[player_a_combo];
@@ -398,6 +405,10 @@ CFRSolver::RangeSampler::RangeSampler(const TrainingRange& player_a_range,
       player_a_sample_weights.push_back(0.0f);
       continue;
     }
+    const size_t offset = compatible_player_b_combos.size();
+    compatible_player_b_offsets[player_a_combo] =
+        static_cast<uint32_t>(offset);
+    float cumulative_player_b_weight = 0.0f;
     for (uint16_t b = 0; b < player_b_range.active_count; ++b) {
       const ComboId player_b_combo = player_b_range.active[b];
       const float player_b_weight = player_b_range.weights[player_b_combo];
@@ -405,8 +416,14 @@ CFRSolver::RangeSampler::RangeSampler(const TrainingRange& player_a_range,
           (ComboMask(player_a_combo) & ComboMask(player_b_combo)) != 0) {
         continue;
       }
-      compatible_player_b_weight[player_a_combo] += player_b_weight;
+      cumulative_player_b_weight += player_b_weight;
+      compatible_player_b_combos.push_back(player_b_combo);
+      compatible_player_b_cumulative_weights.push_back(
+          cumulative_player_b_weight);
     }
+    compatible_player_b_weight[player_a_combo] = cumulative_player_b_weight;
+    compatible_player_b_counts[player_a_combo] =
+        static_cast<uint16_t>(compatible_player_b_combos.size() - offset);
     const float sample_weight =
         player_a_weight * compatible_player_b_weight[player_a_combo];
     player_a_sample_weights.push_back(sample_weight);
@@ -425,33 +442,29 @@ CFRSolver::RangeSampler::RangeSampler(const TrainingRange& player_a_range,
 CFRSolver::RangeDeal CFRSolver::RangeSampler::sample(std::mt19937& rng) {
   const size_t player_a_active_index = player_a_distribution(rng);
   const ComboId player_a_combo = player_a_range.active[player_a_active_index];
-  const CardMask blocked_cards = ComboMask(player_a_combo);
   const float total_player_b_weight =
       compatible_player_b_weight[player_a_combo];
-  std::uniform_real_distribution<float> distribution(
-      0.0f, total_player_b_weight);
-  float remaining = distribution(rng);
-  std::optional<ComboId> fallback_player_b_combo;
-
-  for (uint16_t b = 0; b < player_b_range.active_count; ++b) {
-    const ComboId player_b_combo = player_b_range.active[b];
-    const float player_b_weight = player_b_range.weights[player_b_combo];
-    if (player_b_weight <= 0.0f ||
-        (ComboMask(player_b_combo) & blocked_cards) != 0) {
-      continue;
-    }
-    fallback_player_b_combo = player_b_combo;
-    remaining -= player_b_weight;
-    if (remaining <= 0.0f) {
-      return RangeDeal(player_a_combo, player_b_combo);
-    }
-  }
-
-  if (!fallback_player_b_combo.has_value()) {
+  const uint16_t compatible_count =
+      compatible_player_b_counts[player_a_combo];
+  if (total_player_b_weight <= 0.0f || compatible_count == 0) {
     throw std::logic_error("Range sampler selected an incompatible hand");
   }
 
-  return RangeDeal(player_a_combo, *fallback_player_b_combo);
+  std::uniform_real_distribution<float> distribution(
+      0.0f, total_player_b_weight);
+  const float sample = distribution(rng);
+  const size_t offset = compatible_player_b_offsets[player_a_combo];
+  const auto first = compatible_player_b_cumulative_weights.begin() + offset;
+  const auto last = first + compatible_count;
+  auto sampled = std::upper_bound(first, last, sample);
+  if (sampled == last) {
+    sampled = last - 1;
+  }
+
+  const size_t sampled_index =
+      offset + static_cast<size_t>(sampled - first);
+  return RangeDeal(player_a_combo,
+                   compatible_player_b_combos[sampled_index]);
 }
 
 CFRSolver::InfoSetKey CFRSolver::make_info_set_key(
