@@ -26,6 +26,16 @@ void ExpectInvalidAction(GameTree& tree,
   Expect(threw, message);
 }
 
+void ExpectInvalidActionKey(const Action& action, const char* message) {
+  bool threw = false;
+  try {
+    (void)GameTree::action_key(action);
+  } catch (const std::invalid_argument&) {
+    threw = true;
+  }
+  Expect(threw, message);
+}
+
 Action MakeAction(ActionType type, int amount = 0) {
   Action action;
   action.set_action(type);
@@ -317,6 +327,13 @@ void CheckRaisesRemainAvailableAfterPriorRaise() {
          "facing action keeps all-in");
 }
 
+void CheckActionKeyRejectsCollidingAmounts() {
+  ExpectInvalidActionKey(MakeAction(ActionType::CALL, -1),
+                         "action key should reject negative amounts");
+  ExpectInvalidActionKey(MakeAction(ActionType::CALL, 1000000),
+                         "action key should reject million-chip amounts");
+}
+
 void CheckShowdownUtility(GameTree& tree) {
   BoardState showdown = ShowdownState();
   Hand player_a = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
@@ -372,6 +389,7 @@ int main() {
   poker::CheckDuplicateConcreteBetSizesAreDeduped();
   poker::CheckStreetBetSizesOverrideGlobal();
   poker::CheckRaisesRemainAvailableAfterPriorRaise();
+  poker::CheckActionKeyRejectsCollidingAmounts();
   poker::CheckShowdownUtility(tree);
   poker::CheckChanceAdvancesStreet(tree);
   return 0;

@@ -181,8 +181,14 @@ GameTree::GameTree(const PokerConfig& config)
 }
 
 int GameTree::action_key(const Action& action) {
+  const double amount = action.amount();
+  const int rounded_amount = static_cast<int>(std::lround(amount));
+  if (amount < 0.0 || rounded_amount < 0 ||
+      rounded_amount >= kActionKeyMultiplier) {
+    throw std::invalid_argument("Action amount is outside action-key range");
+  }
   return static_cast<int>(action.action()) * kActionKeyMultiplier +
-         static_cast<int>(std::lround(action.amount()));
+         rounded_amount;
 }
 
 GameTree::Node& GameTree::root() {
