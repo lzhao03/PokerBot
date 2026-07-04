@@ -212,6 +212,37 @@ private:
     size_t operator()(const InfoSetKey& key) const;
   };
 
+  struct PublicStateKey {
+    int street = 0;
+    int pot = 0;
+    int stack_a = 0;
+    int stack_b = 0;
+    int all_in = 0;
+    int folded_player = 0;
+    int player_to_act = 0;
+    int player_contribution_size = 0;
+    std::array<int, 2> player_contributions = {0, 0};
+    int board_size = 0;
+    std::array<int, InfoSetKey::kMaxCards> board_cards = {-1, -1, -1, -1, -1};
+    int history_size = 0;
+    std::array<int, InfoSetKey::kInlineHistoryValues> history_values = {};
+    std::vector<int> history_overflow;
+
+    bool operator==(const PublicStateKey& other) const;
+  };
+
+  struct CompactInfoSetKey {
+    uint32_t public_state_id = 0;
+    uint16_t private_combo = 0;
+    uint8_t player = 0;
+
+    bool operator==(const CompactInfoSetKey& other) const;
+  };
+
+  struct CompactInfoSetKeyHash {
+    size_t operator()(const CompactInfoSetKey& key) const;
+  };
+
   struct ActionState {
     int action_id = 0;
     float cumulative_regret = 0.0f;
@@ -246,6 +277,8 @@ private:
   
   absl::flat_hash_map<InfoSetKey, int, InfoSetKeyHash> info_set_ids_;
   std::vector<InfoSetData> info_sets_;
+  absl::flat_hash_map<CompactInfoSetKey, int, CompactInfoSetKeyHash>
+      compact_info_set_ids_;
   
   // String-keyed strategy loaded from snapshots. Trained CFR state lives in
   // info_sets_ above.
@@ -302,6 +335,11 @@ private:
       const std::vector<Action>& legal_actions,
       StrategyProbabilities& probabilities);
   void average_strategy_probabilities(
+      GameTree::Node& node,
+      int player,
+      const PrivateCards& private_cards,
+      StrategyProbabilities& probabilities);
+  void average_strategy_probabilities(
       const InfoSetData& info_set,
       const std::vector<Action>& legal_actions,
       double fallback_probability,
@@ -309,6 +347,7 @@ private:
   void condition_ranges_for_actions(
       const TrainingRangeView& range,
       const BoardState& state,
+      uint32_t public_state_id,
       int player,
       const ActionChoices& action_choices,
       ConditionedRanges& conditioned_ranges);
@@ -321,10 +360,18 @@ private:
   InfoSetKey make_info_set_key(const BoardState& state,
                                int player,
                                const PrivateCards& private_cards) const;
+  PublicStateKey make_public_state_key(const BoardState& state) const;
   InfoSetKey make_public_info_set_key(const BoardState& state,
                                       int player) const;
+  int get_or_create_compact_info_set_id(
+      uint32_t public_state_id,
+      const BoardState& state,
+      int player,
+      ComboId combo_id,
+      const std::vector<int>& legal_action_ids);
   int get_or_create_info_set_id(const InfoSetKey& key,
                                 const std::vector<int>& legal_action_ids);
+  void rebuild_legacy_info_set_index();
   void initialize_info_set_actions(InfoSetData& info_set,
                                    const std::vector<int>& legal_action_ids);
   std::string info_set_key_to_string(const InfoSetKey& key) const;

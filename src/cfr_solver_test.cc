@@ -39,6 +39,35 @@ class CFRSolverRegretTestPeer {
         solver.make_info_set_key(state, player, hand));
   }
 
+  static bool SamePublicStateKey(const CFRSolver& solver,
+                                 const BoardState& left,
+                                 const BoardState& right) {
+    return solver.make_public_state_key(left) ==
+           solver.make_public_state_key(right);
+  }
+
+  static int CompactInfoSetId(CFRSolver& solver,
+                              const BoardState& state,
+                              int player,
+                              const Hand& hand) {
+    std::vector<Action> legal_actions =
+        solver.game_tree_->get_legal_actions(state);
+    std::vector<int> legal_action_ids;
+    legal_action_ids.reserve(legal_actions.size());
+    for (const Action& action : legal_actions) {
+      legal_action_ids.push_back(GameTree::action_key(action));
+    }
+    const uint32_t public_state_id =
+        static_cast<uint32_t>(solver.get_or_build_root().id);
+    return solver.get_or_create_compact_info_set_id(
+        public_state_id, state, player, HandToComboId(hand),
+        legal_action_ids);
+  }
+
+  static size_t CompactInfoSetCount(const CFRSolver& solver) {
+    return solver.compact_info_set_ids_.size();
+  }
+
   static double EvaluateNode(CFRSolver& solver, GameTree::Node& node,
                              const Hand& player_a_hand,
                              const Hand& player_b_hand) {
@@ -90,10 +119,11 @@ class CFRSolverRegretTestPeer {
     for (const Action& action : legal_actions) {
       legal_action_ids.push_back(GameTree::action_key(action));
     }
-    const CFRSolver::InfoSetKey key =
-        solver.make_info_set_key(state, player, hand);
-    const int info_set_id =
-        solver.get_or_create_info_set_id(key, legal_action_ids);
+    const uint32_t public_state_id =
+        static_cast<uint32_t>(solver.get_or_build_root().id);
+    const int info_set_id = solver.get_or_create_compact_info_set_id(
+        public_state_id, state, player, HandToComboId(hand),
+        legal_action_ids);
     CFRSolver::InfoSetData& info_set = solver.info_sets_[info_set_id];
     auto action = std::find_if(
         info_set.actions.begin(), info_set.actions.end(),
@@ -155,8 +185,10 @@ class CFRSolverRegretTestPeer {
     }
 
     CFRSolver::ConditionedRanges conditioned_ranges;
+    const uint32_t public_state_id =
+        static_cast<uint32_t>(solver.get_or_build_root().id);
     solver.condition_ranges_for_actions(
-        range, state, player, choices, conditioned_ranges);
+        range, state, public_state_id, player, choices, conditioned_ranges);
     return std::move(conditioned_ranges[selected_index]);
   }
 };
@@ -475,6 +507,50 @@ void CheckInfoSetKeyIgnoresBoardOrder() {
   Expect(CFRSolverRegretTestPeer::InfoSetKey(solver, first, 0, hand) ==
              CFRSolverRegretTestPeer::InfoSetKey(solver, second, 0, hand),
          "infoset key should not depend on public board card order");
+}
+
+void CheckPublicStateKeyIgnoresBoardOrder() {
+  PokerConfig config;
+  CFRSolver solver(config);
+  BoardState first = InitialRootState(config);
+  BoardState second = InitialRootState(config);
+  first.set_street(Street::FLOP);
+  second.set_street(Street::FLOP);
+  AddCard(first, 2, Suit::HEARTS);
+  AddCard(first, 7, Suit::DIAMONDS);
+  AddCard(first, 11, Suit::CLUBS);
+  AddCard(second, 11, Suit::CLUBS);
+  AddCard(second, 2, Suit::HEARTS);
+  AddCard(second, 7, Suit::DIAMONDS);
+
+  Expect(CFRSolverRegretTestPeer::SamePublicStateKey(solver, first, second),
+         "public state key should not depend on public board card order");
+}
+
+void CheckCompactInfoSetIdsUseExactCombos() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+
+  CFRSolver solver(config);
+  BoardState state = InitialRootState(config);
+  Hand aces = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand kings = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
+
+  const int first_aces_id =
+      CFRSolverRegretTestPeer::CompactInfoSetId(solver, state, 0, aces);
+  const int second_aces_id =
+      CFRSolverRegretTestPeer::CompactInfoSetId(solver, state, 0, aces);
+  const int kings_id =
+      CFRSolverRegretTestPeer::CompactInfoSetId(solver, state, 0, kings);
+
+  Expect(first_aces_id == second_aces_id,
+         "compact infoset should reuse the same exact combo id");
+  Expect(first_aces_id != kings_id,
+         "compact infoset should distinguish different exact combos");
+  Expect(CFRSolverRegretTestPeer::CompactInfoSetCount(solver) == 2,
+         "compact infoset map should only contain distinct combos");
+  Expect(solver.get_equilibrium_strategy().get_info_sets().size() == 2,
+         "compact infosets should still export through strategy snapshots");
 }
 
 void CheckSaveStrategyUsesProtobufSnapshot() {
@@ -2032,6 +2108,8 @@ int main() {
   CheckCfrDistinguishesActionAmounts();
   CheckInfoSetKeyIgnoresPrivateHandOrder();
   CheckInfoSetKeyIgnoresBoardOrder();
+  CheckPublicStateKeyIgnoresBoardOrder();
+  CheckCompactInfoSetIdsUseExactCombos();
   CheckSaveStrategyUsesProtobufSnapshot();
   CheckLoadStrategyPopulatesEquilibriumStrategy();
   CheckTerminalUtilityCacheReusesScores();

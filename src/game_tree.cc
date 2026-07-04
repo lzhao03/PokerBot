@@ -537,6 +537,7 @@ GameTree::Node& GameTree::add_node(Node node) {
     node_blocks_.push_back(std::make_unique<NodeBlock>());
   }
   NodeBlock& block = *node_blocks_.back();
+  node.id = node_count_;
   block.nodes.push_back(std::move(node));
   ++node_count_;
   return block.nodes.back();

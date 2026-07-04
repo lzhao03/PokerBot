@@ -23,6 +23,7 @@ public:
     std::vector<Action> legal_actions;
     std::vector<int> legal_action_ids;
     absl::flat_hash_map<int, NodeId> children; // Action ID -> node arena ID
+    NodeId id = 0;
     
     // For terminal nodes
     double utility;
