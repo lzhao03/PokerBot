@@ -241,6 +241,10 @@ private:
     bool operator==(const PublicStateKey& other) const;
   };
 
+  struct PublicStateKeyHash {
+    size_t operator()(const PublicStateKey& key) const;
+  };
+
   struct CompactInfoSetKey {
     uint32_t public_state_id = 0;
     uint16_t private_combo = 0;
@@ -260,8 +264,12 @@ private:
   };
 
   struct StrategyTablesView {
+    const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>*
+        public_state_ids = nullptr;
+    const absl::flat_hash_map<CompactInfoSetKey, int, CompactInfoSetKeyHash>*
+        compact_info_set_ids = nullptr;
     const absl::flat_hash_map<InfoSetKey, int, InfoSetKeyHash>*
-        info_set_ids = nullptr;
+        legacy_info_set_ids = nullptr;
     const std::vector<InfoSetData>* info_sets = nullptr;
     const std::vector<int>* action_ids = nullptr;
     const std::vector<float>* cumulative_regrets = nullptr;
@@ -290,6 +298,8 @@ private:
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
   
+  absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>
+      public_state_ids_;
   absl::flat_hash_map<InfoSetKey, int, InfoSetKeyHash> info_set_ids_;
   std::vector<InfoSetData> info_sets_;
   std::vector<int> action_ids_;
@@ -302,7 +312,6 @@ private:
   // info_sets_ above.
   Strategy loaded_strategy_;
   const StrategyTablesView* strategy_tables_view_ = nullptr;
-  bool legacy_info_set_index_valid_ = false;
   
   // Helper methods
   GameTree::Node& get_or_build_root();
@@ -374,6 +383,8 @@ private:
   PublicStateKey make_public_state_key(const GameState& state) const;
   InfoSetKey make_public_info_set_key(const GameState& state,
                                       int player) const;
+  uint32_t get_or_create_public_state_id(const GameState& state,
+                                         uint32_t node_id);
   int get_or_create_compact_info_set_id(
       uint32_t public_state_id,
       const GameState& state,
@@ -382,9 +393,11 @@ private:
       const std::vector<int>& legal_action_ids);
   int get_or_create_info_set_id(const InfoSetKey& key,
                                 const std::vector<int>& legal_action_ids);
-  void ensure_legacy_info_set_index();
-  void rebuild_legacy_info_set_index();
   StrategyTablesView strategy_tables_view() const;
+  const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>&
+  strategy_public_state_ids() const;
+  const absl::flat_hash_map<CompactInfoSetKey, int, CompactInfoSetKeyHash>&
+  strategy_compact_info_set_ids() const;
   const absl::flat_hash_map<InfoSetKey, int, InfoSetKeyHash>&
   strategy_info_set_ids() const;
   const std::vector<InfoSetData>& strategy_info_sets() const;

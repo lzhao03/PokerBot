@@ -445,6 +445,28 @@ bool CFRSolver::PublicStateKey::operator==(
          history_overflow == other.history_overflow;
 }
 
+size_t CFRSolver::PublicStateKeyHash::operator()(
+    const PublicStateKey& key) const {
+  size_t seed = 0;
+  HashCombine(seed, key.street);
+  HashCombine(seed, key.pot);
+  HashCombine(seed, key.stack_a);
+  HashCombine(seed, key.stack_b);
+  HashCombine(seed, key.all_in);
+  HashCombine(seed, key.folded_player);
+  HashCombine(seed, key.player_to_act);
+  HashCombine(seed, key.player_contribution_size);
+  HashArray(seed, key.player_contributions);
+  HashCombine(seed, key.board_size);
+  HashArray(seed, key.board_cards);
+  HashCombine(seed, key.history_size);
+  HashArray(seed, key.history_values);
+  for (int value : key.history_overflow) {
+    HashCombine(seed, value);
+  }
+  return seed;
+}
+
 bool CFRSolver::CompactInfoSetKey::operator==(
     const CompactInfoSetKey& other) const {
   return public_state_id == other.public_state_id &&
@@ -757,6 +779,13 @@ void CFRSolver::initialize_info_set_actions(
   }
 }
 
+uint32_t CFRSolver::get_or_create_public_state_id(const GameState& state,
+                                                  uint32_t node_id) {
+  auto inserted = public_state_ids_.emplace(make_public_state_key(state),
+                                            node_id);
+  return inserted.first->second;
+}
+
 int CFRSolver::get_or_create_compact_info_set_id(
     uint32_t public_state_id,
     const GameState& state,
@@ -792,7 +821,6 @@ int CFRSolver::get_or_create_compact_info_set_id(
   initialize_info_set_actions(data, legal_action_ids);
   info_sets_.push_back(std::move(data));
   compact_info_set_ids_.emplace(compact_key, id);
-  legacy_info_set_index_valid_ = false;
   return id;
 }
 
@@ -821,24 +849,10 @@ int CFRSolver::get_or_create_info_set_id(
   return id;
 }
 
-void CFRSolver::ensure_legacy_info_set_index() {
-  if (!legacy_info_set_index_valid_ ||
-      info_set_ids_.size() != info_sets_.size()) {
-    rebuild_legacy_info_set_index();
-  }
-}
-
-void CFRSolver::rebuild_legacy_info_set_index() {
-  info_set_ids_.clear();
-  info_set_ids_.reserve(info_sets_.size());
-  for (size_t i = 0; i < info_sets_.size(); ++i) {
-    info_set_ids_.emplace(info_sets_[i].key, static_cast<int>(i));
-  }
-  legacy_info_set_index_valid_ = true;
-}
-
 CFRSolver::StrategyTablesView CFRSolver::strategy_tables_view() const {
-  return {&info_set_ids_,
+  return {&public_state_ids_,
+          &compact_info_set_ids_,
+          &info_set_ids_,
           &info_sets_,
           &action_ids_,
           &cumulative_regrets_,
@@ -846,11 +860,28 @@ CFRSolver::StrategyTablesView CFRSolver::strategy_tables_view() const {
           &loaded_strategy_};
 }
 
+const absl::flat_hash_map<CFRSolver::PublicStateKey, uint32_t,
+                          CFRSolver::PublicStateKeyHash>&
+CFRSolver::strategy_public_state_ids() const {
+  return strategy_tables_view_ != nullptr
+             ? *strategy_tables_view_->public_state_ids
+             : public_state_ids_;
+}
+
+const absl::flat_hash_map<CFRSolver::CompactInfoSetKey, int,
+                          CFRSolver::CompactInfoSetKeyHash>&
+CFRSolver::strategy_compact_info_set_ids() const {
+  return strategy_tables_view_ != nullptr
+             ? *strategy_tables_view_->compact_info_set_ids
+             : compact_info_set_ids_;
+}
+
 const absl::flat_hash_map<CFRSolver::InfoSetKey, int,
                           CFRSolver::InfoSetKeyHash>&
 CFRSolver::strategy_info_set_ids() const {
-  return strategy_tables_view_ != nullptr ? *strategy_tables_view_->info_set_ids
-                                          : info_set_ids_;
+  return strategy_tables_view_ != nullptr
+             ? *strategy_tables_view_->legacy_info_set_ids
+             : info_set_ids_;
 }
 
 const std::vector<CFRSolver::InfoSetData>& CFRSolver::strategy_info_sets()
@@ -1125,7 +1156,8 @@ double CFRSolver::cfr_with_ranges(
       (player == 0) ? player_a_cards : player_b_cards;
   
   EnsureLegalActionIds(node);
-  const uint32_t public_state_id = static_cast<uint32_t>(node.id);
+  const uint32_t public_state_id = get_or_create_public_state_id(
+      node.state, static_cast<uint32_t>(node.id));
   const int info_set_id =
       get_or_create_compact_info_set_id(
           public_state_id, node.state, player, player_cards.combo,
@@ -1434,6 +1466,20 @@ void CFRSolver::average_strategy_probabilities(
     return;
   }
 
+  const auto& public_state_ids = strategy_public_state_ids();
+  auto public_state = public_state_ids.find(make_public_state_key(node.state));
+  if (public_state != public_state_ids.end()) {
+    compact_key.public_state_id = public_state->second;
+    const auto& compact_info_set_ids = strategy_compact_info_set_ids();
+    auto strategy_compact = compact_info_set_ids.find(compact_key);
+    if (strategy_compact != compact_info_set_ids.end()) {
+      average_strategy_probabilities(
+          strategy_info_sets()[strategy_compact->second], node.legal_actions,
+          uniform_probability, probabilities);
+      return;
+    }
+  }
+
   average_strategy_probabilities(
       node.state, player, private_cards, node.legal_actions, probabilities);
 }
@@ -1699,7 +1745,6 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   std::shared_ptr<TerminalUtilityCache> utility_cache = utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider =
       continuation_value_provider_;
-  ensure_legacy_info_set_index();
   const StrategyTablesView strategy_tables = strategy_tables_view();
   std::vector<std::future<std::pair<double, int64_t>>> futures;
   futures.reserve(worker_count);
@@ -2016,7 +2061,6 @@ double CFRSolver::sampled_range_best_response_value(
   std::shared_ptr<TerminalUtilityCache> utility_cache = utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider =
       continuation_value_provider_;
-  ensure_legacy_info_set_index();
   const StrategyTablesView strategy_tables = strategy_tables_view();
   std::vector<std::future<std::pair<double, int64_t>>> futures;
   futures.reserve(worker_count);
@@ -2238,13 +2282,13 @@ void CFRSolver::load_strategy(const std::string& filename) {
   }
 
   loaded_strategy_.clear();
+  public_state_ids_.clear();
   info_set_ids_.clear();
   info_sets_.clear();
   action_ids_.clear();
   cumulative_regrets_.clear();
   cumulative_strategies_.clear();
   compact_info_set_ids_.clear();
-  legacy_info_set_index_valid_ = true;
 
   for (const StrategyInfoSetSnapshot& info_set : snapshot.info_sets()) {
     Strategy::ActionProbabilities action_probs;
