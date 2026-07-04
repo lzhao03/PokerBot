@@ -942,9 +942,11 @@ double CFRSolver::cfr_with_ranges(
           static_cast<float>(std::max(0.0, cumulative_regret + regret));
     }
     
-    // CFR+ commonly weights later average-strategy samples more heavily.
-    update_strategy(info_set_id, action_choices,
-                    reach_probabilities[player] * (iteration + 1));
+    if (!config_.regret_only_training()) {
+      // CFR+ commonly weights later average-strategy samples more heavily.
+      update_strategy(info_set_id, action_choices,
+                      reach_probabilities[player] * (iteration + 1));
+    }
   }
   
   return node_value;
@@ -1122,7 +1124,13 @@ void CFRSolver::average_strategy_probabilities(
   if (aligned_action_ids) {
     for (size_t i = 0; i < legal_actions.size(); ++i) {
       POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
-      probabilities[i] = info_set.actions[i].cumulative_strategy;
+      probabilities[i] =
+          config_.regret_only_training()
+              ? std::max(
+                    0.0,
+                    static_cast<double>(
+                        info_set.actions[i].cumulative_regret))
+              : static_cast<double>(info_set.actions[i].cumulative_strategy);
       probability_sum += probabilities[i];
     }
   } else {
@@ -1132,7 +1140,12 @@ void CFRSolver::average_strategy_probabilities(
       for (const ActionState& action_state : info_set.actions) {
         POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
         if (action_state.action_id == legal_action_id) {
-          probabilities[legal_action_index] = action_state.cumulative_strategy;
+          probabilities[legal_action_index] =
+              config_.regret_only_training()
+                  ? std::max(
+                        0.0,
+                        static_cast<double>(action_state.cumulative_regret))
+                  : static_cast<double>(action_state.cumulative_strategy);
           probability_sum += probabilities[legal_action_index];
           break;
         }
@@ -1242,15 +1255,22 @@ Strategy CFRSolver::get_equilibrium_strategy() const {
   for (const InfoSetData& info_set : info_sets_) {
     double sum = 0.0;
     for (const ActionState& action : info_set.actions) {
-      sum += action.cumulative_strategy;
+      sum += config_.regret_only_training()
+                 ? std::max(0.0,
+                            static_cast<double>(action.cumulative_regret))
+                 : static_cast<double>(action.cumulative_strategy);
     }
 
     Strategy::ActionProbabilities normalized_strategy;
     normalized_strategy.reserve(info_set.actions.size());
     if (sum > 0.0) {
       for (const ActionState& action : info_set.actions) {
-        normalized_strategy[action.action_id] =
-            action.cumulative_strategy / sum;
+        const double strategy_weight =
+            config_.regret_only_training()
+                ? std::max(0.0,
+                           static_cast<double>(action.cumulative_regret))
+                : static_cast<double>(action.cumulative_strategy);
+        normalized_strategy[action.action_id] = strategy_weight / sum;
       }
     } else if (!info_set.actions.empty()) {
       double uniform_prob = 1.0 / info_set.actions.size();

@@ -58,7 +58,8 @@ public:
            const HandRange& player_b_range);
   
   // The core chance-sampled CFR+ algorithm.
-  // Uses CFR+ regret clipping and linearly weighted average strategy.
+  // Uses CFR+ regret clipping. Unless config.regret_only_training is set,
+  // it also accumulates a linearly weighted average strategy.
   // Returns the expected value of the game for player A.
   // max_depth <= 0 disables the depth cutoff.
   double cfr(GameTree::Node& node,
@@ -69,7 +70,8 @@ public:
              int depth = 0,
              int max_depth = 0);
   
-  // Get the computed equilibrium strategy
+  // Get the computed strategy. Regret-only training exports the current
+  // regret-matched policy because average-strategy sums are not accumulated.
   Strategy get_equilibrium_strategy() const;
   double evaluate_strategy(const Hand& player_a_hand, const Hand& player_b_hand);
   double evaluate_strategy(int samples, const HandRange& player_a_range,

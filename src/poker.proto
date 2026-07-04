@@ -17,6 +17,7 @@ message PokerConfig {
   repeated double flop_bet_sizes = 10;
   repeated double turn_bet_sizes = 11;
   repeated double river_bet_sizes = 12;
+  bool regret_only_training = 13;
 }
 
 enum Suit {

@@ -24,6 +24,7 @@ constexpr int kDefaultMaxDepth = kProdBenchmarkDefaults ? 0 : 2;
 constexpr int kDefaultEvalSamples = kProdBenchmarkDefaults ? 1 : 100;
 constexpr int kDefaultExploitabilitySamples = 10;
 constexpr bool kDefaultSkipExploitability = kProdBenchmarkDefaults;
+constexpr bool kDefaultRegretOnly = kProdBenchmarkDefaults;
 constexpr const char* kDefaultRange =
     kProdBenchmarkDefaults ? "all" : "premium";
 
@@ -35,6 +36,7 @@ struct Options {
   int exploitability_samples = kDefaultExploitabilitySamples;
   std::string range = kDefaultRange;
   bool skip_exploitability = kDefaultSkipExploitability;
+  bool regret_only = kDefaultRegretOnly;
 };
 
 struct BenchmarkResult {
@@ -73,6 +75,7 @@ poker::PokerConfig BenchmarkConfig(const Options& options) {
   config.set_big_blind(2);
   config.set_max_depth(options.max_depth);
   config.set_chance_samples(options.chance_samples);
+  config.set_regret_only_training(options.regret_only);
   return config;
 }
 
@@ -101,6 +104,8 @@ void PrintUsage(const char* program) {
       << "  --exploitability-samples=N      default "
       << kDefaultExploitabilitySamples << "\n"
       << "  --range=premium|all|RANGE       default " << kDefaultRange << "\n"
+      << "  --regret-only                   default "
+      << (kDefaultRegretOnly ? "true" : "false") << "\n"
       << "  --skip-exploitability           default "
       << (kDefaultSkipExploitability ? "true" : "false") << "\n";
 }
@@ -181,6 +186,8 @@ Options ParseOptions(int argc, char** argv) {
       std::exit(0);
     } else if (arg == "--skip-exploitability") {
       options.skip_exploitability = true;
+    } else if (arg == "--regret-only") {
+      options.regret_only = true;
     } else if (ConsumePrefix(arg, "--iterations=", &value)) {
       options.iterations = ParseInt(value, "--iterations");
     } else if (ConsumePrefix(arg, "--max-depth=", &value)) {

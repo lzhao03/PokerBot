@@ -106,6 +106,16 @@ class CFRSolverRegretTestPeer {
     action->cumulative_regret = regret;
   }
 
+  static double TotalCumulativeStrategy(const CFRSolver& solver) {
+    double total = 0.0;
+    for (const CFRSolver::InfoSetData& info_set : solver.info_sets_) {
+      for (const CFRSolver::ActionState& action : info_set.actions) {
+        total += action.cumulative_strategy;
+      }
+    }
+    return total;
+  }
+
   static std::vector<double> PlayerASampleWeights(
       const HandRange& player_a_range,
       const HandRange& player_b_range) {
@@ -1982,6 +1992,39 @@ void CheckCfrPlusWeightsLaterStrategies() {
          "CFR+ average strategy should weight later iterations linearly");
 }
 
+void CheckRegretOnlyTrainingSkipsAverageStrategyWrites() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+  config.set_regret_only_training(true);
+
+  CFRSolver solver(config);
+  GameTree::Node node;
+  node.state.set_player_to_act(0);
+  node.state.set_folded_player(-1);
+  node.player_to_act = 0;
+
+  node.legal_actions.push_back(MakeAction(ActionType::FOLD));
+  node.legal_actions.push_back(MakeAction(ActionType::CALL, 1));
+
+  AddTerminalChild(solver, node, TestActionKey(ActionType::FOLD),
+                   FoldedState(0));
+  AddTerminalChild(solver, node, TestActionKey(ActionType::CALL, 1),
+                   FoldedState(1));
+
+  Hand player_a_hand;
+  Hand player_b_hand;
+  std::array<double, 2> reach_probabilities = {1.0, 1.0};
+  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
+
+  Expect(CFRSolverRegretTestPeer::TotalCumulativeStrategy(solver) == 0.0,
+         "regret-only training should skip average strategy writes");
+
+  const Strategy strategy = solver.get_equilibrium_strategy();
+  const auto action_probs = strategy.get_strategy(strategy.get_info_sets()[0]);
+  Expect(action_probs.at(TestActionKey(ActionType::CALL, 1)) == 1.0,
+         "regret-only export should use current regret-matched strategy");
+}
+
 }  // namespace
 
 int main() {
@@ -2032,6 +2075,7 @@ int main() {
   CheckPlayerBRegretsUsePlayerBUtility();
   CheckCfrPlusClipsNegativeRegrets();
   CheckCfrPlusWeightsLaterStrategies();
+  CheckRegretOnlyTrainingSkipsAverageStrategyWrites();
 
   PokerConfig config;
   config.add_bet_sizes(1.0);
