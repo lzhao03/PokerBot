@@ -135,6 +135,18 @@ private:
     std::discrete_distribution<size_t> player_a_distribution;
   };
 
+  struct PrivateCards {
+    static PrivateCards FromHand(const Hand& hand);
+    static PrivateCards FromCombo(ComboId combo_id);
+
+    CardMask mask() const;
+    Hand to_hand() const;
+
+    bool has_combo = false;
+    ComboId combo = 0;
+    Hand hand;
+  };
+
   using OptionalTrainingRange =
       std::optional<std::reference_wrapper<const TrainingRangeView>>;
 
@@ -248,10 +260,27 @@ private:
       TraversalScratch& scratch,
       OptionalTrainingRange player_a_range,
       OptionalTrainingRange player_b_range);
+  double cfr_with_ranges(
+      GameTree::Node& node,
+      const PrivateCards& player_a_cards,
+      const PrivateCards& player_b_cards,
+      std::array<double, 2>& reach_probabilities,
+      int iteration,
+      int depth,
+      int max_depth,
+      TraversalScratch& scratch,
+      OptionalTrainingRange player_a_range,
+      OptionalTrainingRange player_b_range);
   double average_strategy_action_probability(
       const BoardState& state,
       int player,
       const Hand& hand,
+      const std::vector<Action>& legal_actions,
+      int action_id);
+  double average_strategy_action_probability(
+      const BoardState& state,
+      int player,
+      const PrivateCards& private_cards,
       const std::vector<Action>& legal_actions,
       int action_id);
   double average_strategy_action_probability(
@@ -268,6 +297,14 @@ private:
   InfoSetKey make_info_set_key(const BoardState& state,
                                int player,
                                const Hand& hand) const;
+  InfoSetKey make_info_set_key(const BoardState& state,
+                               int player,
+                               ComboId combo_id) const;
+  InfoSetKey make_info_set_key(const BoardState& state,
+                               int player,
+                               const PrivateCards& private_cards) const;
+  InfoSetKey make_public_info_set_key(const BoardState& state,
+                                      int player) const;
   int get_or_create_info_set_id(const InfoSetKey& key,
                                 const std::vector<int>& legal_action_ids);
   void initialize_info_set_actions(InfoSetData& info_set,
@@ -284,9 +321,18 @@ private:
   double utility(const BoardState& state,
                  const Hand& player_a_hand,
                  const Hand& player_b_hand);
+  double utility(const BoardState& state,
+                 const PrivateCards& player_a_cards,
+                 const PrivateCards& player_b_cards);
+  double uncached_utility(const BoardState& state,
+                          const PrivateCards& player_a_cards,
+                          const PrivateCards& player_b_cards);
   double evaluate_strategy_node(GameTree::Node& node,
                                 const Hand& player_a_hand,
                                 const Hand& player_b_hand);
+  double evaluate_strategy_node(GameTree::Node& node,
+                                const PrivateCards& player_a_cards,
+                                const PrivateCards& player_b_cards);
   double evaluate_strategy_samples(
       int samples,
       RangeSampler range_sampler);
@@ -316,6 +362,17 @@ private:
       GameTree::Node& node,
       const Hand& player_a_hand,
       const Hand& player_b_hand,
+      std::array<double, 2>& reach_probabilities,
+      int iteration,
+      int depth,
+      int max_depth,
+      TraversalScratch& scratch,
+      OptionalTrainingRange player_a_range,
+      OptionalTrainingRange player_b_range);
+  double chance_sampling_cfr(
+      GameTree::Node& node,
+      const PrivateCards& player_a_cards,
+      const PrivateCards& player_b_cards,
       std::array<double, 2>& reach_probabilities,
       int iteration,
       int depth,

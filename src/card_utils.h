@@ -15,5 +15,8 @@ std::vector<Card> SampleStreetCards(const BoardState& state,
                                     const Hand& player_a_hand,
                                     const Hand& player_b_hand,
                                     std::mt19937& rng);
+std::vector<Card> SampleStreetCards(const BoardState& state,
+                                    CardMask known_private_cards,
+                                    std::mt19937& rng);
 
 }  // namespace poker
