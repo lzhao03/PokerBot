@@ -142,11 +142,10 @@ class CFRSolverRegretTestPeer {
       throw std::runtime_error("Selected action is not legal");
     }
 
-    WeightedHandRangeView conditioned_range;
-    solver.condition_range_for_action(
-        range, state, player, choices, choices[selected_index],
-        conditioned_range);
-    return conditioned_range;
+    std::vector<WeightedHandRangeView> conditioned_ranges;
+    solver.condition_ranges_for_actions(
+        range, state, player, choices, conditioned_ranges);
+    return std::move(conditioned_ranges[selected_index]);
   }
 };
 

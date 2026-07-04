@@ -220,17 +220,6 @@ private:
       int max_depth,
       OptionalWeightedHandRange player_a_range,
       OptionalWeightedHandRange player_b_range);
-  double action_probability_for_hand(
-      const BoardState& state,
-      int player,
-      const Hand& hand,
-      const std::vector<ActionChoice>& legal_action_choices,
-      const ActionChoice& action_choice) const;
-  double regret_matched_probability_for_action(
-      const InfoSetData& info_set,
-      const std::vector<ActionChoice>& legal_action_choices,
-      const ActionChoice& action_choice,
-      double fallback_probability) const;
   double average_strategy_action_probability(
       const BoardState& state,
       int player,
@@ -242,13 +231,12 @@ private:
       const std::vector<Action>& legal_actions,
       int action_id,
       double fallback_probability) const;
-  void condition_range_for_action(
+  void condition_ranges_for_actions(
       const WeightedHandRangeView& range,
       const BoardState& state,
       int player,
-      const std::vector<ActionChoice>& legal_action_choices,
-      const ActionChoice& action_choice,
-      WeightedHandRangeView& conditioned_range) const;
+      const std::vector<ActionChoice>& action_choices,
+      std::vector<WeightedHandRangeView>& conditioned_ranges) const;
   InfoSetKey make_info_set_key(const BoardState& state,
                                int player,
                                const Hand& hand) const;

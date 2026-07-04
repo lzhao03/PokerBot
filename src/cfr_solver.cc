@@ -729,9 +729,23 @@ double CFRSolver::cfr_with_ranges(
   
   // Initialize the expected value for the player
   double node_value = 0.0;
-  WeightedHandRangeView conditioned_player_range;
+  std::vector<WeightedHandRangeView> conditioned_player_ranges;
+  const bool condition_player_a_range =
+      player == 0 && player_a_range.has_value();
+  const bool condition_player_b_range =
+      player == 1 && player_b_range.has_value();
+  if (condition_player_a_range) {
+    condition_ranges_for_actions(player_a_range->get(), node.state, player,
+                                 action_choices, conditioned_player_ranges);
+  } else if (condition_player_b_range) {
+    condition_ranges_for_actions(player_b_range->get(), node.state, player,
+                                 action_choices, conditioned_player_ranges);
+  }
+
   // For each action, recursively call CFR and compute the expected value
-  for (ActionChoice& choice : action_choices) {
+  for (size_t choice_index = 0; choice_index < action_choices.size();
+       ++choice_index) {
+    ActionChoice& choice = action_choices[choice_index];
     const Action& action = choice.action.get();
     int action_id = choice.action_id;
     
@@ -746,16 +760,10 @@ double CFRSolver::cfr_with_ranges(
 
     OptionalWeightedHandRange child_player_a_range = player_a_range;
     OptionalWeightedHandRange child_player_b_range = player_b_range;
-    if (player == 0 && player_a_range.has_value()) {
-      condition_range_for_action(
-          player_a_range->get(), node.state, player, action_choices,
-          choice, conditioned_player_range);
-      child_player_a_range = std::cref(conditioned_player_range);
-    } else if (player == 1 && player_b_range.has_value()) {
-      condition_range_for_action(
-          player_b_range->get(), node.state, player, action_choices,
-          choice, conditioned_player_range);
-      child_player_b_range = std::cref(conditioned_player_range);
+    if (condition_player_a_range) {
+      child_player_a_range = std::cref(conditioned_player_ranges[choice_index]);
+    } else if (condition_player_b_range) {
+      child_player_b_range = std::cref(conditioned_player_ranges[choice_index]);
     }
     
     // Recursive call to get the expected value of this action
@@ -853,60 +861,6 @@ double CFRSolver::chance_sampling_cfr(GameTree::Node& node,
       });
 }
 
-double CFRSolver::action_probability_for_hand(
-    const BoardState& state,
-    int player,
-    const Hand& hand,
-    const std::vector<ActionChoice>& legal_action_choices,
-    const ActionChoice& action_choice) const {
-  if (legal_action_choices.empty()) {
-    return 0.0;
-  }
-  const double uniform_probability = 1.0 / legal_action_choices.size();
-
-  InfoSetKey key = make_info_set_key(state, player, hand);
-  auto existing_info_set = info_set_ids_.find(key);
-  if (existing_info_set == info_set_ids_.end()) {
-    return uniform_probability;
-  }
-
-  return regret_matched_probability_for_action(
-      info_sets_[existing_info_set->second], legal_action_choices, action_choice,
-      uniform_probability);
-}
-
-double CFRSolver::regret_matched_probability_for_action(
-    const InfoSetData& info_set,
-    const std::vector<ActionChoice>& legal_action_choices,
-    const ActionChoice& action_choice,
-    double fallback_probability) const {
-  double positive_regret_sum = 0.0;
-  double action_positive_regret = 0.0;
-
-  for (const ActionChoice& choice : legal_action_choices) {
-    auto action = std::find_if(
-        info_set.actions.begin(), info_set.actions.end(),
-        [&](const ActionState& action_state) {
-          return action_state.action_id == choice.action_id;
-        });
-    if (action == info_set.actions.end()) {
-      continue;
-    }
-
-    const double positive_regret =
-        std::max(0.0, action->cumulative_regret);
-    positive_regret_sum += positive_regret;
-    if (choice.action_id == action_choice.action_id) {
-      action_positive_regret = positive_regret;
-    }
-  }
-
-  if (positive_regret_sum <= 0.0) {
-    return fallback_probability;
-  }
-  return action_positive_regret / positive_regret_sum;
-}
-
 double CFRSolver::average_strategy_action_probability(
     const BoardState& state,
     int player,
@@ -966,30 +920,67 @@ double CFRSolver::average_strategy_action_probability(
   return action_probability / probability_sum;
 }
 
-void CFRSolver::condition_range_for_action(
+void CFRSolver::condition_ranges_for_actions(
     const WeightedHandRangeView& range,
     const BoardState& state,
     int player,
-    const std::vector<ActionChoice>& legal_action_choices,
-    const ActionChoice& action_choice,
-    WeightedHandRangeView& conditioned_range) const {
-  if (!range.has_source()) {
-    conditioned_range.clear();
+    const std::vector<ActionChoice>& action_choices,
+    std::vector<WeightedHandRangeView>& conditioned_ranges) const {
+  conditioned_ranges.clear();
+  conditioned_ranges.resize(action_choices.size());
+  if (action_choices.empty() || !range.has_source()) {
     return;
   }
 
-  conditioned_range.reset_to_filtered(range.source_range());
-  conditioned_range.reserve(range.size());
+  for (WeightedHandRangeView& conditioned_range : conditioned_ranges) {
+    conditioned_range.reset_to_filtered(range.source_range());
+    conditioned_range.reserve(range.size());
+  }
+
+  const double fallback_probability = 1.0 / action_choices.size();
   const CardMask board_mask = BoardMask(state);
+  std::vector<double> positive_regrets(action_choices.size(), 0.0);
   for (size_t i = 0; i < range.size(); ++i) {
     if (range.weight(i) <= 0.0 || (range.mask(i) & board_mask) != 0) {
       continue;
     }
-    double probability = action_probability_for_hand(
-        state, player, range.hand(i), legal_action_choices, action_choice);
-    double conditioned_weight = range.weight(i) * probability;
-    if (conditioned_weight > 0.0) {
-      conditioned_range.add(range.source_index(i), conditioned_weight);
+
+    double positive_regret_sum = 0.0;
+    InfoSetKey key = make_info_set_key(state, player, range.hand(i));
+    auto existing_info_set = info_set_ids_.find(key);
+    if (existing_info_set != info_set_ids_.end()) {
+      const InfoSetData& info_set = info_sets_[existing_info_set->second];
+      std::fill(positive_regrets.begin(), positive_regrets.end(), 0.0);
+      for (size_t action_index = 0; action_index < action_choices.size();
+           ++action_index) {
+        auto action = std::find_if(
+            info_set.actions.begin(), info_set.actions.end(),
+            [&](const ActionState& action_state) {
+              return action_state.action_id ==
+                     action_choices[action_index].action_id;
+            });
+        if (action == info_set.actions.end()) {
+          continue;
+        }
+
+        const double positive_regret =
+            std::max(0.0, action->cumulative_regret);
+        positive_regrets[action_index] = positive_regret;
+        positive_regret_sum += positive_regret;
+      }
+    }
+
+    for (size_t action_index = 0; action_index < action_choices.size();
+         ++action_index) {
+      const double probability =
+          positive_regret_sum > 0.0
+              ? positive_regrets[action_index] / positive_regret_sum
+              : fallback_probability;
+      const double conditioned_weight = range.weight(i) * probability;
+      if (conditioned_weight > 0.0) {
+        conditioned_ranges[action_index].add(range.source_index(i),
+                                             conditioned_weight);
+      }
     }
   }
 }
