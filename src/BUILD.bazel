@@ -14,6 +14,15 @@ cc_proto_library(
 )
 
 cc_library(
+    name = "poker_types",
+    hdrs = ["poker_types.h"],
+    deps = [
+        "@abseil-cpp//absl/container:inlined_vector",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "card",
     hdrs = ["card.h"],
     deps = [
@@ -27,7 +36,8 @@ cc_library(
     srcs = ["hand_evaluator.cc"],
     hdrs = ["hand_evaluator.h"],
     deps = [
-        ":poker_cc_proto",
+        ":combo",
+        ":poker_types",
     ],
     visibility = ["//visibility:public"],
 )
@@ -45,8 +55,7 @@ cc_library(
     srcs = ["card_utils.cc"],
     hdrs = ["card_utils.h"],
     deps = [
-        ":card",
-        ":poker_cc_proto",
+        ":poker_types",
     ],
     visibility = ["//visibility:public"],
 )
@@ -64,8 +73,7 @@ cc_library(
     srcs = ["combo.cc"],
     hdrs = ["combo.h"],
     deps = [
-        ":card",
-        ":poker_cc_proto",
+        ":poker_types",
     ],
     visibility = ["//visibility:public"],
 )
@@ -83,8 +91,9 @@ cc_library(
     srcs = ["game_tree.cc"],
     hdrs = ["game_tree.h"],
     deps = [
-        ":poker_cc_proto",
+        ":combo",
         ":hand_evaluator",
+        ":poker_types",
         "@abseil-cpp//absl/container:flat_hash_map",
     ],
     visibility = ["//visibility:public"],
@@ -102,9 +111,6 @@ cc_library(
     name = "strategy",
     srcs = ["strategy.cc"],
     hdrs = ["strategy.h"],
-    deps = [
-        ":poker_cc_proto",
-    ],
     visibility = ["//visibility:public"],
 )
 
@@ -113,9 +119,7 @@ cc_library(
     srcs = ["hand_range.cc"],
     hdrs = ["hand_range.h"],
     deps = [
-        ":card",
-        ":hand_evaluator",
-        ":poker_cc_proto",
+        ":combo",
     ],
     visibility = ["//visibility:public"],
 )
@@ -168,8 +172,9 @@ cc_library(
     srcs = ["continuation_value.cc"],
     hdrs = ["continuation_value.h"],
     deps = [
+        ":combo",
         ":game_tree",
-        ":poker_cc_proto",
+        ":poker_types",
         ":training_range",
     ],
     visibility = ["//visibility:public"],
@@ -180,7 +185,8 @@ cc_library(
     srcs = ["terminal_utility_cache.cc"],
     hdrs = ["terminal_utility_cache.h"],
     deps = [
-        ":poker_cc_proto",
+        ":combo",
+        ":poker_types",
     ],
     visibility = ["//visibility:public"],
 )
@@ -193,7 +199,7 @@ cc_library(
         ":cfr_solver",
         ":continuation_value",
         ":game_tree",
-        ":poker_cc_proto",
+        ":poker_types",
     ],
     visibility = ["//visibility:public"],
 )

@@ -14,7 +14,7 @@ TrainingRange BuildTrainingRange(const WeightedHandRange& combos) {
       continue;
     }
 
-    const ComboId combo_id = HandToComboId(combos.hands[i]);
+    const ComboId combo_id = combos.combos[i];
     if (training_range.weights[combo_id] == 0.0f) {
       training_range.active[training_range.active_count++] = combo_id;
     }

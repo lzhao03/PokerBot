@@ -45,15 +45,166 @@ constexpr int kParallelBestResponseSampleThreshold = 32;
 #define POKER_TRAVERSAL_STAT_PTR(member) nullptr
 #endif
 
-int ActionKey(const Action& action) {
+int ActionKey(const GameAction& action) {
   return GameTree::action_key(action);
 }
 
-Action ActionFromKey(int action_key) {
+Action ProtoActionFromKey(int action_key) {
   Action action;
   action.set_action(static_cast<ActionType>(action_key / kActionKeyMultiplier));
   action.set_amount(action_key % kActionKeyMultiplier);
   return action;
+}
+
+int ProtoActionKey(const Action& action) {
+  const double amount = action.amount();
+  const int rounded_amount = static_cast<int>(std::lround(amount));
+  if (amount < 0.0 || rounded_amount < 0 ||
+      rounded_amount >= kActionKeyMultiplier) {
+    throw std::invalid_argument("Action amount is outside action-key range");
+  }
+  return static_cast<int>(action.action()) * kActionKeyMultiplier +
+         rounded_amount;
+}
+
+ActionKind ToActionKind(ActionType action_type) {
+  switch (action_type) {
+    case ActionType::BET:
+      return ActionKind::kBet;
+    case ActionType::FOLD:
+      return ActionKind::kFold;
+    case ActionType::CALL:
+      return ActionKind::kCall;
+    case ActionType::RAISE:
+      return ActionKind::kRaise;
+    case ActionType::CHECK:
+      return ActionKind::kCheck;
+    case ActionType::ALL_IN:
+      return ActionKind::kAllIn;
+    case ActionType::NO_ACTION:
+    default:
+      return ActionKind::kNoAction;
+  }
+}
+
+StreetKind ToStreetKind(Street street) {
+  switch (street) {
+    case Street::FLOP:
+      return StreetKind::kFlop;
+    case Street::TURN:
+      return StreetKind::kTurn;
+    case Street::RIVER:
+      return StreetKind::kRiver;
+    case Street::PREFLOP:
+    default:
+      return StreetKind::kPreflop;
+  }
+}
+
+SuitKind ToSuitKind(Suit suit) {
+  switch (suit) {
+    case Suit::DIAMONDS:
+      return SuitKind::kDiamonds;
+    case Suit::CLUBS:
+      return SuitKind::kClubs;
+    case Suit::SPADES:
+      return SuitKind::kSpades;
+    case Suit::HEARTS:
+    default:
+      return SuitKind::kHearts;
+  }
+}
+
+CardId ProtoCardToId(const Card& card) {
+  return MakeCardId(card.rank(), ToSuitKind(card.suit()));
+}
+
+ComboId ProtoHandToComboId(const Hand& hand) {
+  if (hand.cards_size() != 2) {
+    return 0;
+  }
+  return CardsToComboId(ProtoCardToId(hand.cards(0)),
+                        ProtoCardToId(hand.cards(1)));
+}
+
+GameAction GameActionFromProto(const Action& action) {
+  return {ToActionKind(action.action()),
+          static_cast<int>(std::lround(action.amount())),
+          action.player()};
+}
+
+SolverConfig SolverConfigFromProto(const PokerConfig& config) {
+  SolverConfig native;
+  native.bet_sizes.assign(config.bet_sizes().begin(), config.bet_sizes().end());
+  native.starting_stack_size = config.starting_stack_size();
+  native.max_depth = config.max_depth();
+  native.enable_logging = config.enable_logging();
+  native.small_blind = config.small_blind();
+  native.big_blind = config.big_blind();
+  native.chance_samples = config.chance_samples();
+  native.preflop_bet_sizes.assign(config.preflop_bet_sizes().begin(),
+                                  config.preflop_bet_sizes().end());
+  native.flop_bet_sizes.assign(config.flop_bet_sizes().begin(),
+                               config.flop_bet_sizes().end());
+  native.turn_bet_sizes.assign(config.turn_bet_sizes().begin(),
+                               config.turn_bet_sizes().end());
+  native.river_bet_sizes.assign(config.river_bet_sizes().begin(),
+                                config.river_bet_sizes().end());
+  native.regret_only_training = config.regret_only_training();
+  return native;
+}
+
+PokerConfig SolverConfigToProto(const SolverConfig& config) {
+  PokerConfig proto;
+  for (double bet_size : config.bet_sizes) {
+    proto.add_bet_sizes(bet_size);
+  }
+  proto.set_starting_stack_size(config.starting_stack_size);
+  proto.set_max_depth(config.max_depth);
+  proto.set_enable_logging(config.enable_logging);
+  proto.set_small_blind(config.small_blind);
+  proto.set_big_blind(config.big_blind);
+  proto.set_chance_samples(config.chance_samples);
+  for (double bet_size : config.preflop_bet_sizes) {
+    proto.add_preflop_bet_sizes(bet_size);
+  }
+  for (double bet_size : config.flop_bet_sizes) {
+    proto.add_flop_bet_sizes(bet_size);
+  }
+  for (double bet_size : config.turn_bet_sizes) {
+    proto.add_turn_bet_sizes(bet_size);
+  }
+  for (double bet_size : config.river_bet_sizes) {
+    proto.add_river_bet_sizes(bet_size);
+  }
+  proto.set_regret_only_training(config.regret_only_training);
+  return proto;
+}
+
+GameState GameStateFromProto(const BoardState& state) {
+  GameState native;
+  native.stack[0] = state.stack_a();
+  native.stack[1] = state.stack_b();
+  native.pot = state.pot();
+  native.street = ToStreetKind(state.street());
+  native.all_in = state.all_in();
+  native.folded_player = state.folded_player();
+  native.player_to_act = state.player_to_act();
+  native.player_contribution[0] =
+      state.player_contribution_size() > 0
+          ? static_cast<int>(std::lround(state.player_contribution(0)))
+          : 0;
+  native.player_contribution[1] =
+      state.player_contribution_size() > 1
+          ? static_cast<int>(std::lround(state.player_contribution(1)))
+          : 0;
+  for (const Card& card : state.cards()) {
+    AddBoardCard(native, ProtoCardToId(card));
+  }
+  for (const Action& action : state.history().actions()) {
+    native.history.push_back(GameActionFromProto(action));
+  }
+  return native;
 }
 
 double TotalWeight(const WeightedHandRangeView& hands) {
@@ -67,13 +218,13 @@ double TotalWeight(const WeightedHandRangeView& hands) {
 WeightedHandRangeView CompatibleHands(
     const WeightedHandRangeView& hands,
     CardMask known_hand_mask,
-    const BoardState& state) {
+    const GameState& state) {
   WeightedHandRangeView compatible_hands;
   if (!hands.has_source()) {
     return compatible_hands;
   }
 
-  const CardMask blocked_cards = known_hand_mask | BoardMask(state);
+  const CardMask blocked_cards = known_hand_mask | state.board_mask;
   compatible_hands.reset_to_filtered(hands.source_range());
   compatible_hands.reserve(hands.size());
   for (size_t i = 0; i < hands.size(); ++i) {
@@ -85,14 +236,14 @@ WeightedHandRangeView CompatibleHands(
 }
 
 void PublicCompatibleRangeInto(const TrainingRangeView& hands,
-                               const BoardState& state,
+                               const GameState& state,
                                TrainingRangeView& compatible_hands) {
   if (hands.empty()) {
     compatible_hands.clear();
     return;
   }
 
-  const CardMask board_mask = BoardMask(state);
+  const CardMask board_mask = state.board_mask;
   compatible_hands.reset_to_filtered();
   for (size_t i = 0; i < hands.size(); ++i) {
     if (hands.weight(i) > 0.0 && (hands.mask(i) & board_mask) == 0) {
@@ -101,20 +252,10 @@ void PublicCompatibleRangeInto(const TrainingRangeView& hands,
   }
 }
 
-int EncodedCard(const Card& card) {
-  return card.rank() * 8 + static_cast<int>(card.suit());
-}
-
-int EncodedCardId(uint8_t card_id) {
-  const int rank = 2 + card_id % 13;
-  const int suit = 1 + card_id / 13;
-  return rank * 8 + suit;
-}
-
-int ChanceCardsKey(const std::vector<Card>& cards) {
+int ChanceCardsKey(const std::vector<CardId>& cards) {
   absl::InlinedVector<int, 5> encoded_cards;
   encoded_cards.reserve(cards.size());
-  for (const Card& card : cards) {
+  for (CardId card : cards) {
     encoded_cards.push_back(EncodedCard(card));
   }
   std::sort(encoded_cards.begin(), encoded_cards.end());
@@ -128,7 +269,7 @@ int ChanceCardsKey(const std::vector<Card>& cards) {
 
 GameTree::Node& CachedChanceChild(GameTree& game_tree,
                                   GameTree::Node& node,
-                                  const std::vector<Card>& cards,
+                                  const std::vector<CardId>& cards,
                                   int64_t* created_nodes) {
   const int child_key = ChanceCardsKey(cards);
   auto child = node.children.find(child_key);
@@ -144,7 +285,7 @@ GameTree::Node& CachedChanceChild(GameTree& game_tree,
 
 GameTree::Node& CachedActionChild(GameTree& game_tree,
                                   GameTree::Node& node,
-                                  const Action& action,
+                                  const GameAction& action,
                                   int action_id,
                                   int64_t* created_nodes) {
   auto child = node.children.find(action_id);
@@ -165,15 +306,13 @@ void EnsureLegalActionIds(GameTree::Node& node) {
 
   node.legal_action_ids.clear();
   node.legal_action_ids.reserve(node.legal_actions.size());
-  for (const Action& action : node.legal_actions) {
+  for (const GameAction& action : node.legal_actions) {
     node.legal_action_ids.push_back(ActionKey(action));
   }
 }
 
-int RoundedContribution(const BoardState& state, int player) {
-  return state.player_contribution_size() > player
-             ? static_cast<int>(std::lround(state.player_contribution(player)))
-             : 0;
+int RoundedContribution(const GameState& state, int player) {
+  return state.player_contribution[player];
 }
 
 void HashCombine(size_t& seed, int value) {
@@ -189,10 +328,10 @@ void HashArray(size_t& seed, const std::array<int, N>& values) {
 
 double StrategyActionProbability(const Strategy& strategy,
                                  const std::string& info_set_key,
-                                 const std::vector<Action>& legal_actions,
+                                 const std::vector<GameAction>& legal_actions,
                                  int action_id) {
   double probability_sum = 0.0;
-  for (const Action& legal_action : legal_actions) {
+  for (const GameAction& legal_action : legal_actions) {
     probability_sum +=
         strategy.get_action_probability(info_set_key, ActionKey(legal_action));
   }
@@ -203,8 +342,8 @@ double StrategyActionProbability(const Strategy& strategy,
   return legal_actions.empty() ? 0.0 : 1.0 / legal_actions.size();
 }
 
-int ChanceSamples(const PokerConfig& config) {
-  return std::max(1, config.chance_samples());
+int ChanceSamples(const SolverConfig& config) {
+  return std::max(1, config.chance_samples);
 }
 
 int WorkerCountForSamples(int samples) {
@@ -225,7 +364,7 @@ double SampleChanceValue(GameTree& game_tree,
                          EvaluateChild evaluate_child) {
   double value = 0.0;
   for (int i = 0; i < samples; ++i) {
-    std::vector<Card> cards =
+    std::vector<CardId> cards =
         SampleStreetCards(node.state, known_private_cards, rng);
     GameTree::Node& child_node =
         CachedChanceChild(game_tree, node, cards, created_nodes);
@@ -234,35 +373,20 @@ double SampleChanceValue(GameTree& game_tree,
   return value / samples;
 }
 
-template <typename EvaluateChild>
-double SampleChanceValue(GameTree& game_tree,
-                         GameTree::Node& node,
-                         const Hand& player_a_hand,
-                         const Hand& player_b_hand,
-                         int samples,
-                         std::mt19937& rng,
-                         int64_t* created_nodes,
-                         EvaluateChild evaluate_child) {
-  return SampleChanceValue(
-      game_tree, node, HandMask(player_a_hand) | HandMask(player_b_hand),
-      samples, rng, created_nodes, evaluate_child);
-}
+GameState DefaultInitialState(const SolverConfig& config) {
+  const int small_blind = config.small_blind > 0 ? config.small_blind : 1;
+  const int big_blind = config.big_blind > 0 ? config.big_blind : 2;
+  const int starting_stack = config.starting_stack_size;
 
-BoardState DefaultInitialState(const PokerConfig& config) {
-  const int small_blind = config.small_blind() > 0 ? config.small_blind() : 1;
-  const int big_blind = config.big_blind() > 0 ? config.big_blind() : 2;
-  const int starting_stack = config.starting_stack_size();
-
-  BoardState initial_state;
-  initial_state.set_stack_a(std::max(0, starting_stack - small_blind));
-  initial_state.set_stack_b(std::max(0, starting_stack - big_blind));
-  initial_state.set_pot(small_blind + big_blind);
-  initial_state.set_folded_player(-1);
-  initial_state.set_street(Street::PREFLOP);
-  initial_state.set_all_in(false);
-  initial_state.set_player_to_act(0);
-  initial_state.add_player_contribution(small_blind);
-  initial_state.add_player_contribution(big_blind);
+  GameState initial_state;
+  initial_state.stack[0] = std::max(0, starting_stack - small_blind);
+  initial_state.stack[1] = std::max(0, starting_stack - big_blind);
+  initial_state.pot = small_blind + big_blind;
+  initial_state.folded_player = -1;
+  initial_state.street = StreetKind::kPreflop;
+  initial_state.all_in = false;
+  initial_state.player_to_act = 0;
+  initial_state.player_contribution = {small_blind, big_blind};
   return initial_state;
 }
 
@@ -336,25 +460,34 @@ size_t CFRSolver::CompactInfoSetKeyHash::operator()(
   return seed;
 }
 
-CFRSolver::CFRSolver(const PokerConfig& config)
+CFRSolver::CFRSolver(const SolverConfig& config)
     : CFRSolver(config, std::make_shared<TerminalUtilityCache>()) {
 }
 
-CFRSolver::CFRSolver(const PokerConfig& config,
-                     const BoardState& initial_state)
+CFRSolver::CFRSolver(const SolverConfig& config,
+                     const GameState& initial_state)
     : CFRSolver(config, std::make_shared<TerminalUtilityCache>(),
                 std::make_shared<BettingRoundTerminalValueProvider>(),
                 initial_state) {
 }
 
+CFRSolver::CFRSolver(const PokerConfig& config)
+    : CFRSolver(SolverConfigFromProto(config)) {
+}
+
 CFRSolver::CFRSolver(const PokerConfig& config,
+                     const BoardState& initial_state)
+    : CFRSolver(SolverConfigFromProto(config), GameStateFromProto(initial_state)) {
+}
+
+CFRSolver::CFRSolver(const SolverConfig& config,
                      std::shared_ptr<TerminalUtilityCache> utility_cache)
     : CFRSolver(config, std::move(utility_cache),
                 std::make_shared<BettingRoundTerminalValueProvider>()) {
 }
 
 CFRSolver::CFRSolver(
-    const PokerConfig& config,
+    const SolverConfig& config,
     std::shared_ptr<TerminalUtilityCache> utility_cache,
     std::shared_ptr<ContinuationValueProvider> continuation_value_provider)
     : CFRSolver(config, std::move(utility_cache),
@@ -363,10 +496,10 @@ CFRSolver::CFRSolver(
 }
 
 CFRSolver::CFRSolver(
-    const PokerConfig& config,
+    const SolverConfig& config,
     std::shared_ptr<TerminalUtilityCache> utility_cache,
     std::shared_ptr<ContinuationValueProvider> continuation_value_provider,
-    BoardState initial_state)
+    GameState initial_state)
   : config_(config),
     initial_state_(std::move(initial_state)),
     game_tree_(std::make_unique<GameTree>(config)),
@@ -393,31 +526,15 @@ GameTree::Node& CFRSolver::get_or_build_root() {
   return game_tree_->root();
 }
 
-CFRSolver::PrivateCards CFRSolver::PrivateCards::FromHand(const Hand& hand) {
-  std::optional<ComboId> combo_id = MaybeHandToComboId(hand);
-  if (combo_id.has_value()) {
-    return FromCombo(*combo_id);
-  }
-
-  PrivateCards private_cards;
-  private_cards.hand = hand;
-  return private_cards;
-}
-
 CFRSolver::PrivateCards CFRSolver::PrivateCards::FromCombo(
     ComboId combo_id) {
   PrivateCards private_cards;
-  private_cards.has_combo = true;
   private_cards.combo = combo_id;
   return private_cards;
 }
 
 CardMask CFRSolver::PrivateCards::mask() const {
-  return has_combo ? ComboMask(combo) : HandMask(hand);
-}
-
-Hand CFRSolver::PrivateCards::to_hand() const {
-  return has_combo ? ComboIdToHand(combo) : hand;
+  return ComboMask(combo);
 }
 
 CFRSolver::RangeSampler::RangeSampler(const TrainingRange& player_a_range,
@@ -504,67 +621,50 @@ CFRSolver::RangeDeal CFRSolver::RangeSampler::sample(std::mt19937& rng) {
 }
 
 CFRSolver::InfoSetKey CFRSolver::make_info_set_key(
-    const BoardState& state,
-    int player,
-    const Hand& hand) const {
-  InfoSetKey key = make_public_info_set_key(state, player);
-  key.hand_size = std::min(hand.cards_size(), 2);
-  for (int i = 0; i < key.hand_size; ++i) {
-    key.hand_cards[i] = EncodedCard(hand.cards(i));
-  }
-  std::sort(key.hand_cards.begin(),
-            key.hand_cards.begin() + key.hand_size);
-  return key;
-}
-
-CFRSolver::InfoSetKey CFRSolver::make_info_set_key(
-    const BoardState& state,
+    const GameState& state,
     int player,
     ComboId combo_id) const {
   InfoSetKey key = make_public_info_set_key(state, player);
   const ComboInfo& combo = GetComboInfo(combo_id);
   key.hand_size = 2;
-  key.hand_cards[0] = EncodedCardId(combo.card0);
-  key.hand_cards[1] = EncodedCardId(combo.card1);
+  key.hand_cards[0] = EncodedCard(combo.card0);
+  key.hand_cards[1] = EncodedCard(combo.card1);
   std::sort(key.hand_cards.begin(),
             key.hand_cards.begin() + key.hand_size);
   return key;
 }
 
 CFRSolver::InfoSetKey CFRSolver::make_info_set_key(
-    const BoardState& state,
+    const GameState& state,
     int player,
     const PrivateCards& private_cards) const {
-  if (private_cards.has_combo) {
-    return make_info_set_key(state, player, private_cards.combo);
-  }
-  return make_info_set_key(state, player, private_cards.hand);
+  return make_info_set_key(state, player, private_cards.combo);
 }
 
 CFRSolver::PublicStateKey CFRSolver::make_public_state_key(
-    const BoardState& state) const {
+    const GameState& state) const {
   PublicStateKey key;
-  key.street = static_cast<int>(state.street());
-  key.pot = state.pot();
-  key.stack_a = state.stack_a();
-  key.stack_b = state.stack_b();
-  key.all_in = state.all_in() ? 1 : 0;
-  key.folded_player = state.folded_player();
-  key.player_to_act = state.player_to_act();
-  key.player_contribution_size =
-      std::min(state.player_contribution_size(), 2);
+  key.street = static_cast<int>(state.street);
+  key.pot = state.pot;
+  key.stack_a = state.stack[0];
+  key.stack_b = state.stack[1];
+  key.all_in = state.all_in ? 1 : 0;
+  key.folded_player = state.folded_player;
+  key.player_to_act = state.player_to_act;
+  key.player_contribution_size = 2;
   for (int i = 0; i < key.player_contribution_size; ++i) {
     key.player_contributions[i] = RoundedContribution(state, i);
   }
 
-  key.board_size = std::min(state.cards_size(), InfoSetKey::kMaxCards);
+  key.board_size = std::min(static_cast<int>(state.board_cards.size()),
+                            InfoSetKey::kMaxCards);
   for (int i = 0; i < key.board_size; ++i) {
-    key.board_cards[i] = EncodedCard(state.cards(i));
+    key.board_cards[i] = EncodedCard(state.board_cards[i]);
   }
   std::sort(key.board_cards.begin(),
             key.board_cards.begin() + key.board_size);
 
-  const int history_value_count = state.history().actions_size() * 3;
+  const int history_value_count = state.history.size() * 3;
   if (history_value_count > InfoSetKey::kInlineHistoryValues) {
     key.history_overflow.reserve(history_value_count -
                                  InfoSetKey::kInlineHistoryValues);
@@ -577,41 +677,41 @@ CFRSolver::PublicStateKey CFRSolver::make_public_state_key(
     }
     ++key.history_size;
   };
-  for (const Action& action : state.history().actions()) {
-    add_history_value(action.player());
-    add_history_value(static_cast<int>(action.action()));
-    add_history_value(static_cast<int>(std::lround(action.amount())));
+  for (const GameAction& action : state.history) {
+    add_history_value(action.player);
+    add_history_value(static_cast<int>(action.kind));
+    add_history_value(action.amount);
   }
 
   return key;
 }
 
 CFRSolver::InfoSetKey CFRSolver::make_public_info_set_key(
-    const BoardState& state,
+    const GameState& state,
     int player) const {
   InfoSetKey key;
   key.player = player;
-  key.street = static_cast<int>(state.street());
-  key.pot = state.pot();
-  key.stack_a = state.stack_a();
-  key.stack_b = state.stack_b();
-  key.all_in = state.all_in() ? 1 : 0;
-  key.folded_player = state.folded_player();
-  key.player_to_act = state.player_to_act();
-  key.player_contribution_size =
-      std::min(state.player_contribution_size(), 2);
+  key.street = static_cast<int>(state.street);
+  key.pot = state.pot;
+  key.stack_a = state.stack[0];
+  key.stack_b = state.stack[1];
+  key.all_in = state.all_in ? 1 : 0;
+  key.folded_player = state.folded_player;
+  key.player_to_act = state.player_to_act;
+  key.player_contribution_size = 2;
   for (int i = 0; i < key.player_contribution_size; ++i) {
     key.player_contributions[i] = RoundedContribution(state, i);
   }
 
-  key.board_size = std::min(state.cards_size(), InfoSetKey::kMaxCards);
+  key.board_size = std::min(static_cast<int>(state.board_cards.size()),
+                            InfoSetKey::kMaxCards);
   for (int i = 0; i < key.board_size; ++i) {
-    key.board_cards[i] = EncodedCard(state.cards(i));
+    key.board_cards[i] = EncodedCard(state.board_cards[i]);
   }
   std::sort(key.board_cards.begin(),
             key.board_cards.begin() + key.board_size);
 
-  const int history_value_count = state.history().actions_size() * 3;
+  const int history_value_count = state.history.size() * 3;
   if (history_value_count > InfoSetKey::kInlineHistoryValues) {
     key.history_overflow.reserve(history_value_count -
                                  InfoSetKey::kInlineHistoryValues);
@@ -624,10 +724,10 @@ CFRSolver::InfoSetKey CFRSolver::make_public_info_set_key(
     }
     ++key.history_size;
   };
-  for (const Action& action : state.history().actions()) {
-    add_history_value(action.player());
-    add_history_value(static_cast<int>(action.action()));
-    add_history_value(static_cast<int>(std::lround(action.amount())));
+  for (const GameAction& action : state.history) {
+    add_history_value(action.player);
+    add_history_value(static_cast<int>(action.kind));
+    add_history_value(action.amount);
   }
 
   return key;
@@ -659,7 +759,7 @@ void CFRSolver::initialize_info_set_actions(
 
 int CFRSolver::get_or_create_compact_info_set_id(
     uint32_t public_state_id,
-    const BoardState& state,
+    const GameState& state,
     int player,
     ComboId combo_id,
     const std::vector<int>& legal_action_ids) {
@@ -788,17 +888,17 @@ double CFRSolver::regret_for_info_set(const std::string& info_set_key,
   return 0.0;
 }
 
-void CFRSolver::run(int iterations, const Hand& player_a_hand,
-                    const Hand& player_b_hand) {
+void CFRSolver::run(int iterations, ComboId player_a_hand,
+                    ComboId player_b_hand) {
   if (iterations <= 0) {
     return;
   }
 
   GameTree::Node& root = get_or_build_root();
-  const int max_depth = config_.max_depth();
+  const int max_depth = config_.max_depth;
   TraversalScratch scratch;
-  const PrivateCards player_a_cards = PrivateCards::FromHand(player_a_hand);
-  const PrivateCards player_b_cards = PrivateCards::FromHand(player_b_hand);
+  const PrivateCards player_a_cards = PrivateCards::FromCombo(player_a_hand);
+  const PrivateCards player_b_cards = PrivateCards::FromCombo(player_b_hand);
   for (int i = 0; i < iterations; ++i) {
     std::array<double, 2> reach_probabilities = {1.0, 1.0};
     cumulative_root_utility_ += cfr_with_ranges(
@@ -806,6 +906,12 @@ void CFRSolver::run(int iterations, const Hand& player_a_hand,
         iterations_run_, 0, max_depth, scratch, std::nullopt, std::nullopt);
     ++iterations_run_;
   }
+}
+
+void CFRSolver::run(int iterations, const Hand& player_a_hand,
+                    const Hand& player_b_hand) {
+  run(iterations, ProtoHandToComboId(player_a_hand),
+      ProtoHandToComboId(player_b_hand));
 }
 
 void CFRSolver::run(int iterations, const HandRange& player_a_range,
@@ -849,7 +955,7 @@ void CFRSolver::run_iterations(int iterations,
     PrivateCards player_a_cards = PrivateCards::FromCombo(deal.player_a_combo);
     PrivateCards player_b_cards = PrivateCards::FromCombo(deal.player_b_combo);
 
-    const int max_depth = config_.max_depth();
+    const int max_depth = config_.max_depth;
     VLOG(2) << "Iteration " << i + 1 << "/" << iterations;
     int cfr_iteration = iterations_run_;
     std::array<double, 2> reach_probabilities = {1.0, 1.0};
@@ -875,8 +981,8 @@ void CFRSolver::run_iterations(int iterations,
 }
 
 double CFRSolver::cfr(GameTree::Node& node,
-                      const Hand& player_a_hand, 
-                      const Hand& player_b_hand,
+                      ComboId player_a_hand,
+                      ComboId player_b_hand,
                       std::array<double, 2>& reach_probabilities,
                       int iteration,
                       int depth,
@@ -887,10 +993,22 @@ double CFRSolver::cfr(GameTree::Node& node,
                          scratch, std::nullopt, std::nullopt);
 }
 
+double CFRSolver::cfr(GameTree::Node& node,
+                      const Hand& player_a_hand,
+                      const Hand& player_b_hand,
+                      std::array<double, 2>& reach_probabilities,
+                      int iteration,
+                      int depth,
+                      int max_depth) {
+  return cfr(node, ProtoHandToComboId(player_a_hand),
+             ProtoHandToComboId(player_b_hand), reach_probabilities,
+             iteration, depth, max_depth);
+}
+
 double CFRSolver::cfr_with_ranges(
     GameTree::Node& node,
-    const Hand& player_a_hand,
-    const Hand& player_b_hand,
+    ComboId player_a_hand,
+    ComboId player_b_hand,
     std::array<double, 2>& reach_probabilities,
     int iteration,
     int depth,
@@ -899,8 +1017,8 @@ double CFRSolver::cfr_with_ranges(
     OptionalTrainingRange player_a_range,
     OptionalTrainingRange player_b_range) {
   return cfr_with_ranges(
-      node, PrivateCards::FromHand(player_a_hand),
-      PrivateCards::FromHand(player_b_hand), reach_probabilities, iteration,
+      node, PrivateCards::FromCombo(player_a_hand),
+      PrivateCards::FromCombo(player_b_hand), reach_probabilities, iteration,
       depth, max_depth, scratch, player_a_range, player_b_range);
 }
 
@@ -918,7 +1036,7 @@ double CFRSolver::cfr_with_ranges(
   // If the node is a terminal node, return the utility
   if (node.is_terminal) {
     POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.terminal_utility_calls);
-    if (node.state.folded_player() >= 0) {
+    if (node.state.folded_player >= 0) {
       POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.fold_utility_calls);
     } else {
       POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.showdown_utility_calls);
@@ -939,7 +1057,7 @@ double CFRSolver::cfr_with_ranges(
   // Check depth limit to prevent infinite recursion
   if (max_depth > 0 && depth >= max_depth) {
     ContinuationContext context = build_continuation_context(
-        node.state, player_a_cards.to_hand(), player_b_cards.to_hand(),
+        node.state, player_a_cards.combo, player_b_cards.combo,
         player_a_range,
         player_b_range);
     return continuation_value_provider_->value(*game_tree_, context);
@@ -955,13 +1073,9 @@ double CFRSolver::cfr_with_ranges(
   EnsureLegalActionIds(node);
   const uint32_t public_state_id = static_cast<uint32_t>(node.id);
   const int info_set_id =
-      player_cards.has_combo
-          ? get_or_create_compact_info_set_id(
-                public_state_id, node.state, player, player_cards.combo,
-                node.legal_action_ids)
-          : get_or_create_info_set_id(
-                make_info_set_key(node.state, player, player_cards),
-                node.legal_action_ids);
+      get_or_create_compact_info_set_id(
+          public_state_id, node.state, player, player_cards.combo,
+          node.legal_action_ids);
   ActionChoices action_choices;
   action_choices.reserve(node.legal_actions.size());
   {
@@ -1027,7 +1141,7 @@ double CFRSolver::cfr_with_ranges(
   for (size_t choice_index = 0; choice_index < action_choices.size();
        ++choice_index) {
     ActionChoice& choice = action_choices[choice_index];
-    const Action& action = choice.action.get();
+    const GameAction& action = choice.action.get();
     int action_id = choice.action_id;
     
     GameTree::Node& child_node = CachedActionChild(
@@ -1065,20 +1179,18 @@ double CFRSolver::cfr_with_ranges(
     POKER_RECORD_TRAVERSAL_STAT(
         traversal_stats_.max_decision_depth =
             std::max(traversal_stats_.max_decision_depth, depth));
-    switch (node.state.street()) {
-      case Street::PREFLOP:
+    switch (node.state.street) {
+      case StreetKind::kPreflop:
         POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.preflop_updates);
         break;
-      case Street::FLOP:
+      case StreetKind::kFlop:
         POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.flop_updates);
         break;
-      case Street::TURN:
+      case StreetKind::kTurn:
         POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.turn_updates);
         break;
-      case Street::RIVER:
+      case StreetKind::kRiver:
         POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.river_updates);
-        break;
-      default:
         break;
     }
 
@@ -1104,7 +1216,7 @@ double CFRSolver::cfr_with_ranges(
           static_cast<float>(std::max(0.0, cumulative_regret + regret));
     }
     
-    if (!config_.regret_only_training()) {
+    if (!config_.regret_only_training) {
       // CFR+ commonly weights later average-strategy samples more heavily.
       update_strategy(info_set_id, action_choices,
                       reach_probabilities[player] * (iteration + 1));
@@ -1112,22 +1224,6 @@ double CFRSolver::cfr_with_ranges(
   }
   
   return node_value;
-}
-
-double CFRSolver::chance_sampling_cfr(GameTree::Node& node,
-                      const Hand& player_a_hand, 
-                      const Hand& player_b_hand,
-                      std::array<double, 2>& reach_probabilities,
-                      int iteration,
-                      int depth,
-                      int max_depth,
-                      TraversalScratch& scratch,
-                      OptionalTrainingRange player_a_range,
-                      OptionalTrainingRange player_b_range) {
-  return chance_sampling_cfr(
-      node, PrivateCards::FromHand(player_a_hand),
-      PrivateCards::FromHand(player_b_hand), reach_probabilities, iteration,
-      depth, max_depth, scratch, player_a_range, player_b_range);
 }
 
 double CFRSolver::chance_sampling_cfr(GameTree::Node& node,
@@ -1171,20 +1267,10 @@ double CFRSolver::chance_sampling_cfr(GameTree::Node& node,
 }
 
 double CFRSolver::average_strategy_action_probability(
-    const BoardState& state,
-    int player,
-    const Hand& hand,
-    const std::vector<Action>& legal_actions,
-    int action_id) {
-  return average_strategy_action_probability(
-      state, player, PrivateCards::FromHand(hand), legal_actions, action_id);
-}
-
-double CFRSolver::average_strategy_action_probability(
-    const BoardState& state,
+    const GameState& state,
     int player,
     const PrivateCards& private_cards,
-    const std::vector<Action>& legal_actions,
+    const std::vector<GameAction>& legal_actions,
     int action_id) {
   if (legal_actions.empty()) {
     return 0.0;
@@ -1209,7 +1295,7 @@ double CFRSolver::average_strategy_action_probability(
 
 double CFRSolver::average_strategy_action_probability(
     const InfoSetData& info_set,
-    const std::vector<Action>& legal_actions,
+    const std::vector<GameAction>& legal_actions,
     int action_id,
     double fallback_probability) {
   StrategyProbabilities probabilities;
@@ -1224,10 +1310,10 @@ double CFRSolver::average_strategy_action_probability(
 }
 
 void CFRSolver::average_strategy_probabilities(
-    const BoardState& state,
+    const GameState& state,
     int player,
     const PrivateCards& private_cards,
-    const std::vector<Action>& legal_actions,
+    const std::vector<GameAction>& legal_actions,
     StrategyProbabilities& probabilities) {
   probabilities.clear();
   probabilities.resize(legal_actions.size(), 0.0);
@@ -1277,12 +1363,6 @@ void CFRSolver::average_strategy_probabilities(
     return;
   }
 
-  if (!private_cards.has_combo) {
-    average_strategy_probabilities(
-        node.state, player, private_cards, node.legal_actions, probabilities);
-    return;
-  }
-
   const double uniform_probability = 1.0 / node.legal_actions.size();
   CompactInfoSetKey compact_key;
   compact_key.public_state_id = static_cast<uint32_t>(node.id);
@@ -1302,7 +1382,7 @@ void CFRSolver::average_strategy_probabilities(
 
 void CFRSolver::average_strategy_probabilities(
     const InfoSetData& info_set,
-    const std::vector<Action>& legal_actions,
+    const std::vector<GameAction>& legal_actions,
     double fallback_probability,
     StrategyProbabilities& probabilities) {
   probabilities.clear();
@@ -1314,7 +1394,7 @@ void CFRSolver::average_strategy_probabilities(
       legal_actions.size() == info_set.action_count &&
       std::equal(legal_actions.begin(), legal_actions.end(),
                  action_ids_.begin() + action_offset,
-                 [](const Action& legal_action, int action_id) {
+                 [](const GameAction& legal_action, int action_id) {
                    return ActionKey(legal_action) == action_id;
                  });
   if (aligned_action_ids) {
@@ -1322,7 +1402,7 @@ void CFRSolver::average_strategy_probabilities(
       POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
       const size_t table_index = action_offset + i;
       probabilities[i] =
-          config_.regret_only_training()
+          config_.regret_only_training
               ? std::max(0.0,
                          static_cast<double>(
                              cumulative_regrets_[table_index]))
@@ -1339,7 +1419,7 @@ void CFRSolver::average_strategy_probabilities(
         const size_t table_index = action_offset + action_index;
         if (action_ids_[table_index] == legal_action_id) {
           probabilities[legal_action_index] =
-              config_.regret_only_training()
+              config_.regret_only_training
                   ? std::max(
                         0.0,
                         static_cast<double>(cumulative_regrets_[table_index]))
@@ -1362,7 +1442,7 @@ void CFRSolver::average_strategy_probabilities(
 
 void CFRSolver::condition_ranges_for_actions(
     const TrainingRangeView& range,
-    const BoardState& state,
+    const GameState& state,
     uint32_t public_state_id,
     int player,
     const ActionChoices& action_choices,
@@ -1382,7 +1462,7 @@ void CFRSolver::condition_ranges_for_actions(
   }
 
   const double fallback_probability = 1.0 / action_choices.size();
-  const CardMask board_mask = BoardMask(state);
+  const CardMask board_mask = state.board_mask;
   absl::InlinedVector<double, 8> positive_regrets(
       action_choices.size(), 0.0);
   for (size_t i = 0; i < range.size(); ++i) {
@@ -1448,9 +1528,9 @@ void CFRSolver::condition_ranges_for_actions(
 }
 
 ContinuationContext CFRSolver::build_continuation_context(
-    const BoardState& state,
-    const Hand& player_a_hand,
-    const Hand& player_b_hand,
+    const GameState& state,
+    ComboId player_a_hand,
+    ComboId player_b_hand,
     OptionalTrainingRange player_a_range,
     OptionalTrainingRange player_b_range) const {
   ContinuationContext context =
@@ -1473,7 +1553,7 @@ Strategy CFRSolver::get_equilibrium_strategy() const {
     for (uint16_t action_index = 0; action_index < info_set.action_count;
          ++action_index) {
       const size_t table_index = action_offset + action_index;
-      sum += config_.regret_only_training()
+      sum += config_.regret_only_training
                  ? std::max(0.0,
                             static_cast<double>(
                                 cumulative_regrets_[table_index]))
@@ -1487,7 +1567,7 @@ Strategy CFRSolver::get_equilibrium_strategy() const {
            ++action_index) {
         const size_t table_index = action_offset + action_index;
         const double strategy_weight =
-            config_.regret_only_training()
+            config_.regret_only_training
                 ? std::max(0.0,
                            static_cast<double>(
                                cumulative_regrets_[table_index]))
@@ -1510,10 +1590,17 @@ Strategy CFRSolver::get_equilibrium_strategy() const {
   return equilibrium_strategy;
 }
 
+double CFRSolver::evaluate_strategy(ComboId player_a_hand,
+                                    ComboId player_b_hand) {
+  return evaluate_strategy_node(get_or_build_root(),
+                                PrivateCards::FromCombo(player_a_hand),
+                                PrivateCards::FromCombo(player_b_hand));
+}
+
 double CFRSolver::evaluate_strategy(const Hand& player_a_hand,
                                     const Hand& player_b_hand) {
-  return evaluate_strategy_node(get_or_build_root(), player_a_hand,
-                                player_b_hand);
+  return evaluate_strategy(ProtoHandToComboId(player_a_hand),
+                           ProtoHandToComboId(player_b_hand));
 }
 
 double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range,
@@ -1545,7 +1632,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
     worker_seeds.push_back(seed_distribution(rng_));
   }
 
-  PokerConfig config = config_;
+  SolverConfig config = config_;
   std::shared_ptr<TerminalUtilityCache> utility_cache = utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider =
       continuation_value_provider_;
@@ -1615,13 +1702,6 @@ double CFRSolver::evaluate_strategy_samples(
 }
 
 double CFRSolver::evaluate_strategy_node(GameTree::Node& node,
-                                         const Hand& player_a_hand,
-                                         const Hand& player_b_hand) {
-  return evaluate_strategy_node(node, PrivateCards::FromHand(player_a_hand),
-                                PrivateCards::FromHand(player_b_hand));
-}
-
-double CFRSolver::evaluate_strategy_node(GameTree::Node& node,
                                          const PrivateCards& player_a_cards,
                                          const PrivateCards& player_b_cards) {
   if (node.is_terminal) {
@@ -1653,7 +1733,7 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node& node,
   double value = 0.0;
   for (size_t action_index = 0; action_index < node.legal_actions.size();
        ++action_index) {
-    const Action& action = node.legal_actions[action_index];
+    const GameAction& action = node.legal_actions[action_index];
     int action_id = ActionKey(action);
     GameTree::Node& child_node =
         CachedActionChild(*game_tree_, node, action, action_id,
@@ -1666,19 +1746,19 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node& node,
 }
 
 double CFRSolver::best_response_value(GameTree::Node& node,
-                                      const Hand& player_a_hand,
-                                      const Hand& player_b_hand,
+                                      const PrivateCards& player_a_cards,
+                                      const PrivateCards& player_b_cards,
                                       int best_response_player) {
   if (node.is_terminal) {
     double player_a_value =
-        utility(node.state, player_a_hand, player_b_hand);
+        utility(node.state, player_a_cards, player_b_cards);
     return best_response_player == 0 ? player_a_value : -player_a_value;
   }
   if (node.is_chance_node) {
     return SampleChanceValue(
-        *game_tree_, node, player_a_hand, player_b_hand, ChanceSamples(config_),
-        rng_, nullptr, [&](GameTree::Node& child_node) {
-          return best_response_value(child_node, player_a_hand, player_b_hand,
+        *game_tree_, node, player_a_cards.mask() | player_b_cards.mask(),
+        ChanceSamples(config_), rng_, nullptr, [&](GameTree::Node& child_node) {
+          return best_response_value(child_node, player_a_cards, player_b_cards,
                                      best_response_player);
         });
   }
@@ -1691,17 +1771,18 @@ double CFRSolver::best_response_value(GameTree::Node& node,
     return 0.0;
   }
 
-  const Hand& player_hand = player == 0 ? player_a_hand : player_b_hand;
+  const PrivateCards& player_cards =
+      player == 0 ? player_a_cards : player_b_cards;
 
   if (player == best_response_player) {
     double value = -std::numeric_limits<double>::infinity();
-    for (const Action& action : node.legal_actions) {
+    for (const GameAction& action : node.legal_actions) {
       int action_id = ActionKey(action);
       GameTree::Node& child_node =
           CachedActionChild(*game_tree_, node, action, action_id,
                             nullptr);
       value = std::max(value, best_response_value(
-                                  child_node, player_a_hand, player_b_hand,
+                                  child_node, player_a_cards, player_b_cards,
                                   best_response_player));
     }
     return value;
@@ -1709,30 +1790,20 @@ double CFRSolver::best_response_value(GameTree::Node& node,
 
   StrategyProbabilities probabilities;
   average_strategy_probabilities(
-      node, player, PrivateCards::FromHand(player_hand), probabilities);
+      node, player, player_cards, probabilities);
   double value = 0.0;
   for (size_t action_index = 0; action_index < node.legal_actions.size();
        ++action_index) {
-    const Action& action = node.legal_actions[action_index];
+    const GameAction& action = node.legal_actions[action_index];
     int action_id = ActionKey(action);
     GameTree::Node& child_node =
         CachedActionChild(*game_tree_, node, action, action_id,
                           nullptr);
     value += probabilities[action_index] *
-             best_response_value(child_node, player_a_hand, player_b_hand,
+             best_response_value(child_node, player_a_cards, player_b_cards,
                                  best_response_player);
   }
   return value;
-}
-
-double CFRSolver::best_response_value_against_range(
-    GameTree::Node& node,
-    const Hand& best_response_hand,
-    const WeightedHandRangeView& opponent_hands,
-    int best_response_player) {
-  return best_response_value_against_range(
-      node, PrivateCards::FromHand(best_response_hand), opponent_hands,
-      best_response_player);
 }
 
 double CFRSolver::best_response_value_against_range(
@@ -1749,7 +1820,7 @@ double CFRSolver::best_response_value_against_range(
     double value = 0.0;
     for (size_t i = 0; i < opponent_hands.size(); ++i) {
       const PrivateCards opponent_cards =
-          PrivateCards::FromHand(opponent_hands.hand(i));
+          PrivateCards::FromCombo(opponent_hands.combo(i));
       const PrivateCards& player_a_cards =
           best_response_player == 0 ? best_response_cards : opponent_cards;
       const PrivateCards& player_b_cards =
@@ -1776,9 +1847,9 @@ double CFRSolver::best_response_value_against_range(
       size_t sampled_opponent_view_index = opponent_distribution(rng_);
       size_t sampled_opponent_index =
           opponent_hands.source_index(sampled_opponent_view_index);
-      const PrivateCards sampled_opponent = PrivateCards::FromHand(
-          opponent_hands.source_range().hands[sampled_opponent_index]);
-      std::vector<Card> cards =
+      const PrivateCards sampled_opponent = PrivateCards::FromCombo(
+          opponent_hands.source_range().combos[sampled_opponent_index]);
+      std::vector<CardId> cards =
           SampleStreetCards(
               node.state, best_response_cards.mask() | sampled_opponent.mask(),
               rng_);
@@ -1805,7 +1876,7 @@ double CFRSolver::best_response_value_against_range(
 
   if (player == best_response_player) {
     double value = -std::numeric_limits<double>::infinity();
-    for (const Action& action : node.legal_actions) {
+    for (const GameAction& action : node.legal_actions) {
       int action_id = ActionKey(action);
       GameTree::Node& child_node =
           CachedActionChild(*game_tree_, node, action, action_id,
@@ -1820,7 +1891,7 @@ double CFRSolver::best_response_value_against_range(
   double value = 0.0;
   for (size_t action_index = 0; action_index < node.legal_actions.size();
        ++action_index) {
-    const Action& action = node.legal_actions[action_index];
+    const GameAction& action = node.legal_actions[action_index];
     int action_id = ActionKey(action);
     GameTree::Node& child_node =
         CachedActionChild(*game_tree_, node, action, action_id,
@@ -1831,7 +1902,7 @@ double CFRSolver::best_response_value_against_range(
     child_opponents.reserve(opponent_hands.size());
     for (size_t i = 0; i < opponent_hands.size(); ++i) {
       const PrivateCards opponent_cards =
-          PrivateCards::FromHand(opponent_hands.hand(i));
+          PrivateCards::FromCombo(opponent_hands.combo(i));
       StrategyProbabilities probabilities;
       average_strategy_probabilities(node, player, opponent_cards,
                                      probabilities);
@@ -1890,7 +1961,7 @@ double CFRSolver::sampled_range_best_response_value(
     worker_seeds.push_back(seed_distribution(rng_));
   }
 
-  PokerConfig config = config_;
+  SolverConfig config = config_;
   std::shared_ptr<TerminalUtilityCache> utility_cache = utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider =
       continuation_value_provider_;
@@ -1956,8 +2027,8 @@ double CFRSolver::sampled_range_best_response_samples(
   WeightedHandRangeView opponent_view(opponent_hands);
   double total = 0.0;
   for (int i = 0; i < samples; ++i) {
-    const PrivateCards best_response_cards = PrivateCards::FromHand(
-        best_response_hands.hands[best_response_hand_distribution(rng_)]);
+    const PrivateCards best_response_cards = PrivateCards::FromCombo(
+        best_response_hands.combos[best_response_hand_distribution(rng_)]);
     WeightedHandRangeView compatible_opponents =
         CompatibleHands(opponent_view, best_response_cards.mask(), root.state);
     if (compatible_opponents.empty()) {
@@ -1982,10 +2053,12 @@ double CFRSolver::calculate_exploitability(int samples) {
 
   double total = 0.0;
   for (int i = 0; i < samples; ++i) {
-    std::vector<Card> deck = BuildDeck();
+    std::vector<CardId> deck = BuildDeck();
     std::shuffle(deck.begin(), deck.end(), rng_);
-    Hand player_a_hand = DealHand(deck);
-    Hand player_b_hand = DealHand(deck);
+    ComboId player_a_hand = CardsToComboId(deck.back(), deck[deck.size() - 2]);
+    deck.pop_back();
+    deck.pop_back();
+    ComboId player_b_hand = CardsToComboId(deck.back(), deck[deck.size() - 2]);
     total += calculate_exploitability(player_a_hand, player_b_hand);
   }
   return total / samples;
@@ -2027,40 +2100,50 @@ double CFRSolver::calculate_player_b_best_response_value(
                                            player_a_range, 1);
 }
 
-double CFRSolver::calculate_exploitability(const Hand& player_a_hand,
-                                           const Hand& player_b_hand) {
+double CFRSolver::calculate_exploitability(ComboId player_a_hand,
+                                           ComboId player_b_hand) {
   GameTree::Node& root = get_or_build_root();
+  const PrivateCards player_a_cards = PrivateCards::FromCombo(player_a_hand);
+  const PrivateCards player_b_cards = PrivateCards::FromCombo(player_b_hand);
   double strategy_player_a_value =
-      evaluate_strategy_node(root, player_a_hand, player_b_hand);
+      evaluate_strategy_node(root, player_a_cards, player_b_cards);
   double player_a_gap =
-      best_response_value(root, player_a_hand, player_b_hand, 0) -
+      best_response_value(root, player_a_cards, player_b_cards, 0) -
       strategy_player_a_value;
   double player_b_gap =
-      best_response_value(root, player_a_hand, player_b_hand, 1) +
+      best_response_value(root, player_a_cards, player_b_cards, 1) +
       strategy_player_a_value;
   return (std::max(0.0, player_a_gap) + std::max(0.0, player_b_gap)) / 2.0;
 }
 
-Action CFRSolver::get_best_response_action(GameTree::Node& node,
-                                           const Hand& player_a_hand,
-                                           const Hand& player_b_hand,
-                                           int best_response_player) {
-  Action no_action;
-  no_action.set_action(ActionType::NO_ACTION);
+double CFRSolver::calculate_exploitability(const Hand& player_a_hand,
+                                           const Hand& player_b_hand) {
+  return calculate_exploitability(ProtoHandToComboId(player_a_hand),
+                                  ProtoHandToComboId(player_b_hand));
+}
+
+GameAction CFRSolver::get_best_response_action(GameTree::Node& node,
+                                               ComboId player_a_hand,
+                                               ComboId player_b_hand,
+                                               int best_response_player) {
+  GameAction no_action;
+  no_action.kind = ActionKind::kNoAction;
   if (node.is_terminal || node.is_chance_node ||
       node.legal_actions.empty() || node.player_to_act != best_response_player) {
     return no_action;
   }
 
   double best_value = -std::numeric_limits<double>::infinity();
-  Action best_action = no_action;
-  for (const Action& action : node.legal_actions) {
+  GameAction best_action = no_action;
+  const PrivateCards player_a_cards = PrivateCards::FromCombo(player_a_hand);
+  const PrivateCards player_b_cards = PrivateCards::FromCombo(player_b_hand);
+  for (const GameAction& action : node.legal_actions) {
     int action_id = ActionKey(action);
     GameTree::Node& child_node =
         CachedActionChild(*game_tree_, node, action, action_id,
                           nullptr);
-    double value = best_response_value(child_node, player_a_hand,
-                                       player_b_hand, best_response_player);
+    double value = best_response_value(child_node, player_a_cards,
+                                       player_b_cards, best_response_player);
     if (value > best_value) {
       best_value = value;
       best_action = action;
@@ -2079,7 +2162,7 @@ void CFRSolver::save_strategy(const std::string& filename) const {
 
   Strategy equilibrium_strategy = get_equilibrium_strategy();
   StrategySnapshot snapshot;
-  *snapshot.mutable_config() = config_;
+  *snapshot.mutable_config() = SolverConfigToProto(config_);
   snapshot.set_iterations_run(iterations_run_);
   snapshot.set_abstraction_version(kInfoSetKeyVersion);
 
@@ -2091,7 +2174,7 @@ void CFRSolver::save_strategy(const std::string& filename) const {
         equilibrium_strategy.get_strategy(info_set_key);
     for (const auto& action_prob : action_probs) {
       StrategyActionSnapshot& action = *info_set.add_actions();
-      *action.mutable_action() = ActionFromKey(action_prob.first);
+      *action.mutable_action() = ProtoActionFromKey(action_prob.first);
       action.set_probability(action_prob.second);
     }
   }
@@ -2127,7 +2210,7 @@ void CFRSolver::load_strategy(const std::string& filename) {
     Strategy::ActionProbabilities action_probs;
     for (const StrategyActionSnapshot& action : info_set.actions()) {
       if (action.has_action()) {
-        const int action_id = ActionKey(action.action());
+        const int action_id = ProtoActionKey(action.action());
         action_probs[action_id] = action.probability();
       }
     }
@@ -2148,64 +2231,45 @@ CFRSolver::UtilityCacheStats CFRSolver::get_utility_cache_stats() const {
   return {stats.hits, stats.misses, stats.entries};
 }
 
-double CFRSolver::utility(const BoardState& state,
-                          const Hand& player_a_hand,
-                          const Hand& player_b_hand) {
-  if (state.folded_player() >= 0 ||
-      player_a_hand.cards_size() + state.cards_size() < 5) {
-    return game_tree_->get_utility(state, player_a_hand, player_b_hand);
+double CFRSolver::utility(const GameState& state,
+                          const PrivateCards& player_a_cards,
+                          const PrivateCards& player_b_cards) {
+  const double player_a_contribution = state.player_contribution[0];
+  if (state.folded_player == 0) {
+    return -player_a_contribution;
+  }
+  if (state.folded_player == 1) {
+    return state.pot - player_a_contribution;
+  }
+
+  if (state.board_cards.size() + 2 < 5) {
+    return 0.0;
   }
 
   return utility_cache_->get_or_compute(
-      state, player_a_hand, player_b_hand, [&]() {
-        return game_tree_->get_utility(state, player_a_hand, player_b_hand);
+      state, player_a_cards.combo, player_b_cards.combo, [&]() {
+        return game_tree_->get_utility(
+            state, player_a_cards.combo, player_b_cards.combo);
       });
 }
 
-double CFRSolver::utility(const BoardState& state,
-                          const PrivateCards& player_a_cards,
-                          const PrivateCards& player_b_cards) {
-  const double player_a_contribution =
-      state.player_contribution_size() > 0 ? state.player_contribution(0) : 0.0;
-  if (state.folded_player() == 0) {
-    return -player_a_contribution;
-  }
-  if (state.folded_player() == 1) {
-    return state.pot() - player_a_contribution;
-  }
-
-  const int player_a_card_count =
-      player_a_cards.has_combo ? 2 : player_a_cards.hand.cards_size();
-  if (player_a_card_count + state.cards_size() < 5) {
-    return 0.0;
-  }
-
-  const Hand player_a_hand = player_a_cards.to_hand();
-  const Hand player_b_hand = player_b_cards.to_hand();
-  return utility(state, player_a_hand, player_b_hand);
-}
-
-double CFRSolver::uncached_utility(const BoardState& state,
+double CFRSolver::uncached_utility(const GameState& state,
                                    const PrivateCards& player_a_cards,
                                    const PrivateCards& player_b_cards) {
-  const double player_a_contribution =
-      state.player_contribution_size() > 0 ? state.player_contribution(0) : 0.0;
-  if (state.folded_player() == 0) {
+  const double player_a_contribution = state.player_contribution[0];
+  if (state.folded_player == 0) {
     return -player_a_contribution;
   }
-  if (state.folded_player() == 1) {
-    return state.pot() - player_a_contribution;
+  if (state.folded_player == 1) {
+    return state.pot - player_a_contribution;
   }
 
-  const int player_a_card_count =
-      player_a_cards.has_combo ? 2 : player_a_cards.hand.cards_size();
-  if (player_a_card_count + state.cards_size() < 5) {
+  if (state.board_cards.size() + 2 < 5) {
     return 0.0;
   }
 
-  const Hand player_a_hand = player_a_cards.to_hand();
-  const Hand player_b_hand = player_b_cards.to_hand();
-  return game_tree_->get_utility(state, player_a_hand, player_b_hand);
+  return game_tree_->get_utility(
+      state, player_a_cards.combo, player_b_cards.combo);
 }
 
 void CFRSolver::update_strategy(int info_set_id,

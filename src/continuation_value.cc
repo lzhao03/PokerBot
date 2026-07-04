@@ -5,9 +5,9 @@
 namespace poker {
 
 ContinuationContext ContinuationContext::ExactHands(
-    const BoardState& state,
-    const Hand& player_a_hand,
-    const Hand& player_b_hand) {
+    const GameState& state,
+    ComboId player_a_hand,
+    ComboId player_b_hand) {
   ContinuationContext context;
   context.state = state;
   context.player_a_hand = player_a_hand;
@@ -21,9 +21,9 @@ bool ContinuationContext::has_ranges() const {
 
 double ContinuationValueProvider::value(
     GameTree& game_tree,
-    const BoardState& state,
-    const Hand& player_a_hand,
-    const Hand& player_b_hand) const {
+    const GameState& state,
+    ComboId player_a_hand,
+    ComboId player_b_hand) const {
   return value(game_tree,
                ContinuationContext::ExactHands(
                    state, player_a_hand, player_b_hand));

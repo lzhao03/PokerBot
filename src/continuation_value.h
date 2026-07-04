@@ -1,7 +1,8 @@
 #ifndef POKER_CONTINUATION_VALUE_H_
 #define POKER_CONTINUATION_VALUE_H_
 
-#include "src/poker.pb.h"
+#include "src/combo.h"
+#include "src/poker_types.h"
 #include "src/training_range.h"
 
 namespace poker {
@@ -9,15 +10,15 @@ namespace poker {
 class GameTree;
 
 struct ContinuationContext {
-  BoardState state;
-  Hand player_a_hand;
-  Hand player_b_hand;
+  GameState state;
+  ComboId player_a_hand = 0;
+  ComboId player_b_hand = 0;
   TrainingRangeView player_a_range;
   TrainingRangeView player_b_range;
 
-  static ContinuationContext ExactHands(const BoardState& state,
-                                        const Hand& player_a_hand,
-                                        const Hand& player_b_hand);
+  static ContinuationContext ExactHands(const GameState& state,
+                                        ComboId player_a_hand,
+                                        ComboId player_b_hand);
   bool has_ranges() const;
 };
 
@@ -26,9 +27,9 @@ class ContinuationValueProvider {
   virtual ~ContinuationValueProvider() = default;
 
   double value(GameTree& game_tree,
-               const BoardState& state,
-               const Hand& player_a_hand,
-               const Hand& player_b_hand) const;
+               const GameState& state,
+               ComboId player_a_hand,
+               ComboId player_b_hand) const;
   virtual double value(GameTree& game_tree,
                        const ContinuationContext& context) const = 0;
 };

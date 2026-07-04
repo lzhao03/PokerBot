@@ -4,6 +4,7 @@
 #include "src/game_tree.h"
 
 #include <cstdint>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -11,28 +12,31 @@
 namespace poker {
 namespace {
 
-template <typename Message>
-void AppendSerialized(std::string& key, const Message& message) {
-  std::string serialized;
-  message.SerializeToString(&serialized);
-  key.append(std::to_string(serialized.size()));
-  key.append(":");
-  key.append(serialized);
-}
-
 std::string CacheKey(const ContinuationContext& context) {
-  std::string key;
-  AppendSerialized(key, context.state);
-  AppendSerialized(key, context.player_a_hand);
-  AppendSerialized(key, context.player_b_hand);
-  return key;
+  std::ostringstream key;
+  key << static_cast<int>(context.state.street) << ':' << context.state.pot
+      << ':' << context.state.stack[0] << ':' << context.state.stack[1]
+      << ':' << context.state.player_contribution[0] << ':'
+      << context.state.player_contribution[1] << ':'
+      << context.state.folded_player << ':' << context.state.player_to_act
+      << ':' << context.state.all_in << ':' << context.player_a_hand << ':'
+      << context.player_b_hand << ':';
+  for (CardId card : context.state.board_cards) {
+    key << static_cast<int>(card) << ',';
+  }
+  key << ':';
+  for (const GameAction& action : context.state.history) {
+    key << action.player << ',' << static_cast<int>(action.kind) << ','
+        << action.amount << ';';
+  }
+  return key.str();
 }
 
 }  // namespace
 
 ExactHandNestedCFRContinuationValueProvider::
     ExactHandNestedCFRContinuationValueProvider(
-    PokerConfig config,
+    SolverConfig config,
     int iterations)
     : config_(std::move(config)), iterations_(iterations) {
   if (iterations_ <= 0) {
@@ -81,8 +85,8 @@ double ExactHandNestedCFRContinuationValueProvider::compute_value(
         context.state, context.player_a_hand, context.player_b_hand);
   }
 
-  PokerConfig subgame_config = config_;
-  subgame_config.set_max_depth(0);
+  SolverConfig subgame_config = config_;
+  subgame_config.max_depth = 0;
   CFRSolver subgame_solver(subgame_config, context.state);
   subgame_solver.run(
       iterations_, context.player_a_hand, context.player_b_hand);

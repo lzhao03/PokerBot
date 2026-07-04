@@ -11,12 +11,13 @@ void Expect(bool condition, const char* message) {
   }
 }
 
-poker::Hand MakeHand(int first_rank, poker::Suit first_suit, int second_rank,
-                     poker::Suit second_suit) {
-  poker::Hand hand;
-  *hand.add_cards() = poker::MakeCard(first_rank, first_suit);
-  *hand.add_cards() = poker::MakeCard(second_rank, second_suit);
-  return hand;
+::poker::ComboId MakeCombo(int first_rank,
+                           poker::SuitKind first_suit,
+                           int second_rank,
+                           poker::SuitKind second_suit) {
+  return poker::CardsToComboId(
+      poker::MakeCardId(first_rank, first_suit),
+      poker::MakeCardId(second_rank, second_suit));
 }
 
 float TotalWeight(const poker::TrainingRange& range) {
@@ -31,8 +32,9 @@ void CheckTrainingRangeMatchesWeightedCombos() {
   poker::HandRange hand_range;
   hand_range.add_hand_by_index(poker::HandRange::string_to_index("AA"), 6.0);
   hand_range.add_hand_by_index(poker::HandRange::string_to_index("AKs"), 4.0);
-  hand_range.add_hand(
-      MakeHand(14, poker::Suit::SPADES, 14, poker::Suit::HEARTS), 2.0);
+  hand_range.add_combo(
+      MakeCombo(14, poker::SuitKind::kSpades, 14, poker::SuitKind::kHearts),
+      2.0);
 
   const poker::WeightedHandRange& combos = hand_range.get_all_weighted_combos();
   const poker::TrainingRange training_range =
@@ -41,7 +43,7 @@ void CheckTrainingRangeMatchesWeightedCombos() {
   Expect(training_range.active_count == combos.size(),
          "training range should preserve exact combo count");
   for (size_t i = 0; i < combos.size(); ++i) {
-    const poker::ComboId combo_id = poker::HandToComboId(combos.hands[i]);
+    const poker::ComboId combo_id = combos.combos[i];
     Expect(std::abs(training_range.weight(combo_id) -
                     static_cast<float>(combos.weights[i])) < 0.000001f,
            "training range combo weight should match expanded combo weight");
@@ -54,14 +56,14 @@ void CheckTrainingRangeMatchesWeightedCombos() {
 
 void CheckExactHandReplacementSurvivesConversion() {
   poker::HandRange hand_range;
-  poker::Hand aces =
-      MakeHand(14, poker::Suit::SPADES, 14, poker::Suit::HEARTS);
-  poker::Hand reversed =
-      MakeHand(14, poker::Suit::HEARTS, 14, poker::Suit::SPADES);
-  hand_range.add_hand(aces, 1.0);
-  hand_range.add_hand(reversed, 3.0);
+  poker::ComboId aces =
+      MakeCombo(14, poker::SuitKind::kSpades, 14, poker::SuitKind::kHearts);
+  poker::ComboId reversed =
+      MakeCombo(14, poker::SuitKind::kHearts, 14, poker::SuitKind::kSpades);
+  hand_range.add_combo(aces, 1.0);
+  hand_range.add_combo(reversed, 3.0);
 
-  const poker::ComboId combo_id = poker::HandToComboId(aces);
+  const poker::ComboId combo_id = aces;
   const poker::TrainingRange training_range =
       poker::BuildTrainingRange(hand_range);
 
@@ -83,17 +85,17 @@ void CheckEmptyRangeConvertsToEmptyTrainingRange() {
 
 void CheckTrainingRangeViewClearsTouchedWeights() {
   poker::WeightedHandRange combos;
-  poker::Hand aces =
-      MakeHand(14, poker::Suit::SPADES, 14, poker::Suit::HEARTS);
-  poker::Hand kings =
-      MakeHand(13, poker::Suit::SPADES, 13, poker::Suit::HEARTS);
+  poker::ComboId aces =
+      MakeCombo(14, poker::SuitKind::kSpades, 14, poker::SuitKind::kHearts);
+  poker::ComboId kings =
+      MakeCombo(13, poker::SuitKind::kSpades, 13, poker::SuitKind::kHearts);
   combos.add(aces, 1.0);
   combos.add(kings, 2.0);
 
   const poker::TrainingRange training_range =
       poker::BuildTrainingRange(combos);
-  const poker::ComboId aces_combo = poker::HandToComboId(aces);
-  const poker::ComboId kings_combo = poker::HandToComboId(kings);
+  const poker::ComboId aces_combo = aces;
+  const poker::ComboId kings_combo = kings;
 
   poker::TrainingRangeView view(training_range);
   Expect(view.size() == 2, "all-source view should expose source combos");

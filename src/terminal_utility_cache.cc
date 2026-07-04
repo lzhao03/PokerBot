@@ -1,35 +1,35 @@
 #include "src/terminal_utility_cache.h"
 
 #include <algorithm>
-#include <cmath>
 
 namespace poker {
 namespace {
 
-int EncodeCard(const Card& card) {
-  return (card.rank() * 8) + static_cast<int>(card.suit());
-}
-
-template <size_t N, typename Cards>
-std::array<int, N> EncodedSortedCards(const Cards& cards) {
+template <size_t N>
+std::array<int, N> EncodedSortedCards(
+    const std::array<CardId, N>& cards,
+    size_t count) {
   std::array<int, N> encoded;
   encoded.fill(-1);
-  size_t count = 0;
-  for (const Card& card : cards) {
-    if (count == N) {
-      break;
-    }
-    encoded[count] = EncodeCard(card);
-    ++count;
+  for (size_t i = 0; i < count && i < N; ++i) {
+    encoded[i] = EncodedCard(cards[i]);
   }
-  std::sort(encoded.begin(), encoded.begin() + count);
+  std::sort(encoded.begin(), encoded.begin() + std::min(count, N));
   return encoded;
 }
 
-int ContributionAt(const BoardState& state, int player) {
-  return state.player_contribution_size() > player
-             ? static_cast<int>(std::llround(state.player_contribution(player)))
-             : 0;
+std::array<int, 2> EncodedComboCards(ComboId combo_id) {
+  const ComboInfo& combo = GetComboInfo(combo_id);
+  std::array<CardId, 2> cards = {combo.card0, combo.card1};
+  return EncodedSortedCards(cards, cards.size());
+}
+
+std::array<int, 5> EncodedBoardCards(const GameState& state) {
+  std::array<CardId, 5> cards = {};
+  for (size_t i = 0; i < state.board_cards.size() && i < cards.size(); ++i) {
+    cards[i] = state.board_cards[i];
+  }
+  return EncodedSortedCards(cards, state.board_cards.size());
 }
 
 void HashCombine(size_t& seed, int value) {
@@ -74,18 +74,18 @@ size_t TerminalUtilityCache::KeyHash::operator()(const Key& key) const {
 }
 
 TerminalUtilityCache::Key TerminalUtilityCache::key_for(
-    const BoardState& state,
-    const Hand& player_a_hand,
-    const Hand& player_b_hand) {
+    const GameState& state,
+    ComboId player_a_hand,
+    ComboId player_b_hand) {
   Key key;
-  key.street = static_cast<int>(state.street());
-  key.pot = state.pot();
-  key.player_a_contribution = ContributionAt(state, 0);
-  key.player_b_contribution = ContributionAt(state, 1);
-  key.board_size = state.cards_size();
-  key.player_a_cards = EncodedSortedCards<2>(player_a_hand.cards());
-  key.player_b_cards = EncodedSortedCards<2>(player_b_hand.cards());
-  key.board_cards = EncodedSortedCards<5>(state.cards());
+  key.street = static_cast<int>(state.street);
+  key.pot = state.pot;
+  key.player_a_contribution = state.player_contribution[0];
+  key.player_b_contribution = state.player_contribution[1];
+  key.board_size = static_cast<int>(state.board_cards.size());
+  key.player_a_cards = EncodedComboCards(player_a_hand);
+  key.player_b_cards = EncodedComboCards(player_b_hand);
+  key.board_cards = EncodedBoardCards(state);
   return key;
 }
 

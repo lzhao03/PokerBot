@@ -1,5 +1,4 @@
 #include "src/hand_range.h"
-#include "src/card.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,53 +9,42 @@ namespace poker {
 
 namespace {
 
-Hand MakeCombo(int first_rank, Suit first_suit, int second_rank,
-               Suit second_suit) {
-  Hand hand;
-  *hand.add_cards() = MakeCard(first_rank, first_suit);
-  *hand.add_cards() = MakeCard(second_rank, second_suit);
-  return hand;
+ComboId MakeCombo(int first_rank, SuitKind first_suit, int second_rank,
+                  SuitKind second_suit) {
+  return CardsToComboId(MakeCardId(first_rank, first_suit),
+                        MakeCardId(second_rank, second_suit));
 }
 
-bool SameHand(const Hand& left, const Hand& right) {
-  if (left.cards_size() != 2 || right.cards_size() != 2) {
-    return false;
-  }
-
-  return (SameCard(left.cards(0), right.cards(0)) &&
-          SameCard(left.cards(1), right.cards(1))) ||
-         (SameCard(left.cards(0), right.cards(1)) &&
-          SameCard(left.cards(1), right.cards(0)));
-}
-
-void AddWeightedCombo(WeightedHandRange& weighted_combos, const Hand& hand,
+void AddWeightedCombo(WeightedHandRange& weighted_combos, ComboId combo_id,
                       double weight) {
   for (size_t i = 0; i < weighted_combos.size(); ++i) {
-    if (SameHand(weighted_combos.hands[i], hand)) {
+    if (weighted_combos.combos[i] == combo_id) {
       weighted_combos.weights[i] += weight;
       return;
     }
   }
 
-  weighted_combos.add(hand, weight);
+  weighted_combos.add(combo_id, weight);
 }
 
-std::string ExactHandKey(const Hand& hand) {
+std::string ExactHandKey(ComboId combo_id) {
+  const ComboInfo& combo = GetComboInfo(combo_id);
   std::ostringstream oss;
-  for (int i = 0; i < hand.cards_size(); ++i) {
+  const CardId cards[2] = {combo.card0, combo.card1};
+  for (int i = 0; i < 2; ++i) {
     if (i > 0) {
       oss << "-";
     }
-    oss << hand.cards(i).rank() << ":"
-        << static_cast<int>(hand.cards(i).suit());
+    oss << RankFromCardId(cards[i]) << ":"
+        << 1 + SuitIndex(SuitFromCardId(cards[i]));
   }
   return oss.str();
 }
 
-std::vector<Hand> ExpandIndexToCombos(int index) {
-  std::vector<Hand> combos;
-  const Suit suits[] = {Suit::HEARTS, Suit::DIAMONDS, Suit::CLUBS,
-                        Suit::SPADES};
+std::vector<ComboId> ExpandIndexToCombos(int index) {
+  std::vector<ComboId> combos;
+  const SuitKind suits[] = {SuitKind::kHearts, SuitKind::kDiamonds,
+                            SuitKind::kClubs, SuitKind::kSpades};
 
   if (index < 0 || index >= 169) {
     return combos;
@@ -79,8 +67,8 @@ std::vector<Hand> ExpandIndexToCombos(int index) {
   int rank1 = r1 + 2;
   int rank2 = r2 + 2;
 
-  for (Suit first_suit : suits) {
-    for (Suit second_suit : suits) {
+  for (SuitKind first_suit : suits) {
+    for (SuitKind second_suit : suits) {
       if ((first_suit == second_suit) == is_suited) {
         combos.push_back(MakeCombo(rank1, first_suit, rank2, second_suit));
       }
@@ -96,13 +84,13 @@ HandRange::HandRange()
     total_weight_(0.0) {
 }
 
-void HandRange::add_hand(const Hand& hand, double weight) {
-  if (hand.cards_size() != 2 || weight <= 0.0) {
+void HandRange::add_combo(ComboId combo_id, double weight) {
+  if (combo_id >= kComboCount || weight <= 0.0) {
     return;
   }
 
   for (auto& pair : exact_hand_weights_) {
-    if (SameHand(pair.first, hand)) {
+    if (pair.first == combo_id) {
       total_weight_ += weight - pair.second;
       pair.second = weight;
       invalidate_caches();
@@ -110,7 +98,7 @@ void HandRange::add_hand(const Hand& hand, double weight) {
     }
   }
 
-  exact_hand_weights_.emplace_back(hand, weight);
+  exact_hand_weights_.emplace_back(combo_id, weight);
   total_weight_ += weight;
   invalidate_caches();
 }
@@ -138,23 +126,23 @@ void HandRange::add_hand_by_index(int index, double weight) {
   invalidate_caches();
 }
 
-double HandRange::get_probability(const Hand& hand) const {
-  if (hand.cards_size() != 2 || total_weight_ <= 0.0) {
+double HandRange::get_probability(ComboId combo_id) const {
+  if (combo_id >= kComboCount || total_weight_ <= 0.0) {
     return 0.0;
   }
 
   double hand_weight = 0.0;
   for (const auto& pair : exact_hand_weights_) {
-    if (SameHand(pair.first, hand)) {
+    if (pair.first == combo_id) {
       hand_weight += pair.second;
     }
   }
 
-  int index = hand_to_index(hand);
+  int index = combo_to_index(combo_id);
   if (index >= 0) {
     for (const auto& pair : hand_weights_) {
       if (pair.first == index) {
-        std::vector<Hand> combos = ExpandIndexToCombos(index);
+        std::vector<ComboId> combos = ExpandIndexToCombos(index);
         if (!combos.empty()) {
           hand_weight += pair.second / combos.size();
         }
@@ -178,13 +166,13 @@ const WeightedHandRange& HandRange::get_all_weighted_combos() const {
   }
 
   for (const auto& hand_weight : hand_weights_) {
-    std::vector<Hand> combos = ExpandIndexToCombos(hand_weight.first);
+    std::vector<ComboId> combos = ExpandIndexToCombos(hand_weight.first);
     if (combos.empty()) {
       continue;
     }
 
     double combo_weight = hand_weight.second / combos.size();
-    for (const Hand& combo : combos) {
+    for (ComboId combo : combos) {
       AddWeightedCombo(cached_weighted_combos_, combo, combo_weight);
     }
   }
@@ -259,8 +247,7 @@ std::string HandRange::to_string() const {
       oss << ",";
     }
     
-    Hand hand = index_to_hand(index);
-    oss << hand_to_string(hand);
+    oss << combo_to_string(index_to_combo(index));
     needs_separator = true;
   }
 
@@ -298,16 +285,16 @@ void HandRange::normalize() {
   invalidate_caches();
 }
 
-int HandRange::hand_to_index(const Hand& hand) {
-  if (hand.cards_size() < 2) {
+int HandRange::combo_to_index(ComboId combo_id) {
+  if (combo_id >= kComboCount) {
     return -1;
   }
   
-  // Extract the ranks and suits
-  int rank1 = hand.cards(0).rank();
-  int rank2 = hand.cards(1).rank();
-  Suit suit1 = hand.cards(0).suit();
-  Suit suit2 = hand.cards(1).suit();
+  const ComboInfo& combo = GetComboInfo(combo_id);
+  int rank1 = RankFromCardId(combo.card0);
+  int rank2 = RankFromCardId(combo.card1);
+  SuitKind suit1 = SuitFromCardId(combo.card0);
+  SuitKind suit2 = SuitFromCardId(combo.card1);
   
   // Normalize ranks (2-14) to 0-12
   int r1 = rank1 - 2;
@@ -335,11 +322,9 @@ int HandRange::hand_to_index(const Hand& hand) {
   }
 }
 
-Hand HandRange::index_to_hand(int index) {
-  Hand hand;
-  
+ComboId HandRange::index_to_combo(int index) {
   if (index < 0 || index >= 169) {
-    return hand;
+    return 0;
   }
   
   int r1, r2;
@@ -369,23 +354,20 @@ Hand HandRange::index_to_hand(int index) {
   int rank1 = r1 + 2;
   int rank2 = r2 + 2;
   
-  *hand.add_cards() = MakeCard(rank1, Suit::SPADES);
-  *hand.add_cards() =
-      MakeCard(rank2, is_suited ? Suit::SPADES : Suit::HEARTS);
-  
-  return hand;
+  return MakeCombo(rank1, SuitKind::kSpades, rank2,
+                   is_suited ? SuitKind::kSpades : SuitKind::kHearts);
 }
 
-std::string HandRange::hand_to_string(const Hand& hand) {
-  if (hand.cards_size() < 2) {
+std::string HandRange::combo_to_string(ComboId combo_id) {
+  if (combo_id >= kComboCount) {
     return "";
   }
   
-  // Extract the ranks and suits
-  int rank1 = hand.cards(0).rank();
-  int rank2 = hand.cards(1).rank();
-  Suit suit1 = hand.cards(0).suit();
-  Suit suit2 = hand.cards(1).suit();
+  const ComboInfo& combo = GetComboInfo(combo_id);
+  int rank1 = RankFromCardId(combo.card0);
+  int rank2 = RankFromCardId(combo.card1);
+  SuitKind suit1 = SuitFromCardId(combo.card0);
+  SuitKind suit2 = SuitFromCardId(combo.card1);
   
   // Ensure rank1 >= rank2
   if (rank1 < rank2) {

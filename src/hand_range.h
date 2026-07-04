@@ -6,35 +6,34 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "src/card.h"
-#include "src/poker.pb.h"
+#include "src/combo.h"
 
 namespace poker {
 
 struct WeightedHandRange {
-  std::vector<Hand> hands;
+  std::vector<ComboId> combos;
   std::vector<double> weights;
   std::vector<CardMask> masks;
 
-  size_t size() const { return hands.size(); }
-  bool empty() const { return hands.empty(); }
+  size_t size() const { return combos.size(); }
+  bool empty() const { return combos.empty(); }
 
   void reserve(size_t count) {
-    hands.reserve(count);
+    combos.reserve(count);
     weights.reserve(count);
     masks.reserve(count);
   }
 
   void clear() {
-    hands.clear();
+    combos.clear();
     weights.clear();
     masks.clear();
   }
 
-  void add(const Hand& hand, double weight) {
-    hands.push_back(hand);
+  void add(ComboId combo_id, double weight) {
+    combos.push_back(combo_id);
     weights.push_back(weight);
-    masks.push_back(HandMask(hand));
+    masks.push_back(ComboMask(combo_id));
   }
 };
 
@@ -100,8 +99,8 @@ struct WeightedHandRangeView {
     return all_source_hands ? index : indices[index];
   }
 
-  const Hand& hand(size_t index) const {
-    return source_range().hands[source_index(index)];
+  ComboId combo(size_t index) const {
+    return source_range().combos[source_index(index)];
   }
 
   double weight(size_t index) const {
@@ -117,14 +116,14 @@ class HandRange {
 public:
   HandRange();
   
-  // Add a hand to the range with a weight
-  void add_hand(const Hand& hand, double weight);
+  // Add an exact two-card combo to the range with a weight.
+  void add_combo(ComboId combo_id, double weight);
   
   // Add a hand by index with a weight
   void add_hand_by_index(int index, double weight);
   
   // Get the probability of a specific hand
-  double get_probability(const Hand& hand) const;
+  double get_probability(ComboId combo_id) const;
 
   // Get every exact two-card combo represented by the range.
   const WeightedHandRange& get_all_weighted_combos() const;
@@ -147,14 +146,14 @@ public:
   // Normalize the weights to sum to 1
   void normalize();
   
-  // Convert a hand to its canonical index (0-168)
-  static int hand_to_index(const Hand& hand);
+  // Convert a combo to its canonical hand-class index (0-168)
+  static int combo_to_index(ComboId combo_id);
   
-  // Convert an index to a hand
-  static Hand index_to_hand(int index);
+  // Convert an index to a representative combo
+  static ComboId index_to_combo(int index);
   
-  // Convert a hand to a string representation (for display only)
-  static std::string hand_to_string(const Hand& hand);
+  // Convert a combo to a string representation (for display only)
+  static std::string combo_to_string(ComboId combo_id);
   
   // Convert a string to a hand index (for parsing only)
   static int string_to_index(const std::string& hand_str);
@@ -164,8 +163,8 @@ private:
   // Using a sparse representation for efficiency
   std::vector<std::pair<int, double>> hand_weights_;
 
-  // Exact two-card combos added directly with add_hand().
-  std::vector<std::pair<Hand, double>> exact_hand_weights_;
+  // Exact two-card combos added directly with add_combo().
+  std::vector<std::pair<ComboId, double>> exact_hand_weights_;
   
   // Exact combo expansion cache.
   mutable WeightedHandRange cached_weighted_combos_;

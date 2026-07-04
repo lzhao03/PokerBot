@@ -11,14 +11,6 @@ void Expect(bool condition, const char* message) {
   }
 }
 
-poker::Hand MakeHand(int first_rank, poker::Suit first_suit, int second_rank,
-                     poker::Suit second_suit) {
-  poker::Hand hand;
-  *hand.add_cards() = poker::MakeCard(first_rank, first_suit);
-  *hand.add_cards() = poker::MakeCard(second_rank, second_suit);
-  return hand;
-}
-
 void CheckComboTableHasEveryUniqueCombo() {
   const auto& table = poker::ComboTable();
   Expect(table.size() == poker::kComboCount,
@@ -33,11 +25,11 @@ void CheckComboTableHasEveryUniqueCombo() {
     Expect(combo.card1 < poker::kDeckCardCount,
            "combo card ids should be valid");
 
-    const poker::Hand hand = poker::ComboIdToHand(combo_id);
-    Expect(poker::HandToComboId(hand) == combo_id,
-           "combo id should round-trip through protobuf hand");
-    Expect(combo.mask == poker::HandMask(hand),
-           "combo mask should match protobuf hand mask");
+    Expect(poker::CardsToComboId(combo.card0, combo.card1) == combo_id,
+           "combo id should round-trip through card ids");
+    Expect(combo.mask ==
+               (poker::CardBit(combo.card0) | poker::CardBit(combo.card1)),
+           "combo mask should match card-id mask");
     seen[combo_id] = true;
   }
 
@@ -47,25 +39,17 @@ void CheckComboTableHasEveryUniqueCombo() {
 }
 
 void CheckHandToComboIdIgnoresCardOrder() {
-  const poker::Hand ace_king =
-      MakeHand(14, poker::Suit::SPADES, 13, poker::Suit::HEARTS);
-  const poker::Hand king_ace =
-      MakeHand(13, poker::Suit::HEARTS, 14, poker::Suit::SPADES);
+  const poker::CardId ace = poker::MakeCardId(14, poker::SuitKind::kSpades);
+  const poker::CardId king = poker::MakeCardId(13, poker::SuitKind::kHearts);
 
-  Expect(poker::HandToComboId(ace_king) == poker::HandToComboId(king_ace),
+  Expect(poker::CardsToComboId(ace, king) == poker::CardsToComboId(king, ace),
          "combo id should ignore hand card order");
 }
 
 void CheckInvalidHandsDoNotMapToCombos() {
-  poker::Hand duplicate =
-      MakeHand(14, poker::Suit::SPADES, 14, poker::Suit::SPADES);
-  Expect(!poker::MaybeHandToComboId(duplicate).has_value(),
+  const poker::CardId ace = poker::MakeCardId(14, poker::SuitKind::kSpades);
+  Expect(!poker::MaybeCardsToComboId(ace, ace).has_value(),
          "duplicate-card hand should not map to combo id");
-
-  poker::Hand one_card;
-  *one_card.add_cards() = poker::MakeCard(14, poker::Suit::SPADES);
-  Expect(!poker::MaybeHandToComboId(one_card).has_value(),
-         "non-exact hand should not map to combo id");
 }
 
 }  // namespace

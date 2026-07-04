@@ -69,8 +69,6 @@ struct TrainingRangeView {
     return all_source_combos ? source->active[index] : active[index];
   }
 
-  Hand hand(size_t index) const { return ComboIdToHand(combo(index)); }
-
   float weight(size_t index) const {
     const ComboId combo_id = combo(index);
     return all_source_combos ? source->weights[combo_id] : weights[combo_id];

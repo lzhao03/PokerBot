@@ -16,6 +16,7 @@
 #include "src/poker.pb.h"
 #include "src/game_tree.h"
 #include "src/hand_range.h"
+#include "src/poker_types.h"
 #include "src/strategy.h"
 #include "src/training_range.h"
 
@@ -48,10 +49,13 @@ public:
     int64_t entries = 0;
   };
 
+  CFRSolver(const SolverConfig& config);
+  CFRSolver(const SolverConfig& config, const GameState& initial_state);
   CFRSolver(const PokerConfig& config);
   CFRSolver(const PokerConfig& config, const BoardState& initial_state);
   
   // Run CFR for a specified number of iterations
+  void run(int iterations, ComboId player_a_hand, ComboId player_b_hand);
   void run(int iterations, const Hand& player_a_hand,
            const Hand& player_b_hand);
   void run(int iterations, const HandRange& player_a_range,
@@ -63,7 +67,14 @@ public:
   // Returns the expected value of the game for player A.
   // max_depth <= 0 disables the depth cutoff.
   double cfr(GameTree::Node& node,
-             const Hand& player_a_hand, 
+             ComboId player_a_hand,
+             ComboId player_b_hand,
+             std::array<double, 2>& reach_probabilities,
+             int iteration,
+             int depth = 0,
+             int max_depth = 0);
+  double cfr(GameTree::Node& node,
+             const Hand& player_a_hand,
              const Hand& player_b_hand,
              std::array<double, 2>& reach_probabilities,
              int iteration,
@@ -73,6 +84,7 @@ public:
   // Get the computed strategy. Regret-only training exports the current
   // regret-matched policy because average-strategy sums are not accumulated.
   Strategy get_equilibrium_strategy() const;
+  double evaluate_strategy(ComboId player_a_hand, ComboId player_b_hand);
   double evaluate_strategy(const Hand& player_a_hand, const Hand& player_b_hand);
   double evaluate_strategy(int samples, const HandRange& player_a_range,
                            const HandRange& player_b_range);
@@ -82,6 +94,8 @@ public:
   double calculate_exploitability(int samples);
   double calculate_exploitability(int samples, const HandRange& player_a_range,
                                   const HandRange& player_b_range);
+  double calculate_exploitability(ComboId player_a_hand,
+                                  ComboId player_b_hand);
   double calculate_exploitability(const Hand& player_a_hand,
                                   const Hand& player_b_hand);
   double calculate_player_a_best_response_value(
@@ -93,10 +107,10 @@ public:
       const HandRange& player_a_range,
       const HandRange& player_b_range);
   // Debug helper for inspecting sampled best-response choices.
-  Action get_best_response_action(GameTree::Node& node,
-                                  const Hand& player_a_hand,
-                                  const Hand& player_b_hand,
-                                  int best_response_player);
+  GameAction get_best_response_action(GameTree::Node& node,
+                                      ComboId player_a_hand,
+                                      ComboId player_b_hand,
+                                      int best_response_player);
   
   // Save and load the computed strategy
   void save_strategy(const std::string& filename) const;
@@ -142,22 +156,18 @@ private:
   };
 
   struct PrivateCards {
-    static PrivateCards FromHand(const Hand& hand);
     static PrivateCards FromCombo(ComboId combo_id);
 
     CardMask mask() const;
-    Hand to_hand() const;
 
-    bool has_combo = false;
     ComboId combo = 0;
-    Hand hand;
   };
 
   using OptionalTrainingRange =
       std::optional<std::reference_wrapper<const TrainingRangeView>>;
 
   struct ActionChoice {
-    std::reference_wrapper<const Action> action;
+    std::reference_wrapper<const GameAction> action;
     int action_id = 0;
     double probability = 0.0;
     double value = 0.0;
@@ -249,18 +259,18 @@ private:
     uint16_t action_count = 0;
   };
 
-  CFRSolver(const PokerConfig& config,
+  CFRSolver(const SolverConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache);
-  CFRSolver(const PokerConfig& config,
+  CFRSolver(const SolverConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache,
             std::shared_ptr<ContinuationValueProvider> continuation_value_provider);
-  CFRSolver(const PokerConfig& config,
+  CFRSolver(const SolverConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache,
             std::shared_ptr<ContinuationValueProvider> continuation_value_provider,
-            BoardState initial_state);
+            GameState initial_state);
 
-  PokerConfig config_;
-  BoardState initial_state_;
+  SolverConfig config_;
+  GameState initial_state_;
   std::unique_ptr<GameTree> game_tree_;
   std::mt19937 rng_;
   double cumulative_root_utility_;
@@ -289,8 +299,8 @@ private:
                       const HandRange& player_b_range);
   double cfr_with_ranges(
       GameTree::Node& node,
-      const Hand& player_a_hand,
-      const Hand& player_b_hand,
+      ComboId player_a_hand,
+      ComboId player_b_hand,
       std::array<double, 2>& reach_probabilities,
       int iteration,
       int depth,
@@ -310,27 +320,21 @@ private:
       OptionalTrainingRange player_a_range,
       OptionalTrainingRange player_b_range);
   double average_strategy_action_probability(
-      const BoardState& state,
-      int player,
-      const Hand& hand,
-      const std::vector<Action>& legal_actions,
-      int action_id);
-  double average_strategy_action_probability(
-      const BoardState& state,
+      const GameState& state,
       int player,
       const PrivateCards& private_cards,
-      const std::vector<Action>& legal_actions,
+      const std::vector<GameAction>& legal_actions,
       int action_id);
   double average_strategy_action_probability(
       const InfoSetData& info_set,
-      const std::vector<Action>& legal_actions,
+      const std::vector<GameAction>& legal_actions,
       int action_id,
       double fallback_probability);
   void average_strategy_probabilities(
-      const BoardState& state,
+      const GameState& state,
       int player,
       const PrivateCards& private_cards,
-      const std::vector<Action>& legal_actions,
+      const std::vector<GameAction>& legal_actions,
       StrategyProbabilities& probabilities);
   void average_strategy_probabilities(
       GameTree::Node& node,
@@ -339,31 +343,28 @@ private:
       StrategyProbabilities& probabilities);
   void average_strategy_probabilities(
       const InfoSetData& info_set,
-      const std::vector<Action>& legal_actions,
+      const std::vector<GameAction>& legal_actions,
       double fallback_probability,
       StrategyProbabilities& probabilities);
   void condition_ranges_for_actions(
       const TrainingRangeView& range,
-      const BoardState& state,
+      const GameState& state,
       uint32_t public_state_id,
       int player,
       const ActionChoices& action_choices,
       ConditionedRanges& conditioned_ranges);
-  InfoSetKey make_info_set_key(const BoardState& state,
-                               int player,
-                               const Hand& hand) const;
-  InfoSetKey make_info_set_key(const BoardState& state,
+  InfoSetKey make_info_set_key(const GameState& state,
                                int player,
                                ComboId combo_id) const;
-  InfoSetKey make_info_set_key(const BoardState& state,
+  InfoSetKey make_info_set_key(const GameState& state,
                                int player,
                                const PrivateCards& private_cards) const;
-  PublicStateKey make_public_state_key(const BoardState& state) const;
-  InfoSetKey make_public_info_set_key(const BoardState& state,
+  PublicStateKey make_public_state_key(const GameState& state) const;
+  InfoSetKey make_public_info_set_key(const GameState& state,
                                       int player) const;
   int get_or_create_compact_info_set_id(
       uint32_t public_state_id,
-      const BoardState& state,
+      const GameState& state,
       int player,
       ComboId combo_id,
       const std::vector<int>& legal_action_ids);
@@ -376,23 +377,17 @@ private:
   double regret_for_info_set(const std::string& info_set_key,
                              int action_id) const;
   ContinuationContext build_continuation_context(
-      const BoardState& state,
-      const Hand& player_a_hand,
-      const Hand& player_b_hand,
+      const GameState& state,
+      ComboId player_a_hand,
+      ComboId player_b_hand,
       OptionalTrainingRange player_a_range,
       OptionalTrainingRange player_b_range) const;
-  double utility(const BoardState& state,
-                 const Hand& player_a_hand,
-                 const Hand& player_b_hand);
-  double utility(const BoardState& state,
+  double utility(const GameState& state,
                  const PrivateCards& player_a_cards,
                  const PrivateCards& player_b_cards);
-  double uncached_utility(const BoardState& state,
+  double uncached_utility(const GameState& state,
                           const PrivateCards& player_a_cards,
                           const PrivateCards& player_b_cards);
-  double evaluate_strategy_node(GameTree::Node& node,
-                                const Hand& player_a_hand,
-                                const Hand& player_b_hand);
   double evaluate_strategy_node(GameTree::Node& node,
                                 const PrivateCards& player_a_cards,
                                 const PrivateCards& player_b_cards);
@@ -400,14 +395,9 @@ private:
       int samples,
       RangeSampler range_sampler);
   double best_response_value(GameTree::Node& node,
-                             const Hand& player_a_hand,
-                             const Hand& player_b_hand,
+                             const PrivateCards& player_a_cards,
+                             const PrivateCards& player_b_cards,
                              int best_response_player);
-  double best_response_value_against_range(
-      GameTree::Node& node,
-      const Hand& best_response_hand,
-      const WeightedHandRangeView& opponent_hands,
-      int best_response_player);
   double best_response_value_against_range(
       GameTree::Node& node,
       const PrivateCards& best_response_cards,
@@ -426,17 +416,6 @@ private:
   void update_strategy(int info_set_id,
                        const ActionChoices& choices,
                        double reach_prob);
-  double chance_sampling_cfr(
-      GameTree::Node& node,
-      const Hand& player_a_hand,
-      const Hand& player_b_hand,
-      std::array<double, 2>& reach_probabilities,
-      int iteration,
-      int depth,
-      int max_depth,
-      TraversalScratch& scratch,
-      OptionalTrainingRange player_a_range,
-      OptionalTrainingRange player_b_range);
   double chance_sampling_cfr(
       GameTree::Node& node,
       const PrivateCards& player_a_cards,

@@ -1,7 +1,7 @@
 #include "src/hand_evaluator.h"
 
+#include <array>
 #include <stdexcept>
-#include <vector>
 
 namespace poker {
 namespace {
@@ -12,36 +12,24 @@ void Expect(bool condition, const char* message) {
   }
 }
 
-Card MakeCard(int rank, Suit suit) {
-  Card card;
-  card.set_rank(rank);
-  card.set_suit(suit);
-  return card;
+CardId TestCard(int rank, SuitKind suit) {
+  return MakeCardId(rank, suit);
 }
 
-Hand MakeHand(int first_rank, Suit first_suit, int second_rank,
-              Suit second_suit) {
-  Hand hand;
-  *hand.add_cards() = MakeCard(first_rank, first_suit);
-  *hand.add_cards() = MakeCard(second_rank, second_suit);
-  return hand;
-}
-
-BoardState Board(std::vector<Card> cards) {
-  BoardState state;
-  for (const Card& card : cards) {
-    *state.add_cards() = card;
-  }
-  return state;
+ComboId TestCombo(int first_rank, SuitKind first_suit, int second_rank,
+                  SuitKind second_suit) {
+  return CardsToComboId(TestCard(first_rank, first_suit),
+                        TestCard(second_rank, second_suit));
 }
 
 void CheckFiveCardEvaluation() {
-  Hand royal_flush;
-  *royal_flush.add_cards() = MakeCard(10, Suit::HEARTS);
-  *royal_flush.add_cards() = MakeCard(11, Suit::HEARTS);
-  *royal_flush.add_cards() = MakeCard(12, Suit::HEARTS);
-  *royal_flush.add_cards() = MakeCard(13, Suit::HEARTS);
-  *royal_flush.add_cards() = MakeCard(14, Suit::HEARTS);
+  const std::array<CardId, 5> royal_flush = {
+      TestCard(10, SuitKind::kHearts),
+      TestCard(11, SuitKind::kHearts),
+      TestCard(12, SuitKind::kHearts),
+      TestCard(13, SuitKind::kHearts),
+      TestCard(14, SuitKind::kHearts),
+  };
 
   HandEvaluator evaluator;
   HandEvaluation evaluation = evaluator.evaluate(royal_flush);
@@ -50,14 +38,13 @@ void CheckFiveCardEvaluation() {
 }
 
 void CheckSevenCardBestHand() {
-  Hand hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
-  BoardState board = Board({
-      MakeCard(14, Suit::DIAMONDS),
-      MakeCard(13, Suit::HEARTS),
-      MakeCard(13, Suit::CLUBS),
-      MakeCard(2, Suit::SPADES),
-      MakeCard(7, Suit::HEARTS),
-  });
+  ComboId hand = TestCombo(14, SuitKind::kHearts, 14, SuitKind::kSpades);
+  GameState board;
+  AddBoardCard(board, TestCard(14, SuitKind::kDiamonds));
+  AddBoardCard(board, TestCard(13, SuitKind::kHearts));
+  AddBoardCard(board, TestCard(13, SuitKind::kClubs));
+  AddBoardCard(board, TestCard(2, SuitKind::kSpades));
+  AddBoardCard(board, TestCard(7, SuitKind::kHearts));
 
   HandEvaluator evaluator;
   HandEvaluation evaluation = evaluator.evaluate_hand(hand, board);

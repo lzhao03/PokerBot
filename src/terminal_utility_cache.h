@@ -8,7 +8,8 @@
 #include <unordered_map>
 #include <utility>
 
-#include "src/poker.pb.h"
+#include "src/combo.h"
+#include "src/poker_types.h"
 
 namespace poker {
 
@@ -21,9 +22,9 @@ class TerminalUtilityCache {
   };
 
   template <typename Compute>
-  double get_or_compute(const BoardState& state,
-                        const Hand& player_a_hand,
-                        const Hand& player_b_hand,
+  double get_or_compute(const GameState& state,
+                        ComboId player_a_hand,
+                        ComboId player_b_hand,
                         Compute compute) {
     Key key = key_for(state, player_a_hand, player_b_hand);
 
@@ -70,9 +71,9 @@ class TerminalUtilityCache {
     size_t operator()(const Key& key) const;
   };
 
-  static Key key_for(const BoardState& state,
-                     const Hand& player_a_hand,
-                     const Hand& player_b_hand);
+  static Key key_for(const GameState& state,
+                     ComboId player_a_hand,
+                     ComboId player_b_hand);
 
   mutable std::mutex mutex_;
   std::unordered_map<Key, double, KeyHash> values_;

@@ -46,18 +46,18 @@ HandEvaluation ToHandEvaluation(const EvaluationScore& score) {
   return {score.rank, kickers};
 }
 
-EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards) {
+EvaluationScore EvaluateFiveCardScore(const std::array<CardId, 5>& cards) {
   std::array<int, 5> ranks;
   size_t rank_count = 0;
-  for (const Card& card : cards) {
-    ranks[rank_count] = card.rank();
+  for (CardId card : cards) {
+    ranks[rank_count] = RankFromCardId(card);
     ++rank_count;
   }
   std::sort(ranks.begin(), ranks.end(), std::greater<int>());
 
   bool flush = true;
-  for (const Card& card : cards) {
-    if (card.suit() != cards[0].suit()) {
+  for (CardId card : cards) {
+    if (SuitFromCardId(card) != SuitFromCardId(cards[0])) {
       flush = false;
       break;
     }
@@ -184,12 +184,12 @@ EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards) {
 }  // namespace
 
 // Move implementations from HandEvaluator to HandEvaluation as static methods
-bool HandEvaluation::is_flush(const std::vector<Card>& cards) {
+bool HandEvaluation::is_flush(const std::vector<CardId>& cards) {
   if (cards.empty()) return false;
   
-  Suit firstSuit = cards[0].suit();
-  for (const auto& card : cards) {
-    if (card.suit() != firstSuit) {
+  SuitKind first_suit = SuitFromCardId(cards[0]);
+  for (CardId card : cards) {
+    if (SuitFromCardId(card) != first_suit) {
       return false;
     }
   }
@@ -216,26 +216,26 @@ bool HandEvaluation::is_straight(const std::vector<int>& ranks) {
   return true;
 }
 
-bool HandEvaluation::is_straight_flush(const std::vector<Card>& cards) {
+bool HandEvaluation::is_straight_flush(const std::vector<CardId>& cards) {
   if (!is_flush(cards)) return false;
   
   std::vector<int> ranks;
-  for (const auto& card : cards) {
-    ranks.push_back(card.rank());
+  for (CardId card : cards) {
+    ranks.push_back(RankFromCardId(card));
   }
   std::sort(ranks.begin(), ranks.end(), std::greater<int>());
   
   return is_straight(ranks);
 }
 
-bool HandEvaluation::is_royal_flush(const std::vector<Card>& cards) {
+bool HandEvaluation::is_royal_flush(const std::vector<CardId>& cards) {
   if (!is_flush(cards)) return false;
   
   std::set<int> royalRanks = {14, 13, 12, 11, 10}; // A, K, Q, J, 10
   std::set<int> handRanks;
   
-  for (const auto& card : cards) {
-    handRanks.insert(card.rank());
+  for (CardId card : cards) {
+    handRanks.insert(RankFromCardId(card));
   }
   
   return handRanks == royalRanks;
@@ -251,55 +251,28 @@ std::vector<int> HandEvaluation::get_rank_counts(const std::vector<int>& ranks) 
   return counts;
 }
 
-// HandEvaluator implementation methods
-std::vector<Card> HandEvaluator::hand_to_vector(const Hand& hand) const {
-  std::vector<Card> cards;
-  for (int i = 0; i < hand.cards_size(); ++i) {
-    cards.push_back(hand.cards(i));
-  }
-  return cards;
+HandEvaluation HandEvaluator::evaluate(
+    const std::array<CardId, 5>& cards) const {
+  return ToHandEvaluation(EvaluateFiveCardScore(cards));
 }
 
-std::vector<Card> HandEvaluator::board_to_vector(const BoardState& board_state) const {
-  std::vector<Card> cards;
-  for (int i = 0; i < board_state.cards_size(); ++i) {
-    cards.push_back(board_state.cards(i));
-  }
-  return cards;
-}
-
-std::vector<Card> HandEvaluator::combine_cards(const Hand& hand, const BoardState& board_state) const {
-  std::vector<Card> combined = hand_to_vector(hand);
-  std::vector<Card> board_cards = board_to_vector(board_state);
-  combined.insert(combined.end(), board_cards.begin(), board_cards.end());
-  return combined;
-}
-
-HandEvaluation HandEvaluator::evaluate(const Hand& hand) const {
-  std::vector<Card> cards = hand_to_vector(hand);
-  
-  if (cards.size() != 5) {
-    throw std::invalid_argument("Hand evaluation requires exactly 5 cards");
-  }
-
-  std::array<Card, 5> five_cards;
-  std::copy(cards.begin(), cards.end(), five_cards.begin());
-  return ToHandEvaluation(EvaluateFiveCardScore(five_cards));
-}
-
-HandEvaluation HandEvaluator::evaluate_hand(const Hand& hole_cards, const BoardState& board_state) const {
-  std::vector<Card> all_cards;
-  all_cards.reserve(hole_cards.cards_size() + board_state.cards_size());
-  for (const Card& card : hole_cards.cards()) {
-    all_cards.push_back(card);
-  }
-  for (const Card& card : board_state.cards()) {
-    all_cards.push_back(card);
-  }
+HandEvaluation HandEvaluator::evaluate_hand(
+    ComboId hole_cards,
+    const GameState& board_state) const {
+  const ComboInfo& combo = GetComboInfo(hole_cards);
+  std::vector<CardId> all_cards;
+  all_cards.reserve(2 + board_state.board_cards.size());
+  all_cards.push_back(combo.card0);
+  all_cards.push_back(combo.card1);
+  all_cards.insert(all_cards.end(), board_state.board_cards.begin(),
+                   board_state.board_cards.end());
   return find_best_hand(all_cards);
 }
 
-int HandEvaluator::compare_hands(const Hand& hand1, const Hand& hand2, const BoardState& board_state) const {
+int HandEvaluator::compare_hands(
+    ComboId hand1,
+    ComboId hand2,
+    const GameState& board_state) const {
   HandEvaluation eval1 = evaluate_hand(hand1, board_state);
   HandEvaluation eval2 = evaluate_hand(hand2, board_state);
   
@@ -312,11 +285,17 @@ int HandEvaluator::compare_hands(const Hand& hand1, const Hand& hand2, const Boa
   }
 }
 
-int HandEvaluator::find_winner(const Hand& hand1, const Hand& hand2, const BoardState& board_state) const {
+int HandEvaluator::find_winner(
+    ComboId hand1,
+    ComboId hand2,
+    const GameState& board_state) const {
   return compare_hands(hand1, hand2, board_state);
 }
 
-double HandEvaluator::calculate_equity(const Hand& hand, const std::vector<Hand>& opponent_range, const BoardState& board_state) const {
+double HandEvaluator::calculate_equity(
+    ComboId hand,
+    const std::vector<ComboId>& opponent_range,
+    const GameState& board_state) const {
   int wins = 0;
   int total = opponent_range.size();
   
@@ -333,13 +312,14 @@ double HandEvaluator::calculate_equity(const Hand& hand, const std::vector<Hand>
   return static_cast<double>(wins) / total;
 }
 
-HandEvaluation HandEvaluator::find_best_hand(const std::vector<Card>& cards) const {
+HandEvaluation HandEvaluator::find_best_hand(
+    const std::vector<CardId>& cards) const {
   if (cards.size() < 5) {
     throw std::invalid_argument("Need at least 5 cards to find best hand");
   }
 
   EvaluationScore bestEval;
-  std::array<Card, 5> combo;
+  std::array<CardId, 5> combo;
   for (size_t a = 0; a + 4 < cards.size(); ++a) {
     combo[0] = cards[a];
     for (size_t b = a + 1; b + 3 < cards.size(); ++b) {

@@ -2,7 +2,7 @@
 #define POKER_SUBGAME_VALUE_H_
 
 #include "src/continuation_value.h"
-#include "src/poker.pb.h"
+#include "src/poker_types.h"
 
 #include <cstdint>
 #include <mutex>
@@ -23,7 +23,7 @@ class ExactHandNestedCFRContinuationValueProvider
     int64_t entries = 0;
   };
 
-  ExactHandNestedCFRContinuationValueProvider(PokerConfig config,
+  ExactHandNestedCFRContinuationValueProvider(SolverConfig config,
                                               int iterations);
 
   using ContinuationValueProvider::value;
@@ -36,7 +36,7 @@ class ExactHandNestedCFRContinuationValueProvider
   double compute_value(GameTree& game_tree,
                        const ContinuationContext& context) const;
 
-  PokerConfig config_;
+  SolverConfig config_;
   int iterations_;
   mutable std::mutex mutex_;
   mutable std::unordered_map<std::string, double> values_;
