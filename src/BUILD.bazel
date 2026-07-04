@@ -130,6 +130,25 @@ cc_test(
 )
 
 cc_library(
+    name = "training_range",
+    srcs = ["training_range.cc"],
+    hdrs = ["training_range.h"],
+    deps = [
+        ":combo",
+        ":hand_range",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "training_range_test",
+    srcs = ["training_range_test.cc"],
+    deps = [
+        ":training_range",
+    ],
+)
+
+cc_library(
     name = "thread_pool",
     srcs = ["thread_pool.cc"],
     hdrs = ["thread_pool.h"],

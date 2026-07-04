@@ -1,0 +1,24 @@
+#include "src/training_range.h"
+
+namespace poker {
+
+TrainingRange BuildTrainingRange(const HandRange& range) {
+  TrainingRange training_range;
+  const WeightedHandRange& combos = range.get_all_weighted_combos();
+
+  for (size_t i = 0; i < combos.size(); ++i) {
+    if (combos.weights[i] <= 0.0) {
+      continue;
+    }
+
+    const ComboId combo_id = HandToComboId(combos.hands[i]);
+    if (training_range.weights[combo_id] == 0.0f) {
+      training_range.active[training_range.active_count++] = combo_id;
+    }
+    training_range.weights[combo_id] += static_cast<float>(combos.weights[i]);
+  }
+
+  return training_range;
+}
+
+}  // namespace poker
