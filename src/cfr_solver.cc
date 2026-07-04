@@ -51,6 +51,14 @@ double TotalWeight(const WeightedHandRangeView& hands) {
   return total;
 }
 
+size_t ScratchDepthReserve(const SolverConfig& config, int max_depth) {
+  if (max_depth > 0) {
+    return static_cast<size_t>(max_depth) + 2;
+  }
+  const int stack_size = std::max(0, config.starting_stack_size);
+  return std::max<size_t>(32, static_cast<size_t>(stack_size) + 12);
+}
+
 WeightedHandRangeView CompatibleHands(
     const WeightedHandRangeView& hands,
     CardMask known_hand_mask,
@@ -678,6 +686,7 @@ void CFRSolver::run(int iterations, ComboId player_a_hand,
   GameTree::Node& root = get_or_build_root();
   const int max_depth = config_.max_depth;
   TraversalScratch scratch;
+  scratch.reserve_depth(ScratchDepthReserve(config_, max_depth));
   const PrivateCards player_a_cards = PrivateCards::FromCombo(player_a_hand);
   const PrivateCards player_b_cards = PrivateCards::FromCombo(player_b_hand);
   for (int i = 0; i < iterations; ++i) {
@@ -724,13 +733,14 @@ void CFRSolver::run_iterations(int iterations,
   
   // Run iterations of CFR
   LOG(INFO) << "Starting CFR iterations...";
+  const int max_depth = config_.max_depth;
   TraversalScratch scratch;
+  scratch.reserve_depth(ScratchDepthReserve(config_, max_depth));
   for (int i = 0; i < iterations; ++i) {
     const RangeDeal deal = range_sampler.sample(rng_);
     PrivateCards player_a_cards = PrivateCards::FromCombo(deal.player_a_combo);
     PrivateCards player_b_cards = PrivateCards::FromCombo(deal.player_b_combo);
 
-    const int max_depth = config_.max_depth;
     VLOG(2) << "Iteration " << i + 1 << "/" << iterations;
     int cfr_iteration = iterations_run_;
     std::array<double, 2> reach_probabilities = {1.0, 1.0};
@@ -763,6 +773,7 @@ double CFRSolver::cfr(GameTree::Node& node,
                       int depth,
                       int max_depth) {
   TraversalScratch scratch;
+  scratch.reserve_depth(ScratchDepthReserve(config_, max_depth));
   return cfr_with_ranges(node, player_a_hand, player_b_hand,
                          reach_probabilities, iteration, depth, max_depth,
                          scratch, std::nullopt, std::nullopt);
@@ -1148,13 +1159,14 @@ void CFRSolver::condition_ranges_for_actions(
     int player,
     const ActionChoices& action_choices,
     ConditionedRanges& conditioned_ranges) {
-  while (conditioned_ranges.size() < action_choices.size()) {
-    conditioned_ranges.emplace_back();
-  }
   if (action_choices.empty()) {
     return;
   }
 
+  conditioned_ranges.reserve(action_choices.size());
+  while (conditioned_ranges.size() < action_choices.size()) {
+    conditioned_ranges.emplace_back();
+  }
   for (size_t i = 0; i < action_choices.size(); ++i) {
     conditioned_ranges[i].reset_to_filtered();
   }

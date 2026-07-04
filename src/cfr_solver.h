@@ -3,11 +3,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <random>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 #include "absl/container/flat_hash_map.h"
@@ -171,7 +171,7 @@ private:
     double value = 0.0;
   };
   using ActionChoices = absl::InlinedVector<ActionChoice, 8>;
-  using ConditionedRanges = absl::InlinedVector<TrainingRangeView, 8>;
+  using ConditionedRanges = std::vector<TrainingRangeView>;
   using StrategyProbabilities = absl::InlinedVector<double, 8>;
 
   struct RangeScratchFrame {
@@ -181,14 +181,19 @@ private:
   };
 
   struct TraversalScratch {
+    void reserve_depth(size_t depth_count) { frames.reserve(depth_count); }
+
     RangeScratchFrame& frame(size_t depth) {
+      if (depth >= frames.capacity()) {
+        throw std::logic_error("TraversalScratch depth reserve exhausted");
+      }
       while (frames.size() <= depth) {
         frames.emplace_back();
       }
       return frames[depth];
     }
 
-    std::deque<RangeScratchFrame> frames;
+    std::vector<RangeScratchFrame> frames;
   };
 
   struct PublicStateKey {
