@@ -20,6 +20,7 @@ struct Options {
   int chance_samples = 1;
   int eval_samples = 100;
   int exploitability_samples = 10;
+  std::string range = "premium";
   bool skip_exploitability = false;
 };
 
@@ -62,9 +63,15 @@ poker::PokerConfig BenchmarkConfig(const Options& options) {
   return config;
 }
 
-poker::HandRange BenchmarkRange() {
+poker::HandRange BenchmarkRange(const Options& options) {
   poker::HandRange range;
-  range.set_from_string("AA,KK,QQ,JJ,AKs,AQs,AKo");
+  if (options.range == "premium") {
+    range.set_from_string("AA,KK,QQ,JJ,AKs,AQs,AKo");
+  } else if (options.range == "all") {
+    range.set_uniform_range();
+  } else {
+    range.set_from_string(options.range);
+  }
   return range;
 }
 
@@ -76,6 +83,7 @@ void PrintUsage(const char* program) {
       << "  --chance-samples=N              default 1\n"
       << "  --eval-samples=N                default 100\n"
       << "  --exploitability-samples=N      default 10\n"
+      << "  --range=premium|all|RANGE       default premium\n"
       << "  --skip-exploitability\n";
 }
 
@@ -166,6 +174,8 @@ Options ParseOptions(int argc, char** argv) {
     } else if (ConsumePrefix(arg, "--exploitability-samples=", &value)) {
       options.exploitability_samples =
           ParseInt(value, "--exploitability-samples");
+    } else if (ConsumePrefix(arg, "--range=", &value)) {
+      options.range = value;
     } else {
       throw std::invalid_argument("Unknown option: " + arg);
     }
@@ -181,8 +191,8 @@ int main(int argc, char** argv) {
   try {
     Options options = ParseOptions(argc, argv);
     poker::PokerConfig config = BenchmarkConfig(options);
-    poker::HandRange player_a_range = BenchmarkRange();
-    poker::HandRange player_b_range = BenchmarkRange();
+    poker::HandRange player_a_range = BenchmarkRange(options);
+    poker::HandRange player_b_range = BenchmarkRange(options);
 
     std::cout << "case\tseconds\tresult\thands\thands_per_second"
               << "\tcfr_node_updates\tcfr_node_updates_per_second"
