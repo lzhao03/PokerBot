@@ -350,6 +350,7 @@ private:
                                           int player,
                                           uint32_t public_state_id);
   StrategyTablesView strategy_tables_view() const;
+  std::optional<uint32_t> strategy_public_state_id(GameTree::Node& node);
   const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>&
   strategy_public_state_ids() const;
   const absl::flat_hash_map<CompactInfoSetKey, int, CompactInfoSetKeyHash>&

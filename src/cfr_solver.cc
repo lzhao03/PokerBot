@@ -517,13 +517,14 @@ CFRSolver::ComboInfoSetIndex& CFRSolver::get_or_build_combo_info_set_index(
   }
 
   auto index = std::make_unique<ComboInfoSetIndex>();
+  const auto& compact_info_set_ids = strategy_compact_info_set_ids();
   for (int combo = 0; combo < kComboCount; ++combo) {
     CompactInfoSetKey compact_key;
     compact_key.public_state_id = public_state_id;
     compact_key.private_combo = static_cast<ComboId>(combo);
     compact_key.player = static_cast<uint8_t>(player);
-    auto existing_compact = compact_info_set_ids_.find(compact_key);
-    if (existing_compact != compact_info_set_ids_.end()) {
+    auto existing_compact = compact_info_set_ids.find(compact_key);
+    if (existing_compact != compact_info_set_ids.end()) {
       index->info_set_ids[combo] = existing_compact->second;
     }
   }
@@ -610,6 +611,22 @@ CFRSolver::StrategyTablesView CFRSolver::strategy_tables_view() const {
           &action_ids_,
           &cumulative_regrets_,
           &cumulative_strategies_};
+}
+
+std::optional<uint32_t> CFRSolver::strategy_public_state_id(
+    GameTree::Node& node) {
+  if (node.public_state_id != GameTree::Node::kInvalidPublicStateId) {
+    return node.public_state_id;
+  }
+
+  const auto& public_state_ids = strategy_public_state_ids();
+  auto public_state = public_state_ids.find(make_public_state_key(node.state));
+  if (public_state == public_state_ids.end()) {
+    return std::nullopt;
+  }
+
+  node.public_state_id = public_state->second;
+  return node.public_state_id;
 }
 
 const absl::flat_hash_map<CFRSolver::PublicStateKey, uint32_t,
@@ -1048,11 +1065,10 @@ void CFRSolver::average_strategy_probabilities(
     return;
   }
 
-  const auto& public_state_ids = strategy_public_state_ids();
-  auto public_state = public_state_ids.find(make_public_state_key(node.state));
-  if (public_state != public_state_ids.end()) {
-    node.public_state_id = public_state->second;
-    if (try_public_state(node.public_state_id)) {
+  const std::optional<uint32_t> public_state_id =
+      strategy_public_state_id(node);
+  if (public_state_id.has_value()) {
+    if (try_public_state(*public_state_id)) {
       return;
     }
   }
@@ -1557,36 +1573,64 @@ double CFRSolver::best_response_value_against_range(
     return value;
   }
 
+  const double fallback_probability = 1.0 / node.legal_actions.size();
+  const std::optional<uint32_t> public_state_id =
+      strategy_public_state_id(node);
+  const ComboInfoSetIndex* combo_index = nullptr;
+  if (public_state_id.has_value()) {
+    combo_index =
+        &get_or_build_combo_info_set_index(node, player, *public_state_id);
+  }
+
+  absl::InlinedVector<WeightedHandRangeView, 8> child_opponents;
+  child_opponents.resize(node.legal_actions.size());
+  for (WeightedHandRangeView& child_opponent : child_opponents) {
+    child_opponent.reset_to_filtered(opponent_hands.source_range());
+    child_opponent.reserve(opponent_hands.size());
+  }
+
+  StrategyProbabilities probabilities;
+  probabilities.reserve(node.legal_actions.size());
+  for (size_t i = 0; i < opponent_hands.size(); ++i) {
+    probabilities.clear();
+    probabilities.resize(node.legal_actions.size(), fallback_probability);
+
+    if (combo_index != nullptr) {
+      const ComboId opponent_combo = opponent_hands.combo(i);
+      const int32_t info_set_id = combo_index->info_set_ids[opponent_combo];
+      if (info_set_id >= 0) {
+        average_strategy_probabilities(strategy_info_sets()[info_set_id],
+                                       node.legal_actions,
+                                       fallback_probability, probabilities);
+      }
+    }
+
+    const size_t opponent_source_index = opponent_hands.source_index(i);
+    const double opponent_weight = opponent_hands.weight(i);
+    for (size_t action_index = 0; action_index < probabilities.size();
+         ++action_index) {
+      const double probability = probabilities[action_index];
+      if (probability > 0.0) {
+        child_opponents[action_index].add(opponent_source_index,
+                                          opponent_weight * probability);
+      }
+    }
+  }
+
   double value = 0.0;
   for (size_t action_index = 0; action_index < node.legal_actions.size();
        ++action_index) {
     const GameAction& action = node.legal_actions[action_index];
     int action_id = ActionKey(action);
     GameTree::Node& child_node =
-        CachedActionChild(*game_tree_, node, action, action_id,
-                          nullptr);
+        CachedActionChild(*game_tree_, node, action, action_id, nullptr);
 
-    WeightedHandRangeView child_opponents;
-    child_opponents.reset_to_filtered(opponent_hands.source_range());
-    child_opponents.reserve(opponent_hands.size());
-    for (size_t i = 0; i < opponent_hands.size(); ++i) {
-      const PrivateCards opponent_cards =
-          PrivateCards::FromCombo(opponent_hands.combo(i));
-      StrategyProbabilities probabilities;
-      average_strategy_probabilities(node, player, opponent_cards,
-                                     probabilities);
-      double probability = probabilities[action_index];
-      if (probability > 0.0) {
-        child_opponents.add(opponent_hands.source_index(i),
-                            opponent_hands.weight(i) * probability);
-      }
-    }
-
-    double child_weight = TotalWeight(child_opponents);
+    double child_weight = TotalWeight(child_opponents[action_index]);
     if (child_weight > 0.0) {
       value += (child_weight / total_weight) *
                best_response_value_against_range(
-                   child_node, best_response_cards, child_opponents,
+                   child_node, best_response_cards,
+                   child_opponents[action_index],
                    best_response_player);
     }
   }
