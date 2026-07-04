@@ -544,7 +544,7 @@ void CFRSolver::initialize_info_set_actions(
     const std::vector<int>& legal_action_ids) {
   info_set.actions.reserve(legal_action_ids.size());
   for (int action_id : legal_action_ids) {
-    info_set.actions.push_back({action_id, 0.0, 0.0});
+    info_set.actions.push_back({action_id, 0.0f, 0.0f});
     POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
   }
 }
@@ -819,7 +819,10 @@ double CFRSolver::cfr_with_ranges(
          ++action_index) {
       POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
       sum_positive_regrets +=
-          std::max(0.0, info_set.actions[action_index].cumulative_regret);
+          std::max(
+              0.0,
+              static_cast<double>(
+                  info_set.actions[action_index].cumulative_regret));
     }
 
     if (sum_positive_regrets > 0.0) {
@@ -830,7 +833,8 @@ double CFRSolver::cfr_with_ranges(
         choice.probability =
             std::max(
                 0.0,
-                info_set.actions[action_index].cumulative_regret) /
+                static_cast<double>(
+                    info_set.actions[action_index].cumulative_regret)) /
             sum_positive_regrets;
       }
     } else if (!action_choices.empty()) {
@@ -931,10 +935,11 @@ double CFRSolver::cfr_with_ranges(
           opponent_reach_prob * utility_sign * (choice.value - node_value);
       
       // CFR+ clips cumulative regrets at zero.
-      double& cumulative_regret =
+      float& cumulative_regret =
           info_set.actions[action_index].cumulative_regret;
       POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.action_entry_touches += 2);
-      cumulative_regret = std::max(0.0, cumulative_regret + regret);
+      cumulative_regret =
+          static_cast<float>(std::max(0.0, cumulative_regret + regret));
     }
     
     // CFR+ commonly weights later average-strategy samples more heavily.
@@ -1190,8 +1195,10 @@ void CFRSolver::condition_ranges_for_actions(
 
         POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
         const double positive_regret =
-            std::max(0.0,
-                     info_set.actions[action_index].cumulative_regret);
+            std::max(
+                0.0,
+                static_cast<double>(
+                    info_set.actions[action_index].cumulative_regret));
         positive_regrets[action_index] = positive_regret;
         positive_regret_sum += positive_regret;
       }
@@ -1939,8 +1946,8 @@ void CFRSolver::update_strategy(int info_set_id,
   for (size_t action_index = 0; action_index < choices.size();
        ++action_index) {
     POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.action_entry_touches += 2);
-    info_set.actions[action_index].cumulative_strategy +=
-        reach_prob * choices[action_index].probability;
+    info_set.actions[action_index].cumulative_strategy += static_cast<float>(
+        reach_prob * choices[action_index].probability);
   }
 }
 

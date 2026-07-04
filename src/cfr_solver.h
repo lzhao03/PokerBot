@@ -208,8 +208,8 @@ private:
 
   struct ActionState {
     int action_id = 0;
-    double cumulative_regret = 0.0;
-    double cumulative_strategy = 0.0;
+    float cumulative_regret = 0.0f;
+    float cumulative_strategy = 0.0f;
   };
 
   struct InfoSetData {
