@@ -129,6 +129,23 @@ class CFRSolverRegretTestPeer {
     return solver.compact_info_set_ids_.size();
   }
 
+  static const GameTree::Node& Root(CFRSolver& solver) {
+    return solver.get_or_build_root();
+  }
+
+  static size_t PublicStateInfoSetListSize(const CFRSolver& solver,
+                                           const GameTree::Node& node,
+                                           int player) {
+    auto public_state_info_sets =
+        solver.info_set_ids_by_public_state_[player].find(
+            static_cast<uint32_t>(node.id));
+    if (public_state_info_sets ==
+        solver.info_set_ids_by_public_state_[player].end()) {
+      return 0;
+    }
+    return public_state_info_sets->second.size();
+  }
+
   static double EvaluateNode(CFRSolver& solver, GameTree::Node& node,
                              const Hand& player_a_hand,
                              const Hand& player_b_hand) {
@@ -642,11 +659,15 @@ void CheckCompactInfoSetIdsUseExactCombos() {
       CFRSolverRegretTestPeer::CompactInfoSetId(solver, state, 0, aces);
   const int kings_id =
       CFRSolverRegretTestPeer::CompactInfoSetId(solver, state, 0, kings);
+  const GameTree::Node& root = CFRSolverRegretTestPeer::Root(solver);
 
   Expect(first_aces_id == second_aces_id,
          "compact infoset should reuse the same exact combo id");
   Expect(first_aces_id != kings_id,
          "compact infoset should distinguish different exact combos");
+  Expect(CFRSolverRegretTestPeer::PublicStateInfoSetListSize(
+             solver, root, 0) == 2,
+         "public-state infoset list should track created infosets");
   Expect(CFRSolverRegretTestPeer::CompactInfoSetCount(solver) == 2,
          "compact infoset map should only contain distinct combos");
   Expect(solver.get_strategy_profile().size() == 2,

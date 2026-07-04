@@ -240,6 +240,9 @@ private:
     std::array<int32_t, kComboCount> info_set_ids;
   };
 
+  using InfoSetIdsByPublicState =
+      std::array<absl::flat_hash_map<uint32_t, std::vector<int32_t>>, 2>;
+
   struct InfoSetData {
     uint32_t public_state_id = 0;
     ComboId private_combo = 0;
@@ -257,6 +260,7 @@ private:
     const std::vector<int>* action_ids = nullptr;
     const std::vector<float>* cumulative_regrets = nullptr;
     const std::vector<float>* cumulative_strategies = nullptr;
+    const InfoSetIdsByPublicState* info_set_ids_by_public_state = nullptr;
   };
 
   CFRSolver(const SolverConfig& config,
@@ -288,6 +292,7 @@ private:
   std::vector<float> cumulative_strategies_;
   absl::flat_hash_map<CompactInfoSetKey, int, CompactInfoSetKeyHash>
       compact_info_set_ids_;
+  InfoSetIdsByPublicState info_set_ids_by_public_state_;
   std::vector<std::unique_ptr<ComboInfoSetIndex>> combo_info_set_indexes_;
   std::array<absl::flat_hash_map<uint32_t, int32_t>, 2>
       combo_info_set_index_ids_by_public_state_;
@@ -351,6 +356,9 @@ private:
       GameTree::Node& node,
       int player,
       uint32_t public_state_id);
+  ComboInfoSetIndex& ensure_combo_info_set_index(GameTree::Node* node,
+                                                 int player,
+                                                 uint32_t public_state_id);
   ComboInfoSetIndex* combo_info_set_index(GameTree::Node* node,
                                           int player,
                                           uint32_t public_state_id);
@@ -364,6 +372,7 @@ private:
   const std::vector<int>& strategy_action_ids() const;
   const std::vector<float>& strategy_cumulative_regrets() const;
   const std::vector<float>& strategy_cumulative_strategies() const;
+  const InfoSetIdsByPublicState& strategy_info_set_ids_by_public_state() const;
   void initialize_info_set_actions(InfoSetData& info_set,
                                    const std::vector<int>& legal_action_ids);
   ContinuationContext build_continuation_context(
