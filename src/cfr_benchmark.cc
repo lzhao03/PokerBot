@@ -1,7 +1,6 @@
 #include "src/cfr_solver.h"
 #include "absl/log/initialize.h"
 #include "src/hand_range.h"
-#include "src/poker.pb.h"
 
 #include <chrono>
 #include <cstdint>
@@ -66,16 +65,15 @@ int ParseInt(const std::string& value, const std::string& flag) {
   return static_cast<int>(parsed);
 }
 
-poker::PokerConfig BenchmarkConfig(const Options& options) {
-  poker::PokerConfig config;
-  config.add_bet_sizes(0.5);
-  config.add_bet_sizes(1.0);
-  config.set_starting_stack_size(20);
-  config.set_small_blind(1);
-  config.set_big_blind(2);
-  config.set_max_depth(options.max_depth);
-  config.set_chance_samples(options.chance_samples);
-  config.set_regret_only_training(options.regret_only);
+poker::SolverConfig BenchmarkConfig(const Options& options) {
+  poker::SolverConfig config;
+  config.bet_sizes = {0.5, 1.0};
+  config.starting_stack_size = 20;
+  config.small_blind = 1;
+  config.big_blind = 2;
+  config.max_depth = options.max_depth;
+  config.chance_samples = options.chance_samples;
+  config.regret_only_training = options.regret_only;
   return config;
 }
 
@@ -215,7 +213,7 @@ int main(int argc, char** argv) {
 
   try {
     Options options = ParseOptions(argc, argv);
-    poker::PokerConfig config = BenchmarkConfig(options);
+    poker::SolverConfig config = BenchmarkConfig(options);
     poker::HandRange player_a_range = BenchmarkRange(options);
     poker::HandRange player_b_range = BenchmarkRange(options);
 

@@ -4,6 +4,7 @@
 #include "absl/log/log_sink.h"
 #include "absl/log/log_sink_registry.h"
 #include "src/continuation_value.h"
+#include "src/cfr_solver_proto_adapter.h"
 #include "src/hand_range.h"
 #include "src/subgame_value.h"
 
@@ -11,13 +12,12 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
-#include <fstream>
 #include <iostream>
 #include <memory>
 #include <optional>
-#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -59,106 +59,42 @@ ActionKind TestActionKind(ActionType action_type) {
   }
 }
 
-StreetKind TestStreetKind(Street street) {
-  switch (street) {
-    case Street::FLOP:
-      return StreetKind::kFlop;
-    case Street::TURN:
-      return StreetKind::kTurn;
-    case Street::RIVER:
-      return StreetKind::kRiver;
-    case Street::PREFLOP:
-    default:
-      return StreetKind::kPreflop;
-  }
-}
-
-CardId TestCardId(const Card& card) {
-  return MakeCardId(card.rank(), TestSuitKind(card.suit()));
-}
-
 ComboId TestComboId(const Hand& hand) {
-  if (hand.cards_size() != 2) {
-    return 0;
-  }
-  return CardsToComboId(TestCardId(hand.cards(0)), TestCardId(hand.cards(1)));
-}
-
-GameAction TestGameAction(const Action& action) {
-  return {TestActionKind(action.action()),
-          static_cast<int>(std::lround(action.amount())),
-          action.player()};
+  return ComboIdFromProtoHand(hand);
 }
 
 GameState TestGameState(const BoardState& state) {
-  GameState native;
-  native.stack[0] = state.stack_a();
-  native.stack[1] = state.stack_b();
-  native.pot = state.pot();
-  native.street = TestStreetKind(state.street());
-  native.all_in = state.all_in();
-  native.folded_player = state.folded_player();
-  native.player_to_act = state.player_to_act();
-  native.player_contribution[0] =
-      state.player_contribution_size() > 0
-          ? static_cast<int>(std::lround(state.player_contribution(0)))
-          : 0;
-  native.player_contribution[1] =
-      state.player_contribution_size() > 1
-          ? static_cast<int>(std::lround(state.player_contribution(1)))
-          : 0;
-  for (const Card& card : state.cards()) {
-    AddBoardCard(native, TestCardId(card));
-  }
-  for (const Action& action : state.history().actions()) {
-    native.history.push_back(TestGameAction(action));
-  }
-  return native;
+  return GameStateFromProto(state);
 }
 
 SolverConfig TestSolverConfig(const PokerConfig& config) {
-  SolverConfig native;
-  native.bet_sizes.assign(config.bet_sizes().begin(), config.bet_sizes().end());
-  native.starting_stack_size = config.starting_stack_size();
-  native.max_depth = config.max_depth();
-  native.enable_logging = config.enable_logging();
-  native.small_blind = config.small_blind();
-  native.big_blind = config.big_blind();
-  native.chance_samples = config.chance_samples();
-  native.preflop_bet_sizes.assign(config.preflop_bet_sizes().begin(),
-                                  config.preflop_bet_sizes().end());
-  native.flop_bet_sizes.assign(config.flop_bet_sizes().begin(),
-                               config.flop_bet_sizes().end());
-  native.turn_bet_sizes.assign(config.turn_bet_sizes().begin(),
-                               config.turn_bet_sizes().end());
-  native.river_bet_sizes.assign(config.river_bet_sizes().begin(),
-                                config.river_bet_sizes().end());
-  native.regret_only_training = config.regret_only_training();
-  return native;
+  return SolverConfigFromProto(config);
 }
 
 class CFRSolverRegretTestPeer {
  public:
-  static double Regret(const CFRSolver& solver, const std::string& info_set_key,
+  static double Regret(CFRSolver& solver,
+                       const GameTree::Node& node,
+                       int player,
+                       const Hand& hand,
                        int action_id) {
-    return solver.regret_for_info_set(info_set_key, action_id);
-  }
-
-  static std::string InfoSetKey(const CFRSolver& solver,
-                                const BoardState& state,
-                                int player,
-                                const Hand& hand) {
-    return solver.info_set_key_to_string(
-        solver.make_info_set_key(TestGameState(state), player,
-                                 TestComboId(hand)));
-  }
-
-  static std::string InfoSetKey(const CFRSolver& solver,
-                                const GameState& state,
-                                int player,
-                                const Hand& hand) {
-    return solver.info_set_key_to_string(
-        solver.make_info_set_key(state, player, TestComboId(hand)));
+    CFRSolver::CompactInfoSetKey compact_key;
+    compact_key.public_state_id = static_cast<uint32_t>(node.id);
+    compact_key.private_combo = TestComboId(hand);
+    compact_key.player = static_cast<uint8_t>(player);
+    auto info_set_id = solver.compact_info_set_ids_.find(compact_key);
+    if (info_set_id == solver.compact_info_set_ids_.end()) {
+      throw std::runtime_error("Regret info set was not created");
+    }
+    const CFRSolver::InfoSetData& info_set =
+        solver.info_sets_[info_set_id->second];
+    for (uint16_t i = 0; i < info_set.action_count; ++i) {
+      const size_t table_index = info_set.action_offset + i;
+      if (solver.action_ids_[table_index] == action_id) {
+        return solver.cumulative_regrets_[table_index];
+      }
+    }
+    throw std::runtime_error("Regret action was not created");
   }
 
   static bool SamePublicStateKey(const CFRSolver& solver,
@@ -181,10 +117,10 @@ class CFRSolverRegretTestPeer {
       legal_action_ids.push_back(GameTree::action_key(action));
     }
     const uint32_t public_state_id =
-        static_cast<uint32_t>(solver.get_or_build_root().id);
+        solver.get_or_create_public_state_id(
+            native_state, static_cast<uint32_t>(solver.get_or_build_root().id));
     return solver.get_or_create_compact_info_set_id(
-        public_state_id, native_state, player, TestComboId(hand),
-        legal_action_ids);
+        public_state_id, player, TestComboId(hand), legal_action_ids);
   }
 
   static size_t CompactInfoSetCount(const CFRSolver& solver) {
@@ -252,10 +188,10 @@ class CFRSolverRegretTestPeer {
       legal_action_ids.push_back(GameTree::action_key(action));
     }
     const uint32_t public_state_id =
-        static_cast<uint32_t>(solver.get_or_build_root().id);
+        solver.get_or_create_public_state_id(
+            native_state, static_cast<uint32_t>(solver.get_or_build_root().id));
     const int info_set_id = solver.get_or_create_compact_info_set_id(
-        public_state_id, native_state, player, TestComboId(hand),
-        legal_action_ids);
+        public_state_id, player, TestComboId(hand), legal_action_ids);
     CFRSolver::InfoSetData& info_set = solver.info_sets_[info_set_id];
     std::optional<size_t> action_table_index;
     for (uint16_t i = 0; i < info_set.action_count; ++i) {
@@ -320,7 +256,8 @@ class CFRSolverRegretTestPeer {
 
     CFRSolver::ConditionedRanges conditioned_ranges;
     const uint32_t public_state_id =
-        static_cast<uint32_t>(solver.get_or_build_root().id);
+        solver.get_or_create_public_state_id(
+            native_state, static_cast<uint32_t>(solver.get_or_build_root().id));
     solver.condition_ranges_for_actions(
         range, native_state, public_state_id, player, choices,
         conditioned_ranges);
@@ -447,6 +384,70 @@ int TestActionKey(ActionType type, int amount = 0) {
   return static_cast<int>(type) * 1000000 + amount;
 }
 
+double TestCfr(CFRSolver& solver,
+               GameTree::Node& node,
+               const Hand& player_a_hand,
+               const Hand& player_b_hand,
+               std::array<double, 2>& reach_probabilities,
+               int iteration,
+               int depth = 0,
+               int max_depth = 0) {
+  return solver.cfr(node, TestComboId(player_a_hand),
+                    TestComboId(player_b_hand), reach_probabilities,
+                    iteration, depth, max_depth);
+}
+
+std::unordered_map<int, double> StrategyActionMap(
+    const CFRSolver::StrategyProfile& profile,
+    size_t info_set_index = 0) {
+  std::unordered_map<int, double> actions;
+  const CFRSolver::StrategyInfoSet& info_set = profile.info_sets[info_set_index];
+  for (size_t i = 0; i < info_set.action_ids.size(); ++i) {
+    actions.emplace(info_set.action_ids[i], info_set.probabilities[i]);
+  }
+  return actions;
+}
+
+bool StrategyHasCombo(const CFRSolver::StrategyProfile& profile,
+                      int player,
+                      const Hand& hand) {
+  const ComboId combo = TestComboId(hand);
+  return std::any_of(
+      profile.info_sets.begin(), profile.info_sets.end(),
+      [&](const CFRSolver::StrategyInfoSet& info_set) {
+        return info_set.key.player == player &&
+               info_set.key.private_combo == combo;
+      });
+}
+
+bool StrategiesApproximatelyEqual(const CFRSolver::StrategyProfile& left,
+                                  const CFRSolver::StrategyProfile& right) {
+  if (left.info_sets.size() != right.info_sets.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < left.info_sets.size(); ++i) {
+    const CFRSolver::StrategyInfoSet& left_info_set = left.info_sets[i];
+    const CFRSolver::StrategyInfoSet& right_info_set = right.info_sets[i];
+    if (left_info_set.key.public_state_id !=
+            right_info_set.key.public_state_id ||
+        left_info_set.key.private_combo != right_info_set.key.private_combo ||
+        left_info_set.key.player != right_info_set.key.player ||
+        left_info_set.action_ids != right_info_set.action_ids ||
+        left_info_set.probabilities.size() !=
+            right_info_set.probabilities.size()) {
+      return false;
+    }
+    for (size_t action_index = 0;
+         action_index < left_info_set.probabilities.size(); ++action_index) {
+      if (std::abs(left_info_set.probabilities[action_index] -
+                   right_info_set.probabilities[action_index]) > 0.000001) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 Card MakeTestCard(int rank, Suit suit) {
   Card card;
   card.set_rank(rank);
@@ -531,39 +532,11 @@ BoardState InitialRootState(const PokerConfig& config) {
   return state;
 }
 
-void AddStrategyInfoSet(StrategySnapshot& snapshot,
-                        const std::string& info_set_key,
-                        const std::vector<std::pair<Action, double>>& actions) {
-  StrategyInfoSetSnapshot& info_set = *snapshot.add_info_sets();
-  info_set.set_info_set_key(info_set_key);
-  for (const auto& action_prob : actions) {
-    StrategyActionSnapshot& action = *info_set.add_actions();
-    *action.mutable_action() = action_prob.first;
-    action.set_probability(action_prob.second);
-  }
-}
-
-void WriteStrategySnapshot(const std::string& path,
-                           const std::string& info_set_key,
-                           const std::vector<std::pair<Action, double>>& actions) {
-  StrategySnapshot snapshot;
-  AddStrategyInfoSet(snapshot, info_set_key, actions);
-  std::ofstream file(path, std::ios::binary);
-  Expect(snapshot.SerializeToOstream(&file), "strategy snapshot should write");
-}
-
-StrategySnapshot ReadStrategySnapshot(const std::string& path) {
-  StrategySnapshot snapshot;
-  std::ifstream file(path, std::ios::binary);
-  Expect(snapshot.ParseFromIstream(&file), "strategy snapshot should parse");
-  return snapshot;
-}
-
 void CheckCfrUsesLegalActions() {
   PokerConfig config;
   config.set_starting_stack_size(10);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
   node.state.set_stack_a(10);
   node.state.set_stack_b(10);
@@ -583,11 +556,11 @@ void CheckCfrUsesLegalActions() {
   Hand player_a_hand;
   Hand player_b_hand;
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
-  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
+  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
 
-  const Strategy strategy = solver.get_equilibrium_strategy();
-  Expect(strategy.get_info_sets().size() == 1, "CFR should visit one info set");
-  const auto action_probs = strategy.get_strategy(strategy.get_info_sets()[0]);
+  const CFRSolver::StrategyProfile strategy = solver.get_strategy_profile();
+  Expect(strategy.size() == 1, "CFR should visit one info set");
+  const auto action_probs = StrategyActionMap(strategy);
   Expect(action_probs.size() == 1, "strategy should only include legal actions");
   Expect(action_probs.count(TestActionKey(ActionType::CHECK)) == 1,
          "strategy should include check");
@@ -599,7 +572,7 @@ void CheckCfrDistinguishesActionAmounts() {
   PokerConfig config;
   config.set_starting_stack_size(20);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
   node.state.set_stack_a(19);
   node.state.set_stack_b(18);
@@ -620,11 +593,11 @@ void CheckCfrDistinguishesActionAmounts() {
   Hand player_a_hand;
   Hand player_b_hand;
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
-  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
+  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
 
-  const Strategy strategy = solver.get_equilibrium_strategy();
-  Expect(strategy.get_info_sets().size() == 1, "CFR should visit one info set");
-  const auto action_probs = strategy.get_strategy(strategy.get_info_sets()[0]);
+  const CFRSolver::StrategyProfile strategy = solver.get_strategy_profile();
+  Expect(strategy.size() == 1, "CFR should visit one info set");
+  const auto action_probs = StrategyActionMap(strategy);
   Expect(action_probs.size() == 5, "same action type with different amounts should not collide");
   for (const auto& action_prob : action_probs) {
     Expect(std::abs(action_prob.second - 0.2) < 0.000001,
@@ -632,41 +605,9 @@ void CheckCfrDistinguishesActionAmounts() {
   }
 }
 
-void CheckInfoSetKeyIgnoresPrivateHandOrder() {
-  PokerConfig config;
-  CFRSolver solver(config);
-  BoardState state = InitialRootState(config);
-  Hand ace_king = MakeHand(14, Suit::SPADES, 13, Suit::SPADES);
-  Hand king_ace = MakeHand(13, Suit::SPADES, 14, Suit::SPADES);
-
-  Expect(CFRSolverRegretTestPeer::InfoSetKey(solver, state, 0, ace_king) ==
-             CFRSolverRegretTestPeer::InfoSetKey(solver, state, 0, king_ace),
-         "infoset key should not depend on private hand card order");
-}
-
-void CheckInfoSetKeyIgnoresBoardOrder() {
-  PokerConfig config;
-  CFRSolver solver(config);
-  BoardState first = InitialRootState(config);
-  BoardState second = InitialRootState(config);
-  first.set_street(Street::FLOP);
-  second.set_street(Street::FLOP);
-  AddCard(first, 2, Suit::HEARTS);
-  AddCard(first, 7, Suit::DIAMONDS);
-  AddCard(first, 11, Suit::CLUBS);
-  AddCard(second, 11, Suit::CLUBS);
-  AddCard(second, 2, Suit::HEARTS);
-  AddCard(second, 7, Suit::DIAMONDS);
-  Hand hand = MakeHand(14, Suit::SPADES, 13, Suit::SPADES);
-
-  Expect(CFRSolverRegretTestPeer::InfoSetKey(solver, first, 0, hand) ==
-             CFRSolverRegretTestPeer::InfoSetKey(solver, second, 0, hand),
-         "infoset key should not depend on public board card order");
-}
-
 void CheckPublicStateKeyIgnoresBoardOrder() {
   PokerConfig config;
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   BoardState first = InitialRootState(config);
   BoardState second = InitialRootState(config);
   first.set_street(Street::FLOP);
@@ -686,7 +627,7 @@ void CheckCompactInfoSetIdsUseExactCombos() {
   PokerConfig config;
   config.set_starting_stack_size(20);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   BoardState state = InitialRootState(config);
   Hand aces = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
   Hand kings = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
@@ -704,85 +645,15 @@ void CheckCompactInfoSetIdsUseExactCombos() {
          "compact infoset should distinguish different exact combos");
   Expect(CFRSolverRegretTestPeer::CompactInfoSetCount(solver) == 2,
          "compact infoset map should only contain distinct combos");
-  Expect(solver.get_equilibrium_strategy().get_info_sets().size() == 2,
-         "compact infosets should still export through strategy snapshots");
-}
-
-void CheckSaveStrategyUsesProtobufSnapshot() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-
-  CFRSolver solver(config);
-  GameTree::Node node;
-  node.state.set_stack_a(19);
-  node.state.set_stack_b(18);
-  node.state.set_pot(3);
-  node.state.set_street(Street::PREFLOP);
-  node.state.set_all_in(false);
-  node.state.set_folded_player(-1);
-  node.state.add_player_contribution(1);
-  node.state.add_player_contribution(2);
-  node.state.set_player_to_act(0);
-  node.player_to_act = 0;
-  node.legal_actions.push_back(MakeGameAction(ActionType::RAISE, 5));
-
-  Hand player_a_hand;
-  Hand player_b_hand;
-  std::array<double, 2> reach_probabilities = {1.0, 1.0};
-  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
-
-  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
-  std::string path = std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/strategy.pb";
-  solver.save_strategy(path);
-  StrategySnapshot snapshot = ReadStrategySnapshot(path);
-
-  Expect(snapshot.info_sets_size() == 1, "saved snapshot should include one info set");
-  Expect(snapshot.info_sets(0).actions_size() == 1,
-         "saved snapshot should include one action");
-  Expect(snapshot.info_sets(0).actions(0).action().action() ==
-             ActionType::RAISE,
-         "saved snapshot should store action type");
-  Expect(snapshot.info_sets(0).actions(0).action().amount() == 5,
-         "saved snapshot should store action amount");
-  Expect(std::abs(snapshot.info_sets(0).actions(0).probability() - 1.0) <
-             0.000001,
-         "saved snapshot should store action probability");
-  Expect(snapshot.config().starting_stack_size() == 20,
-         "saved snapshot should include solver config");
-  Expect(snapshot.abstraction_version() == "exact_cards_v1",
-         "saved snapshot should include abstraction version");
-}
-
-void CheckLoadStrategyPopulatesEquilibriumStrategy() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-
-  CFRSolver solver(config);
-  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
-  std::string path =
-      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/loaded_strategy.pb";
-  WriteStrategySnapshot(path, "loaded_info_set",
-                        {{MakeAction(ActionType::FOLD), 0.25},
-                         {MakeAction(ActionType::CALL, 3), 0.75}});
-
-  solver.load_strategy(path);
-
-  const Strategy strategy = solver.get_equilibrium_strategy();
-  const auto action_probs = strategy.get_strategy("loaded_info_set");
-  Expect(action_probs.size() == 2, "loaded strategy should expose actions");
-  Expect(std::abs(action_probs.at(TestActionKey(ActionType::FOLD)) - 0.25) <
-             0.000001,
-         "loaded strategy should keep fold probability");
-  Expect(std::abs(action_probs.at(TestActionKey(ActionType::CALL, 3)) - 0.75) <
-             0.000001,
-         "loaded strategy should keep call probability");
+  Expect(solver.get_strategy_profile().size() == 2,
+         "compact infosets should export through strategy profiles");
 }
 
 void CheckTerminalUtilityCacheReusesScores() {
   PokerConfig config;
   config.set_starting_stack_size(20);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   BoardState state;
   state.set_pot(12);
   state.set_folded_player(-1);
@@ -809,88 +680,6 @@ void CheckTerminalUtilityCacheReusesScores() {
   Expect(stats.entries == 1, "cache should contain one utility entry");
 }
 
-void CheckEvaluateLoadedStrategy() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-
-  Hand player_a_hand = MakeHand(14, Suit::SPADES, 13, Suit::SPADES);
-  Hand player_b_hand = MakeHand(12, Suit::HEARTS, 11, Suit::HEARTS);
-  CFRSolver solver(config);
-  std::string root_info_set = CFRSolverRegretTestPeer::InfoSetKey(
-      solver, InitialRootState(config), 0, player_a_hand);
-
-  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
-  std::string path =
-      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/loaded_eval_strategy.pb";
-  WriteStrategySnapshot(path, root_info_set,
-                        {{MakeAction(ActionType::FOLD), 1.0}});
-
-  solver.load_strategy(path);
-  double value = solver.evaluate_strategy(player_a_hand, player_b_hand);
-  Expect(std::abs(value + 1.0) < 0.000001,
-         "evaluated fold strategy should lose the small blind");
-
-  std::string saved_path =
-      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/saved_eval_strategy.pb";
-  solver.save_strategy(saved_path);
-
-  CFRSolver loaded(config);
-  loaded.load_strategy(saved_path);
-  double loaded_value = loaded.evaluate_strategy(player_a_hand, player_b_hand);
-  Expect(std::abs(value - loaded_value) < 0.000001,
-         "saved and loaded strategies should evaluate the same");
-}
-
-void CheckEvaluateRangeStrategy() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-
-  HandRange player_a_range;
-  player_a_range.add_hand_by_index(HandRange::string_to_index("AA"), 1.0);
-  HandRange player_b_range;
-  player_b_range.add_hand_by_index(HandRange::string_to_index("KK"), 1.0);
-
-  CFRSolver solver(config);
-  BoardState root_state = InitialRootState(config);
-  StrategySnapshot snapshot;
-  WeightedHandRange player_a_combos = player_a_range.get_all_weighted_combos();
-  for (ComboId combo : player_a_combos.combos) {
-    AddStrategyInfoSet(
-        snapshot,
-        CFRSolverRegretTestPeer::InfoSetKey(
-            solver, root_state, 0, TestHandFromCombo(combo)),
-        {{MakeAction(ActionType::FOLD), 1.0}});
-  }
-
-  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
-  std::string path =
-      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/range_eval_strategy.pb";
-  {
-    std::ofstream file(path, std::ios::binary);
-    Expect(snapshot.SerializeToOstream(&file),
-           "range strategy snapshot should write");
-  }
-
-  solver.load_strategy(path);
-
-  WeightedHandRange player_b_combos =
-      player_b_range.get_all_weighted_combos();
-  double exact_value =
-      solver.evaluate_strategy(player_a_combos.combos[0],
-                               player_b_combos.combos[0]);
-  double range_value = solver.evaluate_strategy(3, player_a_range, player_b_range);
-  Expect(std::abs(range_value - exact_value) < 0.000001,
-         "range evaluation should match exact fold strategy value");
-  double large_sample_value =
-      solver.evaluate_strategy(64, player_a_range, player_b_range);
-  Expect(std::abs(large_sample_value - exact_value) < 0.000001,
-         "parallel range evaluation should match exact fold strategy value");
-  Expect(solver.calculate_exploitability(0, player_a_range, player_b_range) == 0.0,
-         "zero range exploitability samples should return zero");
-  Expect(solver.calculate_exploitability(1, player_a_range, player_b_range) > 0.0,
-         "range fold strategy should be exploitable");
-}
-
 void CheckSingletonRangeMatchesExactEvaluationAndBestResponse() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -902,21 +691,7 @@ void CheckSingletonRangeMatchesExactEvaluationAndBestResponse() {
   HandRange player_b_range;
   AddHand(player_b_range, player_b_hand, 1.0);
 
-  CFRSolver solver(config);
-  std::string root_info_set = CFRSolverRegretTestPeer::InfoSetKey(
-      solver, InitialRootState(config), 0, player_a_hand);
-  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
-  std::string path =
-      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/singleton_strategy.pb";
-  WriteStrategySnapshot(path, root_info_set,
-                        {{MakeAction(ActionType::FOLD), 1.0}});
-  solver.load_strategy(path);
-
-  double exact_value = solver.evaluate_strategy(player_a_hand, player_b_hand);
-  double range_value = solver.evaluate_strategy(5, player_a_range, player_b_range);
-  Expect(std::abs(exact_value - range_value) < 0.000001,
-         "singleton range evaluation should match exact-hand evaluation");
-
+  CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
   node.state.set_player_to_act(0);
   node.state.set_folded_player(-1);
@@ -957,31 +732,9 @@ void CheckSingletonRangeMatchesExactEvaluationAndBestResponse() {
          "singleton range best response should match exact-hand best response");
 }
 
-void CheckExploitabilityDetectsFoldStrategy() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-
-  Hand player_a_hand = MakeHand(14, Suit::SPADES, 13, Suit::SPADES);
-  Hand player_b_hand = MakeHand(12, Suit::HEARTS, 11, Suit::HEARTS);
-  CFRSolver solver(config);
-  std::string root_info_set = CFRSolverRegretTestPeer::InfoSetKey(
-      solver, InitialRootState(config), 0, player_a_hand);
-
-  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
-  std::string path =
-      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/exploitability_strategy.pb";
-  WriteStrategySnapshot(path, root_info_set,
-                        {{MakeAction(ActionType::FOLD), 1.0}});
-
-  solver.load_strategy(path);
-  double exploitability =
-      solver.calculate_exploitability(player_a_hand, player_b_hand);
-  Expect(exploitability > 0.0, "fold-only strategy should be exploitable");
-}
-
 void CheckExploitabilityZeroSamples() {
   PokerConfig config;
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   HandRange player_a_range;
   HandRange player_b_range;
   Expect(solver.calculate_exploitability(0) == 0.0,
@@ -1004,7 +757,7 @@ void CheckRangeBestResponseWrappersReturnFiniteValues() {
   HandRange player_b_range;
   player_b_range.set_from_string("QQ,JJ");
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   solver.run(2, player_a_range, player_b_range);
 
   double player_a_value = solver.calculate_player_a_best_response_value(
@@ -1040,26 +793,16 @@ void CheckRunUsesConfiguredBlinds() {
   HandRange player_b_range;
   AddHand(player_b_range, player_b_hand, 1.0);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   solver.run(1, player_a_range, player_b_range);
 
-  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
-  std::string path =
-      std::string(test_tmpdir ? test_tmpdir : "/tmp") + "/configured_blinds_strategy.pb";
-  solver.save_strategy(path);
-
-  StrategySnapshot snapshot = ReadStrategySnapshot(path);
-  Expect(snapshot.iterations_run() == 1,
-         "saved snapshot should include completed iteration count");
-  Expect(snapshot.config().small_blind() == 2,
-         "saved snapshot should include configured small blind");
-  Expect(snapshot.config().big_blind() == 5,
-         "saved snapshot should include configured big blind");
+  Expect(solver.get_iterations_run() == 1,
+         "run should include completed iteration count");
   bool has_call_three = false;
-  for (const StrategyInfoSetSnapshot& info_set : snapshot.info_sets()) {
-    for (const StrategyActionSnapshot& action : info_set.actions()) {
-      if (action.action().action() == ActionType::CALL &&
-          action.action().amount() == 3) {
+  const CFRSolver::StrategyProfile strategy = solver.get_strategy_profile();
+  for (const CFRSolver::StrategyInfoSet& info_set : strategy.info_sets) {
+    for (int action_id : info_set.action_ids) {
+      if (action_id == TestActionKey(ActionType::CALL, 3)) {
         has_call_three = true;
       }
     }
@@ -1079,7 +822,7 @@ void CheckRunUpdatesExpectedValue() {
   HandRange player_b_range;
   AddHand(player_b_range, player_b_hand, 1.0);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   Expect(solver.get_iterations_run() == 0, "new solver should have no completed iterations");
   Expect(solver.get_cfr_update_count() == 0,
          "new solver should have no CFR updates");
@@ -1117,15 +860,13 @@ void CheckRunUsesProvidedPrivateRanges() {
   HandRange player_b_range;
   AddHand(player_b_range, player_b_hand, 1.0);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   solver.run(1, player_a_range, player_b_range);
 
-  const Strategy strategy = solver.get_equilibrium_strategy();
-  Expect(strategy.get_info_sets().size() == 1,
+  const CFRSolver::StrategyProfile strategy = solver.get_strategy_profile();
+  Expect(strategy.size() == 1,
          "range run should not swap asymmetric player ranges");
-  const std::string expected_info_set = CFRSolverRegretTestPeer::InfoSetKey(
-      solver, InitialRootState(config), 0, player_a_hand);
-  Expect(strategy.has_info_set(expected_info_set),
+  Expect(StrategyHasCombo(strategy, 0, player_a_hand),
          "range run should train the supplied player A hand class");
 }
 
@@ -1143,7 +884,7 @@ void CheckRunWithoutDepthCutoffTerminates() {
   HandRange player_b_range;
   player_b_range.set_from_string("KK");
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   solver.run(1, player_a_range, player_b_range);
 
   Expect(solver.get_iterations_run() == 1,
@@ -1170,7 +911,7 @@ void CheckRunWithoutDepthCutoffTerminates() {
   Expect(stats.terminal_utility_calls ==
              stats.fold_utility_calls + stats.showdown_utility_calls,
          "terminal utility calls should split into fold and showdown calls");
-  Expect(!solver.get_equilibrium_strategy().get_info_sets().empty(),
+  Expect(!solver.get_strategy_profile().empty(),
          "zero max-depth range run should produce strategy info sets");
 }
 
@@ -1204,9 +945,9 @@ void CheckRangeExpansionUsesExactCombos() {
   }
   Expect(has_disjoint_aces, "AA range should contain disjoint exact combos");
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   solver.run(1, aces, aces);
-  Expect(!solver.get_equilibrium_strategy().get_info_sets().empty(),
+  Expect(!solver.get_strategy_profile().empty(),
          "same hand class ranges should train from disjoint exact combos");
 }
 
@@ -1219,7 +960,7 @@ void CheckRangeSamplingRejectsEmptyRange() {
   HandRange player_b_range;
   player_b_range.add_hand_by_index(HandRange::string_to_index("AA"), 1.0);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   bool threw = false;
   try {
     solver.run(1, player_a_range, player_b_range);
@@ -1265,7 +1006,7 @@ void CheckRangeSamplingRejectsOnlyOverlappingHands() {
   HandRange player_b_range;
   AddHand(player_b_range, blocked, 1.0);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   bool threw = false;
   try {
     solver.run(1, player_a_range, player_b_range);
@@ -1288,15 +1029,13 @@ void CheckRangeSamplingSkipsOverlappingDeals() {
   HandRange player_b_range;
   AddHand(player_b_range, blocked, 1.0);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   solver.run(3, player_a_range, player_b_range);
 
-  const Strategy strategy = solver.get_equilibrium_strategy();
-  Expect(strategy.get_info_sets().size() == 1,
+  const CFRSolver::StrategyProfile strategy = solver.get_strategy_profile();
+  Expect(strategy.size() == 1,
          "range sampling should only train compatible private deals");
-  const std::string expected_info_set = CFRSolverRegretTestPeer::InfoSetKey(
-      solver, InitialRootState(config), 0, compatible);
-  Expect(strategy.has_info_set(expected_info_set),
+  Expect(StrategyHasCombo(strategy, 0, compatible),
          "range sampling should skip overlapping private-card deals");
 }
 
@@ -1316,7 +1055,7 @@ void CheckRunLoggingUsesAbseilLevels() {
   {
     ScopedVLogLevel default_verbosity(0);
     ScopedLogSink capture_logs(default_output);
-    CFRSolver solver(config);
+    CFRSolver solver(TestSolverConfig(config));
     solver.run(1, player_a_range, player_b_range);
   }
   Expect(default_output.messages().find("Starting CFR iterations") !=
@@ -1329,7 +1068,7 @@ void CheckRunLoggingUsesAbseilLevels() {
   {
     ScopedVLogLevel verbose(1);
     ScopedLogSink capture_logs(normal_verbose_output);
-    CFRSolver solver(config);
+    CFRSolver solver(TestSolverConfig(config));
     solver.run(1, player_a_range, player_b_range);
   }
   Expect(normal_verbose_output.messages().find("Iteration 1/1") ==
@@ -1340,7 +1079,7 @@ void CheckRunLoggingUsesAbseilLevels() {
   {
     ScopedVLogLevel verbose(2);
     ScopedLogSink capture_logs(detailed_verbose_output);
-    CFRSolver solver(config);
+    CFRSolver solver(TestSolverConfig(config));
     solver.run(1, player_a_range, player_b_range);
   }
   Expect(detailed_verbose_output.messages().find("Iteration 1/1") !=
@@ -1369,32 +1108,15 @@ void CheckRunProducesDeterministicStrategyShape() {
   HandRange player_b_range;
   AddHand(player_b_range, player_b_hand, 1.0);
 
-  CFRSolver first_solver(config);
-  CFRSolver second_solver(config);
+  CFRSolver first_solver(TestSolverConfig(config));
+  CFRSolver second_solver(TestSolverConfig(config));
   first_solver.run(2, player_a_range, player_b_range);
   second_solver.run(2, player_a_range, player_b_range);
 
-  const Strategy first = first_solver.get_equilibrium_strategy();
-  const Strategy second = second_solver.get_equilibrium_strategy();
-  const auto& first_strategy = first.get_full_strategy();
-  const auto& second_strategy = second.get_full_strategy();
-  Expect(first_strategy.size() == second_strategy.size(),
-         "same config should produce same number of info sets");
-
-  for (const auto& info_set_strategy : first_strategy) {
-    auto second_info_set = second_strategy.find(info_set_strategy.first);
-    Expect(second_info_set != second_strategy.end(),
-           "same config should produce same info set keys");
-    Expect(info_set_strategy.second.size() == second_info_set->second.size(),
-           "same config should produce same action count");
-    for (const auto& action_prob : info_set_strategy.second) {
-      auto second_action = second_info_set->second.find(action_prob.first);
-      Expect(second_action != second_info_set->second.end(),
-             "same config should produce same action keys");
-      Expect(std::abs(action_prob.second - second_action->second) < 0.000001,
-             "same config should produce same action probabilities");
-    }
-  }
+  const CFRSolver::StrategyProfile first = first_solver.get_strategy_profile();
+  const CFRSolver::StrategyProfile second = second_solver.get_strategy_profile();
+  Expect(StrategiesApproximatelyEqual(first, second),
+         "same config should produce the same strategy profile");
 }
 
 void CheckRepeatedRunMatchesSingleRun() {
@@ -1407,34 +1129,17 @@ void CheckRepeatedRunMatchesSingleRun() {
   HandRange player_b_range;
   player_b_range.add_hand_by_index(HandRange::string_to_index("KK"), 1.0);
 
-  CFRSolver continued(config);
+  CFRSolver continued(TestSolverConfig(config));
   continued.run(10, player_a_range, player_b_range);
   continued.run(10, player_a_range, player_b_range);
 
-  CFRSolver single(config);
+  CFRSolver single(TestSolverConfig(config));
   single.run(20, player_a_range, player_b_range);
 
-  const Strategy continued_equilibrium = continued.get_equilibrium_strategy();
-  const Strategy single_equilibrium = single.get_equilibrium_strategy();
-  const auto& continued_strategy = continued_equilibrium.get_full_strategy();
-  const auto& single_strategy = single_equilibrium.get_full_strategy();
-  Expect(continued_strategy.size() == single_strategy.size(),
-         "continued run should visit the same info sets as one longer run");
-
-  for (const auto& info_set_strategy : single_strategy) {
-    auto continued_info_set = continued_strategy.find(info_set_strategy.first);
-    Expect(continued_info_set != continued_strategy.end(),
-           "continued run should include each info set from the longer run");
-    Expect(continued_info_set->second.size() == info_set_strategy.second.size(),
-           "continued run should have the same action count");
-    for (const auto& action_prob : info_set_strategy.second) {
-      auto continued_action = continued_info_set->second.find(action_prob.first);
-      Expect(continued_action != continued_info_set->second.end(),
-             "continued run should include each action");
-      Expect(std::abs(continued_action->second - action_prob.second) < 0.000001,
-             "continued run should keep CFR+ iteration weighting");
-    }
-  }
+  const CFRSolver::StrategyProfile continued_equilibrium = continued.get_strategy_profile();
+  const CFRSolver::StrategyProfile single_equilibrium = single.get_strategy_profile();
+  Expect(StrategiesApproximatelyEqual(continued_equilibrium, single_equilibrium),
+         "continued run should match one longer run");
 }
 
 BoardState FoldedState(int folded_player) {
@@ -1477,10 +1182,10 @@ void CheckRunFixedHandsUsesCustomInitialState() {
   PokerConfig config;
   config.set_starting_stack_size(10);
 
-  CFRSolver solver(config, FoldedState(1));
+  CFRSolver solver(TestSolverConfig(config), TestGameState(FoldedState(1)));
   Hand player_a_hand;
   Hand player_b_hand;
-  solver.run(1, player_a_hand, player_b_hand);
+  solver.run(1, TestComboId(player_a_hand), TestComboId(player_b_hand));
 
   Expect(solver.get_iterations_run() == 1,
          "fixed-hand run should count iterations");
@@ -1605,7 +1310,7 @@ void CheckCfrDepthLimitUsesExactHandNestedContinuationProvider() {
   auto provider =
       std::make_shared<ExactHandNestedCFRContinuationValueProvider>(
           TestSolverConfig(config), 1);
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   solver.set_continuation_value_provider(provider);
 
   GameTree::Node node;
@@ -1615,9 +1320,9 @@ void CheckCfrDepthLimitUsesExactHandNestedContinuationProvider() {
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
 
-  double first = solver.cfr(node, player_a_hand, player_b_hand,
+  double first = TestCfr(solver, node, player_a_hand, player_b_hand,
                             reach_probabilities, 0, 1, 1);
-  double second = solver.cfr(node, player_a_hand, player_b_hand,
+  double second = TestCfr(solver, node, player_a_hand, player_b_hand,
                              reach_probabilities, 1, 1, 1);
   ExactHandNestedCFRContinuationValueProvider::Stats stats = provider->stats();
 
@@ -1639,7 +1344,7 @@ void CheckTerminalUtilityBeatsDepthLimit() {
   PokerConfig config;
   config.set_starting_stack_size(10);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
   node.state = TestGameState(FoldedState(1));
   node.is_terminal = true;
@@ -1648,7 +1353,7 @@ void CheckTerminalUtilityBeatsDepthLimit() {
   Hand player_b_hand;
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
   double value =
-      solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
+      TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
   Expect(value == 5.0, "terminal utility should be returned at the depth limit");
 }
@@ -1657,7 +1362,7 @@ void CheckDepthLimitUsesShowdownUtility() {
   PokerConfig config;
   config.set_starting_stack_size(10);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
   node.state.set_pot(20);
   node.state.set_street(Street::RIVER);
@@ -1678,7 +1383,7 @@ void CheckDepthLimitUsesShowdownUtility() {
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
   double value =
-      solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
+      TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
   Expect(value == 10.0, "depth cutoff should use showdown utility when available");
 }
@@ -1687,7 +1392,7 @@ void CheckDepthLimitDoesNotScoreUncalledBet() {
   PokerConfig config;
   config.set_starting_stack_size(10);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
   node.state.set_pot(15);
   node.state.set_street(Street::RIVER);
@@ -1706,7 +1411,7 @@ void CheckDepthLimitDoesNotScoreUncalledBet() {
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
   double value =
-      solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
+      TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
   Expect(value == 0.0, "depth cutoff should not score unresolved bets");
 }
@@ -1715,7 +1420,7 @@ void CheckDepthLimitUsesContinuationValueProvider() {
   PokerConfig config;
   config.set_starting_stack_size(20);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   auto provider = std::make_shared<FixedContinuationValueProvider>(7.0);
   solver.set_continuation_value_provider(provider);
 
@@ -1729,7 +1434,7 @@ void CheckDepthLimitUsesContinuationValueProvider() {
   Hand player_b_hand;
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
   double value =
-      solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
+      TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
   Expect(value == 7.0,
          "depth cutoff should use the continuation value provider");
@@ -1749,7 +1454,8 @@ void CheckRangeRunPassesContinuationRanges() {
   HandRange player_b_range;
   player_b_range.set_from_string("QQ,JJ");
 
-  CFRSolver solver(config, FlopRangeCutoffState());
+  CFRSolver solver(TestSolverConfig(config),
+                   TestGameState(FlopRangeCutoffState()));
   auto provider = std::make_shared<FixedContinuationValueProvider>(7.0);
   solver.set_continuation_value_provider(provider);
   solver.run(1, player_a_range, player_b_range);
@@ -1785,7 +1491,7 @@ void CheckRangeRunActionConditionsRangesByHandStrategy() {
   HandRange player_b_range;
   player_b_range.set_from_string("QQ,JJ");
 
-  CFRSolver solver(config, root_state);
+  CFRSolver solver(TestSolverConfig(config), TestGameState(root_state));
   auto provider = std::make_shared<FixedContinuationValueProvider>(7.0);
   solver.set_continuation_value_provider(provider);
 
@@ -1825,7 +1531,7 @@ void CheckActionConditioningSkipsBoardBlockedRangeHands() {
   TrainingRange training_range = BuildTrainingRange(hands);
   TrainingRangeView range(training_range);
 
-  CFRSolver solver(config, state);
+  CFRSolver solver(TestSolverConfig(config), TestGameState(state));
   TrainingRangeView conditioned =
       CFRSolverRegretTestPeer::ConditionRangeForAction(
           solver, range, state, 1, ActionType::CHECK, 0);
@@ -1842,7 +1548,7 @@ void CheckZeroMaxDepthDoesNotCutOff() {
   PokerConfig config;
   config.set_starting_stack_size(10);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   GameTree::Node root;
   root.state.set_player_to_act(0);
   root.player_to_act = 0;
@@ -1875,7 +1581,7 @@ void CheckZeroMaxDepthDoesNotCutOff() {
   Hand player_b_hand;
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
   double value =
-      solver.cfr(root, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 0);
+      TestCfr(solver, root, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 0);
 
   Expect(value == 5.0, "zero max depth should not cut off CFR traversal");
 }
@@ -1884,7 +1590,7 @@ void CheckChanceDoesNotConsumeDepth() {
   PokerConfig config;
   config.set_starting_stack_size(10);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
   node.is_chance_node = true;
   node.state.set_pot(20);
@@ -1902,7 +1608,7 @@ void CheckChanceDoesNotConsumeDepth() {
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
   double value =
-      solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
+      TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
   Expect(value == 10.0, "chance nodes should not consume CFR depth");
 }
@@ -1924,29 +1630,29 @@ void CheckChanceSamplesVisitMultipleBoards() {
 
   PokerConfig one_sample_config;
   one_sample_config.set_starting_stack_size(10);
-  CFRSolver one_sample_solver(one_sample_config);
+  CFRSolver one_sample_solver(TestSolverConfig(one_sample_config));
   GameTree::Node one_sample_node;
   one_sample_node.is_chance_node = true;
   one_sample_node.state = TestGameState(state);
   std::array<double, 2> one_sample_reach = {1.0, 1.0};
-  one_sample_solver.cfr(one_sample_node, player_a_hand, player_b_hand,
+  TestCfr(one_sample_solver, one_sample_node, player_a_hand, player_b_hand,
                         one_sample_reach, 0, 0, 1);
 
   PokerConfig three_sample_config;
   three_sample_config.set_starting_stack_size(10);
   three_sample_config.set_chance_samples(3);
-  CFRSolver three_sample_solver(three_sample_config);
+  CFRSolver three_sample_solver(TestSolverConfig(three_sample_config));
   GameTree::Node three_sample_node;
   three_sample_node.is_chance_node = true;
   three_sample_node.state = TestGameState(state);
   std::array<double, 2> three_sample_reach = {1.0, 1.0};
-  three_sample_solver.cfr(three_sample_node, player_a_hand, player_b_hand,
+  TestCfr(three_sample_solver, three_sample_node, player_a_hand, player_b_hand,
                           three_sample_reach, 0, 0, 1);
 
-  Expect(one_sample_solver.get_equilibrium_strategy().get_info_sets().size() == 1,
+  Expect(one_sample_solver.get_strategy_profile().size() == 1,
          "default chance sampling should visit one sampled board");
-  Expect(three_sample_solver.get_equilibrium_strategy().get_info_sets().size() >
-             one_sample_solver.get_equilibrium_strategy().get_info_sets().size(),
+  Expect(three_sample_solver.get_strategy_profile().size() >
+             one_sample_solver.get_strategy_profile().size(),
          "configured chance samples should visit more sampled boards");
 }
 
@@ -1972,7 +1678,7 @@ void CheckEvaluationUsesChanceSamples() {
 
   PokerConfig one_sample_config;
   one_sample_config.set_starting_stack_size(10);
-  CFRSolver one_sample_solver(one_sample_config);
+  CFRSolver one_sample_solver(TestSolverConfig(one_sample_config));
   GameTree::Node one_sample_node = chance_node();
   double first = CFRSolverRegretTestPeer::EvaluateNode(
       one_sample_solver, one_sample_node, player_a_hand, player_b_hand);
@@ -1987,14 +1693,14 @@ void CheckEvaluationUsesChanceSamples() {
   PokerConfig three_sample_config;
   three_sample_config.set_starting_stack_size(10);
   three_sample_config.set_chance_samples(3);
-  CFRSolver three_sample_solver(three_sample_config);
+  CFRSolver three_sample_solver(TestSolverConfig(three_sample_config));
   GameTree::Node three_sample_node = chance_node();
   double sampled_average = CFRSolverRegretTestPeer::EvaluateNode(
       three_sample_solver, three_sample_node, player_a_hand, player_b_hand);
   Expect(std::abs(sampled_average - expected_average) < 0.000001,
          "strategy evaluation should average configured chance samples");
 
-  CFRSolver one_sample_best_response(one_sample_config);
+  CFRSolver one_sample_best_response(TestSolverConfig(one_sample_config));
   GameTree::Node one_sample_response_node = chance_node();
   double first_response = CFRSolverRegretTestPeer::BestResponseNode(
       one_sample_best_response, one_sample_response_node, player_a_hand,
@@ -2008,7 +1714,7 @@ void CheckEvaluationUsesChanceSamples() {
   double expected_response_average =
       (first_response + second_response + third_response) / 3.0;
 
-  CFRSolver three_sample_best_response(three_sample_config);
+  CFRSolver three_sample_best_response(TestSolverConfig(three_sample_config));
   GameTree::Node three_sample_response_node = chance_node();
   double sampled_response_average = CFRSolverRegretTestPeer::BestResponseNode(
       three_sample_best_response, three_sample_response_node, player_a_hand,
@@ -2022,7 +1728,7 @@ void CheckBestResponseActionSelectsBestLegalAction() {
   PokerConfig config;
   config.set_starting_stack_size(10);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
   node.state.set_player_to_act(0);
   node.state.set_folded_player(-1);
@@ -2059,7 +1765,7 @@ void CheckRangeBestResponseDoesNotKnowOpponentHand() {
   PokerConfig config;
   config.set_starting_stack_size(20);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
   node.state.set_player_to_act(0);
   node.state.set_folded_player(-1);
@@ -2110,7 +1816,7 @@ void CheckRangeBestResponseChanceUsesSampledOpponent() {
   config.set_starting_stack_size(20);
   config.set_chance_samples(1);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
   node.is_chance_node = true;
   node.state.set_pot(20);
@@ -2142,7 +1848,7 @@ void CheckPlayerBRegretsUsePlayerBUtility() {
   PokerConfig config;
   config.set_starting_stack_size(10);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
   node.state.set_player_to_act(1);
   node.player_to_act = 1;
@@ -2160,11 +1866,11 @@ void CheckPlayerBRegretsUsePlayerBUtility() {
   Hand player_a_hand;
   Hand player_b_hand;
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
-  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 2);
-  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 1, 0, 2);
+  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 2);
+  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 1, 0, 2);
 
-  const Strategy strategy = solver.get_equilibrium_strategy();
-  const auto action_probs = strategy.get_strategy(strategy.get_info_sets()[0]);
+  const CFRSolver::StrategyProfile strategy = solver.get_strategy_profile();
+  const auto action_probs = StrategyActionMap(strategy);
   Expect(action_probs.at(TestActionKey(ActionType::CALL, 1)) >
              action_probs.at(TestActionKey(ActionType::FOLD)),
          "player B should prefer the action that lowers player A utility");
@@ -2174,7 +1880,7 @@ void CheckCfrPlusClipsNegativeRegrets() {
   PokerConfig config;
   config.set_starting_stack_size(10);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
   node.state.set_player_to_act(0);
   node.state.set_folded_player(-1);
@@ -2192,16 +1898,16 @@ void CheckCfrPlusClipsNegativeRegrets() {
 
   Hand player_a_hand;
   Hand player_b_hand;
-  std::string info_set_key =
-      CFRSolverRegretTestPeer::InfoSetKey(solver, node.state, 0, player_a_hand);
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
-  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
+  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
 
   Expect(CFRSolverRegretTestPeer::Regret(
-             solver, info_set_key, TestActionKey(ActionType::FOLD)) == 0.0,
+             solver, node, 0, player_a_hand,
+             TestActionKey(ActionType::FOLD)) == 0.0,
          "CFR+ should clip negative cumulative regrets");
   Expect(CFRSolverRegretTestPeer::Regret(
-             solver, info_set_key, TestActionKey(ActionType::CALL, 1)) > 0.0,
+             solver, node, 0, player_a_hand,
+             TestActionKey(ActionType::CALL, 1)) > 0.0,
          "positive cumulative regret should remain positive");
 }
 
@@ -2209,7 +1915,7 @@ void CheckCfrPlusWeightsLaterStrategies() {
   PokerConfig config;
   config.set_starting_stack_size(10);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
   node.state.set_player_to_act(0);
   node.state.set_folded_player(-1);
@@ -2228,11 +1934,11 @@ void CheckCfrPlusWeightsLaterStrategies() {
   Hand player_a_hand;
   Hand player_b_hand;
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
-  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
-  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 1, 0, 1);
+  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
+  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 1, 0, 1);
 
-  const Strategy strategy = solver.get_equilibrium_strategy();
-  const auto action_probs = strategy.get_strategy(strategy.get_info_sets()[0]);
+  const CFRSolver::StrategyProfile strategy = solver.get_strategy_profile();
+  const auto action_probs = StrategyActionMap(strategy);
   Expect(std::abs(action_probs.at(TestActionKey(ActionType::CALL, 1)) -
                   (5.0 / 6.0)) < 0.000001,
          "CFR+ average strategy should weight later iterations linearly");
@@ -2243,7 +1949,7 @@ void CheckRegretOnlyTrainingSkipsAverageStrategyWrites() {
   config.set_starting_stack_size(10);
   config.set_regret_only_training(true);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
   node.state.set_player_to_act(0);
   node.state.set_folded_player(-1);
@@ -2260,13 +1966,13 @@ void CheckRegretOnlyTrainingSkipsAverageStrategyWrites() {
   Hand player_a_hand;
   Hand player_b_hand;
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
-  solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
+  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
 
   Expect(CFRSolverRegretTestPeer::TotalCumulativeStrategy(solver) == 0.0,
          "regret-only training should skip average strategy writes");
 
-  const Strategy strategy = solver.get_equilibrium_strategy();
-  const auto action_probs = strategy.get_strategy(strategy.get_info_sets()[0]);
+  const CFRSolver::StrategyProfile strategy = solver.get_strategy_profile();
+  const auto action_probs = StrategyActionMap(strategy);
   Expect(action_probs.at(TestActionKey(ActionType::CALL, 1)) == 1.0,
          "regret-only export should use current regret-matched strategy");
 }
@@ -2276,17 +1982,10 @@ void CheckRegretOnlyTrainingSkipsAverageStrategyWrites() {
 int main() {
   CheckCfrUsesLegalActions();
   CheckCfrDistinguishesActionAmounts();
-  CheckInfoSetKeyIgnoresPrivateHandOrder();
-  CheckInfoSetKeyIgnoresBoardOrder();
   CheckPublicStateKeyIgnoresBoardOrder();
   CheckCompactInfoSetIdsUseExactCombos();
-  CheckSaveStrategyUsesProtobufSnapshot();
-  CheckLoadStrategyPopulatesEquilibriumStrategy();
   CheckTerminalUtilityCacheReusesScores();
-  CheckEvaluateLoadedStrategy();
-  CheckEvaluateRangeStrategy();
   CheckSingletonRangeMatchesExactEvaluationAndBestResponse();
-  CheckExploitabilityDetectsFoldStrategy();
   CheckExploitabilityZeroSamples();
   CheckRangeBestResponseWrappersReturnFiniteValues();
   CheckRunUsesConfiguredBlinds();
@@ -2337,10 +2036,10 @@ int main() {
   HandRange player_b_range;
   AddHand(player_b_range, player_b_hand, 1.0);
 
-  CFRSolver solver(config);
+  CFRSolver solver(TestSolverConfig(config));
   solver.run(1, player_a_range, player_b_range);
 
-  if (solver.get_equilibrium_strategy().get_info_sets().empty()) {
+  if (solver.get_strategy_profile().empty()) {
     throw std::runtime_error("CFR did not visit any information sets");
   }
 

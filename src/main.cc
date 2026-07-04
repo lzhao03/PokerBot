@@ -1,4 +1,5 @@
 #include "src/cfr_solver.h"
+#include "src/cfr_solver_proto_adapter.h"
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "src/hand_range.h"
@@ -89,7 +90,6 @@ void PrintUsage(const char* program) {
       << "Usage: " << program << " [options]\n"
       << "  --config=PATH                  binary PokerConfig protobuf\n"
       << "  --iterations=N                 CFR iterations, default 100\n"
-      << "  --output=PATH                   strategy snapshot, default strategy.pb\n"
       << "  --exploitability-samples=N      estimate exploitability after training\n"
       << "  --starting-stack=N\n"
       << "  --small-blind=N\n"
@@ -112,7 +112,6 @@ int main(int argc, char** argv) {
   poker::PokerConfig config = DefaultConfig();
   int iterations = 100;
   int exploitability_samples = 0;
-  std::string output_path = "strategy.pb";
   bool saw_global_bet_size = false;
 
   try {
@@ -129,8 +128,6 @@ int main(int argc, char** argv) {
         LoadConfig(value, &config);
       } else if (ConsumePrefix(arg, "--iterations=", &value)) {
         iterations = ParseInt(value, "--iterations");
-      } else if (ConsumePrefix(arg, "--output=", &value)) {
-        output_path = value;
       } else if (ConsumePrefix(arg, "--exploitability-samples=", &value)) {
         exploitability_samples =
             ParseInt(value, "--exploitability-samples");
@@ -172,20 +169,20 @@ int main(int argc, char** argv) {
     player_a_range.set_uniform_range();
     player_b_range.set_uniform_range();
 
-    poker::CFRSolver solver(config);
+    const poker::SolverConfig native_config =
+        poker::SolverConfigFromProto(config);
+    poker::CFRSolver solver(native_config);
     auto start = std::chrono::steady_clock::now();
     solver.run(iterations, player_a_range, player_b_range);
     auto end = std::chrono::steady_clock::now();
 
-    poker::Strategy strategy = solver.get_equilibrium_strategy();
-    solver.save_strategy(output_path);
+    poker::CFRSolver::StrategyProfile strategy = solver.get_strategy_profile();
 
     std::chrono::duration<double> elapsed = end - start;
     std::cout << "iterations=" << solver.get_iterations_run() << "\n";
-    std::cout << "info_sets=" << strategy.get_info_sets().size() << "\n";
+    std::cout << "info_sets=" << strategy.size() << "\n";
     std::cout << "player_a_ev=" << solver.get_expected_value(0) << "\n";
     std::cout << "seconds=" << elapsed.count() << "\n";
-    std::cout << "strategy_path=" << output_path << "\n";
 
     if (exploitability_samples > 0) {
       std::cout << "exploitability="

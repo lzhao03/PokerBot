@@ -85,21 +85,3 @@ message PokerHandPolicy {
 message PokerRange {
   repeated double distribution = 1;
 }
-
-message StrategyActionSnapshot {
-  double probability = 2;
-  Action action = 3;
-  reserved 1;
-}
-
-message StrategyInfoSetSnapshot {
-  string info_set_key = 1;
-  repeated StrategyActionSnapshot actions = 2;
-}
-
-message StrategySnapshot {
-  repeated StrategyInfoSetSnapshot info_sets = 1;
-  PokerConfig config = 2;
-  int32 iterations_run = 3;
-  string abstraction_version = 4;
-}

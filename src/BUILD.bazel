@@ -108,13 +108,6 @@ cc_test(
 )
 
 cc_library(
-    name = "strategy",
-    srcs = ["strategy.cc"],
-    hdrs = ["strategy.h"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "hand_range",
     srcs = ["hand_range.cc"],
     hdrs = ["hand_range.h"],
@@ -192,6 +185,18 @@ cc_library(
 )
 
 cc_library(
+    name = "cfr_solver_proto_adapter",
+    srcs = ["cfr_solver_proto_adapter.cc"],
+    hdrs = ["cfr_solver_proto_adapter.h"],
+    deps = [
+        ":combo",
+        ":poker_cc_proto",
+        ":poker_types",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "subgame_value",
     srcs = ["subgame_value.cc"],
     hdrs = ["subgame_value.h"],
@@ -209,8 +214,6 @@ CFR_SOLVER_DEPS = [
     ":continuation_value",
     ":game_tree",
     ":hand_range",
-    ":poker_cc_proto",
-    ":strategy",
     ":terminal_utility_cache",
     ":thread_pool",
     ":training_range",
@@ -240,6 +243,7 @@ cc_test(
     srcs = ["cfr_solver_test.cc"],
     deps = [
         ":cfr_solver",
+        ":cfr_solver_proto_adapter",
         ":continuation_value",
         ":subgame_value",
         "@abseil-cpp//absl/log:globals",
@@ -254,6 +258,7 @@ cc_binary(
     srcs = ["main.cc"],
     deps = [
         ":cfr_solver",
+        ":cfr_solver_proto_adapter",
         ":poker_cc_proto",
         "@abseil-cpp//absl/log:globals",
         "@abseil-cpp//absl/log:initialize",
@@ -266,7 +271,6 @@ cc_binary(
     deps = [
         ":cfr_solver",
         ":hand_range",
-        ":poker_cc_proto",
         "@abseil-cpp//absl/log:initialize",
     ],
 )
@@ -278,7 +282,6 @@ cc_binary(
     deps = [
         ":cfr_solver_no_stats",
         ":hand_range",
-        ":poker_cc_proto",
         "@abseil-cpp//absl/log:initialize",
     ],
 )

@@ -8,16 +8,13 @@
 #include <memory>
 #include <optional>
 #include <random>
-#include <string>
 #include <utility>
 #include <vector>
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/inlined_vector.h"
-#include "src/poker.pb.h"
 #include "src/game_tree.h"
 #include "src/hand_range.h"
 #include "src/poker_types.h"
-#include "src/strategy.h"
 #include "src/training_range.h"
 
 namespace poker {
@@ -49,15 +46,30 @@ public:
     int64_t entries = 0;
   };
 
+  struct StrategyInfoSetKey {
+    uint32_t public_state_id = 0;
+    ComboId private_combo = 0;
+    int player = 0;
+  };
+
+  struct StrategyInfoSet {
+    StrategyInfoSetKey key;
+    std::vector<int> action_ids;
+    std::vector<double> probabilities;
+  };
+
+  struct StrategyProfile {
+    std::vector<StrategyInfoSet> info_sets;
+
+    bool empty() const { return info_sets.empty(); }
+    size_t size() const { return info_sets.size(); }
+  };
+
   CFRSolver(const SolverConfig& config);
   CFRSolver(const SolverConfig& config, const GameState& initial_state);
-  CFRSolver(const PokerConfig& config);
-  CFRSolver(const PokerConfig& config, const BoardState& initial_state);
   
   // Run CFR for a specified number of iterations
   void run(int iterations, ComboId player_a_hand, ComboId player_b_hand);
-  void run(int iterations, const Hand& player_a_hand,
-           const Hand& player_b_hand);
   void run(int iterations, const HandRange& player_a_range,
            const HandRange& player_b_range);
   
@@ -73,19 +85,11 @@ public:
              int iteration,
              int depth = 0,
              int max_depth = 0);
-  double cfr(GameTree::Node& node,
-             const Hand& player_a_hand,
-             const Hand& player_b_hand,
-             std::array<double, 2>& reach_probabilities,
-             int iteration,
-             int depth = 0,
-             int max_depth = 0);
   
   // Get the computed strategy. Regret-only training exports the current
   // regret-matched policy because average-strategy sums are not accumulated.
-  Strategy get_equilibrium_strategy() const;
+  StrategyProfile get_strategy_profile() const;
   double evaluate_strategy(ComboId player_a_hand, ComboId player_b_hand);
-  double evaluate_strategy(const Hand& player_a_hand, const Hand& player_b_hand);
   double evaluate_strategy(int samples, const HandRange& player_a_range,
                            const HandRange& player_b_range);
   
@@ -96,8 +100,6 @@ public:
                                   const HandRange& player_b_range);
   double calculate_exploitability(ComboId player_a_hand,
                                   ComboId player_b_hand);
-  double calculate_exploitability(const Hand& player_a_hand,
-                                  const Hand& player_b_hand);
   double calculate_player_a_best_response_value(
       int samples,
       const HandRange& player_a_range,
@@ -111,10 +113,6 @@ public:
                                       ComboId player_a_hand,
                                       ComboId player_b_hand,
                                       int best_response_player);
-  
-  // Save and load the computed strategy
-  void save_strategy(const std::string& filename) const;
-  void load_strategy(const std::string& filename);
   
   // Get the expected value of the game for a player
   double get_expected_value(int player_id) const;
@@ -193,11 +191,10 @@ private:
     std::deque<RangeScratchFrame> frames;
   };
 
-  struct InfoSetKey {
+  struct PublicStateKey {
     static constexpr int kMaxCards = 5;
     static constexpr int kInlineHistoryValues = 48;
 
-    int player = 0;
     int street = 0;
     int pot = 0;
     int stack_a = 0;
@@ -207,35 +204,10 @@ private:
     int player_to_act = 0;
     int player_contribution_size = 0;
     std::array<int, 2> player_contributions = {0, 0};
-    int hand_size = 0;
-    std::array<int, 2> hand_cards = {-1, -1};
     int board_size = 0;
     std::array<int, kMaxCards> board_cards = {-1, -1, -1, -1, -1};
     int history_size = 0;
     std::array<int, kInlineHistoryValues> history_values = {};
-    std::vector<int> history_overflow;
-
-    bool operator==(const InfoSetKey& other) const;
-  };
-
-  struct InfoSetKeyHash {
-    size_t operator()(const InfoSetKey& key) const;
-  };
-
-  struct PublicStateKey {
-    int street = 0;
-    int pot = 0;
-    int stack_a = 0;
-    int stack_b = 0;
-    int all_in = 0;
-    int folded_player = 0;
-    int player_to_act = 0;
-    int player_contribution_size = 0;
-    std::array<int, 2> player_contributions = {0, 0};
-    int board_size = 0;
-    std::array<int, InfoSetKey::kMaxCards> board_cards = {-1, -1, -1, -1, -1};
-    int history_size = 0;
-    std::array<int, InfoSetKey::kInlineHistoryValues> history_values = {};
     std::vector<int> history_overflow;
 
     bool operator==(const PublicStateKey& other) const;
@@ -258,7 +230,9 @@ private:
   };
 
   struct InfoSetData {
-    InfoSetKey key;
+    uint32_t public_state_id = 0;
+    ComboId private_combo = 0;
+    uint8_t player = 0;
     uint32_t action_offset = 0;
     uint16_t action_count = 0;
   };
@@ -268,13 +242,10 @@ private:
         public_state_ids = nullptr;
     const absl::flat_hash_map<CompactInfoSetKey, int, CompactInfoSetKeyHash>*
         compact_info_set_ids = nullptr;
-    const absl::flat_hash_map<InfoSetKey, int, InfoSetKeyHash>*
-        legacy_info_set_ids = nullptr;
     const std::vector<InfoSetData>* info_sets = nullptr;
     const std::vector<int>* action_ids = nullptr;
     const std::vector<float>* cumulative_regrets = nullptr;
     const std::vector<float>* cumulative_strategies = nullptr;
-    const Strategy* loaded_strategy = nullptr;
   };
 
   CFRSolver(const SolverConfig& config,
@@ -300,17 +271,12 @@ private:
   
   absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>
       public_state_ids_;
-  absl::flat_hash_map<InfoSetKey, int, InfoSetKeyHash> info_set_ids_;
   std::vector<InfoSetData> info_sets_;
   std::vector<int> action_ids_;
   std::vector<float> cumulative_regrets_;
   std::vector<float> cumulative_strategies_;
   absl::flat_hash_map<CompactInfoSetKey, int, CompactInfoSetKeyHash>
       compact_info_set_ids_;
-  
-  // String-keyed strategy loaded from snapshots. Trained CFR state lives in
-  // info_sets_ above.
-  Strategy loaded_strategy_;
   const StrategyTablesView* strategy_tables_view_ = nullptr;
   
   // Helper methods
@@ -340,23 +306,6 @@ private:
       TraversalScratch& scratch,
       OptionalTrainingRange player_a_range,
       OptionalTrainingRange player_b_range);
-  double average_strategy_action_probability(
-      const GameState& state,
-      int player,
-      const PrivateCards& private_cards,
-      const std::vector<GameAction>& legal_actions,
-      int action_id);
-  double average_strategy_action_probability(
-      const InfoSetData& info_set,
-      const std::vector<GameAction>& legal_actions,
-      int action_id,
-      double fallback_probability);
-  void average_strategy_probabilities(
-      const GameState& state,
-      int player,
-      const PrivateCards& private_cards,
-      const std::vector<GameAction>& legal_actions,
-      StrategyProbabilities& probabilities);
   void average_strategy_probabilities(
       GameTree::Node& node,
       int player,
@@ -374,42 +323,25 @@ private:
       int player,
       const ActionChoices& action_choices,
       ConditionedRanges& conditioned_ranges);
-  InfoSetKey make_info_set_key(const GameState& state,
-                               int player,
-                               ComboId combo_id) const;
-  InfoSetKey make_info_set_key(const GameState& state,
-                               int player,
-                               const PrivateCards& private_cards) const;
   PublicStateKey make_public_state_key(const GameState& state) const;
-  InfoSetKey make_public_info_set_key(const GameState& state,
-                                      int player) const;
   uint32_t get_or_create_public_state_id(const GameState& state,
                                          uint32_t node_id);
   int get_or_create_compact_info_set_id(
       uint32_t public_state_id,
-      const GameState& state,
       int player,
       ComboId combo_id,
       const std::vector<int>& legal_action_ids);
-  int get_or_create_info_set_id(const InfoSetKey& key,
-                                const std::vector<int>& legal_action_ids);
   StrategyTablesView strategy_tables_view() const;
   const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>&
   strategy_public_state_ids() const;
   const absl::flat_hash_map<CompactInfoSetKey, int, CompactInfoSetKeyHash>&
   strategy_compact_info_set_ids() const;
-  const absl::flat_hash_map<InfoSetKey, int, InfoSetKeyHash>&
-  strategy_info_set_ids() const;
   const std::vector<InfoSetData>& strategy_info_sets() const;
   const std::vector<int>& strategy_action_ids() const;
   const std::vector<float>& strategy_cumulative_regrets() const;
   const std::vector<float>& strategy_cumulative_strategies() const;
-  const Strategy& strategy_loaded_strategy() const;
   void initialize_info_set_actions(InfoSetData& info_set,
                                    const std::vector<int>& legal_action_ids);
-  std::string info_set_key_to_string(const InfoSetKey& key) const;
-  double regret_for_info_set(const std::string& info_set_key,
-                             int action_id) const;
   ContinuationContext build_continuation_context(
       const GameState& state,
       ComboId player_a_hand,
