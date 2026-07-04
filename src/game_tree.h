@@ -3,8 +3,8 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
-#include <unordered_map>
 #include <vector>
+#include "absl/container/flat_hash_map.h"
 #include "src/hand_evaluator.h"
 #include "src/poker.pb.h"
 
@@ -21,7 +21,7 @@ public:
     bool is_chance_node;
     int player_to_act; // 0 for player A, 1 for player B, -1 for chance
     std::vector<Action> legal_actions;
-    std::unordered_map<int, NodeId> children; // Action ID -> node arena ID
+    absl::flat_hash_map<int, NodeId> children; // Action ID -> node arena ID
     
     // For terminal nodes
     double utility;
