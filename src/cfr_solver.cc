@@ -114,13 +114,11 @@ GameTree::Node& CachedChanceChild(GameTree& game_tree,
   const int child_key = ChanceCardsKey(cards);
   auto child = node.children.find(child_key);
   if (child != node.children.end()) {
-    return *child->second;
+    return game_tree.node(child->second);
   }
 
-  auto child_node = game_tree.create_chance_child_node(node, cards);
-  auto inserted = node.children.emplace(child_key, std::move(child_node));
   ++created_nodes;
-  return *inserted.first->second;
+  return game_tree.create_chance_child_node(node, child_key, cards);
 }
 
 GameTree::Node& CachedActionChild(GameTree& game_tree,
@@ -130,13 +128,11 @@ GameTree::Node& CachedActionChild(GameTree& game_tree,
                                   int64_t& created_nodes) {
   auto child = node.children.find(action_id);
   if (child != node.children.end()) {
-    return *child->second;
+    return game_tree.node(child->second);
   }
 
-  auto child_node = game_tree.create_child_node(node, action);
-  auto inserted = node.children.emplace(action_id, std::move(child_node));
   ++created_nodes;
-  return *inserted.first->second;
+  return game_tree.create_child_node(node, action_id, action);
 }
 
 int RoundedContribution(const BoardState& state, int player) {

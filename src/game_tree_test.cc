@@ -340,9 +340,8 @@ void CheckChanceAdvancesStreet(GameTree& tree) {
       MakeCard(9, Suit::CLUBS),
       MakeCard(10, Suit::SPADES),
   };
-  std::unique_ptr<GameTree::Node> child =
-      tree.create_chance_child_node(root, flop);
-  GameTree::Node& child_ref = *child;
+  GameTree::Node& child_ref =
+      tree.create_chance_child_node(root, 0, flop);
 
   Expect(child_ref.state.street() == Street::FLOP, "chance advances preflop to flop");
   Expect(child_ref.state.cards_size() == 3, "chance adds sampled flop cards");

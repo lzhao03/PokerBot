@@ -1,8 +1,9 @@
 #include "src/game_tree.h"
 #include "src/hand_evaluator.h"
 #include <algorithm>
-#include <stdexcept>
 #include <iostream>
+#include <stdexcept>
+#include <string>
 
 namespace poker {
 
@@ -164,38 +165,41 @@ void AdvanceStreet(BoardState& state, const std::vector<Card>& cards) {
 }  // namespace
 
 GameTree::GameTree(const PokerConfig& config)
-  : root_(nullptr), config_(config) {
+  : config_(config) {
 }
 
 GameTree::Node& GameTree::root() {
-  if (root_ == nullptr) {
+  if (!root_id_.has_value()) {
     throw std::logic_error("Game tree root has not been built");
   }
-  return *root_;
+  return node(*root_id_);
 }
 
 const GameTree::Node& GameTree::root() const {
-  if (root_ == nullptr) {
+  if (!root_id_.has_value()) {
     throw std::logic_error("Game tree root has not been built");
   }
-  return *root_;
+  return node(*root_id_);
 }
 
 GameTree::Node& GameTree::build_tree(const BoardState& initial_state) {
-  root_ = std::make_unique<Node>();
-  root_->state = initial_state;
-  root_->is_terminal = is_terminal(initial_state);
-  root_->player_to_act = get_player_to_act(initial_state);
+  node_blocks_.clear();
+  node_count_ = 0;
+  root_id_ = node_count_;
+  Node& root = add_node(Node());
+  root.state = initial_state;
+  root.is_terminal = is_terminal(initial_state);
+  root.player_to_act = get_player_to_act(initial_state);
   
-  if (root_->is_terminal) {
-    root_->utility = 0.0;
-  } else if (root_->player_to_act == -1) {
-    root_->is_chance_node = true;
+  if (root.is_terminal) {
+    root.utility = 0.0;
+  } else if (root.player_to_act == -1) {
+    root.is_chance_node = true;
   } else {
-    root_->legal_actions = get_legal_actions(initial_state);
+    root.legal_actions = get_legal_actions(initial_state);
   }
   
-  return *root_;
+  return root;
 }
 
 std::vector<Action> GameTree::get_legal_actions(const BoardState& state) const {
@@ -418,48 +422,101 @@ int GameTree::get_player_to_act(const BoardState& state) const {
   return FirstPlayerForStreet(state);
 }
 
-std::unique_ptr<GameTree::Node> GameTree::create_child_node(
-    const Node& parent,
-    const Action& action) const {
-  auto child = std::make_unique<Node>();
+GameTree::Node& GameTree::create_child_node(Node& parent,
+                                            int child_key,
+                                            const Action& action) {
+  return add_child(parent, child_key, make_child_node(parent, action));
+}
+
+GameTree::Node GameTree::make_child_node(const Node& parent,
+                                         const Action& action) const {
+  Node child;
   
-  child->state = apply_action(parent.state, action);
-  child->player_to_act = get_player_to_act(child->state);
-  child->is_terminal = is_terminal(child->state);
-  child->is_chance_node = !child->is_terminal && child->player_to_act == -1;
+  child.state = apply_action(parent.state, action);
+  child.player_to_act = get_player_to_act(child.state);
+  child.is_terminal = is_terminal(child.state);
+  child.is_chance_node = !child.is_terminal && child.player_to_act == -1;
   
   // If the node is terminal, compute the utility
-  if (child->is_terminal) {
+  if (child.is_terminal) {
     // This will be computed when needed in get_utility
-    child->utility = 0.0;
-  } else if (!child->is_chance_node) {
-    child->legal_actions = get_legal_actions(child->state);
+    child.utility = 0.0;
+  } else if (!child.is_chance_node) {
+    child.legal_actions = get_legal_actions(child.state);
   }
   
   return child;
 }
 
-std::unique_ptr<GameTree::Node> GameTree::create_chance_child_node(
+GameTree::Node& GameTree::create_chance_child_node(
+    Node& parent,
+    int child_key,
+    const std::vector<Card>& cards) {
+  return add_child(parent, child_key, make_chance_child_node(parent, cards));
+}
+
+GameTree::Node GameTree::make_chance_child_node(
     const Node& parent,
     const std::vector<Card>& cards) const {
   if (!parent.is_chance_node) {
     throw std::invalid_argument("Parent node is not a chance node");
   }
 
-  auto child = std::make_unique<Node>();
-  child->state = parent.state;
-  AdvanceStreet(child->state, cards);
-  child->is_terminal = is_terminal(child->state);
-  child->player_to_act = get_player_to_act(child->state);
-  child->is_chance_node = !child->is_terminal && child->player_to_act == -1;
+  Node child;
+  child.state = parent.state;
+  AdvanceStreet(child.state, cards);
+  child.is_terminal = is_terminal(child.state);
+  child.player_to_act = get_player_to_act(child.state);
+  child.is_chance_node = !child.is_terminal && child.player_to_act == -1;
 
-  if (child->is_terminal) {
-    child->utility = 0.0;
-  } else if (!child->is_chance_node) {
-    child->legal_actions = get_legal_actions(child->state);
+  if (child.is_terminal) {
+    child.utility = 0.0;
+  } else if (!child.is_chance_node) {
+    child.legal_actions = get_legal_actions(child.state);
   }
 
   return child;
+}
+
+GameTree::Node& GameTree::add_child(Node& parent, int child_key, Node child) {
+  auto existing = parent.children.find(child_key);
+  if (existing != parent.children.end()) {
+    return node(existing->second);
+  }
+
+  NodeId child_id = node_count_;
+  Node& child_ref = add_node(std::move(child));
+  parent.children.emplace(child_key, child_id);
+  return child_ref;
+}
+
+GameTree::Node& GameTree::node(NodeId id) {
+  if (id >= node_count_) {
+    throw std::logic_error("Invalid game tree node ID " +
+                           std::to_string(id) + " for arena size " +
+                           std::to_string(node_count_));
+  }
+  return node_blocks_[id / kNodeBlockSize]->nodes[id % kNodeBlockSize];
+}
+
+const GameTree::Node& GameTree::node(NodeId id) const {
+  if (id >= node_count_) {
+    throw std::logic_error("Invalid game tree node ID " +
+                           std::to_string(id) + " for arena size " +
+                           std::to_string(node_count_));
+  }
+  return node_blocks_[id / kNodeBlockSize]->nodes[id % kNodeBlockSize];
+}
+
+GameTree::Node& GameTree::add_node(Node node) {
+  if (node_blocks_.empty() ||
+      node_blocks_.back()->nodes.size() == kNodeBlockSize) {
+    node_blocks_.push_back(std::make_unique<NodeBlock>());
+  }
+  NodeBlock& block = *node_blocks_.back();
+  block.nodes.push_back(std::move(node));
+  ++node_count_;
+  return block.nodes.back();
 }
 
 bool GameTree::is_betting_round_over(const BoardState& state) const {
