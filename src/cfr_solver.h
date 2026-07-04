@@ -135,8 +135,8 @@ private:
     std::discrete_distribution<size_t> player_a_distribution;
   };
 
-  using OptionalWeightedHandRange =
-      std::optional<std::reference_wrapper<const WeightedHandRangeView>>;
+  using OptionalTrainingRange =
+      std::optional<std::reference_wrapper<const TrainingRangeView>>;
 
   struct ActionChoice {
     std::reference_wrapper<const Action> action;
@@ -145,12 +145,12 @@ private:
     double value = 0.0;
   };
   using ActionChoices = absl::InlinedVector<ActionChoice, 8>;
-  using ConditionedRanges = absl::InlinedVector<WeightedHandRangeView, 8>;
+  using ConditionedRanges = absl::InlinedVector<TrainingRangeView, 8>;
 
   struct RangeScratchFrame {
     ConditionedRanges conditioned_ranges;
-    WeightedHandRangeView public_player_a_range;
-    WeightedHandRangeView public_player_b_range;
+    TrainingRangeView public_player_a_range;
+    TrainingRangeView public_player_b_range;
   };
 
   struct TraversalScratch {
@@ -246,8 +246,8 @@ private:
       int depth,
       int max_depth,
       TraversalScratch& scratch,
-      OptionalWeightedHandRange player_a_range,
-      OptionalWeightedHandRange player_b_range);
+      OptionalTrainingRange player_a_range,
+      OptionalTrainingRange player_b_range);
   double average_strategy_action_probability(
       const BoardState& state,
       int player,
@@ -260,7 +260,7 @@ private:
       int action_id,
       double fallback_probability);
   void condition_ranges_for_actions(
-      const WeightedHandRangeView& range,
+      const TrainingRangeView& range,
       const BoardState& state,
       int player,
       const ActionChoices& action_choices,
@@ -279,8 +279,8 @@ private:
       const BoardState& state,
       const Hand& player_a_hand,
       const Hand& player_b_hand,
-      OptionalWeightedHandRange player_a_range,
-      OptionalWeightedHandRange player_b_range) const;
+      OptionalTrainingRange player_a_range,
+      OptionalTrainingRange player_b_range) const;
   double utility(const BoardState& state,
                  const Hand& player_a_hand,
                  const Hand& player_b_hand);
@@ -321,8 +321,8 @@ private:
       int depth,
       int max_depth,
       TraversalScratch& scratch,
-      OptionalWeightedHandRange player_a_range,
-      OptionalWeightedHandRange player_b_range);
+      OptionalTrainingRange player_a_range,
+      OptionalTrainingRange player_b_range);
 };
 
 } // namespace poker

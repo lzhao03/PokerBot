@@ -119,9 +119,9 @@ class CFRSolverRegretTestPeer {
                                sampler.player_a_sample_weights.end());
   }
 
-  static WeightedHandRangeView ConditionRangeForAction(
+  static TrainingRangeView ConditionRangeForAction(
       CFRSolver& solver,
-      const WeightedHandRangeView& range,
+      const TrainingRangeView& range,
       const BoardState& state,
       int player,
       ActionType action_type,
@@ -1548,10 +1548,11 @@ void CheckActionConditioningSkipsBoardBlockedRangeHands() {
   WeightedHandRange hands;
   hands.add(blocked_by_board, 1.0);
   hands.add(compatible, 1.0);
-  WeightedHandRangeView range(hands);
+  TrainingRange training_range = BuildTrainingRange(hands);
+  TrainingRangeView range(training_range);
 
   CFRSolver solver(config, state);
-  WeightedHandRangeView conditioned =
+  TrainingRangeView conditioned =
       CFRSolverRegretTestPeer::ConditionRangeForAction(
           solver, range, state, 1, ActionType::CHECK, 0);
 

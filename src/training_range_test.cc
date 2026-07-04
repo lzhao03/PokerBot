@@ -81,11 +81,48 @@ void CheckEmptyRangeConvertsToEmptyTrainingRange() {
   Expect(training_range.empty(), "empty range should convert to empty range");
 }
 
+void CheckTrainingRangeViewClearsTouchedWeights() {
+  poker::WeightedHandRange combos;
+  poker::Hand aces =
+      MakeHand(14, poker::Suit::SPADES, 14, poker::Suit::HEARTS);
+  poker::Hand kings =
+      MakeHand(13, poker::Suit::SPADES, 13, poker::Suit::HEARTS);
+  combos.add(aces, 1.0);
+  combos.add(kings, 2.0);
+
+  const poker::TrainingRange training_range =
+      poker::BuildTrainingRange(combos);
+  const poker::ComboId aces_combo = poker::HandToComboId(aces);
+  const poker::ComboId kings_combo = poker::HandToComboId(kings);
+
+  poker::TrainingRangeView view(training_range);
+  Expect(view.size() == 2, "all-source view should expose source combos");
+
+  view.reset_to_filtered();
+  view.add(aces_combo, 0.25f);
+  view.add(kings_combo, 0.75f);
+  Expect(view.size() == 2, "filtered view should expose added combos");
+
+  view.reset_to_filtered();
+  Expect(view.empty(), "reset filtered view should be empty");
+  Expect(view.weights[aces_combo] == 0.0f,
+         "reset should clear previous aces weight");
+  Expect(view.weights[kings_combo] == 0.0f,
+         "reset should clear previous kings weight");
+
+  view.add(kings_combo, 0.5f);
+  Expect(view.size() == 1, "filtered view should reuse after reset");
+  Expect(view.combo(0) == kings_combo, "filtered view should keep new combo");
+  Expect(std::abs(view.weight(0) - 0.5f) < 0.000001f,
+         "filtered view should keep new weight");
+}
+
 }  // namespace
 
 int main() {
   CheckTrainingRangeMatchesWeightedCombos();
   CheckExactHandReplacementSurvivesConversion();
   CheckEmptyRangeConvertsToEmptyTrainingRange();
+  CheckTrainingRangeViewClearsTouchedWeights();
   return 0;
 }

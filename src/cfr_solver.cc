@@ -67,30 +67,21 @@ WeightedHandRangeView CompatibleHands(
   return compatible_hands;
 }
 
-void PublicCompatibleRangeInto(const WeightedHandRangeView& hands,
+void PublicCompatibleRangeInto(const TrainingRangeView& hands,
                                const BoardState& state,
-                               WeightedHandRangeView& compatible_hands) {
-  if (!hands.has_source()) {
+                               TrainingRangeView& compatible_hands) {
+  if (hands.empty()) {
     compatible_hands.clear();
     return;
   }
 
   const CardMask board_mask = BoardMask(state);
-  compatible_hands.reset_to_filtered(hands.source_range());
-  compatible_hands.reserve(hands.size());
+  compatible_hands.reset_to_filtered();
   for (size_t i = 0; i < hands.size(); ++i) {
     if (hands.weight(i) > 0.0 && (hands.mask(i) & board_mask) == 0) {
-      compatible_hands.add(hands.source_index(i), hands.weight(i));
+      compatible_hands.add(hands.combo(i), hands.weight(i));
     }
   }
-}
-
-WeightedHandRangeView PublicCompatibleRange(
-    const WeightedHandRangeView& hands,
-    const BoardState& state) {
-  WeightedHandRangeView compatible_hands;
-  PublicCompatibleRangeInto(hands, state, compatible_hands);
-  return compatible_hands;
 }
 
 int EncodedCard(const Card& card) {
@@ -575,18 +566,14 @@ void CFRSolver::run_iterations(int iterations,
     return;
   }
 
-  const WeightedHandRange& player_a_hands =
-      player_a_range.get_all_weighted_combos();
-  const WeightedHandRange& player_b_hands =
-      player_b_range.get_all_weighted_combos();
   const TrainingRange player_a_training_range =
       BuildTrainingRange(player_a_range);
   const TrainingRange player_b_training_range =
       BuildTrainingRange(player_b_range);
-  WeightedHandRangeView player_a_hands_view;
-  WeightedHandRangeView player_b_hands_view;
-  player_a_hands_view.reset_to_all(player_a_hands);
-  player_b_hands_view.reset_to_all(player_b_hands);
+  TrainingRangeView player_a_hands_view;
+  TrainingRangeView player_b_hands_view;
+  player_a_hands_view.reset_to_all(player_a_training_range);
+  player_b_hands_view.reset_to_all(player_b_training_range);
   RangeSampler range_sampler(player_a_training_range, player_b_training_range);
 
   VLOG(1) << "Preparing game tree...";
@@ -612,8 +599,8 @@ void CFRSolver::run_iterations(int iterations,
     VLOG(2) << "Iteration " << i + 1 << "/" << iterations;
     int cfr_iteration = iterations_run_;
     std::array<double, 2> reach_probabilities = {1.0, 1.0};
-    OptionalWeightedHandRange player_a_context_range;
-    OptionalWeightedHandRange player_b_context_range;
+    OptionalTrainingRange player_a_context_range;
+    OptionalTrainingRange player_b_context_range;
     if (max_depth > 0) {
       player_a_context_range = std::cref(player_a_hands_view);
       player_b_context_range = std::cref(player_b_hands_view);
@@ -655,8 +642,8 @@ double CFRSolver::cfr_with_ranges(
     int depth,
     int max_depth,
     TraversalScratch& scratch,
-    OptionalWeightedHandRange player_a_range,
-    OptionalWeightedHandRange player_b_range) {
+    OptionalTrainingRange player_a_range,
+    OptionalTrainingRange player_b_range) {
   // If the node is a terminal node, return the utility
   if (node.is_terminal) {
     ++traversal_stats_.terminal_utility_calls;
@@ -766,8 +753,8 @@ double CFRSolver::cfr_with_ranges(
     reach_probabilities[player] =
         previous_reach_probability * choice.probability;
 
-    OptionalWeightedHandRange child_player_a_range = player_a_range;
-    OptionalWeightedHandRange child_player_b_range = player_b_range;
+    OptionalTrainingRange child_player_a_range = player_a_range;
+    OptionalTrainingRange child_player_b_range = player_b_range;
     if (condition_player_a_range) {
       child_player_a_range = std::cref(conditioned_player_ranges[choice_index]);
     } else if (condition_player_b_range) {
@@ -844,21 +831,21 @@ double CFRSolver::chance_sampling_cfr(GameTree::Node& node,
                       int depth,
                       int max_depth,
                       TraversalScratch& scratch,
-                      OptionalWeightedHandRange player_a_range,
-                      OptionalWeightedHandRange player_b_range) {
+                      OptionalTrainingRange player_a_range,
+                      OptionalTrainingRange player_b_range) {
   int samples = ChanceSamples(config_);
   traversal_stats_.chance_samples += samples;
   RangeScratchFrame& scratch_frame = scratch.frame(depth);
-  WeightedHandRangeView& public_player_a_range =
+  TrainingRangeView& public_player_a_range =
       scratch_frame.public_player_a_range;
-  WeightedHandRangeView& public_player_b_range =
+  TrainingRangeView& public_player_b_range =
       scratch_frame.public_player_b_range;
   return SampleChanceValue(
       *game_tree_, node, player_a_hand, player_b_hand, samples,
       rng_, traversal_stats_.child_nodes_created,
       [&](GameTree::Node& child_node) {
-        OptionalWeightedHandRange child_player_a_range = player_a_range;
-        OptionalWeightedHandRange child_player_b_range = player_b_range;
+        OptionalTrainingRange child_player_a_range = player_a_range;
+        OptionalTrainingRange child_player_b_range = player_b_range;
         if (player_a_range.has_value()) {
           PublicCompatibleRangeInto(
               player_a_range->get(), child_node.state, public_player_a_range);
@@ -941,32 +928,37 @@ double CFRSolver::average_strategy_action_probability(
 }
 
 void CFRSolver::condition_ranges_for_actions(
-    const WeightedHandRangeView& range,
+    const TrainingRangeView& range,
     const BoardState& state,
     int player,
     const ActionChoices& action_choices,
     ConditionedRanges& conditioned_ranges) {
-  conditioned_ranges.clear();
-  conditioned_ranges.resize(action_choices.size());
-  if (action_choices.empty() || !range.has_source()) {
+  while (conditioned_ranges.size() < action_choices.size()) {
+    conditioned_ranges.emplace_back();
+  }
+  if (action_choices.empty()) {
     return;
   }
 
-  for (WeightedHandRangeView& conditioned_range : conditioned_ranges) {
-    conditioned_range.reset_to_filtered(range.source_range());
-    conditioned_range.reserve(range.size());
+  for (size_t i = 0; i < action_choices.size(); ++i) {
+    conditioned_ranges[i].reset_to_filtered();
+  }
+  if (range.empty()) {
+    return;
   }
 
   const double fallback_probability = 1.0 / action_choices.size();
   const CardMask board_mask = BoardMask(state);
-  std::vector<double> positive_regrets(action_choices.size(), 0.0);
+  absl::InlinedVector<double, 8> positive_regrets(
+      action_choices.size(), 0.0);
   for (size_t i = 0; i < range.size(); ++i) {
     if (range.weight(i) <= 0.0 || (range.mask(i) & board_mask) != 0) {
       continue;
     }
 
     double positive_regret_sum = 0.0;
-    InfoSetKey key = make_info_set_key(state, player, range.hand(i));
+    Hand hand = range.hand(i);
+    InfoSetKey key = make_info_set_key(state, player, hand);
     auto existing_info_set = info_set_ids_.find(key);
     if (existing_info_set != info_set_ids_.end()) {
       const InfoSetData& info_set = info_sets_[existing_info_set->second];
@@ -997,8 +989,8 @@ void CFRSolver::condition_ranges_for_actions(
               : fallback_probability;
       const double conditioned_weight = range.weight(i) * probability;
       if (conditioned_weight > 0.0) {
-        conditioned_ranges[action_index].add(range.source_index(i),
-                                             conditioned_weight);
+        conditioned_ranges[action_index].add(
+            range.combo(i), static_cast<float>(conditioned_weight));
       }
     }
   }
@@ -1008,13 +1000,15 @@ ContinuationContext CFRSolver::build_continuation_context(
     const BoardState& state,
     const Hand& player_a_hand,
     const Hand& player_b_hand,
-    OptionalWeightedHandRange player_a_range,
-    OptionalWeightedHandRange player_b_range) const {
+    OptionalTrainingRange player_a_range,
+    OptionalTrainingRange player_b_range) const {
   ContinuationContext context =
       ContinuationContext::ExactHands(state, player_a_hand, player_b_hand);
   if (player_a_range.has_value() && player_b_range.has_value()) {
-    context.player_a_range = PublicCompatibleRange(player_a_range->get(), state);
-    context.player_b_range = PublicCompatibleRange(player_b_range->get(), state);
+    PublicCompatibleRangeInto(
+        player_a_range->get(), state, context.player_a_range);
+    PublicCompatibleRangeInto(
+        player_b_range->get(), state, context.player_b_range);
   }
   return context;
 }

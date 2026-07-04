@@ -3,8 +3,11 @@
 namespace poker {
 
 TrainingRange BuildTrainingRange(const HandRange& range) {
+  return BuildTrainingRange(range.get_all_weighted_combos());
+}
+
+TrainingRange BuildTrainingRange(const WeightedHandRange& combos) {
   TrainingRange training_range;
-  const WeightedHandRange& combos = range.get_all_weighted_combos();
 
   for (size_t i = 0; i < combos.size(); ++i) {
     if (combos.weights[i] <= 0.0) {

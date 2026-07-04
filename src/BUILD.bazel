@@ -169,8 +169,8 @@ cc_library(
     hdrs = ["continuation_value.h"],
     deps = [
         ":game_tree",
-        ":hand_range",
         ":poker_cc_proto",
+        ":training_range",
     ],
     visibility = ["//visibility:public"],
 )

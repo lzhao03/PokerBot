@@ -1,8 +1,8 @@
 #ifndef POKER_CONTINUATION_VALUE_H_
 #define POKER_CONTINUATION_VALUE_H_
 
-#include "src/hand_range.h"
 #include "src/poker.pb.h"
+#include "src/training_range.h"
 
 namespace poker {
 
@@ -12,8 +12,8 @@ struct ContinuationContext {
   BoardState state;
   Hand player_a_hand;
   Hand player_b_hand;
-  WeightedHandRangeView player_a_range;
-  WeightedHandRangeView player_b_range;
+  TrainingRangeView player_a_range;
+  TrainingRangeView player_b_range;
 
   static ContinuationContext ExactHands(const BoardState& state,
                                         const Hand& player_a_hand,
