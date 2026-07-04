@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -146,6 +147,23 @@ private:
   using ActionChoices = absl::InlinedVector<ActionChoice, 8>;
   using ConditionedRanges = absl::InlinedVector<WeightedHandRangeView, 8>;
 
+  struct RangeScratchFrame {
+    ConditionedRanges conditioned_ranges;
+    WeightedHandRangeView public_player_a_range;
+    WeightedHandRangeView public_player_b_range;
+  };
+
+  struct TraversalScratch {
+    RangeScratchFrame& frame(size_t depth) {
+      while (frames.size() <= depth) {
+        frames.emplace_back();
+      }
+      return frames[depth];
+    }
+
+    std::deque<RangeScratchFrame> frames;
+  };
+
   struct InfoSetKey {
     static constexpr int kMaxCards = 5;
     static constexpr int kInlineHistoryValues = 48;
@@ -227,6 +245,7 @@ private:
       int iteration,
       int depth,
       int max_depth,
+      TraversalScratch& scratch,
       OptionalWeightedHandRange player_a_range,
       OptionalWeightedHandRange player_b_range);
   double average_strategy_action_probability(
@@ -301,6 +320,7 @@ private:
       int iteration,
       int depth,
       int max_depth,
+      TraversalScratch& scratch,
       OptionalWeightedHandRange player_a_range,
       OptionalWeightedHandRange player_b_range);
 };

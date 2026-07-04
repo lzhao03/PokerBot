@@ -553,11 +553,12 @@ void CFRSolver::run(int iterations, const Hand& player_a_hand,
 
   GameTree::Node& root = get_or_build_root();
   const int max_depth = config_.max_depth();
+  TraversalScratch scratch;
   for (int i = 0; i < iterations; ++i) {
     std::array<double, 2> reach_probabilities = {1.0, 1.0};
-    cumulative_root_utility_ += cfr(root, player_a_hand, player_b_hand,
-                                    reach_probabilities, iterations_run_, 0,
-                                    max_depth);
+    cumulative_root_utility_ += cfr_with_ranges(
+        root, player_a_hand, player_b_hand, reach_probabilities,
+        iterations_run_, 0, max_depth, scratch, std::nullopt, std::nullopt);
     ++iterations_run_;
   }
 }
@@ -601,6 +602,7 @@ void CFRSolver::run_iterations(int iterations,
   
   // Run iterations of CFR
   LOG(INFO) << "Starting CFR iterations...";
+  TraversalScratch scratch;
   for (int i = 0; i < iterations; ++i) {
     const RangeDeal deal = range_sampler.sample(rng_);
     Hand player_a_hand = ComboIdToHand(deal.player_a_combo);
@@ -618,7 +620,7 @@ void CFRSolver::run_iterations(int iterations,
     }
     double dealt_value = cfr_with_ranges(
         root, player_a_hand, player_b_hand, reach_probabilities,
-        cfr_iteration, 0, max_depth, player_a_context_range,
+        cfr_iteration, 0, max_depth, scratch, player_a_context_range,
         player_b_context_range);
 
     cumulative_root_utility_ += dealt_value;
@@ -638,9 +640,10 @@ double CFRSolver::cfr(GameTree::Node& node,
                       int iteration,
                       int depth,
                       int max_depth) {
+  TraversalScratch scratch;
   return cfr_with_ranges(node, player_a_hand, player_b_hand,
                          reach_probabilities, iteration, depth, max_depth,
-                         std::nullopt, std::nullopt);
+                         scratch, std::nullopt, std::nullopt);
 }
 
 double CFRSolver::cfr_with_ranges(
@@ -651,6 +654,7 @@ double CFRSolver::cfr_with_ranges(
     int iteration,
     int depth,
     int max_depth,
+    TraversalScratch& scratch,
     OptionalWeightedHandRange player_a_range,
     OptionalWeightedHandRange player_b_range) {
   // If the node is a terminal node, return the utility
@@ -671,7 +675,7 @@ double CFRSolver::cfr_with_ranges(
   if (node.is_chance_node) {
     return chance_sampling_cfr(node, player_a_hand, player_b_hand,
                                reach_probabilities, iteration, depth, max_depth,
-                               player_a_range, player_b_range);
+                               scratch, player_a_range, player_b_range);
   }
 
   // Check depth limit to prevent infinite recursion
@@ -731,7 +735,9 @@ double CFRSolver::cfr_with_ranges(
   
   // Initialize the expected value for the player
   double node_value = 0.0;
-  ConditionedRanges conditioned_player_ranges;
+  RangeScratchFrame& scratch_frame = scratch.frame(depth);
+  ConditionedRanges& conditioned_player_ranges =
+      scratch_frame.conditioned_ranges;
   const bool condition_player_a_range =
       player == 0 && player_a_range.has_value();
   const bool condition_player_b_range =
@@ -771,7 +777,7 @@ double CFRSolver::cfr_with_ranges(
     // Recursive call to get the expected value of this action
     choice.value = cfr_with_ranges(
         child_node, player_a_hand, player_b_hand, reach_probabilities,
-        iteration, depth + 1, max_depth, child_player_a_range,
+        iteration, depth + 1, max_depth, scratch, child_player_a_range,
         child_player_b_range);
     reach_probabilities[player] = previous_reach_probability;
     
@@ -837,12 +843,16 @@ double CFRSolver::chance_sampling_cfr(GameTree::Node& node,
                       int iteration,
                       int depth,
                       int max_depth,
+                      TraversalScratch& scratch,
                       OptionalWeightedHandRange player_a_range,
                       OptionalWeightedHandRange player_b_range) {
   int samples = ChanceSamples(config_);
   traversal_stats_.chance_samples += samples;
-  WeightedHandRangeView public_player_a_range;
-  WeightedHandRangeView public_player_b_range;
+  RangeScratchFrame& scratch_frame = scratch.frame(depth);
+  WeightedHandRangeView& public_player_a_range =
+      scratch_frame.public_player_a_range;
+  WeightedHandRangeView& public_player_b_range =
+      scratch_frame.public_player_b_range;
   return SampleChanceValue(
       *game_tree_, node, player_a_hand, player_b_hand, samples,
       rng_, traversal_stats_.child_nodes_created,
@@ -861,7 +871,7 @@ double CFRSolver::chance_sampling_cfr(GameTree::Node& node,
         }
         return cfr_with_ranges(child_node, player_a_hand, player_b_hand,
                                reach_probabilities, iteration, depth,
-                               max_depth, child_player_a_range,
+                               max_depth, scratch, child_player_a_range,
                                child_player_b_range);
       });
 }
