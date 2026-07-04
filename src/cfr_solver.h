@@ -345,6 +345,11 @@ private:
       const Hand& best_response_hand,
       const WeightedHandRangeView& opponent_hands,
       int best_response_player);
+  double best_response_value_against_range(
+      GameTree::Node& node,
+      const PrivateCards& best_response_cards,
+      const WeightedHandRangeView& opponent_hands,
+      int best_response_player);
   double sampled_range_best_response_value(
       int samples,
       const HandRange& best_response_range,

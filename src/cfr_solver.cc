@@ -49,14 +49,14 @@ double TotalWeight(const WeightedHandRangeView& hands) {
 
 WeightedHandRangeView CompatibleHands(
     const WeightedHandRangeView& hands,
-    const Hand& known_hand,
+    CardMask known_hand_mask,
     const BoardState& state) {
   WeightedHandRangeView compatible_hands;
   if (!hands.has_source()) {
     return compatible_hands;
   }
 
-  const CardMask blocked_cards = HandMask(known_hand) | BoardMask(state);
+  const CardMask blocked_cards = known_hand_mask | BoardMask(state);
   compatible_hands.reset_to_filtered(hands.source_range());
   compatible_hands.reserve(hands.size());
   for (size_t i = 0; i < hands.size(); ++i) {
@@ -1378,6 +1378,16 @@ double CFRSolver::best_response_value_against_range(
     const Hand& best_response_hand,
     const WeightedHandRangeView& opponent_hands,
     int best_response_player) {
+  return best_response_value_against_range(
+      node, PrivateCards::FromHand(best_response_hand), opponent_hands,
+      best_response_player);
+}
+
+double CFRSolver::best_response_value_against_range(
+    GameTree::Node& node,
+    const PrivateCards& best_response_cards,
+    const WeightedHandRangeView& opponent_hands,
+    int best_response_player) {
   double total_weight = TotalWeight(opponent_hands);
   if (total_weight <= 0.0) {
     return 0.0;
@@ -1386,14 +1396,14 @@ double CFRSolver::best_response_value_against_range(
   if (node.is_terminal) {
     double value = 0.0;
     for (size_t i = 0; i < opponent_hands.size(); ++i) {
-      const Hand& player_a_hand =
-          best_response_player == 0 ? best_response_hand
-                                    : opponent_hands.hand(i);
-      const Hand& player_b_hand =
-          best_response_player == 0 ? opponent_hands.hand(i)
-                                    : best_response_hand;
+      const PrivateCards opponent_cards =
+          PrivateCards::FromHand(opponent_hands.hand(i));
+      const PrivateCards& player_a_cards =
+          best_response_player == 0 ? best_response_cards : opponent_cards;
+      const PrivateCards& player_b_cards =
+          best_response_player == 0 ? opponent_cards : best_response_cards;
       double player_a_value =
-          utility(node.state, player_a_hand, player_b_hand);
+          utility(node.state, player_a_cards, player_b_cards);
       value += opponent_hands.weight(i) *
                (best_response_player == 0 ? player_a_value : -player_a_value);
     }
@@ -1415,21 +1425,20 @@ double CFRSolver::best_response_value_against_range(
       size_t sampled_opponent_view_index = opponent_distribution(rng_);
       size_t sampled_opponent_index =
           opponent_hands.source_index(sampled_opponent_view_index);
-      const Hand& sampled_opponent =
-          opponent_hands.source_range().hands[sampled_opponent_index];
-      const Hand& player_a_hand =
-          best_response_player == 0 ? best_response_hand : sampled_opponent;
-      const Hand& player_b_hand =
-          best_response_player == 0 ? sampled_opponent : best_response_hand;
+      const PrivateCards sampled_opponent = PrivateCards::FromHand(
+          opponent_hands.source_range().hands[sampled_opponent_index]);
       std::vector<Card> cards =
-          SampleStreetCards(node.state, player_a_hand, player_b_hand, rng_);
+          SampleStreetCards(
+              node.state, best_response_cards.mask() | sampled_opponent.mask(),
+              rng_);
       GameTree::Node& child_node =
           CachedChanceChild(*game_tree_, node, cards, ignored_created_nodes);
       WeightedHandRangeView child_opponents;
       child_opponents.reset_to_filtered(opponent_hands.source_range());
       child_opponents.add(sampled_opponent_index, 1.0);
       value += best_response_value_against_range(
-          child_node, best_response_hand, child_opponents, best_response_player);
+          child_node, best_response_cards, child_opponents,
+          best_response_player);
     }
     return value / samples;
   }
@@ -1452,7 +1461,7 @@ double CFRSolver::best_response_value_against_range(
           CachedActionChild(*game_tree_, node, action, action_id,
                             ignored_created_nodes);
       value = std::max(value, best_response_value_against_range(
-                                  child_node, best_response_hand,
+                                  child_node, best_response_cards,
                                   opponent_hands, best_response_player));
     }
     return value;
@@ -1470,8 +1479,8 @@ double CFRSolver::best_response_value_against_range(
     child_opponents.reserve(opponent_hands.size());
     for (size_t i = 0; i < opponent_hands.size(); ++i) {
       double probability = average_strategy_action_probability(
-          node.state, player, opponent_hands.hand(i), node.legal_actions,
-          action_id);
+          node.state, player, PrivateCards::FromHand(opponent_hands.hand(i)),
+          node.legal_actions, action_id);
       if (probability > 0.0) {
         child_opponents.add(opponent_hands.source_index(i),
                             opponent_hands.weight(i) * probability);
@@ -1482,7 +1491,7 @@ double CFRSolver::best_response_value_against_range(
     if (child_weight > 0.0) {
       value += (child_weight / total_weight) *
                best_response_value_against_range(
-                   child_node, best_response_hand, child_opponents,
+                   child_node, best_response_cards, child_opponents,
                    best_response_player);
     }
   }
@@ -1584,15 +1593,15 @@ double CFRSolver::sampled_range_best_response_samples(
   WeightedHandRangeView opponent_view(opponent_hands);
   double total = 0.0;
   for (int i = 0; i < samples; ++i) {
-    const Hand& best_response_hand =
-        best_response_hands.hands[best_response_hand_distribution(rng_)];
+    const PrivateCards best_response_cards = PrivateCards::FromHand(
+        best_response_hands.hands[best_response_hand_distribution(rng_)]);
     WeightedHandRangeView compatible_opponents =
-        CompatibleHands(opponent_view, best_response_hand, root.state);
+        CompatibleHands(opponent_view, best_response_cards.mask(), root.state);
     if (compatible_opponents.empty()) {
       throw std::invalid_argument(
           "Could not sample non-overlapping hands from ranges");
     }
-    total += best_response_value_against_range(root, best_response_hand,
+    total += best_response_value_against_range(root, best_response_cards,
                                                compatible_opponents,
                                                best_response_player);
   }
