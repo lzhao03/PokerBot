@@ -1575,6 +1575,34 @@ void CheckActionConditioningSkipsBoardBlockedRangeHands() {
          "compatible hand should retain the check action probability");
 }
 
+void CheckActionConditioningIndexTracksNewInfoSets() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+
+  BoardState state = FlopRangeCutoffState();
+  Hand queens = MakeHand(12, Suit::HEARTS, 12, Suit::SPADES);
+
+  WeightedHandRange hands;
+  hands.add(TestComboId(queens), 1.0);
+  TrainingRange training_range = BuildTrainingRange(hands);
+  TrainingRangeView range(training_range);
+
+  CFRSolver solver(TestSolverConfig(config), TestGameState(state));
+  TrainingRangeView initially_conditioned =
+      CFRSolverRegretTestPeer::ConditionRangeForAction(
+          solver, range, state, 1, ActionType::ALL_IN, 20);
+  Expect(std::abs(initially_conditioned.weight(0) - 0.5) < 0.000001,
+         "missing combo index entries should use the uniform strategy");
+
+  CFRSolverRegretTestPeer::SetRegret(
+      solver, state, 1, queens, TestActionKey(ActionType::ALL_IN, 20), 1.0);
+  TrainingRangeView updated_conditioned =
+      CFRSolverRegretTestPeer::ConditionRangeForAction(
+          solver, range, state, 1, ActionType::ALL_IN, 20);
+  Expect(std::abs(updated_conditioned.weight(0) - 1.0) < 0.000001,
+         "combo index should track info sets created after the index is built");
+}
+
 void CheckZeroMaxDepthDoesNotCutOff() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -2040,6 +2068,7 @@ int main() {
   CheckRangeRunPassesContinuationRanges();
   CheckRangeRunActionConditionsRangesByHandStrategy();
   CheckActionConditioningSkipsBoardBlockedRangeHands();
+  CheckActionConditioningIndexTracksNewInfoSets();
   CheckExactHandNestedCfrContinuationSolvesRiverCallSubgame();
   CheckExactHandNestedCfrContinuationCachesSubgames();
   CheckExactHandNestedCfrContinuationSeparatesPrivateHands();

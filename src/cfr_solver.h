@@ -229,6 +229,12 @@ private:
     size_t operator()(const CompactInfoSetKey& key) const;
   };
 
+  struct ComboInfoSetIndex {
+    ComboInfoSetIndex() { info_set_ids.fill(-1); }
+
+    std::array<int32_t, kComboCount> info_set_ids;
+  };
+
   struct InfoSetData {
     uint32_t public_state_id = 0;
     ComboId private_combo = 0;
@@ -277,6 +283,10 @@ private:
   std::vector<float> cumulative_strategies_;
   absl::flat_hash_map<CompactInfoSetKey, int, CompactInfoSetKeyHash>
       compact_info_set_ids_;
+  std::array<
+      absl::flat_hash_map<uint32_t, std::unique_ptr<ComboInfoSetIndex>>, 2>
+      combo_info_set_ids_by_public_state_;
+  bool has_combo_info_set_indexes_ = false;
   const StrategyTablesView* strategy_tables_view_ = nullptr;
   
   // Helper methods
@@ -331,6 +341,13 @@ private:
       int player,
       ComboId combo_id,
       const std::vector<int>& legal_action_ids);
+  ComboInfoSetIndex& get_or_build_combo_info_set_index(
+      int player,
+      uint32_t public_state_id);
+  ComboInfoSetIndex* combo_info_set_index(int player,
+                                          uint32_t public_state_id);
+  const ComboInfoSetIndex* combo_info_set_index(int player,
+                                                uint32_t public_state_id) const;
   StrategyTablesView strategy_tables_view() const;
   const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>&
   strategy_public_state_ids() const;

@@ -490,17 +490,81 @@ uint32_t CFRSolver::get_or_create_public_state_id(const GameState& state,
   return inserted.first->second;
 }
 
+CFRSolver::ComboInfoSetIndex& CFRSolver::get_or_build_combo_info_set_index(
+    int player,
+    uint32_t public_state_id) {
+  has_combo_info_set_indexes_ = true;
+  absl::flat_hash_map<uint32_t, std::unique_ptr<ComboInfoSetIndex>>&
+      player_indexes =
+      combo_info_set_ids_by_public_state_[player];
+  std::unique_ptr<ComboInfoSetIndex>& index = player_indexes[public_state_id];
+  if (index == nullptr) {
+    index = std::make_unique<ComboInfoSetIndex>();
+    for (int combo = 0; combo < kComboCount; ++combo) {
+      CompactInfoSetKey compact_key;
+      compact_key.public_state_id = public_state_id;
+      compact_key.private_combo = static_cast<ComboId>(combo);
+      compact_key.player = static_cast<uint8_t>(player);
+      auto existing_compact = compact_info_set_ids_.find(compact_key);
+      if (existing_compact != compact_info_set_ids_.end()) {
+        index->info_set_ids[combo] = existing_compact->second;
+      }
+    }
+  }
+  return *index;
+}
+
+CFRSolver::ComboInfoSetIndex* CFRSolver::combo_info_set_index(
+    int player,
+    uint32_t public_state_id) {
+  if (!has_combo_info_set_indexes_) {
+    return nullptr;
+  }
+  absl::flat_hash_map<uint32_t, std::unique_ptr<ComboInfoSetIndex>>&
+      player_indexes = combo_info_set_ids_by_public_state_[player];
+  auto index = player_indexes.find(public_state_id);
+  if (index == player_indexes.end()) {
+    return nullptr;
+  }
+  return index->second.get();
+}
+
+const CFRSolver::ComboInfoSetIndex* CFRSolver::combo_info_set_index(
+    int player,
+    uint32_t public_state_id) const {
+  if (!has_combo_info_set_indexes_) {
+    return nullptr;
+  }
+  const absl::flat_hash_map<uint32_t, std::unique_ptr<ComboInfoSetIndex>>&
+      player_indexes = combo_info_set_ids_by_public_state_[player];
+  auto index = player_indexes.find(public_state_id);
+  if (index == player_indexes.end()) {
+    return nullptr;
+  }
+  return index->second.get();
+}
+
 int CFRSolver::get_or_create_compact_info_set_id(
     uint32_t public_state_id,
     int player,
     ComboId combo_id,
     const std::vector<int>& legal_action_ids) {
+  ComboInfoSetIndex* combo_index =
+      combo_info_set_index(player, public_state_id);
+  if (combo_index != nullptr &&
+      combo_index->info_set_ids[combo_id] >= 0) {
+    return combo_index->info_set_ids[combo_id];
+  }
+
   CompactInfoSetKey compact_key;
   compact_key.public_state_id = public_state_id;
   compact_key.private_combo = combo_id;
   compact_key.player = static_cast<uint8_t>(player);
   auto existing_compact = compact_info_set_ids_.find(compact_key);
   if (existing_compact != compact_info_set_ids_.end()) {
+    if (combo_index != nullptr) {
+      combo_index->info_set_ids[combo_id] = existing_compact->second;
+    }
     return existing_compact->second;
   }
 
@@ -519,6 +583,9 @@ int CFRSolver::get_or_create_compact_info_set_id(
   initialize_info_set_actions(data, legal_action_ids);
   info_sets_.push_back(std::move(data));
   compact_info_set_ids_.emplace(compact_key, id);
+  if (combo_index != nullptr) {
+    combo_index->info_set_ids[combo_id] = id;
+  }
   return id;
 }
 
@@ -1063,24 +1130,19 @@ void CFRSolver::condition_ranges_for_actions(
   const CardMask board_mask = state.board_mask;
   absl::InlinedVector<double, 8> positive_regrets(
       action_choices.size(), 0.0);
+  const ComboInfoSetIndex& combo_index =
+      get_or_build_combo_info_set_index(player, public_state_id);
   for (size_t i = 0; i < range.size(); ++i) {
     if (range.weight(i) <= 0.0 || (range.mask(i) & board_mask) != 0) {
       continue;
     }
 
     double positive_regret_sum = 0.0;
-    std::optional<int> info_set_id;
-    CompactInfoSetKey compact_key;
-    compact_key.public_state_id = public_state_id;
-    compact_key.private_combo = range.combo(i);
-    compact_key.player = static_cast<uint8_t>(player);
-    auto existing_compact = compact_info_set_ids_.find(compact_key);
-    if (existing_compact != compact_info_set_ids_.end()) {
-      info_set_id = existing_compact->second;
-    }
+    const int32_t info_set_id =
+        combo_index.info_set_ids[range.combo(i)];
 
-    if (info_set_id.has_value()) {
-      const InfoSetData& info_set = info_sets_[*info_set_id];
+    if (info_set_id >= 0) {
+      const InfoSetData& info_set = info_sets_[info_set_id];
       const size_t table_offset = info_set.action_offset;
       std::fill(positive_regrets.begin(), positive_regrets.end(), 0.0);
       const size_t action_count =
