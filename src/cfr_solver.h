@@ -101,6 +101,7 @@ public:
   double get_expected_value(int player_id) const;
   int get_iterations_run() const { return iterations_run_; }
   int64_t get_cfr_update_count() const { return cfr_update_count_; }
+  size_t get_info_set_count() const { return info_sets_.size(); }
   TraversalStats get_traversal_stats() const { return traversal_stats_; }
   UtilityCacheStats get_utility_cache_stats() const;
   void set_continuation_value_provider(

@@ -210,8 +210,7 @@ int main(int argc, char** argv) {
       solver.run(options.iterations, player_a_range, player_b_range);
       int64_t updates = solver.get_cfr_update_count() - start_updates;
       return BenchmarkResult{
-          static_cast<double>(
-              solver.get_equilibrium_strategy().get_info_sets().size()),
+          static_cast<double>(solver.get_info_set_count()),
           options.iterations, updates, solver.get_traversal_stats(),
           solver.get_utility_cache_stats()};
     });
