@@ -259,6 +259,16 @@ private:
     uint16_t action_count = 0;
   };
 
+  struct StrategyTablesView {
+    const absl::flat_hash_map<InfoSetKey, int, InfoSetKeyHash>*
+        info_set_ids = nullptr;
+    const std::vector<InfoSetData>* info_sets = nullptr;
+    const std::vector<int>* action_ids = nullptr;
+    const std::vector<float>* cumulative_regrets = nullptr;
+    const std::vector<float>* cumulative_strategies = nullptr;
+    const Strategy* loaded_strategy = nullptr;
+  };
+
   CFRSolver(const SolverConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache);
   CFRSolver(const SolverConfig& config,
@@ -291,6 +301,8 @@ private:
   // String-keyed strategy loaded from snapshots. Trained CFR state lives in
   // info_sets_ above.
   Strategy loaded_strategy_;
+  const StrategyTablesView* strategy_tables_view_ = nullptr;
+  bool legacy_info_set_index_valid_ = false;
   
   // Helper methods
   GameTree::Node& get_or_build_root();
@@ -370,7 +382,16 @@ private:
       const std::vector<int>& legal_action_ids);
   int get_or_create_info_set_id(const InfoSetKey& key,
                                 const std::vector<int>& legal_action_ids);
+  void ensure_legacy_info_set_index();
   void rebuild_legacy_info_set_index();
+  StrategyTablesView strategy_tables_view() const;
+  const absl::flat_hash_map<InfoSetKey, int, InfoSetKeyHash>&
+  strategy_info_set_ids() const;
+  const std::vector<InfoSetData>& strategy_info_sets() const;
+  const std::vector<int>& strategy_action_ids() const;
+  const std::vector<float>& strategy_cumulative_regrets() const;
+  const std::vector<float>& strategy_cumulative_strategies() const;
+  const Strategy& strategy_loaded_strategy() const;
   void initialize_info_set_actions(InfoSetData& info_set,
                                    const std::vector<int>& legal_action_ids);
   std::string info_set_key_to_string(const InfoSetKey& key) const;
