@@ -1654,7 +1654,7 @@ void CheckEvaluationUsesChanceSamples() {
   };
 
   Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
-  Hand player_b_hand = MakeHand(10, Suit::HEARTS, 10, Suit::CLUBS);
+  Hand player_b_hand = MakeHand(10, Suit::HEARTS, 10, Suit::DIAMONDS);
 
   PokerConfig one_sample_config;
   one_sample_config.set_starting_stack_size(10);
