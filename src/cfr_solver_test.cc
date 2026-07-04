@@ -106,19 +106,13 @@ class CFRSolverRegretTestPeer {
     action->cumulative_regret = regret;
   }
 
-  static std::vector<double> CompatibleDealWeights(
+  static std::vector<double> PlayerASampleWeights(
       const HandRange& player_a_range,
       const HandRange& player_b_range) {
-    std::vector<CFRSolver::RangeDeal> deals =
-        CFRSolver::build_compatible_range_deals(
-            player_a_range.get_all_weighted_combos(),
-            player_b_range.get_all_weighted_combos());
-    std::vector<double> weights;
-    weights.reserve(deals.size());
-    for (const CFRSolver::RangeDeal& deal : deals) {
-      weights.push_back(deal.weight);
-    }
-    return weights;
+    CFRSolver::RangeSampler sampler(
+        player_a_range.get_all_weighted_combos(),
+        player_b_range.get_all_weighted_combos());
+    return sampler.player_a_sample_weights;
   }
 
   static WeightedHandRangeView ConditionRangeForAction(
@@ -957,7 +951,7 @@ void CheckRangeSamplingRejectsEmptyRange() {
   Expect(threw, "range sampling should reject empty ranges");
 }
 
-void CheckCompatibleDealWeightsUseProductWeights() {
+void CheckRangeSamplerWeightsUseCompatibleProducts() {
   Hand blocked = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
   Hand player_a_compatible = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
   Hand player_b_compatible = MakeHand(12, Suit::SPADES, 12, Suit::HEARTS);
@@ -970,17 +964,16 @@ void CheckCompatibleDealWeightsUseProductWeights() {
   player_b_range.add_hand(player_b_compatible, 7.0);
 
   std::vector<double> weights =
-      CFRSolverRegretTestPeer::CompatibleDealWeights(player_a_range,
-                                                     player_b_range);
+      CFRSolverRegretTestPeer::PlayerASampleWeights(player_a_range,
+                                                    player_b_range);
   std::sort(weights.begin(), weights.end());
 
-  Expect(weights.size() == 3, "compatible deal builder should skip overlaps");
+  Expect(weights.size() == 2,
+         "range sampler should weight each player A exact hand");
   Expect(std::abs(weights[0] - 14.0) < 0.000001,
-         "deal weight should be player hand weight product");
-  Expect(std::abs(weights[1] - 15.0) < 0.000001,
-         "deal weight should include compatible player B hands");
-  Expect(std::abs(weights[2] - 21.0) < 0.000001,
-         "deal weight should include compatible player A and B hands");
+         "range sampler should skip overlapping player B hands");
+  Expect(std::abs(weights[1] - 36.0) < 0.000001,
+         "range sampler should weight by compatible player B mass");
 }
 
 void CheckRangeSamplingRejectsOnlyOverlappingHands() {
@@ -1973,7 +1966,7 @@ int main() {
   CheckRunWithoutDepthCutoffTerminates();
   CheckRangeExpansionUsesExactCombos();
   CheckRangeSamplingRejectsEmptyRange();
-  CheckCompatibleDealWeightsUseProductWeights();
+  CheckRangeSamplerWeightsUseCompatibleProducts();
   CheckRangeSamplingRejectsOnlyOverlappingHands();
   CheckRangeSamplingSkipsOverlappingDeals();
   CheckRunLoggingUsesAbseilLevels();

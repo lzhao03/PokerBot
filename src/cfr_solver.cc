@@ -326,10 +326,14 @@ GameTree::Node& CFRSolver::get_or_build_root() {
   return game_tree_->root();
 }
 
-std::vector<CFRSolver::RangeDeal> CFRSolver::build_compatible_range_deals(
+CFRSolver::RangeSampler::RangeSampler(
     const WeightedHandRange& player_a_hands,
-    const WeightedHandRange& player_b_hands) {
-  std::vector<RangeDeal> deals;
+    const WeightedHandRange& player_b_hands)
+    : player_a_hands(player_a_hands),
+      player_b_hands(player_b_hands),
+      compatible_player_b_weight(player_a_hands.size(), 0.0),
+      player_a_sample_weights(player_a_hands.size(), 0.0) {
+  double total_weight = 0.0;
   for (size_t a = 0; a < player_a_hands.size(); ++a) {
     if (player_a_hands.weights[a] <= 0.0) {
       continue;
@@ -339,11 +343,49 @@ std::vector<CFRSolver::RangeDeal> CFRSolver::build_compatible_range_deals(
           (player_a_hands.masks[a] & player_b_hands.masks[b]) != 0) {
         continue;
       }
-      deals.emplace_back(
-          a, b, player_a_hands.weights[a] * player_b_hands.weights[b]);
+      compatible_player_b_weight[a] += player_b_hands.weights[b];
+    }
+    player_a_sample_weights[a] =
+        player_a_hands.weights[a] * compatible_player_b_weight[a];
+    total_weight += player_a_sample_weights[a];
+  }
+
+  if (total_weight <= 0.0) {
+    throw std::invalid_argument(
+        "Could not sample non-overlapping hands from ranges");
+  }
+
+  player_a_distribution = std::discrete_distribution<size_t>(
+      player_a_sample_weights.begin(), player_a_sample_weights.end());
+}
+
+CFRSolver::RangeDeal CFRSolver::RangeSampler::sample(std::mt19937& rng) {
+  const size_t player_a_index = player_a_distribution(rng);
+  const CardMask blocked_cards = player_a_hands.masks[player_a_index];
+  const double total_player_b_weight =
+      compatible_player_b_weight[player_a_index];
+  std::uniform_real_distribution<double> distribution(
+      0.0, total_player_b_weight);
+  double remaining = distribution(rng);
+  size_t fallback_player_b_index = player_b_hands.size();
+
+  for (size_t b = 0; b < player_b_hands.size(); ++b) {
+    if (player_b_hands.weights[b] <= 0.0 ||
+        (player_b_hands.masks[b] & blocked_cards) != 0) {
+      continue;
+    }
+    fallback_player_b_index = b;
+    remaining -= player_b_hands.weights[b];
+    if (remaining <= 0.0) {
+      return RangeDeal(player_a_index, b);
     }
   }
-  return deals;
+
+  if (fallback_player_b_index == player_b_hands.size()) {
+    throw std::logic_error("Range sampler selected an incompatible hand");
+  }
+
+  return RangeDeal(player_a_index, fallback_player_b_index);
 }
 
 CFRSolver::InfoSetKey CFRSolver::make_info_set_key(
@@ -518,30 +560,19 @@ void CFRSolver::run(int iterations, const HandRange& player_a_range,
 void CFRSolver::run_iterations(int iterations,
                                const HandRange& player_a_range,
                                const HandRange& player_b_range) {
+  if (iterations <= 0) {
+    return;
+  }
+
+  const WeightedHandRange& player_a_hands =
+      player_a_range.get_all_weighted_combos();
+  const WeightedHandRange& player_b_hands =
+      player_b_range.get_all_weighted_combos();
   WeightedHandRangeView player_a_hands_view;
   WeightedHandRangeView player_b_hands_view;
-  std::vector<RangeDeal> range_deals;
-  std::vector<double> range_deal_weights;
-  std::discrete_distribution<size_t> range_deal_distribution;
-  if (iterations > 0) {
-    const WeightedHandRange& player_a_hands =
-        player_a_range.get_all_weighted_combos();
-    const WeightedHandRange& player_b_hands =
-        player_b_range.get_all_weighted_combos();
-    player_a_hands_view.reset_to_all(player_a_hands);
-    player_b_hands_view.reset_to_all(player_b_hands);
-    range_deals = build_compatible_range_deals(player_a_hands, player_b_hands);
-    if (range_deals.empty()) {
-      throw std::invalid_argument(
-          "Could not sample non-overlapping hands from ranges");
-    }
-    range_deal_weights.reserve(range_deals.size());
-    for (const RangeDeal& deal : range_deals) {
-      range_deal_weights.push_back(deal.weight);
-    }
-    range_deal_distribution = std::discrete_distribution<size_t>(
-        range_deal_weights.begin(), range_deal_weights.end());
-  }
+  player_a_hands_view.reset_to_all(player_a_hands);
+  player_b_hands_view.reset_to_all(player_b_hands);
+  RangeSampler range_sampler(player_a_hands, player_b_hands);
 
   VLOG(1) << "Preparing game tree...";
   bool had_root = game_tree_->has_root();
@@ -557,7 +588,7 @@ void CFRSolver::run_iterations(int iterations,
   // Run iterations of CFR
   LOG(INFO) << "Starting CFR iterations...";
   for (int i = 0; i < iterations; ++i) {
-    const RangeDeal& deal = range_deals[range_deal_distribution(rng_)];
+    const RangeDeal deal = range_sampler.sample(rng_);
     Hand player_a_hand =
         player_a_hands_view.source_range().hands[deal.player_a_index];
     Hand player_b_hand =
@@ -1012,28 +1043,15 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
       player_a_range.get_all_weighted_combos();
   const WeightedHandRange& player_b_hands =
       player_b_range.get_all_weighted_combos();
-  std::vector<RangeDeal> range_deals = build_compatible_range_deals(
-      player_a_hands, player_b_hands);
-  if (range_deals.empty()) {
-    throw std::invalid_argument(
-        "Could not sample non-overlapping hands from ranges");
-  }
-
-  std::vector<double> range_deal_weights;
-  range_deal_weights.reserve(range_deals.size());
-  for (const RangeDeal& deal : range_deals) {
-    range_deal_weights.push_back(deal.weight);
-  }
+  RangeSampler range_sampler(player_a_hands, player_b_hands);
 
   if (samples < kParallelEvaluationSampleThreshold) {
-    return evaluate_strategy_samples(samples, player_a_hands, player_b_hands,
-                                     range_deals, range_deal_weights);
+    return evaluate_strategy_samples(samples, range_sampler);
   }
 
   int worker_count = WorkerCountForSamples(samples);
   if (worker_count <= 1) {
-    return evaluate_strategy_samples(samples, player_a_hands, player_b_hands,
-                                     range_deals, range_deal_weights);
+    return evaluate_strategy_samples(samples, range_sampler);
   }
 
   ThreadPoolExecutor executor(worker_count);
@@ -1058,22 +1076,19 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
     int shard_samples = samples_remaining / (worker_count - i);
     samples_remaining -= shard_samples;
     unsigned int seed = worker_seeds[i];
-    futures.push_back(executor.submit([config, &player_a_hands,
-                                       &player_b_hands, &range_deals,
-                                       &range_deal_weights,
+    futures.push_back(executor.submit([config, range_sampler,
                                        &loaded_strategy_copy,
                                        &strategy_info_set_ids,
                                        &strategy_info_sets,
                                        utility_cache, continuation_value_provider,
-                                       shard_samples, seed]() {
+                                       shard_samples, seed]() mutable {
       CFRSolver worker(config, utility_cache, continuation_value_provider);
       worker.info_set_ids_ = strategy_info_set_ids;
       worker.info_sets_ = strategy_info_sets;
       worker.loaded_strategy_ = loaded_strategy_copy;
       worker.rng_.seed(seed);
       const double value = worker.evaluate_strategy_samples(
-          shard_samples, player_a_hands, player_b_hands, range_deals,
-          range_deal_weights);
+          shard_samples, range_sampler);
       return std::make_pair(
           value * shard_samples,
           worker.get_traversal_stats().action_entry_touches);
@@ -1091,24 +1106,19 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
 
 double CFRSolver::evaluate_strategy_samples(
     int samples,
-    const WeightedHandRange& player_a_hands,
-    const WeightedHandRange& player_b_hands,
-    const std::vector<RangeDeal>& range_deals,
-    const std::vector<double>& range_deal_weights) {
+    RangeSampler range_sampler) {
   if (samples <= 0) {
     return 0.0;
   }
 
-  std::discrete_distribution<size_t> range_deal_distribution(
-      range_deal_weights.begin(), range_deal_weights.end());
   GameTree::Node& root = get_or_build_root();
 
   double total = 0.0;
   for (int i = 0; i < samples; ++i) {
-    const RangeDeal& deal = range_deals[range_deal_distribution(rng_)];
+    const RangeDeal deal = range_sampler.sample(rng_);
     total += evaluate_strategy_node(
-        root, player_a_hands.hands[deal.player_a_index],
-        player_b_hands.hands[deal.player_b_index]);
+        root, range_sampler.player_a_hands.hands[deal.player_a_index],
+        range_sampler.player_b_hands.hands[deal.player_b_index]);
   }
   return total / samples;
 }

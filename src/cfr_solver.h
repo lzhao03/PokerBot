@@ -112,14 +112,25 @@ private:
   friend class CFRSolverRegretTestPeer;
 
   struct RangeDeal {
-    RangeDeal(size_t player_a_index, size_t player_b_index, double weight)
+    RangeDeal(size_t player_a_index, size_t player_b_index)
         : player_a_index(player_a_index),
-          player_b_index(player_b_index),
-          weight(weight) {}
+          player_b_index(player_b_index) {}
 
     size_t player_a_index = 0;
     size_t player_b_index = 0;
-    double weight = 0.0;
+  };
+
+  struct RangeSampler {
+    RangeSampler(const WeightedHandRange& player_a_hands,
+                 const WeightedHandRange& player_b_hands);
+
+    RangeDeal sample(std::mt19937& rng);
+
+    const WeightedHandRange& player_a_hands;
+    const WeightedHandRange& player_b_hands;
+    std::vector<double> compatible_player_b_weight;
+    std::vector<double> player_a_sample_weights;
+    std::discrete_distribution<size_t> player_a_distribution;
   };
 
   using OptionalWeightedHandRange =
@@ -204,9 +215,6 @@ private:
   
   // Helper methods
   GameTree::Node& get_or_build_root();
-  static std::vector<RangeDeal> build_compatible_range_deals(
-      const WeightedHandRange& player_a_hands,
-      const WeightedHandRange& player_b_hands);
   void run_iterations(int iterations,
                       const HandRange& player_a_range,
                       const HandRange& player_b_range);
@@ -261,10 +269,7 @@ private:
                                 const Hand& player_b_hand);
   double evaluate_strategy_samples(
       int samples,
-      const WeightedHandRange& player_a_hands,
-      const WeightedHandRange& player_b_hands,
-      const std::vector<RangeDeal>& range_deals,
-      const std::vector<double>& range_deal_weights);
+      RangeSampler range_sampler);
   double best_response_value(GameTree::Node& node,
                              const Hand& player_a_hand,
                              const Hand& player_b_hand,
