@@ -392,15 +392,18 @@ void CFRSolver::ensure_info_set_actions(
     const std::vector<Action>& legal_actions) {
   for (const Action& action : legal_actions) {
     int action_id = ActionKey(action);
-    auto existing = std::find_if(
-        info_set.actions.begin(), info_set.actions.end(),
-        [action_id](const ActionState& action_state) {
-          return action_state.action_id == action_id;
-        });
-    if (existing != info_set.actions.end()) {
-      continue;
+    bool existing = false;
+    for (const ActionState& action_state : info_set.actions) {
+      ++traversal_stats_.action_entry_touches;
+      if (action_state.action_id == action_id) {
+        existing = true;
+        break;
+      }
     }
-    info_set.actions.push_back({action_id, 0.0, 0.0});
+    if (!existing) {
+      info_set.actions.push_back({action_id, 0.0, 0.0});
+      ++traversal_stats_.action_entry_touches;
+    }
   }
 }
 
@@ -690,22 +693,24 @@ double CFRSolver::cfr_with_ranges(
       if (existing_choice != action_choices.end()) {
         continue;
       }
-      auto action_state = std::find_if(
-          info_set.actions.begin(), info_set.actions.end(),
-          [action_id](const ActionState& state) {
-            return state.action_id == action_id;
-          });
-      if (action_state == info_set.actions.end()) {
+      size_t action_index = info_set.actions.size();
+      for (size_t i = 0; i < info_set.actions.size(); ++i) {
+        ++traversal_stats_.action_entry_touches;
+        if (info_set.actions[i].action_id == action_id) {
+          action_index = i;
+          break;
+        }
+      }
+      if (action_index == info_set.actions.size()) {
         continue;
       }
       action_choices.push_back(
-          {std::cref(action), action_id,
-           static_cast<size_t>(action_state - info_set.actions.begin()), 0.0,
-           0.0});
+          {std::cref(action), action_id, action_index, 0.0, 0.0});
     }
 
     double sum_positive_regrets = 0.0;
     for (const ActionChoice& choice : action_choices) {
+      ++traversal_stats_.action_entry_touches;
       sum_positive_regrets +=
           std::max(0.0,
                    info_set.actions[choice.action_index].cumulative_regret);
@@ -713,6 +718,7 @@ double CFRSolver::cfr_with_ranges(
 
     if (sum_positive_regrets > 0.0) {
       for (ActionChoice& choice : action_choices) {
+        ++traversal_stats_.action_entry_touches;
         choice.probability =
             std::max(
                 0.0,
@@ -814,6 +820,7 @@ double CFRSolver::cfr_with_ranges(
       // CFR+ clips cumulative regrets at zero.
       double& cumulative_regret =
           info_set.actions[choice.action_index].cumulative_regret;
+      traversal_stats_.action_entry_touches += 2;
       cumulative_regret = std::max(0.0, cumulative_regret + regret);
     }
     
@@ -866,7 +873,7 @@ double CFRSolver::average_strategy_action_probability(
     int player,
     const Hand& hand,
     const std::vector<Action>& legal_actions,
-    int action_id) const {
+    int action_id) {
   if (legal_actions.empty()) {
     return 0.0;
   }
@@ -892,22 +899,27 @@ double CFRSolver::average_strategy_action_probability(
     const InfoSetData& info_set,
     const std::vector<Action>& legal_actions,
     int action_id,
-    double fallback_probability) const {
+    double fallback_probability) {
   double probability_sum = 0.0;
   double action_probability = 0.0;
 
   for (const Action& legal_action : legal_actions) {
     const int legal_action_id = ActionKey(legal_action);
-    auto action = std::find_if(
-        info_set.actions.begin(), info_set.actions.end(),
-        [legal_action_id](const ActionState& action_state) {
-          return action_state.action_id == legal_action_id;
-        });
-    if (action == info_set.actions.end()) {
+    size_t action_index = info_set.actions.size();
+    for (size_t i = 0; i < info_set.actions.size(); ++i) {
+      ++traversal_stats_.action_entry_touches;
+      if (info_set.actions[i].action_id == legal_action_id) {
+        action_index = i;
+        break;
+      }
+    }
+    if (action_index == info_set.actions.size()) {
       continue;
     }
 
-    const double probability = action->cumulative_strategy;
+    ++traversal_stats_.action_entry_touches;
+    const double probability =
+        info_set.actions[action_index].cumulative_strategy;
     probability_sum += probability;
     if (legal_action_id == action_id) {
       action_probability = probability;
@@ -925,7 +937,7 @@ void CFRSolver::condition_ranges_for_actions(
     const BoardState& state,
     int player,
     const std::vector<ActionChoice>& action_choices,
-    std::vector<WeightedHandRangeView>& conditioned_ranges) const {
+    std::vector<WeightedHandRangeView>& conditioned_ranges) {
   conditioned_ranges.clear();
   conditioned_ranges.resize(action_choices.size());
   if (action_choices.empty() || !range.has_source()) {
@@ -953,18 +965,24 @@ void CFRSolver::condition_ranges_for_actions(
       std::fill(positive_regrets.begin(), positive_regrets.end(), 0.0);
       for (size_t action_index = 0; action_index < action_choices.size();
            ++action_index) {
-        auto action = std::find_if(
-            info_set.actions.begin(), info_set.actions.end(),
-            [&](const ActionState& action_state) {
-              return action_state.action_id ==
-                     action_choices[action_index].action_id;
-            });
-        if (action == info_set.actions.end()) {
+        size_t info_set_action_index = info_set.actions.size();
+        for (size_t i = 0; i < info_set.actions.size(); ++i) {
+          ++traversal_stats_.action_entry_touches;
+          if (info_set.actions[i].action_id ==
+              action_choices[action_index].action_id) {
+            info_set_action_index = i;
+            break;
+          }
+        }
+        if (info_set_action_index == info_set.actions.size()) {
           continue;
         }
 
+        ++traversal_stats_.action_entry_touches;
         const double positive_regret =
-            std::max(0.0, action->cumulative_regret);
+            std::max(0.0,
+                     info_set.actions[info_set_action_index]
+                         .cumulative_regret);
         positive_regrets[action_index] = positive_regret;
         positive_regret_sum += positive_regret;
       }
@@ -1085,7 +1103,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   auto strategy_info_set_ids = info_set_ids_;
   auto strategy_info_sets = info_sets_;
   Strategy loaded_strategy_copy = loaded_strategy_;
-  std::vector<std::future<double>> futures;
+  std::vector<std::future<std::pair<double, int64_t>>> futures;
   futures.reserve(worker_count);
   int samples_remaining = samples;
   for (int i = 0; i < worker_count; ++i) {
@@ -1105,16 +1123,20 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
       worker.info_sets_ = strategy_info_sets;
       worker.loaded_strategy_ = loaded_strategy_copy;
       worker.rng_.seed(seed);
-      return worker.evaluate_strategy_samples(
-                 shard_samples, player_a_hands, player_b_hands, range_deals,
-                 range_deal_weights) *
-             shard_samples;
+      const double value = worker.evaluate_strategy_samples(
+          shard_samples, player_a_hands, player_b_hands, range_deals,
+          range_deal_weights);
+      return std::make_pair(
+          value * shard_samples,
+          worker.get_traversal_stats().action_entry_touches);
     }));
   }
 
   double total = 0.0;
-  for (std::future<double>& future : futures) {
-    total += future.get();
+  for (std::future<std::pair<double, int64_t>>& future : futures) {
+    const std::pair<double, int64_t> result = future.get();
+    total += result.first;
+    traversal_stats_.action_entry_touches += result.second;
   }
   return total / samples;
 }
@@ -1403,7 +1425,7 @@ double CFRSolver::sampled_range_best_response_value(
   auto strategy_info_set_ids = info_set_ids_;
   auto strategy_info_sets = info_sets_;
   Strategy loaded_strategy_copy = loaded_strategy_;
-  std::vector<std::future<double>> futures;
+  std::vector<std::future<std::pair<double, int64_t>>> futures;
   futures.reserve(worker_count);
   int samples_remaining = samples;
   for (int i = 0; i < worker_count; ++i) {
@@ -1421,16 +1443,20 @@ double CFRSolver::sampled_range_best_response_value(
       worker.info_sets_ = strategy_info_sets;
       worker.loaded_strategy_ = loaded_strategy_copy;
       worker.rng_.seed(seed);
-      return worker.sampled_range_best_response_samples(
-                 shard_samples, best_response_hands, opponent_hands,
-                 best_response_player) *
-             shard_samples;
+      const double value = worker.sampled_range_best_response_samples(
+          shard_samples, best_response_hands, opponent_hands,
+          best_response_player);
+      return std::make_pair(
+          value * shard_samples,
+          worker.get_traversal_stats().action_entry_touches);
     }));
   }
 
   double total = 0.0;
-  for (std::future<double>& future : futures) {
-    total += future.get();
+  for (std::future<std::pair<double, int64_t>>& future : futures) {
+    const std::pair<double, int64_t> result = future.get();
+    total += result.first;
+    traversal_stats_.action_entry_touches += result.second;
   }
   return total / samples;
 }
@@ -1658,6 +1684,7 @@ void CFRSolver::update_strategy(int info_set_id,
                                 double reach_prob) {
   InfoSetData& info_set = info_sets_[info_set_id];
   for (const ActionChoice& choice : choices) {
+    traversal_stats_.action_entry_touches += 2;
     info_set.actions[choice.action_index].cumulative_strategy +=
         reach_prob * choice.probability;
   }

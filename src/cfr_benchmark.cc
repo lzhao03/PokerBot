@@ -93,6 +93,29 @@ poker::CFRSolver::UtilityCacheStats CacheDelta(
           after.entries};
 }
 
+poker::CFRSolver::TraversalStats TraversalDelta(
+    const poker::CFRSolver::TraversalStats& after,
+    const poker::CFRSolver::TraversalStats& before) {
+  poker::CFRSolver::TraversalStats delta;
+  delta.cfr_updates = after.cfr_updates - before.cfr_updates;
+  delta.preflop_updates = after.preflop_updates - before.preflop_updates;
+  delta.flop_updates = after.flop_updates - before.flop_updates;
+  delta.turn_updates = after.turn_updates - before.turn_updates;
+  delta.river_updates = after.river_updates - before.river_updates;
+  delta.child_nodes_created =
+      after.child_nodes_created - before.child_nodes_created;
+  delta.chance_samples = after.chance_samples - before.chance_samples;
+  delta.terminal_utility_calls =
+      after.terminal_utility_calls - before.terminal_utility_calls;
+  delta.fold_utility_calls =
+      after.fold_utility_calls - before.fold_utility_calls;
+  delta.showdown_utility_calls =
+      after.showdown_utility_calls - before.showdown_utility_calls;
+  delta.action_entry_touches =
+      after.action_entry_touches - before.action_entry_touches;
+  return delta;
+}
+
 void RunBenchmark(const std::string& name,
                   const std::function<BenchmarkResult()>& benchmark) {
   auto start = std::chrono::steady_clock::now();
@@ -104,6 +127,9 @@ void RunBenchmark(const std::string& name,
             << RatePerSecond(result.hands, elapsed.count()) << "\t"
             << result.cfr_node_updates << "\t"
             << RatePerSecond(result.cfr_node_updates, elapsed.count()) << "\t"
+            << result.traversal_stats.action_entry_touches << "\t"
+            << RatePerSecond(result.traversal_stats.action_entry_touches,
+                             elapsed.count()) << "\t"
             << result.traversal_stats.preflop_updates << "\t"
             << result.traversal_stats.flop_updates << "\t"
             << result.traversal_stats.turn_updates << "\t"
@@ -160,6 +186,7 @@ int main(int argc, char** argv) {
 
     std::cout << "case\tseconds\tresult\thands\thands_per_second"
               << "\tcfr_node_updates\tcfr_node_updates_per_second"
+              << "\taction_entry_touches\taction_entry_touches_per_second"
               << "\tpreflop_updates\tflop_updates\tturn_updates"
               << "\triver_updates\tmax_decision_depth"
               << "\tchild_nodes_created\tchance_samples"
@@ -206,10 +233,14 @@ int main(int argc, char** argv) {
     RunBenchmark("evaluate_range", [&] {
       poker::CFRSolver::UtilityCacheStats before =
           evaluate_solver.get_utility_cache_stats();
+      poker::CFRSolver::TraversalStats traversal_before =
+          evaluate_solver.get_traversal_stats();
       double value = evaluate_solver.evaluate_strategy(
           options.eval_samples, player_a_range, player_b_range);
       return BenchmarkResult{
-          value, options.eval_samples, 0, {},
+          value, options.eval_samples, 0,
+          TraversalDelta(evaluate_solver.get_traversal_stats(),
+                         traversal_before),
           CacheDelta(evaluate_solver.get_utility_cache_stats(), before)};
     });
 
@@ -220,28 +251,40 @@ int main(int argc, char** argv) {
       RunBenchmark("best_response_player_a", [&] {
         poker::CFRSolver::UtilityCacheStats before =
             exploitability_solver.get_utility_cache_stats();
+        poker::CFRSolver::TraversalStats traversal_before =
+            exploitability_solver.get_traversal_stats();
         double value = exploitability_solver.calculate_player_a_best_response_value(
             options.exploitability_samples, player_a_range, player_b_range);
         return BenchmarkResult{
-            value, options.exploitability_samples, 0, {},
+            value, options.exploitability_samples, 0,
+            TraversalDelta(exploitability_solver.get_traversal_stats(),
+                           traversal_before),
             CacheDelta(exploitability_solver.get_utility_cache_stats(), before)};
       });
       RunBenchmark("best_response_player_b", [&] {
         poker::CFRSolver::UtilityCacheStats before =
             exploitability_solver.get_utility_cache_stats();
+        poker::CFRSolver::TraversalStats traversal_before =
+            exploitability_solver.get_traversal_stats();
         double value = exploitability_solver.calculate_player_b_best_response_value(
             options.exploitability_samples, player_a_range, player_b_range);
         return BenchmarkResult{
-            value, options.exploitability_samples, 0, {},
+            value, options.exploitability_samples, 0,
+            TraversalDelta(exploitability_solver.get_traversal_stats(),
+                           traversal_before),
             CacheDelta(exploitability_solver.get_utility_cache_stats(), before)};
       });
       RunBenchmark("exploitability_total", [&] {
         poker::CFRSolver::UtilityCacheStats before =
             exploitability_solver.get_utility_cache_stats();
+        poker::CFRSolver::TraversalStats traversal_before =
+            exploitability_solver.get_traversal_stats();
         double value = exploitability_solver.calculate_exploitability(
             options.exploitability_samples, player_a_range, player_b_range);
         return BenchmarkResult{
-            value, options.exploitability_samples * 3, 0, {},
+            value, options.exploitability_samples * 3, 0,
+            TraversalDelta(exploitability_solver.get_traversal_stats(),
+                           traversal_before),
             CacheDelta(exploitability_solver.get_utility_cache_stats(), before)};
       });
     }

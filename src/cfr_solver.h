@@ -36,6 +36,7 @@ public:
     int64_t terminal_utility_calls = 0;
     int64_t fold_utility_calls = 0;
     int64_t showdown_utility_calls = 0;
+    int64_t action_entry_touches = 0;
   };
 
   struct UtilityCacheStats {
@@ -225,18 +226,18 @@ private:
       int player,
       const Hand& hand,
       const std::vector<Action>& legal_actions,
-      int action_id) const;
+      int action_id);
   double average_strategy_action_probability(
       const InfoSetData& info_set,
       const std::vector<Action>& legal_actions,
       int action_id,
-      double fallback_probability) const;
+      double fallback_probability);
   void condition_ranges_for_actions(
       const WeightedHandRangeView& range,
       const BoardState& state,
       int player,
       const std::vector<ActionChoice>& action_choices,
-      std::vector<WeightedHandRangeView>& conditioned_ranges) const;
+      std::vector<WeightedHandRangeView>& conditioned_ranges);
   InfoSetKey make_info_set_key(const BoardState& state,
                                int player,
                                const Hand& hand) const;
