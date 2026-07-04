@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/inlined_vector.h"
 #include "src/poker.pb.h"
 #include "src/game_tree.h"
 #include "src/hand_range.h"
@@ -61,7 +62,7 @@ public:
   double cfr(GameTree::Node& node,
              const Hand& player_a_hand, 
              const Hand& player_b_hand,
-             std::vector<double>& reach_probabilities, 
+             std::array<double, 2>& reach_probabilities,
              int iteration,
              int depth = 0,
              int max_depth = 0);
@@ -130,6 +131,8 @@ private:
     double probability = 0.0;
     double value = 0.0;
   };
+  using ActionChoices = absl::InlinedVector<ActionChoice, 8>;
+  using ConditionedRanges = absl::InlinedVector<WeightedHandRangeView, 8>;
 
   struct InfoSetKey {
     static constexpr int kMaxCards = 5;
@@ -211,7 +214,7 @@ private:
       GameTree::Node& node,
       const Hand& player_a_hand,
       const Hand& player_b_hand,
-      std::vector<double>& reach_probabilities,
+      std::array<double, 2>& reach_probabilities,
       int iteration,
       int depth,
       int max_depth,
@@ -232,8 +235,8 @@ private:
       const WeightedHandRangeView& range,
       const BoardState& state,
       int player,
-      const std::vector<ActionChoice>& action_choices,
-      std::vector<WeightedHandRangeView>& conditioned_ranges);
+      const ActionChoices& action_choices,
+      ConditionedRanges& conditioned_ranges);
   InfoSetKey make_info_set_key(const BoardState& state,
                                int player,
                                const Hand& hand) const;
@@ -282,13 +285,13 @@ private:
       const WeightedHandRange& opponent_hands,
       int best_response_player);
   void update_strategy(int info_set_id,
-                       const std::vector<ActionChoice>& choices,
+                       const ActionChoices& choices,
                        double reach_prob);
   double chance_sampling_cfr(
       GameTree::Node& node,
       const Hand& player_a_hand,
       const Hand& player_b_hand,
-      std::vector<double>& reach_probabilities,
+      std::array<double, 2>& reach_probabilities,
       int iteration,
       int depth,
       int max_depth,

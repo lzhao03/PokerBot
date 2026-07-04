@@ -8,6 +8,7 @@
 #include "src/subgame_value.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -129,7 +130,7 @@ class CFRSolverRegretTestPeer {
       int amount) {
     std::vector<Action> legal_actions =
         solver.game_tree_->get_legal_actions(state);
-    std::vector<CFRSolver::ActionChoice> choices;
+    CFRSolver::ActionChoices choices;
     choices.reserve(legal_actions.size());
     size_t selected_index = legal_actions.size();
     for (size_t i = 0; i < legal_actions.size(); ++i) {
@@ -145,7 +146,7 @@ class CFRSolverRegretTestPeer {
       throw std::runtime_error("Selected action is not legal");
     }
 
-    std::vector<WeightedHandRangeView> conditioned_ranges;
+    CFRSolver::ConditionedRanges conditioned_ranges;
     solver.condition_ranges_for_actions(
         range, state, player, choices, conditioned_ranges);
     return std::move(conditioned_ranges[selected_index]);
@@ -386,7 +387,7 @@ void CheckCfrUsesLegalActions() {
 
   Hand player_a_hand;
   Hand player_b_hand;
-  std::vector<double> reach_probabilities = {1.0, 1.0};
+  std::array<double, 2> reach_probabilities = {1.0, 1.0};
   solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
 
   const Strategy strategy = solver.get_equilibrium_strategy();
@@ -423,7 +424,7 @@ void CheckCfrDistinguishesActionAmounts() {
 
   Hand player_a_hand;
   Hand player_b_hand;
-  std::vector<double> reach_probabilities = {1.0, 1.0};
+  std::array<double, 2> reach_probabilities = {1.0, 1.0};
   solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
 
   const Strategy strategy = solver.get_equilibrium_strategy();
@@ -456,7 +457,7 @@ void CheckSaveStrategyUsesProtobufSnapshot() {
 
   Hand player_a_hand;
   Hand player_b_hand;
-  std::vector<double> reach_probabilities = {1.0, 1.0};
+  std::array<double, 2> reach_probabilities = {1.0, 1.0};
   solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
 
   const char* test_tmpdir = std::getenv("TEST_TMPDIR");
@@ -1053,23 +1054,34 @@ void CheckRunLoggingUsesAbseilLevels() {
   Expect(default_output.messages().find("Iteration 1/1") == std::string::npos,
          "run should not log per-iteration progress at default verbosity");
 
-  CapturingLogSink verbose_output;
+  CapturingLogSink normal_verbose_output;
   {
     ScopedVLogLevel verbose(1);
-    ScopedLogSink capture_logs(verbose_output);
+    ScopedLogSink capture_logs(normal_verbose_output);
     CFRSolver solver(config);
     solver.run(1, player_a_range, player_b_range);
   }
-  Expect(verbose_output.messages().find("Iteration 1/1") !=
+  Expect(normal_verbose_output.messages().find("Iteration 1/1") ==
              std::string::npos,
-         "run should log per-iteration progress at verbose level");
-  Expect(verbose_output.messages().find("Iterations run: 1") !=
+         "run should not log per-iteration progress at normal verbosity");
+
+  CapturingLogSink detailed_verbose_output;
+  {
+    ScopedVLogLevel verbose(2);
+    ScopedLogSink capture_logs(detailed_verbose_output);
+    CFRSolver solver(config);
+    solver.run(1, player_a_range, player_b_range);
+  }
+  Expect(detailed_verbose_output.messages().find("Iteration 1/1") !=
+             std::string::npos,
+         "run should log per-iteration progress at detailed verbosity");
+  Expect(detailed_verbose_output.messages().find("Iterations run: 1") !=
              std::string::npos,
          "run should log completed iteration count");
-  Expect(verbose_output.messages().find("Information sets: 1") !=
+  Expect(detailed_verbose_output.messages().find("Information sets: 1") !=
              std::string::npos,
          "run should log trained info set count");
-  Expect(verbose_output.messages().find("Player A average EV:") !=
+  Expect(detailed_verbose_output.messages().find("Player A average EV:") !=
              std::string::npos,
          "run should log average root EV");
 }
@@ -1319,7 +1331,7 @@ void CheckCfrDepthLimitUsesExactHandNestedContinuationProvider() {
   node.player_to_act = 0;
   Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
-  std::vector<double> reach_probabilities = {1.0, 1.0};
+  std::array<double, 2> reach_probabilities = {1.0, 1.0};
 
   double first = solver.cfr(node, player_a_hand, player_b_hand,
                             reach_probabilities, 0, 1, 1);
@@ -1352,7 +1364,7 @@ void CheckTerminalUtilityBeatsDepthLimit() {
 
   Hand player_a_hand;
   Hand player_b_hand;
-  std::vector<double> reach_probabilities = {1.0, 1.0};
+  std::array<double, 2> reach_probabilities = {1.0, 1.0};
   double value =
       solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
@@ -1382,7 +1394,7 @@ void CheckDepthLimitUsesShowdownUtility() {
 
   Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
-  std::vector<double> reach_probabilities = {1.0, 1.0};
+  std::array<double, 2> reach_probabilities = {1.0, 1.0};
   double value =
       solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
@@ -1410,7 +1422,7 @@ void CheckDepthLimitDoesNotScoreUncalledBet() {
 
   Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
-  std::vector<double> reach_probabilities = {1.0, 1.0};
+  std::array<double, 2> reach_probabilities = {1.0, 1.0};
   double value =
       solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
@@ -1433,7 +1445,7 @@ void CheckDepthLimitUsesContinuationValueProvider() {
 
   Hand player_a_hand;
   Hand player_b_hand;
-  std::vector<double> reach_probabilities = {1.0, 1.0};
+  std::array<double, 2> reach_probabilities = {1.0, 1.0};
   double value =
       solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
@@ -1577,7 +1589,7 @@ void CheckZeroMaxDepthDoesNotCutOff() {
 
   Hand player_a_hand;
   Hand player_b_hand;
-  std::vector<double> reach_probabilities = {1.0, 1.0};
+  std::array<double, 2> reach_probabilities = {1.0, 1.0};
   double value =
       solver.cfr(root, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 0);
 
@@ -1604,7 +1616,7 @@ void CheckChanceDoesNotConsumeDepth() {
 
   Hand player_a_hand = MakeHand(14, Suit::SPADES, 3, Suit::HEARTS);
   Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
-  std::vector<double> reach_probabilities = {1.0, 1.0};
+  std::array<double, 2> reach_probabilities = {1.0, 1.0};
   double value =
       solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
@@ -1632,7 +1644,7 @@ void CheckChanceSamplesVisitMultipleBoards() {
   GameTree::Node one_sample_node;
   one_sample_node.is_chance_node = true;
   one_sample_node.state = state;
-  std::vector<double> one_sample_reach = {1.0, 1.0};
+  std::array<double, 2> one_sample_reach = {1.0, 1.0};
   one_sample_solver.cfr(one_sample_node, player_a_hand, player_b_hand,
                         one_sample_reach, 0, 0, 1);
 
@@ -1643,7 +1655,7 @@ void CheckChanceSamplesVisitMultipleBoards() {
   GameTree::Node three_sample_node;
   three_sample_node.is_chance_node = true;
   three_sample_node.state = state;
-  std::vector<double> three_sample_reach = {1.0, 1.0};
+  std::array<double, 2> three_sample_reach = {1.0, 1.0};
   three_sample_solver.cfr(three_sample_node, player_a_hand, player_b_hand,
                           three_sample_reach, 0, 0, 1);
 
@@ -1861,7 +1873,7 @@ void CheckPlayerBRegretsUsePlayerBUtility() {
 
   Hand player_a_hand;
   Hand player_b_hand;
-  std::vector<double> reach_probabilities = {1.0, 1.0};
+  std::array<double, 2> reach_probabilities = {1.0, 1.0};
   solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 2);
   solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 1, 0, 2);
 
@@ -1896,7 +1908,7 @@ void CheckCfrPlusClipsNegativeRegrets() {
   Hand player_b_hand;
   std::string info_set_key =
       CFRSolverRegretTestPeer::InfoSetKey(solver, node.state, 0, player_a_hand);
-  std::vector<double> reach_probabilities = {1.0, 1.0};
+  std::array<double, 2> reach_probabilities = {1.0, 1.0};
   solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
 
   Expect(CFRSolverRegretTestPeer::Regret(
@@ -1929,7 +1941,7 @@ void CheckCfrPlusWeightsLaterStrategies() {
 
   Hand player_a_hand;
   Hand player_b_hand;
-  std::vector<double> reach_probabilities = {1.0, 1.0};
+  std::array<double, 2> reach_probabilities = {1.0, 1.0};
   solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
   solver.cfr(node, player_a_hand, player_b_hand, reach_probabilities, 1, 0, 1);
 

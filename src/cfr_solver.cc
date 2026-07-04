@@ -502,7 +502,7 @@ void CFRSolver::run(int iterations, const Hand& player_a_hand,
   GameTree::Node& root = get_or_build_root();
   const int max_depth = config_.max_depth();
   for (int i = 0; i < iterations; ++i) {
-    std::vector<double> reach_probabilities(2, 1.0);
+    std::array<double, 2> reach_probabilities = {1.0, 1.0};
     cumulative_root_utility_ += cfr(root, player_a_hand, player_b_hand,
                                     reach_probabilities, iterations_run_, 0,
                                     max_depth);
@@ -564,9 +564,9 @@ void CFRSolver::run_iterations(int iterations,
         player_b_hands_view.source_range().hands[deal.player_b_index];
     
     const int max_depth = config_.max_depth();
-    VLOG(1) << "Iteration " << i + 1 << "/" << iterations;
+    VLOG(2) << "Iteration " << i + 1 << "/" << iterations;
     int cfr_iteration = iterations_run_;
-    std::vector<double> reach_probabilities(2, 1.0);
+    std::array<double, 2> reach_probabilities = {1.0, 1.0};
     OptionalWeightedHandRange player_a_context_range;
     OptionalWeightedHandRange player_b_context_range;
     if (max_depth > 0) {
@@ -591,7 +591,7 @@ void CFRSolver::run_iterations(int iterations,
 double CFRSolver::cfr(GameTree::Node& node,
                       const Hand& player_a_hand, 
                       const Hand& player_b_hand,
-                      std::vector<double>& reach_probabilities, 
+                      std::array<double, 2>& reach_probabilities,
                       int iteration,
                       int depth,
                       int max_depth) {
@@ -604,7 +604,7 @@ double CFRSolver::cfr_with_ranges(
     GameTree::Node& node,
     const Hand& player_a_hand,
     const Hand& player_b_hand,
-    std::vector<double>& reach_probabilities,
+    std::array<double, 2>& reach_probabilities,
     int iteration,
     int depth,
     int max_depth,
@@ -649,7 +649,7 @@ double CFRSolver::cfr_with_ranges(
   EnsureLegalActionIds(node);
   const int info_set_id =
       get_or_create_info_set_id(info_set_key, node.legal_action_ids);
-  std::vector<ActionChoice> action_choices;
+  ActionChoices action_choices;
   action_choices.reserve(node.legal_actions.size());
   {
     InfoSetData& info_set = info_sets_[info_set_id];
@@ -688,7 +688,7 @@ double CFRSolver::cfr_with_ranges(
   
   // Initialize the expected value for the player
   double node_value = 0.0;
-  std::vector<WeightedHandRangeView> conditioned_player_ranges;
+  ConditionedRanges conditioned_player_ranges;
   const bool condition_player_a_range =
       player == 0 && player_a_range.has_value();
   const bool condition_player_b_range =
@@ -790,7 +790,7 @@ double CFRSolver::cfr_with_ranges(
 double CFRSolver::chance_sampling_cfr(GameTree::Node& node,
                       const Hand& player_a_hand, 
                       const Hand& player_b_hand,
-                      std::vector<double>& reach_probabilities, 
+                      std::array<double, 2>& reach_probabilities,
                       int iteration,
                       int depth,
                       int max_depth,
@@ -891,8 +891,8 @@ void CFRSolver::condition_ranges_for_actions(
     const WeightedHandRangeView& range,
     const BoardState& state,
     int player,
-    const std::vector<ActionChoice>& action_choices,
-    std::vector<WeightedHandRangeView>& conditioned_ranges) {
+    const ActionChoices& action_choices,
+    ConditionedRanges& conditioned_ranges) {
   conditioned_ranges.clear();
   conditioned_ranges.resize(action_choices.size());
   if (action_choices.empty() || !range.has_source()) {
@@ -1628,7 +1628,7 @@ double CFRSolver::utility(const BoardState& state,
 }
 
 void CFRSolver::update_strategy(int info_set_id,
-                                const std::vector<ActionChoice>& choices,
+                                const ActionChoices& choices,
                                 double reach_prob) {
   InfoSetData& info_set = info_sets_[info_set_id];
   for (size_t action_index = 0; action_index < choices.size();
