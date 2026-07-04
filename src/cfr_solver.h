@@ -158,6 +158,7 @@ private:
   };
   using ActionChoices = absl::InlinedVector<ActionChoice, 8>;
   using ConditionedRanges = absl::InlinedVector<TrainingRangeView, 8>;
+  using StrategyProbabilities = absl::InlinedVector<double, 8>;
 
   struct RangeScratchFrame {
     ConditionedRanges conditioned_ranges;
@@ -288,6 +289,17 @@ private:
       const std::vector<Action>& legal_actions,
       int action_id,
       double fallback_probability);
+  void average_strategy_probabilities(
+      const BoardState& state,
+      int player,
+      const PrivateCards& private_cards,
+      const std::vector<Action>& legal_actions,
+      StrategyProbabilities& probabilities);
+  void average_strategy_probabilities(
+      const InfoSetData& info_set,
+      const std::vector<Action>& legal_actions,
+      double fallback_probability,
+      StrategyProbabilities& probabilities);
   void condition_ranges_for_actions(
       const TrainingRangeView& range,
       const BoardState& state,

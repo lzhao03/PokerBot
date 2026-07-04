@@ -1021,36 +1021,105 @@ double CFRSolver::average_strategy_action_probability(
     const std::vector<Action>& legal_actions,
     int action_id,
     double fallback_probability) {
+  StrategyProbabilities probabilities;
+  average_strategy_probabilities(
+      info_set, legal_actions, fallback_probability, probabilities);
+  for (size_t i = 0; i < legal_actions.size(); ++i) {
+    if (ActionKey(legal_actions[i]) == action_id) {
+      return probabilities[i];
+    }
+  }
+  return fallback_probability;
+}
+
+void CFRSolver::average_strategy_probabilities(
+    const BoardState& state,
+    int player,
+    const PrivateCards& private_cards,
+    const std::vector<Action>& legal_actions,
+    StrategyProbabilities& probabilities) {
+  probabilities.clear();
+  probabilities.resize(legal_actions.size(), 0.0);
+  if (legal_actions.empty()) {
+    return;
+  }
+
+  const double uniform_probability = 1.0 / legal_actions.size();
+  InfoSetKey key = make_info_set_key(state, player, private_cards);
+  auto existing_info_set = info_set_ids_.find(key);
+  if (existing_info_set != info_set_ids_.end()) {
+    average_strategy_probabilities(
+        info_sets_[existing_info_set->second], legal_actions,
+        uniform_probability, probabilities);
+    return;
+  }
+
+  if (loaded_strategy_.empty()) {
+    std::fill(probabilities.begin(), probabilities.end(), uniform_probability);
+    return;
+  }
+
   double probability_sum = 0.0;
-  double action_probability = 0.0;
+  const std::string info_set_key = info_set_key_to_string(key);
+  for (size_t i = 0; i < legal_actions.size(); ++i) {
+    probabilities[i] = loaded_strategy_.get_action_probability(
+        info_set_key, ActionKey(legal_actions[i]));
+    probability_sum += probabilities[i];
+  }
+  if (probability_sum <= 0.0) {
+    std::fill(probabilities.begin(), probabilities.end(), uniform_probability);
+    return;
+  }
+  for (double& probability : probabilities) {
+    probability /= probability_sum;
+  }
+}
 
-  for (const Action& legal_action : legal_actions) {
-    const int legal_action_id = ActionKey(legal_action);
-    size_t action_index = info_set.actions.size();
-    for (size_t i = 0; i < info_set.actions.size(); ++i) {
+void CFRSolver::average_strategy_probabilities(
+    const InfoSetData& info_set,
+    const std::vector<Action>& legal_actions,
+    double fallback_probability,
+    StrategyProbabilities& probabilities) {
+  probabilities.clear();
+  probabilities.resize(legal_actions.size(), 0.0);
+  double probability_sum = 0.0;
+
+  const bool aligned_action_ids =
+      legal_actions.size() == info_set.actions.size() &&
+      std::equal(legal_actions.begin(), legal_actions.end(),
+                 info_set.actions.begin(),
+                 [](const Action& legal_action,
+                    const ActionState& action_state) {
+                   return ActionKey(legal_action) == action_state.action_id;
+                 });
+  if (aligned_action_ids) {
+    for (size_t i = 0; i < legal_actions.size(); ++i) {
       ++traversal_stats_.action_entry_touches;
-      if (info_set.actions[i].action_id == legal_action_id) {
-        action_index = i;
-        break;
+      probabilities[i] = info_set.actions[i].cumulative_strategy;
+      probability_sum += probabilities[i];
+    }
+  } else {
+    for (size_t legal_action_index = 0;
+         legal_action_index < legal_actions.size(); ++legal_action_index) {
+      const int legal_action_id = ActionKey(legal_actions[legal_action_index]);
+      for (const ActionState& action_state : info_set.actions) {
+        ++traversal_stats_.action_entry_touches;
+        if (action_state.action_id == legal_action_id) {
+          probabilities[legal_action_index] = action_state.cumulative_strategy;
+          probability_sum += probabilities[legal_action_index];
+          break;
+        }
       }
-    }
-    if (action_index == info_set.actions.size()) {
-      continue;
-    }
-
-    ++traversal_stats_.action_entry_touches;
-    const double probability =
-        info_set.actions[action_index].cumulative_strategy;
-    probability_sum += probability;
-    if (legal_action_id == action_id) {
-      action_probability = probability;
     }
   }
 
   if (probability_sum <= 0.0) {
-    return fallback_probability;
+    std::fill(probabilities.begin(), probabilities.end(), fallback_probability);
+    return;
   }
-  return action_probability / probability_sum;
+  for (double& probability : probabilities) {
+    probability /= probability_sum;
+  }
 }
 
 void CFRSolver::condition_ranges_for_actions(
@@ -1298,18 +1367,22 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node& node,
 
   const PrivateCards& player_cards =
       player == 0 ? player_a_cards : player_b_cards;
+  StrategyProbabilities probabilities;
+  average_strategy_probabilities(
+      node.state, player, player_cards, node.legal_actions, probabilities);
 
   double value = 0.0;
   int64_t ignored_created_nodes = 0;
-  for (const Action& action : node.legal_actions) {
+  for (size_t action_index = 0; action_index < node.legal_actions.size();
+       ++action_index) {
+    const Action& action = node.legal_actions[action_index];
     int action_id = ActionKey(action);
-    double probability = average_strategy_action_probability(
-        node.state, player, player_cards, node.legal_actions, action_id);
     GameTree::Node& child_node =
         CachedActionChild(*game_tree_, node, action, action_id,
                           ignored_created_nodes);
-    value += probability * evaluate_strategy_node(
-                              child_node, player_a_cards, player_b_cards);
+    value += probabilities[action_index] *
+             evaluate_strategy_node(
+                 child_node, player_a_cards, player_b_cards);
   }
   return value;
 }
