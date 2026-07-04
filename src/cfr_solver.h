@@ -240,6 +240,16 @@ private:
     std::array<int32_t, kComboCount> info_set_ids;
   };
 
+  static constexpr size_t kComboInfoSetIndexBlockSize = 128;
+
+  struct ComboInfoSetIndexBlock {
+    ComboInfoSetIndexBlock() {
+      indexes.reserve(kComboInfoSetIndexBlockSize);
+    }
+
+    std::vector<ComboInfoSetIndex> indexes;
+  };
+
   using InfoSetIdsByPublicState =
       std::array<absl::flat_hash_map<uint32_t, std::vector<int32_t>>, 2>;
 
@@ -293,7 +303,9 @@ private:
   absl::flat_hash_map<CompactInfoSetKey, int, CompactInfoSetKeyHash>
       compact_info_set_ids_;
   InfoSetIdsByPublicState info_set_ids_by_public_state_;
-  std::vector<std::unique_ptr<ComboInfoSetIndex>> combo_info_set_indexes_;
+  std::vector<std::unique_ptr<ComboInfoSetIndexBlock>>
+      combo_info_set_index_blocks_;
+  size_t combo_info_set_index_count_ = 0;
   std::array<absl::flat_hash_map<uint32_t, int32_t>, 2>
       combo_info_set_index_ids_by_public_state_;
   const StrategyTablesView* strategy_tables_view_ = nullptr;
@@ -362,6 +374,9 @@ private:
   ComboInfoSetIndex* combo_info_set_index(GameTree::Node* node,
                                           int player,
                                           uint32_t public_state_id);
+  int32_t allocate_combo_info_set_index_id();
+  ComboInfoSetIndex& combo_info_set_index_at(int32_t index_id);
+  const ComboInfoSetIndex& combo_info_set_index_at(int32_t index_id) const;
   StrategyTablesView strategy_tables_view() const;
   std::optional<uint32_t> strategy_public_state_id(GameTree::Node& node);
   const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>&

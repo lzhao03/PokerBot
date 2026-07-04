@@ -514,13 +514,51 @@ CFRSolver::ComboInfoSetIndex& CFRSolver::get_or_build_combo_info_set_index(
   return ensure_combo_info_set_index(&node, player, public_state_id);
 }
 
+int32_t CFRSolver::allocate_combo_info_set_index_id() {
+  if (combo_info_set_index_count_ >
+      static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+    throw std::overflow_error("Too many combo infoset indexes");
+  }
+
+  if (combo_info_set_index_blocks_.empty() ||
+      combo_info_set_index_blocks_.back()->indexes.size() ==
+          kComboInfoSetIndexBlockSize) {
+    combo_info_set_index_blocks_.push_back(
+        std::make_unique<ComboInfoSetIndexBlock>());
+  }
+
+  const int32_t index_id =
+      static_cast<int32_t>(combo_info_set_index_count_);
+  combo_info_set_index_blocks_.back()->indexes.emplace_back();
+  ++combo_info_set_index_count_;
+  return index_id;
+}
+
+CFRSolver::ComboInfoSetIndex& CFRSolver::combo_info_set_index_at(
+    int32_t index_id) {
+  const size_t block_index =
+      static_cast<size_t>(index_id) / kComboInfoSetIndexBlockSize;
+  const size_t offset =
+      static_cast<size_t>(index_id) % kComboInfoSetIndexBlockSize;
+  return combo_info_set_index_blocks_[block_index]->indexes[offset];
+}
+
+const CFRSolver::ComboInfoSetIndex& CFRSolver::combo_info_set_index_at(
+    int32_t index_id) const {
+  const size_t block_index =
+      static_cast<size_t>(index_id) / kComboInfoSetIndexBlockSize;
+  const size_t offset =
+      static_cast<size_t>(index_id) % kComboInfoSetIndexBlockSize;
+  return combo_info_set_index_blocks_[block_index]->indexes[offset];
+}
+
 CFRSolver::ComboInfoSetIndex& CFRSolver::ensure_combo_info_set_index(
     GameTree::Node* node,
     int player,
     uint32_t public_state_id) {
   if (node != nullptr && node->combo_info_set_index_ids[player] >= 0) {
     const int32_t index_id = node->combo_info_set_index_ids[player];
-    return *combo_info_set_indexes_[index_id];
+    return combo_info_set_index_at(index_id);
   }
 
   absl::flat_hash_map<uint32_t, int32_t>& player_index_ids =
@@ -530,14 +568,11 @@ CFRSolver::ComboInfoSetIndex& CFRSolver::ensure_combo_info_set_index(
     if (node != nullptr) {
       node->combo_info_set_index_ids[player] = existing_index_id->second;
     }
-    return *combo_info_set_indexes_[existing_index_id->second];
+    return combo_info_set_index_at(existing_index_id->second);
   }
 
-  auto index = std::make_unique<ComboInfoSetIndex>();
-  const int32_t node_index_id =
-      static_cast<int32_t>(combo_info_set_indexes_.size());
+  const int32_t node_index_id = allocate_combo_info_set_index_id();
   player_index_ids.emplace(public_state_id, node_index_id);
-  combo_info_set_indexes_.push_back(std::move(index));
   if (node != nullptr) {
     node->combo_info_set_index_ids[player] = node_index_id;
   }
@@ -547,15 +582,14 @@ CFRSolver::ComboInfoSetIndex& CFRSolver::ensure_combo_info_set_index(
       info_set_ids_by_public_state[player].find(public_state_id);
   if (public_state_info_sets !=
       info_set_ids_by_public_state[player].end()) {
-    ComboInfoSetIndex& combo_index =
-        *combo_info_set_indexes_[node_index_id];
+    ComboInfoSetIndex& combo_index = combo_info_set_index_at(node_index_id);
     const std::vector<InfoSetData>& info_sets = strategy_info_sets();
     for (int32_t info_set_id : public_state_info_sets->second) {
       const InfoSetData& info_set = info_sets[info_set_id];
       combo_index.info_set_ids[info_set.private_combo] = info_set_id;
     }
   }
-  return *combo_info_set_indexes_[node_index_id];
+  return combo_info_set_index_at(node_index_id);
 }
 
 CFRSolver::ComboInfoSetIndex* CFRSolver::combo_info_set_index(
@@ -564,9 +598,9 @@ CFRSolver::ComboInfoSetIndex* CFRSolver::combo_info_set_index(
     uint32_t public_state_id) {
   if (node != nullptr && node->combo_info_set_index_ids[player] >= 0) {
     const int32_t index_id = node->combo_info_set_index_ids[player];
-    return combo_info_set_indexes_[index_id].get();
+    return &combo_info_set_index_at(index_id);
   }
-  if (combo_info_set_indexes_.empty()) {
+  if (combo_info_set_index_count_ == 0) {
     return nullptr;
   }
   auto existing_index_id =
@@ -578,7 +612,7 @@ CFRSolver::ComboInfoSetIndex* CFRSolver::combo_info_set_index(
   if (node != nullptr) {
     node->combo_info_set_index_ids[player] = existing_index_id->second;
   }
-  return combo_info_set_indexes_[existing_index_id->second].get();
+  return &combo_info_set_index_at(existing_index_id->second);
 }
 
 int CFRSolver::get_or_create_compact_info_set_id(
