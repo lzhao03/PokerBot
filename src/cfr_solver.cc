@@ -1233,7 +1233,6 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   }
 
   SolverConfig config = config_;
-  std::shared_ptr<TerminalUtilityCache> utility_cache = utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider =
       continuation_value_provider_;
   const StrategyTablesView strategy_tables = strategy_tables_view();
@@ -1245,10 +1244,11 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
     samples_remaining -= shard_samples;
     unsigned int seed = worker_seeds[i];
     futures.push_back(executor.submit([config, range_sampler,
-                                       &strategy_tables, utility_cache,
+                                       &strategy_tables,
                                        continuation_value_provider,
                                        shard_samples, seed]() mutable {
-      CFRSolver worker(config, utility_cache, continuation_value_provider);
+      CFRSolver worker(config, std::make_shared<TerminalUtilityCache>(),
+                       continuation_value_provider);
       worker.strategy_tables_view_ = &strategy_tables;
       worker.rng_.seed(seed);
       const double value = worker.evaluate_strategy_samples(
@@ -1549,7 +1549,6 @@ double CFRSolver::sampled_range_best_response_value(
   }
 
   SolverConfig config = config_;
-  std::shared_ptr<TerminalUtilityCache> utility_cache = utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider =
       continuation_value_provider_;
   const StrategyTablesView strategy_tables = strategy_tables_view();
@@ -1562,9 +1561,10 @@ double CFRSolver::sampled_range_best_response_value(
     unsigned int seed = worker_seeds[i];
     futures.push_back(executor.submit([config, &best_response_hands,
                                        &opponent_hands, &strategy_tables,
-                                       utility_cache, continuation_value_provider,
+                                       continuation_value_provider,
                                        shard_samples, seed, best_response_player]() {
-      CFRSolver worker(config, utility_cache, continuation_value_provider);
+      CFRSolver worker(config, std::make_shared<TerminalUtilityCache>(),
+                       continuation_value_provider);
       worker.strategy_tables_view_ = &strategy_tables;
       worker.rng_.seed(seed);
       const double value = worker.sampled_range_best_response_samples(

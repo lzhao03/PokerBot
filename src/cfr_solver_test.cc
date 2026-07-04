@@ -17,6 +17,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -777,6 +778,36 @@ void CheckRangeBestResponseWrappersReturnFiniteValues() {
          "parallel player A range best-response should return a finite value");
   Expect(std::isfinite(player_b_value),
          "parallel player B range best-response should return a finite value");
+}
+
+void CheckParallelEvaluationUsesWorkerLocalUtilityCaches() {
+  PokerConfig config;
+  config.set_starting_stack_size(6);
+  config.set_max_depth(1);
+  config.add_bet_sizes(1.0);
+
+  HandRange player_a_range;
+  player_a_range.set_from_string("AA,KK");
+  HandRange player_b_range;
+  player_b_range.set_from_string("QQ,JJ");
+
+  CFRSolver solver(TestSolverConfig(config));
+  solver.run(2, player_a_range, player_b_range);
+
+  const CFRSolver::UtilityCacheStats before =
+      solver.get_utility_cache_stats();
+  const double value =
+      solver.evaluate_strategy(64, player_a_range, player_b_range);
+  const CFRSolver::UtilityCacheStats after =
+      solver.get_utility_cache_stats();
+
+  Expect(std::isfinite(value),
+         "parallel range evaluation should return a finite value");
+  if (std::thread::hardware_concurrency() > 1) {
+    Expect(after.hits == before.hits && after.misses == before.misses &&
+               after.entries == before.entries,
+           "parallel range evaluation should not mutate the parent utility cache");
+  }
 }
 
 void CheckRunUsesConfiguredBlinds() {
@@ -1988,6 +2019,7 @@ int main() {
   CheckSingletonRangeMatchesExactEvaluationAndBestResponse();
   CheckExploitabilityZeroSamples();
   CheckRangeBestResponseWrappersReturnFiniteValues();
+  CheckParallelEvaluationUsesWorkerLocalUtilityCaches();
   CheckRunUsesConfiguredBlinds();
   CheckRunUpdatesExpectedValue();
   CheckRunUsesProvidedPrivateRanges();
