@@ -243,15 +243,10 @@ private:
     size_t operator()(const CompactInfoSetKey& key) const;
   };
 
-  struct ActionState {
-    int action_id = 0;
-    float cumulative_regret = 0.0f;
-    float cumulative_strategy = 0.0f;
-  };
-
   struct InfoSetData {
     InfoSetKey key;
-    std::vector<ActionState> actions;
+    uint32_t action_offset = 0;
+    uint16_t action_count = 0;
   };
 
   CFRSolver(const PokerConfig& config,
@@ -277,6 +272,9 @@ private:
   
   absl::flat_hash_map<InfoSetKey, int, InfoSetKeyHash> info_set_ids_;
   std::vector<InfoSetData> info_sets_;
+  std::vector<int> action_ids_;
+  std::vector<float> cumulative_regrets_;
+  std::vector<float> cumulative_strategies_;
   absl::flat_hash_map<CompactInfoSetKey, int, CompactInfoSetKeyHash>
       compact_info_set_ids_;
   

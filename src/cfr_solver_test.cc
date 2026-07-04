@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -125,23 +126,24 @@ class CFRSolverRegretTestPeer {
         public_state_id, state, player, HandToComboId(hand),
         legal_action_ids);
     CFRSolver::InfoSetData& info_set = solver.info_sets_[info_set_id];
-    auto action = std::find_if(
-        info_set.actions.begin(), info_set.actions.end(),
-        [action_id](const CFRSolver::ActionState& action_state) {
-          return action_state.action_id == action_id;
-        });
-    if (action == info_set.actions.end()) {
+    std::optional<size_t> action_table_index;
+    for (uint16_t i = 0; i < info_set.action_count; ++i) {
+      const size_t table_index = info_set.action_offset + i;
+      if (solver.action_ids_[table_index] == action_id) {
+        action_table_index = table_index;
+        break;
+      }
+    }
+    if (!action_table_index.has_value()) {
       throw std::runtime_error("Seeded regret action is not legal");
     }
-    action->cumulative_regret = regret;
+    solver.cumulative_regrets_[*action_table_index] = regret;
   }
 
   static double TotalCumulativeStrategy(const CFRSolver& solver) {
     double total = 0.0;
-    for (const CFRSolver::InfoSetData& info_set : solver.info_sets_) {
-      for (const CFRSolver::ActionState& action : info_set.actions) {
-        total += action.cumulative_strategy;
-      }
+    for (float cumulative_strategy : solver.cumulative_strategies_) {
+      total += cumulative_strategy;
     }
     return total;
   }
