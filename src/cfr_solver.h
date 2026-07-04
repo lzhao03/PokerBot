@@ -7,10 +7,10 @@
 #include <memory>
 #include <optional>
 #include <random>
-#include <unordered_map>
 #include <string>
 #include <utility>
 #include <vector>
+#include "absl/container/flat_hash_map.h"
 #include "src/poker.pb.h"
 #include "src/game_tree.h"
 #include "src/hand_range.h"
@@ -194,7 +194,7 @@ private:
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
   
-  std::unordered_map<InfoSetKey, int, InfoSetKeyHash> info_set_ids_;
+  absl::flat_hash_map<InfoSetKey, int, InfoSetKeyHash> info_set_ids_;
   std::vector<InfoSetData> info_sets_;
   
   // String-keyed strategy loaded from snapshots. Trained CFR state lives in

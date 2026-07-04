@@ -413,6 +413,13 @@ int CFRSolver::get_or_create_info_set_id(
     return existing->second;
   }
 
+  if (info_sets_.size() == info_sets_.capacity()) {
+    const size_t new_capacity =
+        info_sets_.empty() ? 1024 : info_sets_.capacity() * 2;
+    info_sets_.reserve(new_capacity);
+    info_set_ids_.reserve(new_capacity);
+  }
+
   const int id = static_cast<int>(info_sets_.size());
   InfoSetData data;
   data.key = key;

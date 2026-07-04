@@ -173,6 +173,7 @@ cc_library(
         ":hand_range",
         ":thread_pool",
         ":terminal_utility_cache",
+        "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/log:log",
     ],
     visibility = ["//visibility:public"],
