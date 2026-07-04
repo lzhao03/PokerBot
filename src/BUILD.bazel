@@ -60,6 +60,25 @@ cc_test(
 )
 
 cc_library(
+    name = "combo",
+    srcs = ["combo.cc"],
+    hdrs = ["combo.h"],
+    deps = [
+        ":card",
+        ":poker_cc_proto",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "combo_test",
+    srcs = ["combo_test.cc"],
+    deps = [
+        ":combo",
+    ],
+)
+
+cc_library(
     name = "game_tree",
     srcs = ["game_tree.cc"],
     hdrs = ["game_tree.h"],
