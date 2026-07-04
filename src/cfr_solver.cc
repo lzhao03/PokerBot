@@ -1187,9 +1187,8 @@ void CFRSolver::condition_ranges_for_actions(
     return;
   }
 
-  conditioned_ranges.reserve(action_choices.size());
-  while (conditioned_ranges.size() < action_choices.size()) {
-    conditioned_ranges.emplace_back();
+  if (conditioned_ranges.size() < action_choices.size()) {
+    conditioned_ranges.resize(action_choices.size());
   }
   for (size_t i = 0; i < action_choices.size(); ++i) {
     conditioned_ranges[i].reset_to_filtered();
