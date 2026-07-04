@@ -493,6 +493,8 @@ CFRSolver::InfoSetKey CFRSolver::make_public_info_set_key(
   for (int i = 0; i < key.board_size; ++i) {
     key.board_cards[i] = EncodedCard(state.cards(i));
   }
+  std::sort(key.board_cards.begin(),
+            key.board_cards.begin() + key.board_size);
 
   const int history_value_count = state.history().actions_size() * 3;
   if (history_value_count > InfoSetKey::kInlineHistoryValues) {

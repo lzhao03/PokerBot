@@ -447,6 +447,26 @@ void CheckInfoSetKeyIgnoresPrivateHandOrder() {
          "infoset key should not depend on private hand card order");
 }
 
+void CheckInfoSetKeyIgnoresBoardOrder() {
+  PokerConfig config;
+  CFRSolver solver(config);
+  BoardState first = InitialRootState(config);
+  BoardState second = InitialRootState(config);
+  first.set_street(Street::FLOP);
+  second.set_street(Street::FLOP);
+  AddCard(first, 2, Suit::HEARTS);
+  AddCard(first, 7, Suit::DIAMONDS);
+  AddCard(first, 11, Suit::CLUBS);
+  AddCard(second, 11, Suit::CLUBS);
+  AddCard(second, 2, Suit::HEARTS);
+  AddCard(second, 7, Suit::DIAMONDS);
+  Hand hand = MakeHand(14, Suit::SPADES, 13, Suit::SPADES);
+
+  Expect(CFRSolverRegretTestPeer::InfoSetKey(solver, first, 0, hand) ==
+             CFRSolverRegretTestPeer::InfoSetKey(solver, second, 0, hand),
+         "infoset key should not depend on public board card order");
+}
+
 void CheckSaveStrategyUsesProtobufSnapshot() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -1968,6 +1988,7 @@ int main() {
   CheckCfrUsesLegalActions();
   CheckCfrDistinguishesActionAmounts();
   CheckInfoSetKeyIgnoresPrivateHandOrder();
+  CheckInfoSetKeyIgnoresBoardOrder();
   CheckSaveStrategyUsesProtobufSnapshot();
   CheckLoadStrategyPopulatesEquilibriumStrategy();
   CheckTerminalUtilityCacheReusesScores();
