@@ -21,6 +21,7 @@ public:
     bool is_chance_node;
     int player_to_act; // 0 for player A, 1 for player B, -1 for chance
     std::vector<Action> legal_actions;
+    std::vector<int> legal_action_ids;
     absl::flat_hash_map<int, NodeId> children; // Action ID -> node arena ID
     
     // For terminal nodes
@@ -31,6 +32,8 @@ public:
   
   // Constructor
   GameTree(const PokerConfig& config);
+
+  static int action_key(const Action& action);
   
   // Build the root node from the initial state
   Node& build_tree(const BoardState& initial_state);

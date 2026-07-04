@@ -29,9 +29,7 @@ constexpr int kParallelEvaluationSampleThreshold = 32;
 constexpr int kParallelBestResponseSampleThreshold = 32;
 
 int ActionKey(const Action& action) {
-  // ponytail: amounts are whole chips today; use a structured key if fractional chips matter.
-  return static_cast<int>(action.action()) * kActionKeyMultiplier +
-         static_cast<int>(std::lround(action.amount()));
+  return GameTree::action_key(action);
 }
 
 Action ActionFromKey(int action_key) {
@@ -133,6 +131,18 @@ GameTree::Node& CachedActionChild(GameTree& game_tree,
 
   ++created_nodes;
   return game_tree.create_child_node(node, action_id, action);
+}
+
+void EnsureLegalActionIds(GameTree::Node& node) {
+  if (node.legal_action_ids.size() == node.legal_actions.size()) {
+    return;
+  }
+
+  node.legal_action_ids.clear();
+  node.legal_action_ids.reserve(node.legal_actions.size());
+  for (const Action& action : node.legal_actions) {
+    node.legal_action_ids.push_back(ActionKey(action));
+  }
 }
 
 int RoundedContribution(const BoardState& state, int player) {
@@ -387,32 +397,21 @@ CFRSolver::InfoSetKey CFRSolver::make_info_set_key(
   return key;
 }
 
-void CFRSolver::ensure_info_set_actions(
+void CFRSolver::initialize_info_set_actions(
     InfoSetData& info_set,
-    const std::vector<Action>& legal_actions) {
-  for (const Action& action : legal_actions) {
-    int action_id = ActionKey(action);
-    bool existing = false;
-    for (const ActionState& action_state : info_set.actions) {
-      ++traversal_stats_.action_entry_touches;
-      if (action_state.action_id == action_id) {
-        existing = true;
-        break;
-      }
-    }
-    if (!existing) {
-      info_set.actions.push_back({action_id, 0.0, 0.0});
-      ++traversal_stats_.action_entry_touches;
-    }
+    const std::vector<int>& legal_action_ids) {
+  info_set.actions.reserve(legal_action_ids.size());
+  for (int action_id : legal_action_ids) {
+    info_set.actions.push_back({action_id, 0.0, 0.0});
+    ++traversal_stats_.action_entry_touches;
   }
 }
 
 int CFRSolver::get_or_create_info_set_id(
     const InfoSetKey& key,
-    const std::vector<Action>& legal_actions) {
+    const std::vector<int>& legal_action_ids) {
   auto existing = info_set_ids_.find(key);
   if (existing != info_set_ids_.end()) {
-    ensure_info_set_actions(info_sets_[existing->second], legal_actions);
     return existing->second;
   }
 
@@ -426,7 +425,7 @@ int CFRSolver::get_or_create_info_set_id(
   const int id = static_cast<int>(info_sets_.size());
   InfoSetData data;
   data.key = key;
-  ensure_info_set_actions(data, legal_actions);
+  initialize_info_set_actions(data, legal_action_ids);
   info_sets_.push_back(std::move(data));
   info_set_ids_.emplace(info_sets_.back().key, id);
   return id;
@@ -647,52 +646,36 @@ double CFRSolver::cfr_with_ranges(
   const Hand& player_hand = (player == 0) ? player_a_hand : player_b_hand;
   
   InfoSetKey info_set_key = make_info_set_key(node.state, player, player_hand);
+  EnsureLegalActionIds(node);
   const int info_set_id =
-      get_or_create_info_set_id(info_set_key, node.legal_actions);
+      get_or_create_info_set_id(info_set_key, node.legal_action_ids);
   std::vector<ActionChoice> action_choices;
   action_choices.reserve(node.legal_actions.size());
   {
     InfoSetData& info_set = info_sets_[info_set_id];
-    for (const Action& action : node.legal_actions) {
-      int action_id = ActionKey(action);
-      auto existing_choice =
-          std::find_if(action_choices.begin(), action_choices.end(),
-                       [action_id](const ActionChoice& choice) {
-                         return choice.action_id == action_id;
-                       });
-      if (existing_choice != action_choices.end()) {
-        continue;
-      }
-      size_t action_index = info_set.actions.size();
-      for (size_t i = 0; i < info_set.actions.size(); ++i) {
-        ++traversal_stats_.action_entry_touches;
-        if (info_set.actions[i].action_id == action_id) {
-          action_index = i;
-          break;
-        }
-      }
-      if (action_index == info_set.actions.size()) {
-        continue;
-      }
+    for (size_t i = 0; i < node.legal_actions.size(); ++i) {
       action_choices.push_back(
-          {std::cref(action), action_id, action_index, 0.0, 0.0});
+          {std::cref(node.legal_actions[i]), node.legal_action_ids[i], 0.0,
+           0.0});
     }
 
     double sum_positive_regrets = 0.0;
-    for (const ActionChoice& choice : action_choices) {
+    for (size_t action_index = 0; action_index < action_choices.size();
+         ++action_index) {
       ++traversal_stats_.action_entry_touches;
       sum_positive_regrets +=
-          std::max(0.0,
-                   info_set.actions[choice.action_index].cumulative_regret);
+          std::max(0.0, info_set.actions[action_index].cumulative_regret);
     }
 
     if (sum_positive_regrets > 0.0) {
-      for (ActionChoice& choice : action_choices) {
+      for (size_t action_index = 0; action_index < action_choices.size();
+           ++action_index) {
         ++traversal_stats_.action_entry_touches;
+        ActionChoice& choice = action_choices[action_index];
         choice.probability =
             std::max(
                 0.0,
-                info_set.actions[choice.action_index].cumulative_regret) /
+                info_set.actions[action_index].cumulative_regret) /
             sum_positive_regrets;
       }
     } else if (!action_choices.empty()) {
@@ -780,7 +763,9 @@ double CFRSolver::cfr_with_ranges(
     double opponent_reach_prob = reach_probabilities[1 - player];
     InfoSetData& info_set = info_sets_[info_set_id];
     // For each action, compute and accumulate the counterfactual regret
-    for (const ActionChoice& choice : action_choices) {
+    for (size_t action_index = 0; action_index < action_choices.size();
+         ++action_index) {
+      const ActionChoice& choice = action_choices[action_index];
       // get_utility returns player A's utility; player B's regret uses the
       // opposite payoff in this zero-sum game.
       double utility_sign = player == 0 ? 1.0 : -1.0;
@@ -789,7 +774,7 @@ double CFRSolver::cfr_with_ranges(
       
       // CFR+ clips cumulative regrets at zero.
       double& cumulative_regret =
-          info_set.actions[choice.action_index].cumulative_regret;
+          info_set.actions[action_index].cumulative_regret;
       traversal_stats_.action_entry_touches += 2;
       cumulative_regret = std::max(0.0, cumulative_regret + regret);
     }
@@ -933,26 +918,19 @@ void CFRSolver::condition_ranges_for_actions(
     if (existing_info_set != info_set_ids_.end()) {
       const InfoSetData& info_set = info_sets_[existing_info_set->second];
       std::fill(positive_regrets.begin(), positive_regrets.end(), 0.0);
-      for (size_t action_index = 0; action_index < action_choices.size();
+      const size_t action_count =
+          std::min(action_choices.size(), info_set.actions.size());
+      for (size_t action_index = 0; action_index < action_count;
            ++action_index) {
-        size_t info_set_action_index = info_set.actions.size();
-        for (size_t i = 0; i < info_set.actions.size(); ++i) {
-          ++traversal_stats_.action_entry_touches;
-          if (info_set.actions[i].action_id ==
-              action_choices[action_index].action_id) {
-            info_set_action_index = i;
-            break;
-          }
-        }
-        if (info_set_action_index == info_set.actions.size()) {
+        if (info_set.actions[action_index].action_id !=
+            action_choices[action_index].action_id) {
           continue;
         }
 
         ++traversal_stats_.action_entry_touches;
         const double positive_regret =
             std::max(0.0,
-                     info_set.actions[info_set_action_index]
-                         .cumulative_regret);
+                     info_set.actions[action_index].cumulative_regret);
         positive_regrets[action_index] = positive_regret;
         positive_regret_sum += positive_regret;
       }
@@ -1653,10 +1631,11 @@ void CFRSolver::update_strategy(int info_set_id,
                                 const std::vector<ActionChoice>& choices,
                                 double reach_prob) {
   InfoSetData& info_set = info_sets_[info_set_id];
-  for (const ActionChoice& choice : choices) {
+  for (size_t action_index = 0; action_index < choices.size();
+       ++action_index) {
     traversal_stats_.action_entry_touches += 2;
-    info_set.actions[choice.action_index].cumulative_strategy +=
-        reach_prob * choice.probability;
+    info_set.actions[action_index].cumulative_strategy +=
+        reach_prob * choices[action_index].probability;
   }
 }
 

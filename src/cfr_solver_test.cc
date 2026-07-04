@@ -84,10 +84,15 @@ class CFRSolverRegretTestPeer {
                         double regret) {
     std::vector<Action> legal_actions =
         solver.game_tree_->get_legal_actions(state);
+    std::vector<int> legal_action_ids;
+    legal_action_ids.reserve(legal_actions.size());
+    for (const Action& action : legal_actions) {
+      legal_action_ids.push_back(GameTree::action_key(action));
+    }
     const CFRSolver::InfoSetKey key =
         solver.make_info_set_key(state, player, hand);
     const int info_set_id =
-        solver.get_or_create_info_set_id(key, legal_actions);
+        solver.get_or_create_info_set_id(key, legal_action_ids);
     CFRSolver::InfoSetData& info_set = solver.info_sets_[info_set_id];
     auto action = std::find_if(
         info_set.actions.begin(), info_set.actions.end(),
@@ -129,10 +134,8 @@ class CFRSolverRegretTestPeer {
     size_t selected_index = legal_actions.size();
     for (size_t i = 0; i < legal_actions.size(); ++i) {
       const Action& action = legal_actions[i];
-      const int action_id =
-          static_cast<int>(action.action()) * 1000000 +
-          static_cast<int>(std::lround(action.amount()));
-      choices.push_back({std::cref(action), action_id, i, 0.0, 0.0});
+      const int action_id = GameTree::action_key(action);
+      choices.push_back({std::cref(action), action_id, 0.0, 0.0});
       if (action.action() == action_type &&
           static_cast<int>(std::lround(action.amount())) == amount) {
         selected_index = i;

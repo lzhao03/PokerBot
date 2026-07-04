@@ -1,15 +1,18 @@
 #include "src/game_tree.h"
 #include "src/hand_evaluator.h"
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace poker {
 
 namespace {
 
 constexpr int kPlayerCount = 2;
+constexpr int kActionKeyMultiplier = 1000000;
 
 bool IsPlayer(int player) {
   return player == 0 || player == 1;
@@ -123,6 +126,15 @@ void AddActionIfMissing(std::vector<Action>& actions, ActionType type, int amoun
   actions.push_back(new_action);
 }
 
+void SetLegalActions(GameTree::Node& node, std::vector<Action> actions) {
+  node.legal_actions = std::move(actions);
+  node.legal_action_ids.clear();
+  node.legal_action_ids.reserve(node.legal_actions.size());
+  for (const Action& action : node.legal_actions) {
+    node.legal_action_ids.push_back(GameTree::action_key(action));
+  }
+}
+
 int CommitChips(BoardState& state, int player, int requested) {
   if (requested <= 0) {
     throw std::invalid_argument("Action amount must be positive");
@@ -168,6 +180,11 @@ GameTree::GameTree(const PokerConfig& config)
   : config_(config) {
 }
 
+int GameTree::action_key(const Action& action) {
+  return static_cast<int>(action.action()) * kActionKeyMultiplier +
+         static_cast<int>(std::lround(action.amount()));
+}
+
 GameTree::Node& GameTree::root() {
   if (!root_id_.has_value()) {
     throw std::logic_error("Game tree root has not been built");
@@ -196,7 +213,7 @@ GameTree::Node& GameTree::build_tree(const BoardState& initial_state) {
   } else if (root.player_to_act == -1) {
     root.is_chance_node = true;
   } else {
-    root.legal_actions = get_legal_actions(initial_state);
+    SetLegalActions(root, get_legal_actions(initial_state));
   }
   
   return root;
@@ -442,7 +459,7 @@ GameTree::Node GameTree::make_child_node(const Node& parent,
     // This will be computed when needed in get_utility
     child.utility = 0.0;
   } else if (!child.is_chance_node) {
-    child.legal_actions = get_legal_actions(child.state);
+    SetLegalActions(child, get_legal_actions(child.state));
   }
   
   return child;
@@ -472,7 +489,7 @@ GameTree::Node GameTree::make_chance_child_node(
   if (child.is_terminal) {
     child.utility = 0.0;
   } else if (!child.is_chance_node) {
-    child.legal_actions = get_legal_actions(child.state);
+    SetLegalActions(child, get_legal_actions(child.state));
   }
 
   return child;

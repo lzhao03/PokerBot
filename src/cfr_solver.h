@@ -127,7 +127,6 @@ private:
   struct ActionChoice {
     std::reference_wrapper<const Action> action;
     int action_id = 0;
-    size_t action_index = 0;
     double probability = 0.0;
     double value = 0.0;
   };
@@ -239,9 +238,9 @@ private:
                                int player,
                                const Hand& hand) const;
   int get_or_create_info_set_id(const InfoSetKey& key,
-                                const std::vector<Action>& legal_actions);
-  void ensure_info_set_actions(InfoSetData& info_set,
-                               const std::vector<Action>& legal_actions);
+                                const std::vector<int>& legal_action_ids);
+  void initialize_info_set_actions(InfoSetData& info_set,
+                                   const std::vector<int>& legal_action_ids);
   std::string info_set_key_to_string(const InfoSetKey& key) const;
   double regret_for_info_set(const std::string& info_set_key,
                              int action_id) const;
