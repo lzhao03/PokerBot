@@ -1,6 +1,8 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -23,6 +25,7 @@ public:
     std::vector<GameAction> legal_actions;
     std::vector<int> legal_action_ids;
     absl::flat_hash_map<int, NodeId> children; // Action ID -> node arena ID
+    std::array<int32_t, 2> combo_info_set_index_ids = {-1, -1};
     NodeId id = 0;
     
     // For terminal nodes

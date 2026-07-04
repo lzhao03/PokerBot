@@ -491,66 +491,71 @@ uint32_t CFRSolver::get_or_create_public_state_id(const GameState& state,
 }
 
 CFRSolver::ComboInfoSetIndex& CFRSolver::get_or_build_combo_info_set_index(
+    GameTree::Node& node,
     int player,
     uint32_t public_state_id) {
-  has_combo_info_set_indexes_ = true;
-  absl::flat_hash_map<uint32_t, std::unique_ptr<ComboInfoSetIndex>>&
-      player_indexes =
-      combo_info_set_ids_by_public_state_[player];
-  std::unique_ptr<ComboInfoSetIndex>& index = player_indexes[public_state_id];
-  if (index == nullptr) {
-    index = std::make_unique<ComboInfoSetIndex>();
-    for (int combo = 0; combo < kComboCount; ++combo) {
-      CompactInfoSetKey compact_key;
-      compact_key.public_state_id = public_state_id;
-      compact_key.private_combo = static_cast<ComboId>(combo);
-      compact_key.player = static_cast<uint8_t>(player);
-      auto existing_compact = compact_info_set_ids_.find(compact_key);
-      if (existing_compact != compact_info_set_ids_.end()) {
-        index->info_set_ids[combo] = existing_compact->second;
-      }
+  int32_t& node_index_id = node.combo_info_set_index_ids[player];
+  if (node_index_id >= 0) {
+    return *combo_info_set_indexes_[node_index_id];
+  }
+
+  absl::flat_hash_map<uint32_t, int32_t>& player_index_ids =
+      combo_info_set_index_ids_by_public_state_[player];
+  auto existing_index_id = player_index_ids.find(public_state_id);
+  if (existing_index_id != player_index_ids.end()) {
+    node_index_id = existing_index_id->second;
+    return *combo_info_set_indexes_[node_index_id];
+  }
+
+  auto index = std::make_unique<ComboInfoSetIndex>();
+  for (int combo = 0; combo < kComboCount; ++combo) {
+    CompactInfoSetKey compact_key;
+    compact_key.public_state_id = public_state_id;
+    compact_key.private_combo = static_cast<ComboId>(combo);
+    compact_key.player = static_cast<uint8_t>(player);
+    auto existing_compact = compact_info_set_ids_.find(compact_key);
+    if (existing_compact != compact_info_set_ids_.end()) {
+      index->info_set_ids[combo] = existing_compact->second;
     }
   }
-  return *index;
+
+  node_index_id = static_cast<int32_t>(combo_info_set_indexes_.size());
+  player_index_ids.emplace(public_state_id, node_index_id);
+  combo_info_set_indexes_.push_back(std::move(index));
+  return *combo_info_set_indexes_[node_index_id];
 }
 
 CFRSolver::ComboInfoSetIndex* CFRSolver::combo_info_set_index(
+    GameTree::Node* node,
     int player,
-    uint32_t public_state_id) {
-  if (!has_combo_info_set_indexes_) {
+  uint32_t public_state_id) {
+  if (node != nullptr && node->combo_info_set_index_ids[player] >= 0) {
+    const int32_t index_id = node->combo_info_set_index_ids[player];
+    return combo_info_set_indexes_[index_id].get();
+  }
+  if (combo_info_set_indexes_.empty()) {
     return nullptr;
   }
-  absl::flat_hash_map<uint32_t, std::unique_ptr<ComboInfoSetIndex>>&
-      player_indexes = combo_info_set_ids_by_public_state_[player];
-  auto index = player_indexes.find(public_state_id);
-  if (index == player_indexes.end()) {
+  auto existing_index_id =
+      combo_info_set_index_ids_by_public_state_[player].find(public_state_id);
+  if (existing_index_id ==
+      combo_info_set_index_ids_by_public_state_[player].end()) {
     return nullptr;
   }
-  return index->second.get();
-}
-
-const CFRSolver::ComboInfoSetIndex* CFRSolver::combo_info_set_index(
-    int player,
-    uint32_t public_state_id) const {
-  if (!has_combo_info_set_indexes_) {
-    return nullptr;
+  if (node != nullptr) {
+    node->combo_info_set_index_ids[player] = existing_index_id->second;
   }
-  const absl::flat_hash_map<uint32_t, std::unique_ptr<ComboInfoSetIndex>>&
-      player_indexes = combo_info_set_ids_by_public_state_[player];
-  auto index = player_indexes.find(public_state_id);
-  if (index == player_indexes.end()) {
-    return nullptr;
-  }
-  return index->second.get();
+  return combo_info_set_indexes_[existing_index_id->second].get();
 }
 
 int CFRSolver::get_or_create_compact_info_set_id(
     uint32_t public_state_id,
+    GameTree::Node* node,
     int player,
     ComboId combo_id,
     const std::vector<int>& legal_action_ids) {
   ComboInfoSetIndex* combo_index =
-      combo_info_set_index(player, public_state_id);
+      combo_info_set_index(node, player, public_state_id);
   if (combo_index != nullptr &&
       combo_index->info_set_ids[combo_id] >= 0) {
     return combo_index->info_set_ids[combo_id];
@@ -807,7 +812,7 @@ double CFRSolver::cfr_with_ranges(
       node.state, static_cast<uint32_t>(node.id));
   const int info_set_id =
       get_or_create_compact_info_set_id(
-          public_state_id, player, player_cards.combo,
+          public_state_id, &node, player, player_cards.combo,
           node.legal_action_ids);
   ActionChoices action_choices;
   action_choices.reserve(node.legal_actions.size());
@@ -861,11 +866,11 @@ double CFRSolver::cfr_with_ranges(
   const bool condition_player_b_range =
       player == 1 && player_b_range.has_value();
   if (condition_player_a_range) {
-    condition_ranges_for_actions(player_a_range->get(), node.state,
+    condition_ranges_for_actions(player_a_range->get(), node,
                                  public_state_id, player, action_choices,
                                  conditioned_player_ranges);
   } else if (condition_player_b_range) {
-    condition_ranges_for_actions(player_b_range->get(), node.state,
+    condition_ranges_for_actions(player_b_range->get(), node,
                                  public_state_id, player, action_choices,
                                  conditioned_player_ranges);
   }
@@ -1107,7 +1112,7 @@ void CFRSolver::average_strategy_probabilities(
 
 void CFRSolver::condition_ranges_for_actions(
     const TrainingRangeView& range,
-    const GameState& state,
+    GameTree::Node& node,
     uint32_t public_state_id,
     int player,
     const ActionChoices& action_choices,
@@ -1127,11 +1132,11 @@ void CFRSolver::condition_ranges_for_actions(
   }
 
   const double fallback_probability = 1.0 / action_choices.size();
-  const CardMask board_mask = state.board_mask;
+  const CardMask board_mask = node.state.board_mask;
   absl::InlinedVector<double, 8> positive_regrets(
       action_choices.size(), 0.0);
   const ComboInfoSetIndex& combo_index =
-      get_or_build_combo_info_set_index(player, public_state_id);
+      get_or_build_combo_info_set_index(node, player, public_state_id);
   for (size_t i = 0; i < range.size(); ++i) {
     if (range.weight(i) <= 0.0 || (range.mask(i) & board_mask) != 0) {
       continue;

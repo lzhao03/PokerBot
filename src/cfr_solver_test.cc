@@ -117,11 +117,12 @@ class CFRSolverRegretTestPeer {
     for (const GameAction& action : legal_actions) {
       legal_action_ids.push_back(GameTree::action_key(action));
     }
+    GameTree::Node& root = solver.get_or_build_root();
     const uint32_t public_state_id =
         solver.get_or_create_public_state_id(
-            native_state, static_cast<uint32_t>(solver.get_or_build_root().id));
+            native_state, static_cast<uint32_t>(root.id));
     return solver.get_or_create_compact_info_set_id(
-        public_state_id, player, TestComboId(hand), legal_action_ids);
+        public_state_id, &root, player, TestComboId(hand), legal_action_ids);
   }
 
   static size_t CompactInfoSetCount(const CFRSolver& solver) {
@@ -188,11 +189,12 @@ class CFRSolverRegretTestPeer {
     for (const GameAction& action : legal_actions) {
       legal_action_ids.push_back(GameTree::action_key(action));
     }
+    GameTree::Node& root = solver.get_or_build_root();
     const uint32_t public_state_id =
         solver.get_or_create_public_state_id(
-            native_state, static_cast<uint32_t>(solver.get_or_build_root().id));
+            native_state, static_cast<uint32_t>(root.id));
     const int info_set_id = solver.get_or_create_compact_info_set_id(
-        public_state_id, player, TestComboId(hand), legal_action_ids);
+        public_state_id, &root, player, TestComboId(hand), legal_action_ids);
     CFRSolver::InfoSetData& info_set = solver.info_sets_[info_set_id];
     std::optional<size_t> action_table_index;
     for (uint16_t i = 0; i < info_set.action_count; ++i) {
@@ -256,11 +258,12 @@ class CFRSolverRegretTestPeer {
     }
 
     CFRSolver::ConditionedRanges conditioned_ranges;
+    GameTree::Node& root = solver.get_or_build_root();
     const uint32_t public_state_id =
         solver.get_or_create_public_state_id(
-            native_state, static_cast<uint32_t>(solver.get_or_build_root().id));
+            native_state, static_cast<uint32_t>(root.id));
     solver.condition_ranges_for_actions(
-        range, native_state, public_state_id, player, choices,
+        range, root, public_state_id, player, choices,
         conditioned_ranges);
     return std::move(conditioned_ranges[selected_index]);
   }

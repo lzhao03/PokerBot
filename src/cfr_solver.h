@@ -283,10 +283,9 @@ private:
   std::vector<float> cumulative_strategies_;
   absl::flat_hash_map<CompactInfoSetKey, int, CompactInfoSetKeyHash>
       compact_info_set_ids_;
-  std::array<
-      absl::flat_hash_map<uint32_t, std::unique_ptr<ComboInfoSetIndex>>, 2>
-      combo_info_set_ids_by_public_state_;
-  bool has_combo_info_set_indexes_ = false;
+  std::vector<std::unique_ptr<ComboInfoSetIndex>> combo_info_set_indexes_;
+  std::array<absl::flat_hash_map<uint32_t, int32_t>, 2>
+      combo_info_set_index_ids_by_public_state_;
   const StrategyTablesView* strategy_tables_view_ = nullptr;
   
   // Helper methods
@@ -328,7 +327,7 @@ private:
       StrategyProbabilities& probabilities);
   void condition_ranges_for_actions(
       const TrainingRangeView& range,
-      const GameState& state,
+      GameTree::Node& node,
       uint32_t public_state_id,
       int player,
       const ActionChoices& action_choices,
@@ -338,16 +337,17 @@ private:
                                          uint32_t node_id);
   int get_or_create_compact_info_set_id(
       uint32_t public_state_id,
+      GameTree::Node* node,
       int player,
       ComboId combo_id,
       const std::vector<int>& legal_action_ids);
   ComboInfoSetIndex& get_or_build_combo_info_set_index(
+      GameTree::Node& node,
       int player,
       uint32_t public_state_id);
-  ComboInfoSetIndex* combo_info_set_index(int player,
+  ComboInfoSetIndex* combo_info_set_index(GameTree::Node* node,
+                                          int player,
                                           uint32_t public_state_id);
-  const ComboInfoSetIndex* combo_info_set_index(int player,
-                                                uint32_t public_state_id) const;
   StrategyTablesView strategy_tables_view() const;
   const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>&
   strategy_public_state_ids() const;
