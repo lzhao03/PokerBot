@@ -198,25 +198,35 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+CFR_SOLVER_DEPS = [
+    ":card_utils",
+    ":continuation_value",
+    ":game_tree",
+    ":hand_range",
+    ":poker_cc_proto",
+    ":strategy",
+    ":terminal_utility_cache",
+    ":thread_pool",
+    ":training_range",
+    "@abseil-cpp//absl/container:flat_hash_map",
+    "@abseil-cpp//absl/container:inlined_vector",
+    "@abseil-cpp//absl/log:log",
+]
+
 cc_library(
     name = "cfr_solver",
     srcs = ["cfr_solver.cc"],
     hdrs = ["cfr_solver.h"],
-    deps = [
-        ":card_utils",
-        ":continuation_value",
-        ":poker_cc_proto",
-        ":game_tree",
-        ":strategy",
-        ":hand_range",
-        ":thread_pool",
-        ":terminal_utility_cache",
-        ":training_range",
-        "@abseil-cpp//absl/container:flat_hash_map",
-        "@abseil-cpp//absl/container:inlined_vector",
-        "@abseil-cpp//absl/log:log",
-    ],
+    deps = CFR_SOLVER_DEPS,
     visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "cfr_solver_no_stats",
+    srcs = ["cfr_solver.cc"],
+    hdrs = ["cfr_solver.h"],
+    copts = ["-DPOKER_ENABLE_TRAVERSAL_STATS=0"],
+    deps = CFR_SOLVER_DEPS,
 )
 
 cc_test(
@@ -249,6 +259,18 @@ cc_binary(
     srcs = ["cfr_benchmark.cc"],
     deps = [
         ":cfr_solver",
+        ":hand_range",
+        ":poker_cc_proto",
+        "@abseil-cpp//absl/log:initialize",
+    ],
+)
+
+cc_binary(
+    name = "cfr_prod_benchmark",
+    srcs = ["cfr_benchmark.cc"],
+    copts = ["-DPOKER_BENCHMARK_PROD_DEFAULTS=1"],
+    deps = [
+        ":cfr_solver_no_stats",
         ":hand_range",
         ":poker_cc_proto",
         "@abseil-cpp//absl/log:initialize",

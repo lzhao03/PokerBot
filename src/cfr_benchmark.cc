@@ -14,14 +14,27 @@
 
 namespace {
 
+#ifndef POKER_BENCHMARK_PROD_DEFAULTS
+#define POKER_BENCHMARK_PROD_DEFAULTS 0
+#endif
+
+constexpr bool kProdBenchmarkDefaults = POKER_BENCHMARK_PROD_DEFAULTS != 0;
+constexpr int kDefaultIterations = kProdBenchmarkDefaults ? 5000 : 100;
+constexpr int kDefaultMaxDepth = kProdBenchmarkDefaults ? 0 : 2;
+constexpr int kDefaultEvalSamples = kProdBenchmarkDefaults ? 1 : 100;
+constexpr int kDefaultExploitabilitySamples = 10;
+constexpr bool kDefaultSkipExploitability = kProdBenchmarkDefaults;
+constexpr const char* kDefaultRange =
+    kProdBenchmarkDefaults ? "all" : "premium";
+
 struct Options {
-  int iterations = 100;
-  int max_depth = 2;
+  int iterations = kDefaultIterations;
+  int max_depth = kDefaultMaxDepth;
   int chance_samples = 1;
-  int eval_samples = 100;
-  int exploitability_samples = 10;
-  std::string range = "premium";
-  bool skip_exploitability = false;
+  int eval_samples = kDefaultEvalSamples;
+  int exploitability_samples = kDefaultExploitabilitySamples;
+  std::string range = kDefaultRange;
+  bool skip_exploitability = kDefaultSkipExploitability;
 };
 
 struct BenchmarkResult {
@@ -78,13 +91,18 @@ poker::HandRange BenchmarkRange(const Options& options) {
 void PrintUsage(const char* program) {
   std::cerr
       << "Usage: " << program << " [options]\n"
-      << "  --iterations=N                 default 100\n"
-      << "  --max-depth=N                   default 2\n"
+      << "  --iterations=N                 default " << kDefaultIterations
+      << "\n"
+      << "  --max-depth=N                   default " << kDefaultMaxDepth
+      << "\n"
       << "  --chance-samples=N              default 1\n"
-      << "  --eval-samples=N                default 100\n"
-      << "  --exploitability-samples=N      default 10\n"
-      << "  --range=premium|all|RANGE       default premium\n"
-      << "  --skip-exploitability\n";
+      << "  --eval-samples=N                default " << kDefaultEvalSamples
+      << "\n"
+      << "  --exploitability-samples=N      default "
+      << kDefaultExploitabilitySamples << "\n"
+      << "  --range=premium|all|RANGE       default " << kDefaultRange << "\n"
+      << "  --skip-exploitability           default "
+      << (kDefaultSkipExploitability ? "true" : "false") << "\n";
 }
 
 double RatePerSecond(int64_t count, double seconds) {
