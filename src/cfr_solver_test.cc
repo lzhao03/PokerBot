@@ -103,13 +103,13 @@ class CFRSolverRegretTestPeer {
     const GameState right_state = TestGameState(right);
     return solver.make_betting_history_key(left_state) ==
                solver.make_betting_history_key(right_state) &&
-           solver.card_abstraction_.public_id(left_state) ==
-               solver.card_abstraction_.public_id(right_state);
+           solver.card_abstraction_.public_bucket(left_state) ==
+               solver.card_abstraction_.public_bucket(right_state);
   }
 
-  static uint64_t PublicCardsId(const CFRSolver& solver,
-                                const BoardState& state) {
-    return solver.card_abstraction_.public_id(TestGameState(state));
+  static CFRSolver::PublicBucketId PublicBucket(const CFRSolver& solver,
+                                                const BoardState& state) {
+    return solver.card_abstraction_.public_bucket(TestGameState(state));
   }
 
   static uint16_t PrivateId(const CFRSolver& solver,
@@ -768,8 +768,8 @@ void CheckPublicStateKeyIgnoresBoardOrder() {
 
   Expect(CFRSolverRegretTestPeer::SamePublicStateKey(solver, first, second),
          "public state key should not depend on public board card order");
-  Expect(CFRSolverRegretTestPeer::PublicCardsId(solver, first) ==
-             CFRSolverRegretTestPeer::PublicCardsId(solver, second),
+  Expect(CFRSolverRegretTestPeer::PublicBucket(solver, first) ==
+             CFRSolverRegretTestPeer::PublicBucket(solver, second),
          "identity public-card abstraction should canonicalize by board mask");
 }
 

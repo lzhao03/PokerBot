@@ -225,9 +225,11 @@ private:
     size_t operator()(const BettingHistoryKey& key) const;
   };
 
+  using PublicBucketId = uint64_t;
+
   struct PublicStateKey {
     uint32_t betting_history_id = 0;
-    uint64_t public_cards_id = 0;
+    PublicBucketId public_bucket = 0;
 
     bool operator==(const PublicStateKey& other) const;
   };
@@ -256,7 +258,7 @@ private:
   };
 
   struct IdentityCardAbstraction {
-    uint64_t public_id(const GameState& state) const {
+    PublicBucketId public_bucket(const GameState& state) const {
       return state.board_mask;
     }
 

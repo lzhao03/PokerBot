@@ -337,14 +337,14 @@ size_t CFRSolver::BettingHistoryKeyHash::operator()(
 bool CFRSolver::PublicStateKey::operator==(
     const PublicStateKey& other) const {
   return betting_history_id == other.betting_history_id &&
-         public_cards_id == other.public_cards_id;
+         public_bucket == other.public_bucket;
 }
 
 size_t CFRSolver::PublicStateKeyHash::operator()(
     const PublicStateKey& key) const {
   size_t seed = 0;
   HashCombine(seed, static_cast<uint64_t>(key.betting_history_id));
-  HashCombine(seed, key.public_cards_id);
+  HashCombine(seed, key.public_bucket);
   return seed;
 }
 
@@ -575,7 +575,7 @@ CFRSolver::BettingHistoryRow CFRSolver::make_betting_history_row(
 CFRSolver::PublicStateKey CFRSolver::make_public_state_key(
     uint32_t betting_history_id,
     const GameState& state) const {
-  return {betting_history_id, card_abstraction_.public_id(state)};
+  return {betting_history_id, card_abstraction_.public_bucket(state)};
 }
 
 CFRSolver::InfoSetRow CFRSolver::append_info_set_actions(
