@@ -642,12 +642,41 @@ const CFRSolver::InfoSetRow* CFRSolver::find_info_set_row(
     return nullptr;
   }
   const PublicInfoSetSlabPlayer& player_slab = slab->players[player];
-  const int32_t row_id = player_slab.private_rows[private_id];
+  return find_info_set_row(player_slab, private_id);
+}
+
+const CFRSolver::InfoSetRow* CFRSolver::find_info_set_row(
+    const PublicInfoSetSlabPlayer& player_slab,
+    uint16_t private_id) {
+  if (private_id >= kComboCount) {
+    return nullptr;
+  }
+  const size_t chunk_index = private_id / kPrivateIdChunkSize;
+  const size_t chunk_offset = private_id % kPrivateIdChunkSize;
+  const std::unique_ptr<PrivateRowChunk>& chunk =
+      player_slab.private_row_chunks[chunk_index];
+  if (chunk == nullptr) {
+    return nullptr;
+  }
+  const int32_t row_id = chunk->rows[chunk_offset];
   if (row_id < 0 ||
       static_cast<size_t>(row_id) >= player_slab.rows.size()) {
     return nullptr;
   }
   return &player_slab.rows[row_id];
+}
+
+int32_t& CFRSolver::get_or_create_private_row_slot(
+    PublicInfoSetSlabPlayer& player_slab,
+    uint16_t private_id) {
+  const size_t chunk_index = private_id / kPrivateIdChunkSize;
+  const size_t chunk_offset = private_id % kPrivateIdChunkSize;
+  std::unique_ptr<PrivateRowChunk>& chunk =
+      player_slab.private_row_chunks[chunk_index];
+  if (chunk == nullptr) {
+    chunk = std::make_unique<PrivateRowChunk>();
+  }
+  return chunk->rows[chunk_offset];
 }
 
 int CFRSolver::get_or_create_info_set_id(
@@ -683,7 +712,7 @@ int CFRSolver::get_or_create_info_set_id(
   info_sets_.push_back(std::move(data));
   PublicInfoSetSlab& slab = get_or_create_public_info_set_slab(public_state_id);
   PublicInfoSetSlabPlayer& player_slab = slab.players[player];
-  int32_t& row_id = player_slab.private_rows[private_id];
+  int32_t& row_id = get_or_create_private_row_slot(player_slab, private_id);
   row_id = static_cast<int32_t>(player_slab.rows.size());
   player_slab.rows.push_back({action_offset, action_count, id});
   return id;
@@ -1443,12 +1472,8 @@ void CFRSolver::condition_ranges_for_actions(
     const uint16_t private_id =
         card_abstraction_.private_id(combo_id, node.state);
     const InfoSetRow* row = nullptr;
-    if (player_slab != nullptr && private_id < kComboCount) {
-      const int32_t row_id = player_slab->private_rows[private_id];
-      if (row_id >= 0 &&
-          static_cast<size_t>(row_id) < player_slab->rows.size()) {
-        row = &player_slab->rows[row_id];
-      }
+    if (player_slab != nullptr) {
+      row = find_info_set_row(*player_slab, private_id);
     }
 
     if (row != nullptr) {
@@ -1871,13 +1896,10 @@ double CFRSolver::best_response_value_against_range(
       const ComboId opponent_combo = opponent_hands.combo(i);
       const uint16_t private_id =
           card_abstraction_.private_id(opponent_combo, node.state);
-      if (private_id < kComboCount) {
-        const int32_t row_id = player_slab->private_rows[private_id];
-        if (row_id >= 0 &&
-            static_cast<size_t>(row_id) < player_slab->rows.size()) {
-          average_strategy_probabilities(player_slab->rows[row_id], node,
-                                         fallback_probability, probabilities);
-        }
+      if (const InfoSetRow* row =
+              find_info_set_row(*player_slab, private_id)) {
+        average_strategy_probabilities(*row, node, fallback_probability,
+                                       probabilities);
       }
     }
 

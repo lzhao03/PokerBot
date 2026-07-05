@@ -252,10 +252,19 @@ private:
     int32_t info_set_id = -1;
   };
 
-  struct PublicInfoSetSlabPlayer {
-    PublicInfoSetSlabPlayer() { private_rows.fill(-1); }
+  static constexpr int kPrivateIdChunkSize = 64;
+  static constexpr int kPrivateIdChunkCount =
+      (kComboCount + kPrivateIdChunkSize - 1) / kPrivateIdChunkSize;
 
-    std::array<int32_t, kComboCount> private_rows;
+  struct PrivateRowChunk {
+    PrivateRowChunk() { rows.fill(-1); }
+
+    std::array<int32_t, kPrivateIdChunkSize> rows;
+  };
+
+  struct PublicInfoSetSlabPlayer {
+    std::array<std::unique_ptr<PrivateRowChunk>, kPrivateIdChunkCount>
+        private_row_chunks;
     std::vector<InfoSetRow> rows;
   };
 
@@ -389,6 +398,12 @@ private:
   const InfoSetRow* find_info_set_row(uint32_t public_state_id,
                                       int player,
                                       uint16_t private_id) const;
+  static const InfoSetRow* find_info_set_row(
+      const PublicInfoSetSlabPlayer& player_slab,
+      uint16_t private_id);
+  static int32_t& get_or_create_private_row_slot(
+      PublicInfoSetSlabPlayer& player_slab,
+      uint16_t private_id);
   ContinuationContext build_continuation_context(
       const GameState& state,
       ComboId player_a_hand,
