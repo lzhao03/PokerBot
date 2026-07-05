@@ -225,18 +225,25 @@ private:
     size_t operator()(const PublicStateKey& key) const;
   };
 
-  struct CompactInfoSetKey {
-    uint32_t public_state_id = 0;
-    uint16_t private_combo = 0;
-    uint8_t player = 0;
+  // Compact internal key: (public_state_id << 32) | (private_combo << 16) | player.
+  using CompactInfoSetKey = uint64_t;
 
-    bool operator==(const CompactInfoSetKey& other) const;
-  };
+  static constexpr CompactInfoSetKey EncodeCompactInfoSetKey(
+      uint32_t public_state_id, uint16_t private_combo, uint8_t player) {
+    return (static_cast<CompactInfoSetKey>(public_state_id) << 32) |
+           (static_cast<CompactInfoSetKey>(private_combo) << 16) |
+           static_cast<CompactInfoSetKey>(player);
+  }
 
-  struct CompactInfoSetKeyHash {
-    size_t operator()(const CompactInfoSetKey& key) const;
-  };
-
+  static constexpr uint32_t DecodePublicStateId(CompactInfoSetKey key) {
+    return static_cast<uint32_t>(key >> 32);
+  }
+  static constexpr uint16_t DecodePrivateCombo(CompactInfoSetKey key) {
+    return static_cast<uint16_t>((key >> 16) & 0xFFFF);
+  }
+  static constexpr uint8_t DecodePlayer(CompactInfoSetKey key) {
+    return static_cast<uint8_t>(key & 0xFF);
+  }
 
   struct InfoSetData {
     uint32_t public_state_id = 0;
@@ -249,8 +256,8 @@ private:
   struct StrategyTablesView {
     const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>*
         public_state_ids = nullptr;
-    const absl::flat_hash_map<CompactInfoSetKey, int, CompactInfoSetKeyHash>*
-        compact_info_set_ids = nullptr;
+    const absl::flat_hash_map<CompactInfoSetKey, int>* compact_info_set_ids =
+        nullptr;
     const std::vector<InfoSetData>* info_sets = nullptr;
     const std::vector<int>* action_ids = nullptr;
     // The cumulative arrays are shared read/write across worker threads.
@@ -288,8 +295,7 @@ private:
   std::vector<int> action_ids_;
   std::vector<float> cumulative_regrets_;
   std::vector<float> cumulative_strategies_;
-  absl::flat_hash_map<CompactInfoSetKey, int, CompactInfoSetKeyHash>
-      compact_info_set_ids_;
+  absl::flat_hash_map<CompactInfoSetKey, int> compact_info_set_ids_;
   const StrategyTablesView* strategy_tables_view_ = nullptr;
   
   // Helper methods
@@ -355,7 +361,7 @@ private:
   std::optional<uint32_t> strategy_public_state_id(GameTree::Node& node);
   const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>&
   strategy_public_state_ids() const;
-  const absl::flat_hash_map<CompactInfoSetKey, int, CompactInfoSetKeyHash>&
+  const absl::flat_hash_map<CompactInfoSetKey, int>&
   strategy_compact_info_set_ids() const;
   const std::vector<InfoSetData>& strategy_info_sets() const;
   const std::vector<int>& strategy_action_ids() const;

@@ -79,10 +79,10 @@ class CFRSolverRegretTestPeer {
                        int player,
                        const Hand& hand,
                        int action_id) {
-    CFRSolver::CompactInfoSetKey compact_key;
-    compact_key.public_state_id = static_cast<uint32_t>(node.id);
-    compact_key.private_combo = TestComboId(hand);
-    compact_key.player = static_cast<uint8_t>(player);
+    const CFRSolver::CompactInfoSetKey compact_key =
+        CFRSolver::EncodeCompactInfoSetKey(
+            static_cast<uint32_t>(node.id), TestComboId(hand),
+            static_cast<uint8_t>(player));
     auto info_set_id = solver.compact_info_set_ids_.find(compact_key);
     if (info_set_id == solver.compact_info_set_ids_.end()) {
       throw std::runtime_error("Regret info set was not created");
@@ -142,8 +142,8 @@ class CFRSolverRegretTestPeer {
         solver.get_or_create_public_state_id(
             node.state, static_cast<uint32_t>(node.id));
     for (const auto& entry : solver.compact_info_set_ids_) {
-      if (entry.first.public_state_id == public_state_id &&
-          entry.first.player == static_cast<uint8_t>(player)) {
+      if (CFRSolver::DecodePublicStateId(entry.first) == public_state_id &&
+          CFRSolver::DecodePlayer(entry.first) == static_cast<uint8_t>(player)) {
         ++count;
       }
     }

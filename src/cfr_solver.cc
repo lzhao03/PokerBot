@@ -333,20 +333,6 @@ size_t CFRSolver::PublicStateKeyHash::operator()(
   return seed;
 }
 
-bool CFRSolver::CompactInfoSetKey::operator==(
-    const CompactInfoSetKey& other) const {
-  return public_state_id == other.public_state_id &&
-         private_combo == other.private_combo && player == other.player;
-}
-
-size_t CFRSolver::CompactInfoSetKeyHash::operator()(
-    const CompactInfoSetKey& key) const {
-  size_t seed = 0;
-  HashCombine(seed, static_cast<int>(key.public_state_id));
-  HashCombine(seed, static_cast<int>(key.private_combo));
-  HashCombine(seed, static_cast<int>(key.player));
-  return seed;
-}
 
 CFRSolver::CFRSolver(const SolverConfig& config)
     : CFRSolver(config, std::make_shared<TerminalUtilityCache>()) {
@@ -601,10 +587,9 @@ int CFRSolver::get_or_create_compact_info_set_id(
     ComboId combo_id,
     const int* action_ids,
     int num_actions) {
-  CompactInfoSetKey compact_key;
-  compact_key.public_state_id = public_state_id;
-  compact_key.private_combo = combo_id;
-  compact_key.player = static_cast<uint8_t>(player);
+  const CompactInfoSetKey compact_key = EncodeCompactInfoSetKey(
+      public_state_id, static_cast<uint16_t>(combo_id),
+      static_cast<uint8_t>(player));
 
   const auto& compact_ids = strategy_compact_info_set_ids();
   auto existing_compact = compact_ids.find(compact_key);
@@ -668,8 +653,7 @@ CFRSolver::strategy_public_state_ids() const {
              : public_state_ids_;
 }
 
-const absl::flat_hash_map<CFRSolver::CompactInfoSetKey, int,
-                          CFRSolver::CompactInfoSetKeyHash>&
+const absl::flat_hash_map<CFRSolver::CompactInfoSetKey, int>&
 CFRSolver::strategy_compact_info_set_ids() const {
   return strategy_tables_view_ != nullptr
              ? *strategy_tables_view_->compact_info_set_ids
@@ -877,7 +861,7 @@ void CFRSolver::run_iterations_parallel(
 
     const unsigned int seed = seed_dist(rng_);
     futures.push_back(executor.submit(
-        [this, shard, seed, range_sampler, &tables,
+        [this, shard, seed, &range_sampler, &tables,
          &player_a_training_range, &player_b_training_range]() mutable {
           // Build a lightweight worker that shares frozen tables.
           CFRSolver worker(config_, utility_cache_,
@@ -1244,11 +1228,11 @@ void CFRSolver::average_strategy_probabilities(
   }
 
   const double uniform_probability = 1.0 / node.action_count;
-  CompactInfoSetKey compact_key;
-  compact_key.private_combo = private_cards.combo;
-  compact_key.player = static_cast<uint8_t>(player);
+  const uint16_t private_combo = private_cards.combo;
+  const uint8_t player_u8 = static_cast<uint8_t>(player);
   auto try_public_state = [&](uint32_t public_state_id) {
-    compact_key.public_state_id = public_state_id;
+    const CompactInfoSetKey compact_key =
+        EncodeCompactInfoSetKey(public_state_id, private_combo, player_u8);
     const auto& compact_info_set_ids = strategy_compact_info_set_ids();
     auto existing_compact = compact_info_set_ids.find(compact_key);
     if (existing_compact == compact_info_set_ids.end()) {
@@ -1379,9 +1363,7 @@ void CFRSolver::condition_ranges_for_actions(
   const auto& action_ids = strategy_action_ids();
   const auto& regrets = strategy_cumulative_regrets();
   absl::InlinedVector<double, 8> positive_regrets(action_count, 0.0);
-  CompactInfoSetKey key;
-  key.public_state_id = public_state_id;
-  key.player = static_cast<uint8_t>(player);
+  const uint8_t player_u8 = static_cast<uint8_t>(player);
   for (size_t i = 0; i < range_size; ++i) {
     const float range_weight = range.weight(i);
     const ComboId combo_id = range.combo(i);
@@ -1390,7 +1372,8 @@ void CFRSolver::condition_ranges_for_actions(
     }
 
     double positive_regret_sum = 0.0;
-    key.private_combo = combo_id;
+    const CompactInfoSetKey key =
+        EncodeCompactInfoSetKey(public_state_id, combo_id, player_u8);
     auto found = compact_info_set_ids.find(key);
     const int32_t info_set_id =
         found != compact_info_set_ids.end() ? found->second : -1;
@@ -1805,16 +1788,17 @@ double CFRSolver::best_response_value_against_range(
   const auto& info_sets = strategy_info_sets();
   StrategyProbabilities probabilities;
   probabilities.reserve(node.action_count);
-  CompactInfoSetKey key;
-  key.public_state_id = public_state_id.value_or(0);
-  key.player = static_cast<uint8_t>(player);
+  const uint8_t player_u8 = static_cast<uint8_t>(player);
+  const uint32_t public_state_id_value = public_state_id.value_or(0);
   for (size_t i = 0; i < opponent_hands.size(); ++i) {
     probabilities.clear();
     probabilities.resize(node.action_count, fallback_probability);
 
     if (public_state_id.has_value()) {
       const ComboId opponent_combo = opponent_hands.combo(i);
-      key.private_combo = opponent_combo;
+      const CompactInfoSetKey key =
+          EncodeCompactInfoSetKey(public_state_id_value, opponent_combo,
+                                  player_u8);
       auto found = compact_info_set_ids.find(key);
       if (found != compact_info_set_ids.end()) {
         average_strategy_probabilities(info_sets[found->second], node,
