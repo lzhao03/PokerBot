@@ -80,12 +80,9 @@ class CFRSolverRegretTestPeer {
                        const Hand& hand,
                        int action_id) {
     auto public_state =
-        solver.public_state_ids_.find(solver.make_public_state_key(node.state));
-    if (public_state == solver.public_state_ids_.end()) {
-      throw std::runtime_error("Public state was not created");
-    }
+        solver.get_or_create_public_state_id(node.state);
     const CFRSolver::InfoSetRow* row =
-        solver.find_info_set_row(public_state->second, player,
+        solver.find_info_set_row(public_state, player,
                                  TestComboId(hand));
     if (row == nullptr) {
       throw std::runtime_error("Regret info set was not created");
@@ -102,8 +99,12 @@ class CFRSolverRegretTestPeer {
   static bool SamePublicStateKey(const CFRSolver& solver,
                                  const BoardState& left,
                                  const BoardState& right) {
-    return solver.make_public_state_key(TestGameState(left)) ==
-           solver.make_public_state_key(TestGameState(right));
+    const GameState left_state = TestGameState(left);
+    const GameState right_state = TestGameState(right);
+    return solver.make_betting_history_key(left_state) ==
+               solver.make_betting_history_key(right_state) &&
+           solver.card_abstraction_.public_id(left_state) ==
+               solver.card_abstraction_.public_id(right_state);
   }
 
   static uint64_t PublicCardsId(const CFRSolver& solver,
@@ -120,6 +121,11 @@ class CFRSolverRegretTestPeer {
 
   static uint32_t PublicStateId(CFRSolver& solver, const BoardState& state) {
     return solver.get_or_create_public_state_id(TestGameState(state));
+  }
+
+  static uint32_t BettingHistoryId(CFRSolver& solver,
+                                   const BoardState& state) {
+    return solver.get_or_create_betting_history_id(TestGameState(state));
   }
 
   static int InfoSetOffset(CFRSolver& solver,
@@ -723,6 +729,36 @@ void CheckPublicStateIdsAreDenseAndKeyedByState() {
   Expect(flop_id == 1, "different public state should get next dense id");
   Expect(repeated_flop_id == flop_id,
          "same public state key should reuse its dense id");
+}
+
+void CheckBettingHistoryIdsIgnorePublicCards() {
+  PokerConfig config;
+  CFRSolver solver(TestSolverConfig(config));
+  BoardState first_flop = InitialRootState(config);
+  first_flop.set_street(Street::FLOP);
+  AddCard(first_flop, 2, Suit::HEARTS);
+  AddCard(first_flop, 7, Suit::DIAMONDS);
+  AddCard(first_flop, 11, Suit::CLUBS);
+
+  BoardState second_flop = InitialRootState(config);
+  second_flop.set_street(Street::FLOP);
+  AddCard(second_flop, 3, Suit::HEARTS);
+  AddCard(second_flop, 8, Suit::DIAMONDS);
+  AddCard(second_flop, 12, Suit::CLUBS);
+
+  const uint32_t first_betting_id =
+      CFRSolverRegretTestPeer::BettingHistoryId(solver, first_flop);
+  const uint32_t second_betting_id =
+      CFRSolverRegretTestPeer::BettingHistoryId(solver, second_flop);
+  const uint32_t first_public_id =
+      CFRSolverRegretTestPeer::PublicStateId(solver, first_flop);
+  const uint32_t second_public_id =
+      CFRSolverRegretTestPeer::PublicStateId(solver, second_flop);
+
+  Expect(first_betting_id == second_betting_id,
+         "betting history ids should ignore public card identity");
+  Expect(first_public_id != second_public_id,
+         "public state ids should still distinguish public card ids");
 }
 
 void CheckSparseSlabRowsUseExactCombos() {
@@ -2224,6 +2260,7 @@ int main() {
   CheckPublicStateKeyIgnoresBoardOrder();
   CheckIdentityPrivateAbstractionUsesExactCombo();
   CheckPublicStateIdsAreDenseAndKeyedByState();
+  CheckBettingHistoryIdsIgnorePublicCards();
   CheckSparseSlabRowsUseExactCombos();
   CheckSparseSlabTracksInfoSets();
   CheckTerminalUtilityCacheReusesScores();

@@ -200,7 +200,7 @@ private:
     std::vector<RangeScratchFrame> frames;
   };
 
-  struct PublicStateKey {
+  struct BettingHistoryKey {
     static constexpr int kInlineHistoryValues = 48;
 
     int street = 0;
@@ -212,10 +212,20 @@ private:
     int player_to_act = 0;
     int player_contribution_size = 0;
     std::array<int, 2> player_contributions = {0, 0};
-    uint64_t public_cards_id = 0;
     int history_size = 0;
     std::array<int, kInlineHistoryValues> history_values = {};
     std::vector<int> history_overflow;
+
+    bool operator==(const BettingHistoryKey& other) const;
+  };
+
+  struct BettingHistoryKeyHash {
+    size_t operator()(const BettingHistoryKey& key) const;
+  };
+
+  struct PublicStateKey {
+    uint32_t betting_history_id = 0;
+    uint64_t public_cards_id = 0;
 
     bool operator==(const PublicStateKey& other) const;
   };
@@ -264,6 +274,9 @@ private:
   };
 
   struct StrategyTablesView {
+    const absl::flat_hash_map<BettingHistoryKey, uint32_t,
+                              BettingHistoryKeyHash>*
+        betting_history_ids = nullptr;
     const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>*
         public_state_ids = nullptr;
     const std::vector<std::unique_ptr<PublicInfoSetSlab>>*
@@ -299,6 +312,8 @@ private:
   // parallel training phase only writes to the atomic regret/strategy arrays.
   bool frozen_ = false;
   
+  absl::flat_hash_map<BettingHistoryKey, uint32_t, BettingHistoryKeyHash>
+      betting_history_ids_;
   absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>
       public_state_ids_;
   size_t info_set_count_ = 0;
@@ -357,7 +372,10 @@ private:
       int player,
       const ActionChoices& action_choices,
       ConditionedRanges& conditioned_ranges);
-  PublicStateKey make_public_state_key(const GameState& state) const;
+  BettingHistoryKey make_betting_history_key(const GameState& state) const;
+  PublicStateKey make_public_state_key(uint32_t betting_history_id,
+                                       const GameState& state) const;
+  uint32_t get_or_create_betting_history_id(const GameState& state);
   uint32_t get_or_create_public_state_id(const GameState& state);
   uint32_t get_or_create_public_state_id(GameTree::Node& node);
   std::optional<InfoSetRow> get_or_create_info_set_row(
@@ -367,7 +385,12 @@ private:
       const int* action_ids,
       int num_actions);
   StrategyTablesView strategy_tables_view();
+  std::optional<uint32_t> strategy_betting_history_id(
+      const GameState& state) const;
   std::optional<uint32_t> strategy_public_state_id(GameTree::Node& node);
+  const absl::flat_hash_map<BettingHistoryKey, uint32_t,
+                            BettingHistoryKeyHash>&
+  strategy_betting_history_ids() const;
   const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>&
   strategy_public_state_ids() const;
   const std::vector<std::unique_ptr<PublicInfoSetSlab>>&
