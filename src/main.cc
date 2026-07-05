@@ -40,6 +40,9 @@ double ParseDouble(const std::string& value, const std::string& flag) {
   return parsed;
 }
 
+constexpr int64_t kDefaultMaxInfoSets = 500000;
+constexpr int64_t kDefaultMaxTreeNodes = 200000;
+
 void PrintUsage(const char* program) {
   std::cerr
       << "Usage: " << program << " [options]\n"
@@ -56,7 +59,12 @@ void PrintUsage(const char* program) {
       << "  --flop-bet-size=X\n"
       << "  --turn-bet-size=X\n"
       << "  --river-bet-size=X\n"
-      << "  --max-info-sets=N               cap info set allocations (0 = unlimited)\n"
+      << "  --max-info-sets=N               cap info set allocations (default "
+      << kDefaultMaxInfoSets << ", 0 = unlimited)\n"
+      << "  --max-tree-nodes=N              cap game tree node cache (default "
+      << kDefaultMaxTreeNodes << ", 0 = unlimited)\n"
+      << "  --threads=N                     parallel training threads (0 or 1 = single-threaded)\n"
+      << "  --warmup-iterations=N           single-threaded warmup before parallel phase (0 = auto)\n"
       << "  --log                           show INFO logs and VLOG(1) progress\n";
 }
 
@@ -69,6 +77,8 @@ int main(int argc, char** argv) {
   int iterations = 100;
   int exploitability_samples = 0;
   bool saw_global_bet_size = false;
+  bool saw_max_info_sets = false;
+  bool saw_max_tree_nodes = false;
 
   try {
     for (int i = 1; i < argc; ++i) {
@@ -117,9 +127,25 @@ int main(int argc, char** argv) {
                           ParseDouble(value, "--river-bet-size"));
       } else if (ConsumePrefix(arg, "--max-info-sets=", &value)) {
         config.set_max_info_sets(ParseInt(value, "--max-info-sets"));
+        saw_max_info_sets = true;
+      } else if (ConsumePrefix(arg, "--max-tree-nodes=", &value)) {
+        config.set_max_tree_nodes(ParseInt(value, "--max-tree-nodes"));
+        saw_max_tree_nodes = true;
+      } else if (ConsumePrefix(arg, "--threads=", &value)) {
+        config.set_num_training_threads(ParseInt(value, "--threads"));
+      } else if (ConsumePrefix(arg, "--warmup-iterations=", &value)) {
+        config.set_warmup_iterations(ParseInt(value, "--warmup-iterations"));
       } else {
         throw std::invalid_argument("Unknown option: " + arg);
       }
+    }
+
+    // Apply sensible memory caps when the user did not explicitly set them.
+    if (!saw_max_info_sets) {
+      config.set_max_info_sets(kDefaultMaxInfoSets);
+    }
+    if (!saw_max_tree_nodes) {
+      config.set_max_tree_nodes(kDefaultMaxTreeNodes);
     }
 
     poker::HandRange player_a_range;
@@ -141,6 +167,7 @@ int main(int argc, char** argv) {
     std::cout << "info_sets=" << strategy.size() << "\n";
     std::cout << "player_a_ev=" << solver.get_expected_value(0) << "\n";
     std::cout << "seconds=" << elapsed.count() << "\n";
+    std::cout << "tree_nodes=" << solver.get_tree_node_count() << "\n";
 
     if (exploitability_samples > 0) {
       std::cout << "exploitability="
