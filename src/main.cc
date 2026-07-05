@@ -5,12 +5,32 @@
 #include "src/hand_range.h"
 #include "src/poker_config.h"
 
+#include <cerrno>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <string>
+#include <sys/resource.h>
 
 namespace {
+
+constexpr int64_t kDefaultMemoryLimitMb = 4096;
+
+void SetMemoryLimit(int64_t megabytes) {
+  if (megabytes <= 0) {
+    return;
+  }
+  const rlim_t bytes = static_cast<rlim_t>(megabytes) * 1024ULL * 1024ULL;
+  struct rlimit limit;
+  limit.rlim_cur = bytes;
+  limit.rlim_max = bytes;
+  if (setrlimit(RLIMIT_AS, &limit) != 0) {
+    std::cerr << "Warning: failed to set memory limit to " << megabytes
+              << " MB: " << std::strerror(errno) << "\n";
+  }
+}
 
 bool ConsumePrefix(const std::string& arg,
                    const std::string& prefix,
@@ -29,6 +49,15 @@ int ParseInt(const std::string& value, const std::string& flag) {
     throw std::invalid_argument("Invalid integer for " + flag + ": " + value);
   }
   return static_cast<int>(parsed);
+}
+
+int64_t ParseInt64(const std::string& value, const std::string& flag) {
+  char* end = nullptr;
+  long long parsed = std::strtoll(value.c_str(), &end, 10);
+  if (end == value.c_str() || *end != '\0') {
+    throw std::invalid_argument("Invalid integer for " + flag + ": " + value);
+  }
+  return static_cast<int64_t>(parsed);
 }
 
 double ParseDouble(const std::string& value, const std::string& flag) {
@@ -65,6 +94,8 @@ void PrintUsage(const char* program) {
       << kDefaultMaxTreeNodes << ", 0 = unlimited)\n"
       << "  --threads=N                     parallel training threads (0 or 1 = single-threaded)\n"
       << "  --warmup-iterations=N           single-threaded warmup before parallel phase (0 = auto)\n"
+      << "  --max-memory-mb=N                hard memory limit in MB (default "
+      << kDefaultMemoryLimitMb << ", 0 = unlimited)\n"
       << "  --log                           show INFO logs and VLOG(1) progress\n";
 }
 
@@ -79,6 +110,7 @@ int main(int argc, char** argv) {
   bool saw_global_bet_size = false;
   bool saw_max_info_sets = false;
   bool saw_max_tree_nodes = false;
+  int64_t memory_limit_mb = kDefaultMemoryLimitMb;
 
   try {
     for (int i = 1; i < argc; ++i) {
@@ -131,6 +163,11 @@ int main(int argc, char** argv) {
       } else if (ConsumePrefix(arg, "--max-tree-nodes=", &value)) {
         config.set_max_tree_nodes(ParseInt(value, "--max-tree-nodes"));
         saw_max_tree_nodes = true;
+      } else if (ConsumePrefix(arg, "--max-memory-mb=", &value)) {
+        memory_limit_mb = ParseInt64(value, "--max-memory-mb");
+        if (memory_limit_mb < 0) {
+          throw std::invalid_argument("--max-memory-mb must be non-negative");
+        }
       } else if (ConsumePrefix(arg, "--threads=", &value)) {
         config.set_num_training_threads(ParseInt(value, "--threads"));
       } else if (ConsumePrefix(arg, "--warmup-iterations=", &value)) {
@@ -155,6 +192,7 @@ int main(int argc, char** argv) {
 
     const poker::SolverConfig native_config =
         poker::SolverConfigFromProto(config);
+    SetMemoryLimit(memory_limit_mb);
     poker::CFRSolver solver(native_config);
     auto start = std::chrono::steady_clock::now();
     solver.run(iterations, player_a_range, player_b_range);
