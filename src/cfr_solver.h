@@ -4,7 +4,6 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -333,7 +332,7 @@ private:
     const std::vector<BettingHistoryRow>* betting_history_rows = nullptr;
     const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>*
         public_state_ids = nullptr;
-    const std::deque<PublicStateRow>* public_state_rows = nullptr;
+    const std::vector<PublicStateRow>* public_state_rows = nullptr;
     const absl::flat_hash_map<uint64_t, uint32_t>* public_chance_child_ids =
         nullptr;
     const std::vector<std::unique_ptr<PublicInfoSetSlab>>*
@@ -375,7 +374,7 @@ private:
       betting_history_ids_;
   absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>
       public_state_ids_;
-  std::deque<PublicStateRow> public_state_rows_;
+  std::vector<PublicStateRow> public_state_rows_;
   absl::flat_hash_map<uint64_t, uint32_t> public_chance_child_ids_;
   std::vector<BettingHistoryRow> betting_history_rows_;
   size_t info_set_count_ = 0;
@@ -506,7 +505,7 @@ private:
   const std::vector<BettingHistoryRow>& strategy_betting_history_rows() const;
   const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>&
   strategy_public_state_ids() const;
-  const std::deque<PublicStateRow>& strategy_public_state_rows() const;
+  const std::vector<PublicStateRow>& strategy_public_state_rows() const;
   const absl::flat_hash_map<uint64_t, uint32_t>&
   strategy_public_chance_child_ids() const;
   const std::vector<std::unique_ptr<PublicInfoSetSlab>>&

@@ -403,6 +403,9 @@ CFRSolver::CFRSolver(
     cumulative_regrets_.reserve(action_cap);
     cumulative_strategies_.reserve(action_cap);
   }
+  if (config_.max_tree_nodes > 0) {
+    public_state_rows_.reserve(static_cast<size_t>(config_.max_tree_nodes));
+  }
 }
 
 void CFRSolver::set_continuation_value_provider(
@@ -824,10 +827,20 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
         ++traversal_stats_.betting_history_transition_misses);
     return std::nullopt;
   }
+  if (config_.max_tree_nodes > 0 &&
+      static_cast<int>(public_state_rows_.size()) >= config_.max_tree_nodes) {
+    POKER_RECORD_TRAVERSAL_STAT(
+        ++traversal_stats_.betting_history_transition_misses);
+    return std::nullopt;
+  }
 
-  PublicStateRow& row = public_state_rows_[public_state_id];
+  const GameState parent_state = public_state_rows_[public_state_id].state;
+  const GameAction action =
+      public_state_rows_[public_state_id].actions[action_slot];
+  const uint32_t parent_betting_history_id =
+      public_state_rows_[public_state_id].betting_history_id;
   const GameState child_state =
-      game_tree_->apply_action(row.state, row.actions[action_slot]);
+      game_tree_->apply_action(parent_state, action);
   std::optional<uint32_t> child_id =
       get_or_create_public_state_row(child_state);
   if (!child_id.has_value()) {
@@ -836,9 +849,9 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
     return std::nullopt;
   }
 
-  row.action_child_ids[action_slot] = *child_id;
-  if (row.betting_history_id < betting_history_rows_.size()) {
-    betting_history_rows_[row.betting_history_id]
+  public_state_rows_[public_state_id].action_child_ids[action_slot] = *child_id;
+  if (parent_betting_history_id < betting_history_rows_.size()) {
+    betting_history_rows_[parent_betting_history_id]
         .action_child_ids[action_slot] =
         public_state_rows_[*child_id].betting_history_id;
   }
@@ -869,9 +882,17 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
         ++traversal_stats_.betting_history_transition_misses);
     return std::nullopt;
   }
+  if (config_.max_tree_nodes > 0 &&
+      static_cast<int>(public_state_rows_.size()) >= config_.max_tree_nodes) {
+    POKER_RECORD_TRAVERSAL_STAT(
+        ++traversal_stats_.betting_history_transition_misses);
+    return std::nullopt;
+  }
 
-  const PublicStateRow& row = public_state_rows_[public_state_id];
-  const GameState child_state = game_tree_->apply_chance(row.state, cards);
+  const GameState parent_state = public_state_rows_[public_state_id].state;
+  const uint32_t parent_betting_history_id =
+      public_state_rows_[public_state_id].betting_history_id;
+  const GameState child_state = game_tree_->apply_chance(parent_state, cards);
   std::optional<uint32_t> child_id =
       get_or_create_public_state_row(child_state);
   if (!child_id.has_value()) {
@@ -881,8 +902,8 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
   }
 
   public_chance_child_ids_.emplace(map_key, *child_id);
-  if (row.betting_history_id < betting_history_rows_.size()) {
-    betting_history_rows_[row.betting_history_id].chance_child_id =
+  if (parent_betting_history_id < betting_history_rows_.size()) {
+    betting_history_rows_[parent_betting_history_id].chance_child_id =
         public_state_rows_[*child_id].betting_history_id;
   }
   POKER_RECORD_TRAVERSAL_STAT(
@@ -1176,7 +1197,7 @@ CFRSolver::strategy_public_state_ids() const {
              : public_state_ids_;
 }
 
-const std::deque<CFRSolver::PublicStateRow>&
+const std::vector<CFRSolver::PublicStateRow>&
 CFRSolver::strategy_public_state_rows() const {
   return strategy_tables_view_ != nullptr
              ? *strategy_tables_view_->public_state_rows
@@ -1786,6 +1807,7 @@ double CFRSolver::cfr_with_ranges(
   if (!IsPlayer(player) || row.action_count == 0) {
     return 0.0;
   }
+  const StreetKind street = row.state.street;
   const PrivateCards& player_cards =
       player == 0 ? player_a_cards : player_b_cards;
 
@@ -1912,7 +1934,7 @@ double CFRSolver::cfr_with_ranges(
   POKER_RECORD_TRAVERSAL_STAT(
       traversal_stats_.max_decision_depth =
           std::max(traversal_stats_.max_decision_depth, depth));
-  switch (row.state.street) {
+  switch (street) {
     case StreetKind::kPreflop:
       POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.preflop_updates);
       break;
@@ -2009,7 +2031,7 @@ double CFRSolver::chance_sampling_cfr(
   if (public_state_id >= rows.size()) {
     return 0.0;
   }
-  const PublicStateRow& row = rows[public_state_id];
+  const GameState state = rows[public_state_id].state;
 
   const int samples = ChanceSamples(config_);
   POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.chance_samples += samples);
@@ -2023,7 +2045,7 @@ double CFRSolver::chance_sampling_cfr(
   int evaluated = 0;
   for (int i = 0; i < samples; ++i) {
     const auto cards = SampleStreetCards(
-        row.state, player_a_cards.mask() | player_b_cards.mask(), rng_);
+        state, player_a_cards.mask() | player_b_cards.mask(), rng_);
     std::optional<uint32_t> child_public_state_id =
         get_or_create_chance_child_public_state(public_state_id, cards);
     if (!child_public_state_id.has_value()) {
@@ -2642,12 +2664,13 @@ double CFRSolver::evaluate_strategy_node(
     return utility(row.state, player_a_cards, player_b_cards);
   }
   if (row.is_chance_node) {
+    const GameState state = row.state;
     const int samples = ChanceSamples(config_);
     double value = 0.0;
     int evaluated = 0;
     for (int i = 0; i < samples; ++i) {
       const auto cards = SampleStreetCards(
-          row.state, player_a_cards.mask() | player_b_cards.mask(), rng_);
+          state, player_a_cards.mask() | player_b_cards.mask(), rng_);
       std::optional<uint32_t> child_public_state_id =
           get_or_create_chance_child_public_state(public_state_id, cards);
       if (!child_public_state_id.has_value()) {
@@ -2675,7 +2698,8 @@ double CFRSolver::evaluate_strategy_node(
       public_state_id, row, player, player_cards, probabilities);
 
   double value = 0.0;
-  for (int action_index = 0; action_index < row.action_count; ++action_index) {
+  const int action_count = row.action_count;
+  for (int action_index = 0; action_index < action_count; ++action_index) {
     std::optional<uint32_t> child_public_state_id =
         get_or_create_action_child_public_state(public_state_id, action_index);
     if (!child_public_state_id.has_value()) {
