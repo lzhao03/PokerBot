@@ -815,8 +815,8 @@ const CFRSolver::PublicInfoSetSlab* CFRSolver::public_info_set_slab(
 const CFRSolver::InfoSetRow* CFRSolver::find_info_set_row(
     uint32_t public_state_id,
     int player,
-    uint16_t private_id) const {
-  if (player < 0 || player >= kPlayerCount || private_id >= kComboCount) {
+    PrivateBucketId private_bucket) const {
+  if (player < 0 || player >= kPlayerCount || private_bucket >= kComboCount) {
     return nullptr;
   }
   const PublicInfoSetSlab* slab = public_info_set_slab(public_state_id);
@@ -824,17 +824,17 @@ const CFRSolver::InfoSetRow* CFRSolver::find_info_set_row(
     return nullptr;
   }
   const PublicInfoSetSlabPlayer& player_slab = slab->players[player];
-  return find_info_set_row(player_slab, private_id);
+  return find_info_set_row(player_slab, private_bucket);
 }
 
 const CFRSolver::InfoSetRow* CFRSolver::find_info_set_row(
     const PublicInfoSetSlabPlayer& player_slab,
-    uint16_t private_id) {
-  if (private_id >= kComboCount) {
+    PrivateBucketId private_bucket) {
+  if (private_bucket >= kComboCount) {
     return nullptr;
   }
-  const size_t chunk_index = private_id / kPrivateIdChunkSize;
-  const size_t chunk_offset = private_id % kPrivateIdChunkSize;
+  const size_t chunk_index = private_bucket / kPrivateBucketChunkSize;
+  const size_t chunk_offset = private_bucket % kPrivateBucketChunkSize;
   const std::unique_ptr<PrivateRowChunk>& chunk =
       player_slab.private_row_chunks[chunk_index];
   if (chunk == nullptr) {
@@ -850,9 +850,9 @@ const CFRSolver::InfoSetRow* CFRSolver::find_info_set_row(
 
 int32_t& CFRSolver::get_or_create_private_row_slot(
     PublicInfoSetSlabPlayer& player_slab,
-    uint16_t private_id) {
-  const size_t chunk_index = private_id / kPrivateIdChunkSize;
-  const size_t chunk_offset = private_id % kPrivateIdChunkSize;
+    PrivateBucketId private_bucket) {
+  const size_t chunk_index = private_bucket / kPrivateBucketChunkSize;
+  const size_t chunk_offset = private_bucket % kPrivateBucketChunkSize;
   std::unique_ptr<PrivateRowChunk>& chunk =
       player_slab.private_row_chunks[chunk_index];
   if (chunk == nullptr) {
@@ -864,11 +864,11 @@ int32_t& CFRSolver::get_or_create_private_row_slot(
 std::optional<CFRSolver::InfoSetRow> CFRSolver::get_or_create_info_set_row(
     uint32_t public_state_id,
     int player,
-    uint16_t private_id,
+    PrivateBucketId private_bucket,
     const int* action_ids,
     int num_actions) {
   if (const InfoSetRow* row =
-          find_info_set_row(public_state_id, player, private_id)) {
+          find_info_set_row(public_state_id, player, private_bucket)) {
     return *row;
   }
 
@@ -880,7 +880,7 @@ std::optional<CFRSolver::InfoSetRow> CFRSolver::get_or_create_info_set_row(
   InfoSetRow row = append_info_set_actions(action_ids, num_actions);
   PublicInfoSetSlab& slab = get_or_create_public_info_set_slab(public_state_id);
   PublicInfoSetSlabPlayer& player_slab = slab.players[player];
-  int32_t& row_id = get_or_create_private_row_slot(player_slab, private_id);
+  int32_t& row_id = get_or_create_private_row_slot(player_slab, private_bucket);
   row_id = static_cast<int32_t>(player_slab.rows.size());
   player_slab.rows.push_back(row);
   ++info_set_count_;
@@ -1333,7 +1333,7 @@ double CFRSolver::cfr_with_ranges(
   const std::optional<InfoSetRow> info_set_row =
       get_or_create_info_set_row(
           public_state_id, player,
-          card_abstraction_.private_id(player_cards.combo, node.state),
+          card_abstraction_.private_bucket(player_cards.combo, node.state),
           betting_history.action_ids.data(), betting_history.action_count);
   ActionChoices action_choices;
   action_choices.reserve(betting_history.action_count);
@@ -1552,11 +1552,11 @@ void CFRSolver::average_strategy_probabilities(
   }
 
   const double uniform_probability = 1.0 / node.action_count;
-  const uint16_t private_id =
-      card_abstraction_.private_id(private_cards.combo, node.state);
+  const PrivateBucketId private_bucket =
+      card_abstraction_.private_bucket(private_cards.combo, node.state);
   auto try_public_state = [&](uint32_t public_state_id) {
     const InfoSetRow* row =
-        find_info_set_row(public_state_id, player, private_id);
+        find_info_set_row(public_state_id, player, private_bucket);
     if (row == nullptr) {
       return false;
     }
@@ -1694,11 +1694,11 @@ void CFRSolver::condition_ranges_for_actions(
     }
 
     double positive_regret_sum = 0.0;
-    const uint16_t private_id =
-        card_abstraction_.private_id(combo_id, node.state);
+    const PrivateBucketId private_bucket =
+        card_abstraction_.private_bucket(combo_id, node.state);
     const InfoSetRow* row = nullptr;
     if (player_slab != nullptr) {
-      row = find_info_set_row(*player_slab, private_id);
+      row = find_info_set_row(*player_slab, private_bucket);
     }
 
     if (row != nullptr) {
@@ -1785,7 +1785,7 @@ CFRSolver::StrategyProfile CFRSolver::get_strategy_profile() const {
 
   auto export_row = [&](uint32_t public_state_id,
                         uint8_t player,
-                        uint16_t private_id,
+                        PrivateBucketId private_bucket,
                         const InfoSetRow& row) {
     double sum = 0.0;
     const size_t action_offset = row.action_offset;
@@ -1797,7 +1797,7 @@ CFRSolver::StrategyProfile CFRSolver::get_strategy_profile() const {
 
     StrategyInfoSet exported;
     exported.key.public_state_id = public_state_id;
-    exported.key.private_id = private_id;
+    exported.key.private_bucket = private_bucket;
     exported.key.player = player;
     exported.action_ids.reserve(row.action_count);
     exported.probabilities.reserve(row.action_count);
@@ -1840,9 +1840,9 @@ CFRSolver::StrategyProfile CFRSolver::get_strategy_profile() const {
         }
         for (size_t chunk_offset = 0; chunk_offset < chunk->rows.size();
              ++chunk_offset) {
-          const uint16_t private_id = static_cast<uint16_t>(
-              chunk_index * kPrivateIdChunkSize + chunk_offset);
-          if (private_id >= kComboCount) {
+          const PrivateBucketId private_bucket = static_cast<PrivateBucketId>(
+              chunk_index * kPrivateBucketChunkSize + chunk_offset);
+          if (private_bucket >= kComboCount) {
             break;
           }
           const int32_t row_id = chunk->rows[chunk_offset];
@@ -1850,7 +1850,7 @@ CFRSolver::StrategyProfile CFRSolver::get_strategy_profile() const {
               static_cast<size_t>(row_id) >= player_slab.rows.size()) {
             continue;
           }
-          export_row(public_state_id, player, private_id,
+          export_row(public_state_id, player, private_bucket,
                      player_slab.rows[row_id]);
         }
       }
@@ -2183,10 +2183,10 @@ double CFRSolver::best_response_value_against_range(
 
     if (player_slab != nullptr) {
       const ComboId opponent_combo = opponent_hands.combo(i);
-      const uint16_t private_id =
-          card_abstraction_.private_id(opponent_combo, node.state);
+      const PrivateBucketId private_bucket =
+          card_abstraction_.private_bucket(opponent_combo, node.state);
       if (const InfoSetRow* row =
-              find_info_set_row(*player_slab, private_id)) {
+              find_info_set_row(*player_slab, private_bucket)) {
         average_strategy_probabilities(*row, node, fallback_probability,
                                        probabilities);
       }

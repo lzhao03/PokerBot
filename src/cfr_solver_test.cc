@@ -112,11 +112,11 @@ class CFRSolverRegretTestPeer {
     return solver.card_abstraction_.public_bucket(TestGameState(state));
   }
 
-  static uint16_t PrivateId(const CFRSolver& solver,
-                            const BoardState& state,
-                            const Hand& hand) {
-    return solver.card_abstraction_.private_id(TestComboId(hand),
-                                               TestGameState(state));
+  static CFRSolver::PrivateBucketId PrivateBucket(const CFRSolver& solver,
+                                                  const BoardState& state,
+                                                  const Hand& hand) {
+    return solver.card_abstraction_.private_bucket(TestComboId(hand),
+                                                   TestGameState(state));
   }
 
   static uint32_t PublicStateId(CFRSolver& solver, const BoardState& state) {
@@ -142,10 +142,13 @@ class CFRSolverRegretTestPeer {
     }
     const uint32_t public_state_id =
         solver.get_or_create_public_state_id(native_state);
+    const CFRSolver::PrivateBucketId private_bucket =
+        solver.card_abstraction_.private_bucket(TestComboId(hand),
+                                                native_state);
     std::optional<CFRSolver::InfoSetRow> row =
         solver.get_or_create_info_set_row(
-        public_state_id, player, TestComboId(hand),
-        action_id_buf, num_actions);
+            public_state_id, player, private_bucket, action_id_buf,
+            num_actions);
     if (!row.has_value()) {
       return -1;
     }
@@ -168,10 +171,11 @@ class CFRSolverRegretTestPeer {
     const GameState native_state = TestGameState(state);
     const uint32_t public_state_id =
         solver.get_or_create_public_state_id(native_state);
-    const uint16_t private_id =
-        solver.card_abstraction_.private_id(TestComboId(hand), native_state);
+    const CFRSolver::PrivateBucketId private_bucket =
+        solver.card_abstraction_.private_bucket(TestComboId(hand),
+                                                native_state);
     const CFRSolver::InfoSetRow* row =
-        solver.find_info_set_row(public_state_id, player, private_id);
+        solver.find_info_set_row(public_state_id, player, private_bucket);
     if (row == nullptr) {
       return -1;
     }
@@ -563,7 +567,7 @@ bool StrategyHasCombo(const CFRSolver::StrategyProfile& profile,
       profile.info_sets.begin(), profile.info_sets.end(),
       [&](const CFRSolver::StrategyInfoSet& info_set) {
         return info_set.key.player == player &&
-               info_set.key.private_id == combo;
+               info_set.key.private_bucket == combo;
       });
 }
 
@@ -577,7 +581,7 @@ bool StrategiesApproximatelyEqual(const CFRSolver::StrategyProfile& left,
     const CFRSolver::StrategyInfoSet& right_info_set = right.info_sets[i];
     if (left_info_set.key.public_state_id !=
             right_info_set.key.public_state_id ||
-        left_info_set.key.private_id != right_info_set.key.private_id ||
+        left_info_set.key.private_bucket != right_info_set.key.private_bucket ||
         left_info_set.key.player != right_info_set.key.player ||
         left_info_set.action_ids != right_info_set.action_ids ||
         left_info_set.probabilities.size() !=
@@ -779,7 +783,7 @@ void CheckIdentityPrivateAbstractionUsesExactCombo() {
   BoardState state = InitialRootState(config);
   Hand aces = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
 
-  Expect(CFRSolverRegretTestPeer::PrivateId(solver, state, aces) ==
+  Expect(CFRSolverRegretTestPeer::PrivateBucket(solver, state, aces) ==
              TestComboId(aces),
          "identity private abstraction should use exact combo ids");
 }

@@ -49,9 +49,11 @@ public:
     int64_t entries = 0;
   };
 
+  using PrivateBucketId = uint16_t;
+
   struct StrategyInfoSetKey {
     uint32_t public_state_id = 0;
-    uint16_t private_id = 0;
+    PrivateBucketId private_bucket = 0;
     int player = 0;
   };
 
@@ -262,11 +264,11 @@ private:
       return state.board_mask;
     }
 
-    uint16_t private_id(ComboId combo_id, const GameState&) const {
+    PrivateBucketId private_bucket(ComboId combo_id, const GameState&) const {
       return combo_id;
     }
 
-    uint32_t private_id_count(const GameState&) const {
+    uint32_t private_bucket_count(const GameState&) const {
       return kComboCount;
     }
   };
@@ -276,18 +278,18 @@ private:
     uint16_t action_count = 0;
   };
 
-  static constexpr int kPrivateIdChunkSize = 64;
-  static constexpr int kPrivateIdChunkCount =
-      (kComboCount + kPrivateIdChunkSize - 1) / kPrivateIdChunkSize;
+  static constexpr int kPrivateBucketChunkSize = 64;
+  static constexpr int kPrivateBucketChunkCount =
+      (kComboCount + kPrivateBucketChunkSize - 1) / kPrivateBucketChunkSize;
 
   struct PrivateRowChunk {
     PrivateRowChunk() { rows.fill(-1); }
 
-    std::array<int32_t, kPrivateIdChunkSize> rows;
+    std::array<int32_t, kPrivateBucketChunkSize> rows;
   };
 
   struct PublicInfoSetSlabPlayer {
-    std::array<std::unique_ptr<PrivateRowChunk>, kPrivateIdChunkCount>
+    std::array<std::unique_ptr<PrivateRowChunk>, kPrivateBucketChunkCount>
         private_row_chunks;
     std::vector<InfoSetRow> rows;
   };
@@ -417,7 +419,7 @@ private:
   std::optional<InfoSetRow> get_or_create_info_set_row(
       uint32_t public_state_id,
       int player,
-      uint16_t private_id,
+      PrivateBucketId private_bucket,
       const int* action_ids,
       int num_actions);
   StrategyTablesView strategy_tables_view();
@@ -445,13 +447,13 @@ private:
       uint32_t public_state_id) const;
   const InfoSetRow* find_info_set_row(uint32_t public_state_id,
                                       int player,
-                                      uint16_t private_id) const;
+                                      PrivateBucketId private_bucket) const;
   static const InfoSetRow* find_info_set_row(
       const PublicInfoSetSlabPlayer& player_slab,
-      uint16_t private_id);
+      PrivateBucketId private_bucket);
   static int32_t& get_or_create_private_row_slot(
       PublicInfoSetSlabPlayer& player_slab,
-      uint16_t private_id);
+      PrivateBucketId private_bucket);
   ContinuationContext build_continuation_context(
       const GameState& state,
       ComboId player_a_hand,
