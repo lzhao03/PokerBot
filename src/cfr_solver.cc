@@ -649,10 +649,16 @@ uint32_t CFRSolver::get_or_create_betting_history_id(GameTree::Node& node) {
 }
 
 uint32_t CFRSolver::get_or_create_public_state_id(GameTree::Node& node) {
+  const uint32_t betting_history_id = get_or_create_betting_history_id(node);
+  return get_or_create_public_state_id(node, betting_history_id);
+}
+
+uint32_t CFRSolver::get_or_create_public_state_id(
+    GameTree::Node& node,
+    uint32_t betting_history_id) {
   if (node.public_state_id != GameTree::Node::kInvalidPublicStateId) {
     return node.public_state_id;
   }
-  const uint32_t betting_history_id = get_or_create_betting_history_id(node);
   node.public_state_id =
       get_or_create_public_state_id(betting_history_id, node.state);
   return node.public_state_id;
@@ -1316,8 +1322,9 @@ double CFRSolver::cfr_with_ranges(
       (player == 0) ? player_a_cards : player_b_cards;
   
   EnsureLegalActionIds(node);
-  const uint32_t public_state_id = get_or_create_public_state_id(node);
   const uint32_t betting_history_id = get_or_create_betting_history_id(node);
+  const uint32_t public_state_id =
+      get_or_create_public_state_id(node, betting_history_id);
   const auto& betting_history_rows = strategy_betting_history_rows();
   if (betting_history_id >= betting_history_rows.size()) {
     throw std::logic_error("Betting history row is missing");

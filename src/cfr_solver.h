@@ -415,6 +415,8 @@ private:
                                          const GameState& state);
   uint32_t get_or_create_public_state_id(const GameState& state);
   uint32_t get_or_create_public_state_id(GameTree::Node& node);
+  uint32_t get_or_create_public_state_id(GameTree::Node& node,
+                                         uint32_t betting_history_id);
   void cache_action_betting_history_transition(GameTree::Node& node,
                                                int action_index,
                                                GameTree::Node& child_node);
