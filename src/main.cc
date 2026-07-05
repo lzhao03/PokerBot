@@ -198,14 +198,24 @@ int main(int argc, char** argv) {
     solver.run(iterations, player_a_range, player_b_range);
     auto end = std::chrono::steady_clock::now();
 
-    poker::CFRSolver::StrategyProfile strategy = solver.get_strategy_profile();
-
     std::chrono::duration<double> elapsed = end - start;
+    const size_t info_sets = solver.get_info_set_count();
+    const size_t tree_nodes = solver.get_tree_node_count();
     std::cout << "iterations=" << solver.get_iterations_run() << "\n";
-    std::cout << "info_sets=" << strategy.size() << "\n";
+    std::cout << "info_sets=" << info_sets << "\n";
+    std::cout << "max_info_sets=" << native_config.max_info_sets << "\n";
+    std::cout << "info_set_cap_hit="
+              << (native_config.max_info_sets > 0 &&
+                  info_sets >= static_cast<size_t>(native_config.max_info_sets))
+              << "\n";
     std::cout << "player_a_ev=" << solver.get_expected_value(0) << "\n";
     std::cout << "seconds=" << elapsed.count() << "\n";
-    std::cout << "tree_nodes=" << solver.get_tree_node_count() << "\n";
+    std::cout << "tree_nodes=" << tree_nodes << "\n";
+    std::cout << "max_tree_nodes=" << native_config.max_tree_nodes << "\n";
+    std::cout << "tree_node_cap_hit="
+              << (native_config.max_tree_nodes > 0 &&
+                  tree_nodes >= static_cast<size_t>(native_config.max_tree_nodes))
+              << "\n";
     const int64_t touches =
         solver.get_traversal_stats().action_entry_touches;
     std::cout << "action_entry_touches=" << touches << "\n";

@@ -195,13 +195,6 @@ GameTree::Node* CachedChanceChildOrNull(GameTree& game_tree,
   return &game_tree.create_chance_child_node(node, child_key, cards);
 }
 
-GameTree::Node& CachedChanceChild(GameTree& game_tree,
-                                  GameTree::Node& node,
-                                  absl::Span<const CardId> cards,
-                                  int64_t* created_nodes) {
-  return *CachedChanceChildOrNull(game_tree, node, cards, created_nodes);
-}
-
 // Returns nullptr if the child does not already exist AND either frozen is true
 // or the total tree-node cap has already been reached.
 GameTree::Node* CachedActionChildOrNull(GameTree& game_tree,
@@ -226,15 +219,6 @@ GameTree::Node* CachedActionChildOrNull(GameTree& game_tree,
     ++*created_nodes;
   }
   return &game_tree.create_child_node(node, action_id, action);
-}
-
-GameTree::Node& CachedActionChild(GameTree& game_tree,
-                                  GameTree::Node& node,
-                                  const GameAction& action,
-                                  int action_id,
-                                  int64_t* created_nodes) {
-  return *CachedActionChildOrNull(game_tree, node, action, action_id,
-                                  created_nodes);
 }
 
 // No-op: action keys are always in sync in the inline action table.
@@ -1702,7 +1686,8 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node& node,
         rng_, nullptr, [&](GameTree::Node& child_node) {
           return evaluate_strategy_node(child_node, player_a_cards,
                                         player_b_cards);
-        });
+        },
+        false, config_.max_tree_nodes);
   }
   if (node.action_count == 0) {
     return 0.0;
@@ -1722,10 +1707,15 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node& node,
   for (int action_index = 0; action_index < node.action_count; ++action_index) {
     const GameAction& action = node.actions[action_index].action;
     int action_id = node.actions[action_index].key;
-    GameTree::Node& child_node =
-        CachedActionChild(*game_tree_, node, action, action_id, nullptr);
+    GameTree::Node* child_node = CachedActionChildOrNull(
+        *game_tree_, node, action, action_id, nullptr,
+        false, config_.max_tree_nodes);
+    if (child_node == nullptr) {
+      continue;
+    }
     value += probabilities[action_index] *
-             evaluate_strategy_node(child_node, player_a_cards, player_b_cards);
+             evaluate_strategy_node(*child_node, player_a_cards,
+                                    player_b_cards);
   }
   return value;
 }
@@ -1745,7 +1735,8 @@ double CFRSolver::best_response_value(GameTree::Node& node,
         ChanceSamples(config_), rng_, nullptr, [&](GameTree::Node& child_node) {
           return best_response_value(child_node, player_a_cards, player_b_cards,
                                      best_response_player);
-        });
+        },
+        false, config_.max_tree_nodes);
   }
   if (node.action_count == 0) {
     return 0.0;
@@ -1764,11 +1755,15 @@ double CFRSolver::best_response_value(GameTree::Node& node,
     for (int i = 0; i < node.action_count; ++i) {
       const GameAction& action = node.actions[i].action;
       int action_id = node.actions[i].key;
-      GameTree::Node& child_node =
-          CachedActionChild(*game_tree_, node, action, action_id, nullptr);
-      value = std::max(value, best_response_value(
-                                  child_node, player_a_cards, player_b_cards,
-                                  best_response_player));
+      GameTree::Node* child_node = CachedActionChildOrNull(
+          *game_tree_, node, action, action_id, nullptr,
+          false, config_.max_tree_nodes);
+      const double child_value =
+          child_node != nullptr
+              ? best_response_value(*child_node, player_a_cards,
+                                    player_b_cards, best_response_player)
+              : 0.0;
+      value = std::max(value, child_value);
     }
     return value;
   }
@@ -1779,10 +1774,14 @@ double CFRSolver::best_response_value(GameTree::Node& node,
   for (int action_index = 0; action_index < node.action_count; ++action_index) {
     const GameAction& action = node.actions[action_index].action;
     int action_id = node.actions[action_index].key;
-    GameTree::Node& child_node =
-        CachedActionChild(*game_tree_, node, action, action_id, nullptr);
+    GameTree::Node* child_node = CachedActionChildOrNull(
+        *game_tree_, node, action, action_id, nullptr,
+        false, config_.max_tree_nodes);
+    if (child_node == nullptr) {
+      continue;
+    }
     value += probabilities[action_index] *
-             best_response_value(child_node, player_a_cards, player_b_cards,
+             best_response_value(*child_node, player_a_cards, player_b_cards,
                                  best_response_player);
   }
   return value;
@@ -1817,6 +1816,7 @@ double CFRSolver::best_response_value_against_range(
 
   if (node.is_chance_node) {
     double value = 0.0;
+    int evaluated = 0;
     int samples = ChanceSamples(config_);
     std::vector<double> opponent_weights;
     opponent_weights.reserve(opponent_hands.size());
@@ -1835,16 +1835,20 @@ double CFRSolver::best_response_value_against_range(
           SampleStreetCards(
               node.state, best_response_cards.mask() | sampled_opponent.mask(),
               rng_);
-      GameTree::Node& child_node =
-          CachedChanceChild(*game_tree_, node, cards, nullptr);
+      GameTree::Node* child_node = CachedChanceChildOrNull(
+          *game_tree_, node, cards, nullptr, false, config_.max_tree_nodes);
+      if (child_node == nullptr) {
+        continue;
+      }
       WeightedHandRangeView child_opponents;
       child_opponents.reset_to_filtered(opponent_hands.source_range());
       child_opponents.add(sampled_opponent_index, 1.0);
       value += best_response_value_against_range(
-          child_node, best_response_cards, child_opponents,
+          *child_node, best_response_cards, child_opponents,
           best_response_player);
+      ++evaluated;
     }
-    return value / samples;
+    return evaluated > 0 ? value / evaluated : 0.0;
   }
 
   if (node.action_count == 0) {
@@ -1861,11 +1865,16 @@ double CFRSolver::best_response_value_against_range(
     for (int i = 0; i < node.action_count; ++i) {
       const GameAction& action = node.actions[i].action;
       int action_id = node.actions[i].key;
-      GameTree::Node& child_node =
-          CachedActionChild(*game_tree_, node, action, action_id, nullptr);
-      value = std::max(value, best_response_value_against_range(
-                                  child_node, best_response_cards,
-                                  opponent_hands, best_response_player));
+      GameTree::Node* child_node = CachedActionChildOrNull(
+          *game_tree_, node, action, action_id, nullptr,
+          false, config_.max_tree_nodes);
+      const double child_value =
+          child_node != nullptr
+              ? best_response_value_against_range(
+                    *child_node, best_response_cards, opponent_hands,
+                    best_response_player)
+              : 0.0;
+      value = std::max(value, child_value);
     }
     return value;
   }
@@ -1919,14 +1928,18 @@ double CFRSolver::best_response_value_against_range(
   for (int action_index = 0; action_index < node.action_count; ++action_index) {
     const GameAction& action = node.actions[action_index].action;
     int action_id = node.actions[action_index].key;
-    GameTree::Node& child_node =
-        CachedActionChild(*game_tree_, node, action, action_id, nullptr);
+    GameTree::Node* child_node = CachedActionChildOrNull(
+        *game_tree_, node, action, action_id, nullptr,
+        false, config_.max_tree_nodes);
+    if (child_node == nullptr) {
+      continue;
+    }
 
     double child_weight = TotalWeight(child_opponents[action_index]);
     if (child_weight > 0.0) {
       value += (child_weight / total_weight) *
                best_response_value_against_range(
-                   child_node, best_response_cards,
+                   *child_node, best_response_cards,
                    child_opponents[action_index],
                    best_response_player);
     }
@@ -2131,10 +2144,14 @@ GameAction CFRSolver::get_best_response_action(GameTree::Node& node,
   for (int i = 0; i < node.action_count; ++i) {
     const GameAction& action = node.actions[i].action;
     int action_id = node.actions[i].key;
-    GameTree::Node& child_node =
-        CachedActionChild(*game_tree_, node, action, action_id, nullptr);
-    double value = best_response_value(child_node, player_a_cards,
-                                       player_b_cards, best_response_player);
+    GameTree::Node* child_node = CachedActionChildOrNull(
+        *game_tree_, node, action, action_id, nullptr,
+        false, config_.max_tree_nodes);
+    const double value =
+        child_node != nullptr
+            ? best_response_value(*child_node, player_a_cards, player_b_cards,
+                                  best_response_player)
+            : 0.0;
     if (value > best_value) {
       best_value = value;
       best_action = action;
