@@ -81,9 +81,10 @@ class CFRSolverRegretTestPeer {
                        int action_id) {
     auto public_state =
         solver.get_or_create_public_state_id(node.state);
+    const CFRSolver::PrivateBucketId private_bucket =
+        solver.card_abstraction_.private_bucket(TestComboId(hand), node.state);
     const CFRSolver::InfoSetRow* row =
-        solver.find_info_set_row(public_state, player,
-                                 TestComboId(hand));
+        solver.find_info_set_row({public_state, player, private_bucket});
     if (row == nullptr) {
       throw std::runtime_error("Regret info set was not created");
     }
@@ -147,7 +148,7 @@ class CFRSolverRegretTestPeer {
                                                 native_state);
     std::optional<CFRSolver::InfoSetRow> row =
         solver.get_or_create_info_set_row(
-            public_state_id, player, private_bucket, action_id_buf,
+            {public_state_id, player, private_bucket}, action_id_buf,
             num_actions);
     if (!row.has_value()) {
       return -1;
@@ -175,7 +176,7 @@ class CFRSolverRegretTestPeer {
         solver.card_abstraction_.private_bucket(TestComboId(hand),
                                                 native_state);
     const CFRSolver::InfoSetRow* row =
-        solver.find_info_set_row(public_state_id, player, private_bucket);
+        solver.find_info_set_row({public_state_id, player, private_bucket});
     if (row == nullptr) {
       return -1;
     }
@@ -337,10 +338,13 @@ class CFRSolverRegretTestPeer {
     }
     const uint32_t public_state_id =
         solver.get_or_create_public_state_id(native_state);
+    const CFRSolver::PrivateBucketId private_bucket =
+        solver.card_abstraction_.private_bucket(TestComboId(hand),
+                                                native_state);
     std::optional<CFRSolver::InfoSetRow> row =
         solver.get_or_create_info_set_row(
-        public_state_id, player, TestComboId(hand),
-        action_id_buf, num_actions);
+            {public_state_id, player, private_bucket}, action_id_buf,
+            num_actions);
     if (!row.has_value()) {
       throw std::runtime_error("Could not create seeded regret row");
     }

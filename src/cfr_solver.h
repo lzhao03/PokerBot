@@ -278,6 +278,12 @@ private:
     uint16_t action_count = 0;
   };
 
+  struct InfoSetAddress {
+    uint32_t public_state_id = 0;
+    int player = 0;
+    PrivateBucketId private_bucket = 0;
+  };
+
   static constexpr int kPrivateBucketChunkSize = 64;
   static constexpr int kPrivateBucketChunkCount =
       (kComboCount + kPrivateBucketChunkSize - 1) / kPrivateBucketChunkSize;
@@ -417,9 +423,7 @@ private:
   void cache_betting_history_actions(uint32_t betting_history_id,
                                      const GameTree::Node& node);
   std::optional<InfoSetRow> get_or_create_info_set_row(
-      uint32_t public_state_id,
-      int player,
-      PrivateBucketId private_bucket,
+      InfoSetAddress address,
       const int* action_ids,
       int num_actions);
   StrategyTablesView strategy_tables_view();
@@ -445,9 +449,7 @@ private:
       uint32_t public_state_id);
   const PublicInfoSetSlab* public_info_set_slab(
       uint32_t public_state_id) const;
-  const InfoSetRow* find_info_set_row(uint32_t public_state_id,
-                                      int player,
-                                      PrivateBucketId private_bucket) const;
+  const InfoSetRow* find_info_set_row(InfoSetAddress address) const;
   static const InfoSetRow* find_info_set_row(
       const PublicInfoSetSlabPlayer& player_slab,
       PrivateBucketId private_bucket);
