@@ -711,6 +711,20 @@ std::vector<float>& CFRSolver::mutable_strategy_cumulative_strategies() {
              : cumulative_strategies_;
 }
 
+void CFRSolver::add_traversal_stats(const TraversalStats& stats) {
+  traversal_stats_.cfr_updates += stats.cfr_updates;
+  traversal_stats_.preflop_updates += stats.preflop_updates;
+  traversal_stats_.flop_updates += stats.flop_updates;
+  traversal_stats_.turn_updates += stats.turn_updates;
+  traversal_stats_.river_updates += stats.river_updates;
+  traversal_stats_.child_nodes_created += stats.child_nodes_created;
+  traversal_stats_.chance_samples += stats.chance_samples;
+  traversal_stats_.terminal_utility_calls += stats.terminal_utility_calls;
+  traversal_stats_.fold_utility_calls += stats.fold_utility_calls;
+  traversal_stats_.showdown_utility_calls += stats.showdown_utility_calls;
+  traversal_stats_.action_entry_touches += stats.action_entry_touches;
+}
+
 void CFRSolver::run(int iterations, ComboId player_a_hand,
                     ComboId player_b_hand) {
   if (iterations <= 0) {
@@ -850,7 +864,7 @@ void CFRSolver::run_iterations_parallel(
 
   ThreadPoolExecutor executor(num_threads);
   std::uniform_int_distribution<unsigned int> seed_dist;
-  std::vector<std::future<double>> futures;
+  std::vector<std::future<std::pair<double, TraversalStats>>> futures;
   futures.reserve(num_threads);
 
   int iterations_remaining = iterations;
@@ -909,13 +923,15 @@ void CFRSolver::run_iterations_parallel(
                 cfr_iteration, 0, max_depth, scratch,
                 player_a_context_range, player_b_context_range);
           }
-          return local_utility;
+          return std::make_pair(local_utility, worker.get_traversal_stats());
         }));
   }
 
-  // Accumulate per-worker root utilities into the main solver.
-  for (std::future<double>& f : futures) {
-    cumulative_root_utility_ += f.get();
+  // Accumulate per-worker root utilities and traversal stats into the main solver.
+  for (std::future<std::pair<double, TraversalStats>>& f : futures) {
+    const auto result = f.get();
+    cumulative_root_utility_ += result.first;
+    add_traversal_stats(result.second);
   }
 }
 

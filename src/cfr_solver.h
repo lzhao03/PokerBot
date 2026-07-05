@@ -122,6 +122,7 @@ public:
   size_t get_info_set_count() const { return info_sets_.size(); }
   size_t get_tree_node_count() const { return game_tree_->node_count(); }
   TraversalStats get_traversal_stats() const { return traversal_stats_; }
+  void add_traversal_stats(const TraversalStats& stats);
   UtilityCacheStats get_utility_cache_stats() const;
   void set_continuation_value_provider(
       std::shared_ptr<ContinuationValueProvider> provider);
