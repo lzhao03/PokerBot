@@ -3,14 +3,15 @@
 #include <random>
 #include <vector>
 
+#include "absl/container/inlined_vector.h"
 #include "src/poker_types.h"
 
 namespace poker {
 
 std::vector<CardId> BuildDeck();
 int CardsForNextStreet(StreetKind street);
-std::vector<CardId> SampleStreetCards(const GameState& state,
-                                      CardMask known_private_cards,
-                                      std::mt19937& rng);
+absl::InlinedVector<CardId, 5> SampleStreetCards(const GameState& state,
+                                                 CardMask known_private_cards,
+                                                 std::mt19937& rng);
 
 }  // namespace poker

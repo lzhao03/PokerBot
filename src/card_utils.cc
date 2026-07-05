@@ -41,9 +41,9 @@ int AvailableCards(CardMask known_mask) {
 
 }  // namespace
 
-std::vector<CardId> SampleStreetCards(const GameState& state,
-                                      CardMask known_private_cards,
-                                      std::mt19937& rng) {
+absl::InlinedVector<CardId, 5> SampleStreetCards(const GameState& state,
+                                                CardMask known_private_cards,
+                                                std::mt19937& rng) {
   const int count = CardsForNextStreet(state.street);
   if (count <= 0) {
     return {};
@@ -55,7 +55,7 @@ std::vector<CardId> SampleStreetCards(const GameState& state,
   }
 
   std::uniform_int_distribution<int> card_distribution(0, kDeckCardCount - 1);
-  std::vector<CardId> sampled;
+  absl::InlinedVector<CardId, 5> sampled;
   sampled.reserve(count);
   while (static_cast<int>(sampled.size()) < count) {
     const CardId card_id = static_cast<CardId>(card_distribution(rng));

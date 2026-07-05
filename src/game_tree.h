@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 #include "absl/container/flat_hash_map.h"
+#include "absl/types/span.h"
 #include "src/hand_evaluator.h"
 #include "src/poker_types.h"
 
@@ -91,7 +92,7 @@ public:
   Node& create_chance_child_node(
       Node& parent,
       int child_key,
-      const std::vector<CardId>& cards);
+      absl::Span<const CardId> cards);
 
   // Move an already-built node into the arena and link it as a child.
   Node& add_child(Node& parent, int child_key, Node child);
@@ -140,7 +141,7 @@ private:
   Node make_child_node(const Node& parent, const GameAction& action) const;
   Node make_chance_child_node(
       const Node& parent,
-      const std::vector<CardId>& cards) const;
+      absl::Span<const CardId> cards) const;
   Node& add_node(Node node);
 
   // Helpers for the chance-children side-table.

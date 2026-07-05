@@ -139,17 +139,27 @@ void PublicCompatibleRangeInto(const TrainingRangeView& hands,
   }
 }
 
-int ChanceCardsKey(const std::vector<CardId>& cards) {
-  absl::InlinedVector<int, 5> encoded_cards;
-  encoded_cards.reserve(cards.size());
-  for (CardId card : cards) {
-    encoded_cards.push_back(EncodedCard(card));
+int ChanceCardsKey(absl::Span<const CardId> cards) {
+  int encoded[5];
+  const int n = static_cast<int>(cards.size());
+  for (int i = 0; i < n; ++i) {
+    encoded[i] = EncodedCard(cards[i]);
   }
-  std::sort(encoded_cards.begin(), encoded_cards.end());
+  // Chance samples are small (max 5), so a simple sort network is cheaper than
+  // calling std::sort on a dynamically-sized vector.
+  if (n > 1) {
+    for (int i = 0; i < n - 1; ++i) {
+      for (int j = i + 1; j < n; ++j) {
+        if (encoded[j] < encoded[i]) {
+          std::swap(encoded[i], encoded[j]);
+        }
+      }
+    }
+  }
 
-  int key = static_cast<int>(cards.size());
-  for (int encoded_card : encoded_cards) {
-    key = key * 128 + encoded_card;
+  int key = n;
+  for (int i = 0; i < n; ++i) {
+    key = key * 128 + encoded[i];
   }
   return -1 - key;
 }
@@ -161,7 +171,7 @@ int ChanceCardsKey(const std::vector<CardId>& cards) {
 // over the remaining samples that do hit the tree).
 GameTree::Node* CachedChanceChildOrNull(GameTree& game_tree,
                                         GameTree::Node& node,
-                                        const std::vector<CardId>& cards,
+                                        absl::Span<const CardId> cards,
                                         int64_t* created_nodes,
                                         bool frozen = false,
                                         int max_tree_nodes = 0) {
@@ -187,7 +197,7 @@ GameTree::Node* CachedChanceChildOrNull(GameTree& game_tree,
 
 GameTree::Node& CachedChanceChild(GameTree& game_tree,
                                   GameTree::Node& node,
-                                  const std::vector<CardId>& cards,
+                                  absl::Span<const CardId> cards,
                                   int64_t* created_nodes) {
   return *CachedChanceChildOrNull(game_tree, node, cards, created_nodes);
 }
@@ -264,7 +274,7 @@ double SampleChanceValue(GameTree& game_tree,
   double value = 0.0;
   int evaluated = 0;
   for (int i = 0; i < samples; ++i) {
-    std::vector<CardId> cards =
+    const auto cards =
         SampleStreetCards(node.state, known_private_cards, rng);
     GameTree::Node* child_node =
         CachedChanceChildOrNull(game_tree, node, cards, created_nodes, frozen,
@@ -1734,7 +1744,7 @@ double CFRSolver::best_response_value_against_range(
           opponent_hands.source_index(sampled_opponent_view_index);
       const PrivateCards sampled_opponent = PrivateCards::FromCombo(
           opponent_hands.source_range().combos[sampled_opponent_index]);
-      std::vector<CardId> cards =
+      const auto cards =
           SampleStreetCards(
               node.state, best_response_cards.mask() | sampled_opponent.mask(),
               rng_);

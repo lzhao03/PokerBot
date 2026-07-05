@@ -18,7 +18,8 @@ bool ContainsCard(const std::vector<CardId>& cards, CardId card) {
   return std::find(cards.begin(), cards.end(), card) != cards.end();
 }
 
-void ExpectUniqueCards(const std::vector<CardId>& cards, const char* message) {
+template <typename CardContainer>
+void ExpectUniqueCards(const CardContainer& cards, const char* message) {
   for (size_t i = 0; i < cards.size(); ++i) {
     for (size_t j = i + 1; j < cards.size(); ++j) {
       Expect(cards[i] != cards[j], message);
@@ -59,7 +60,7 @@ void CheckSampledStreetCardsAvoidKnownCards() {
   AddBoardCard(state, MakeCardId(4, SuitKind::kHearts));
 
   std::mt19937 rng(12345);
-  std::vector<CardId> sampled = SampleStreetCards(state, known_private_cards, rng);
+  const auto sampled = SampleStreetCards(state, known_private_cards, rng);
   Expect(sampled.size() == 1, "flop samples one turn card");
 
   CardMask known_cards = known_private_cards | state.board_mask;
@@ -78,7 +79,7 @@ void CheckSampledFlopCardsAreUniqueAndAvoidKnownCards() {
   state.street = StreetKind::kPreflop;
 
   std::mt19937 rng(12345);
-  std::vector<CardId> sampled = SampleStreetCards(state, known_private_cards, rng);
+  const auto sampled = SampleStreetCards(state, known_private_cards, rng);
   Expect(sampled.size() == 3, "preflop samples three flop cards");
   ExpectUniqueCards(sampled, "sampled flop cards should be unique");
 

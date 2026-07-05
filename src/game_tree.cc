@@ -135,7 +135,7 @@ int CommitChips(GameState& state, int player, int requested) {
   return committed;
 }
 
-void AdvanceStreet(GameState& state, const std::vector<CardId>& cards) {
+void AdvanceStreet(GameState& state, absl::Span<const CardId> cards) {
   switch (state.street) {
     case StreetKind::kPreflop:
       state.street = StreetKind::kFlop;
@@ -419,13 +419,13 @@ GameTree::Node GameTree::make_child_node(
 GameTree::Node& GameTree::create_chance_child_node(
     Node& parent,
     int child_key,
-    const std::vector<CardId>& cards) {
+    absl::Span<const CardId> cards) {
   return add_child(parent, child_key, make_chance_child_node(parent, cards));
 }
 
 GameTree::Node GameTree::make_chance_child_node(
     const Node& parent,
-    const std::vector<CardId>& cards) const {
+    absl::Span<const CardId> cards) const {
   if (!parent.is_chance_node) {
     throw std::invalid_argument("Parent node is not a chance node");
   }
