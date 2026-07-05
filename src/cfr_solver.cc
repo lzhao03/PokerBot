@@ -666,9 +666,9 @@ std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
     return existing->second;
   }
 
-  if (frozen_ || (config_.max_tree_nodes > 0 &&
-                  static_cast<int>(public_state_rows_.size()) >=
-                      config_.max_tree_nodes)) {
+  if (config_.max_tree_nodes > 0 &&
+      static_cast<int>(public_state_rows_.size()) >=
+          config_.max_tree_nodes) {
     return std::nullopt;
   }
 
@@ -2100,6 +2100,32 @@ void CFRSolver::average_strategy_probabilities(
 }
 
 void CFRSolver::average_strategy_probabilities(
+    uint32_t public_state_id,
+    const PublicStateRow& row,
+    int player,
+    const PrivateCards& private_cards,
+    StrategyProbabilities& probabilities) {
+  probabilities.clear();
+  probabilities.resize(row.action_count, 0.0);
+  if (row.action_count == 0) {
+    return;
+  }
+
+  const double uniform_probability = 1.0 / row.action_count;
+  const PrivateBucketId private_bucket =
+      card_abstraction_.private_bucket(private_cards.combo, row.state);
+  const InfoSetRow* info_set_row =
+      find_info_set_row({public_state_id, player, private_bucket});
+  if (info_set_row == nullptr) {
+    std::fill(probabilities.begin(), probabilities.end(), uniform_probability);
+    return;
+  }
+
+  average_strategy_probabilities(
+      *info_set_row, row, uniform_probability, probabilities);
+}
+
+void CFRSolver::average_strategy_probabilities(
     const InfoSetRow& row,
     const GameTree::Node& node,
     double fallback_probability,
@@ -2164,6 +2190,81 @@ void CFRSolver::average_strategy_probabilities(
     std::fill(probabilities.begin(), probabilities.end(), fallback_probability);
     return;
   }
+  for (double& probability : probabilities) {
+    probability /= probability_sum;
+  }
+}
+
+void CFRSolver::average_strategy_probabilities(
+    const InfoSetRow& info_set_row,
+    const PublicStateRow& public_state_row,
+    double fallback_probability,
+    StrategyProbabilities& probabilities) {
+  const int num_actions = public_state_row.action_count;
+  probabilities.clear();
+  probabilities.resize(num_actions, 0.0);
+  double probability_sum = 0.0;
+  const size_t action_offset = info_set_row.action_offset;
+  const std::vector<int>& action_ids = strategy_action_ids();
+  const std::vector<float>& cumulative_regrets =
+      strategy_cumulative_regrets();
+  const std::vector<float>& cumulative_strategies =
+      strategy_cumulative_strategies();
+
+  const bool aligned_action_ids =
+      num_actions == info_set_row.action_count &&
+      [&]() {
+        for (int i = 0; i < num_actions; ++i) {
+          if (public_state_row.action_ids[static_cast<size_t>(i)] !=
+              action_ids[action_offset + i]) {
+            return false;
+          }
+        }
+        return true;
+      }();
+  if (aligned_action_ids) {
+    for (int i = 0; i < num_actions; ++i) {
+      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
+      const size_t table_index = action_offset + i;
+      probabilities[i] =
+          config_.regret_only_training
+              ? std::max(0.0,
+                         static_cast<double>(
+                             AtomicFloatLoad(&cumulative_regrets[table_index])))
+              : static_cast<double>(
+                    AtomicFloatLoad(&cumulative_strategies[table_index]));
+      probability_sum += probabilities[i];
+    }
+  } else {
+    for (int legal_action_index = 0; legal_action_index < num_actions;
+         ++legal_action_index) {
+      const int legal_action_id =
+          public_state_row.action_ids[static_cast<size_t>(legal_action_index)];
+      for (uint16_t action_index = 0;
+           action_index < info_set_row.action_count; ++action_index) {
+        POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
+        const size_t table_index = action_offset + action_index;
+        if (action_ids[table_index] == legal_action_id) {
+          probabilities[legal_action_index] =
+              config_.regret_only_training
+                  ? std::max(
+                        0.0,
+                        static_cast<double>(
+                            AtomicFloatLoad(&cumulative_regrets[table_index])))
+                  : static_cast<double>(
+                        AtomicFloatLoad(&cumulative_strategies[table_index]));
+          probability_sum += probabilities[legal_action_index];
+          break;
+        }
+      }
+    }
+  }
+
+  if (probability_sum <= 0.0) {
+    std::fill(probabilities.begin(), probabilities.end(), fallback_probability);
+    return;
+  }
+
   for (double& probability : probabilities) {
     probability /= probability_sum;
   }
@@ -2377,7 +2478,12 @@ CFRSolver::StrategyProfile CFRSolver::get_strategy_profile() const {
 
 double CFRSolver::evaluate_strategy(ComboId player_a_hand,
                                     ComboId player_b_hand) {
-  return evaluate_strategy_node(get_or_build_root(),
+  const std::optional<uint32_t> root_public_state_id =
+      get_or_create_public_state_row(initial_state_);
+  if (!root_public_state_id.has_value()) {
+    return 0.0;
+  }
+  return evaluate_strategy_node(*root_public_state_id,
                                 PrivateCards::FromCombo(player_a_hand),
                                 PrivateCards::FromCombo(player_b_hand));
 }
@@ -2393,14 +2499,21 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   const TrainingRange player_b_training_range =
       BuildTrainingRange(player_b_range);
   RangeSampler range_sampler(player_a_training_range, player_b_training_range);
+  const std::optional<uint32_t> root_public_state_id =
+      get_or_create_public_state_row(initial_state_);
+  if (!root_public_state_id.has_value()) {
+    return 0.0;
+  }
 
   if (samples < kParallelEvaluationSampleThreshold) {
-    return evaluate_strategy_samples(samples, range_sampler);
+    return evaluate_strategy_samples(samples, *root_public_state_id,
+                                     range_sampler);
   }
 
   int worker_count = WorkerCountForSamples(samples);
   if (worker_count <= 1) {
-    return evaluate_strategy_samples(samples, range_sampler);
+    return evaluate_strategy_samples(samples, *root_public_state_id,
+                                     range_sampler);
   }
 
   ThreadPoolExecutor executor(worker_count);
@@ -2423,6 +2536,8 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
     samples_remaining -= shard_samples;
     unsigned int seed = worker_seeds[i];
     futures.push_back(executor.submit([config, range_sampler,
+                                       root_public_state_id =
+                                           *root_public_state_id,
                                        &strategy_tables,
                                        continuation_value_provider,
                                        shard_samples, seed]() mutable {
@@ -2431,7 +2546,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
       worker.strategy_tables_view_ = &strategy_tables;
       worker.rng_.seed(seed);
       const double value = worker.evaluate_strategy_samples(
-          shard_samples, range_sampler);
+          shard_samples, root_public_state_id, range_sampler);
       return std::make_pair(
           value * shard_samples,
           worker.get_traversal_stats().action_entry_touches);
@@ -2450,18 +2565,17 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
 
 double CFRSolver::evaluate_strategy_samples(
     int samples,
+    uint32_t root_public_state_id,
     RangeSampler range_sampler) {
   if (samples <= 0) {
     return 0.0;
   }
 
-  GameTree::Node& root = get_or_build_root();
-
   double total = 0.0;
   for (int i = 0; i < samples; ++i) {
     const RangeDeal deal = range_sampler.sample(rng_);
     total += evaluate_strategy_node(
-        root, PrivateCards::FromCombo(deal.player_a_combo),
+        root_public_state_id, PrivateCards::FromCombo(deal.player_a_combo),
         PrivateCards::FromCombo(deal.player_b_combo));
   }
   return total / samples;
@@ -2509,6 +2623,66 @@ double CFRSolver::evaluate_strategy_node(GameTree::Node& node,
     cache_action_betting_history_transition(node, action_index, *child_node);
     value += probabilities[action_index] *
              evaluate_strategy_node(*child_node, player_a_cards,
+                                    player_b_cards);
+  }
+  return value;
+}
+
+double CFRSolver::evaluate_strategy_node(
+    uint32_t public_state_id,
+    const PrivateCards& player_a_cards,
+    const PrivateCards& player_b_cards) {
+  const auto& rows = strategy_public_state_rows();
+  if (public_state_id >= rows.size()) {
+    return 0.0;
+  }
+  const PublicStateRow& row = rows[public_state_id];
+
+  if (row.is_terminal) {
+    return utility(row.state, player_a_cards, player_b_cards);
+  }
+  if (row.is_chance_node) {
+    const int samples = ChanceSamples(config_);
+    double value = 0.0;
+    int evaluated = 0;
+    for (int i = 0; i < samples; ++i) {
+      const auto cards = SampleStreetCards(
+          row.state, player_a_cards.mask() | player_b_cards.mask(), rng_);
+      std::optional<uint32_t> child_public_state_id =
+          get_or_create_chance_child_public_state(public_state_id, cards);
+      if (!child_public_state_id.has_value()) {
+        continue;
+      }
+      value += evaluate_strategy_node(
+          *child_public_state_id, player_a_cards, player_b_cards);
+      ++evaluated;
+    }
+    return evaluated > 0 ? value / evaluated : 0.0;
+  }
+  if (row.action_count == 0) {
+    return 0.0;
+  }
+
+  const int player = row.player_to_act;
+  if (!IsPlayer(player)) {
+    return 0.0;
+  }
+
+  const PrivateCards& player_cards =
+      player == 0 ? player_a_cards : player_b_cards;
+  StrategyProbabilities probabilities;
+  average_strategy_probabilities(
+      public_state_id, row, player, player_cards, probabilities);
+
+  double value = 0.0;
+  for (int action_index = 0; action_index < row.action_count; ++action_index) {
+    std::optional<uint32_t> child_public_state_id =
+        get_or_create_action_child_public_state(public_state_id, action_index);
+    if (!child_public_state_id.has_value()) {
+      continue;
+    }
+    value += probabilities[action_index] *
+             evaluate_strategy_node(*child_public_state_id, player_a_cards,
                                     player_b_cards);
   }
   return value;

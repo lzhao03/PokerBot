@@ -365,8 +365,10 @@ private:
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
   IdentityCardAbstraction card_abstraction_;
-  // Set to true after warmup; blocks all tree/info-set allocation so the
-  // parallel training phase only writes to the atomic regret/strategy arrays.
+  // Set to true after warmup; blocks info-set allocation so the parallel
+  // training phase only writes to the atomic regret/strategy arrays. Shared
+  // worker solvers also receive read-only public-state rows via
+  // StrategyTablesView.
   bool frozen_ = false;
   
   absl::flat_hash_map<BettingHistoryKey, uint32_t, BettingHistoryKeyHash>
@@ -433,8 +435,19 @@ private:
       const PrivateCards& private_cards,
       StrategyProbabilities& probabilities);
   void average_strategy_probabilities(
+      uint32_t public_state_id,
+      const PublicStateRow& row,
+      int player,
+      const PrivateCards& private_cards,
+      StrategyProbabilities& probabilities);
+  void average_strategy_probabilities(
       const InfoSetRow& row,
       const GameTree::Node& node,
+      double fallback_probability,
+      StrategyProbabilities& probabilities);
+  void average_strategy_probabilities(
+      const InfoSetRow& info_set_row,
+      const PublicStateRow& public_state_row,
       double fallback_probability,
       StrategyProbabilities& probabilities);
   void condition_ranges_for_actions(
@@ -530,8 +543,12 @@ private:
   double evaluate_strategy_node(GameTree::Node& node,
                                 const PrivateCards& player_a_cards,
                                 const PrivateCards& player_b_cards);
+  double evaluate_strategy_node(uint32_t public_state_id,
+                                const PrivateCards& player_a_cards,
+                                const PrivateCards& player_b_cards);
   double evaluate_strategy_samples(
       int samples,
+      uint32_t root_public_state_id,
       RangeSampler range_sampler);
   double best_response_value(GameTree::Node& node,
                              const PrivateCards& player_a_cards,

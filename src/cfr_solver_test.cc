@@ -2528,11 +2528,20 @@ void CheckRangeTrainingUsesCompactPublicStates() {
 
   CFRSolver solver(TestSolverConfig(config));
   solver.run(5, player_a_range, player_b_range);
+  const double exact_value =
+      solver.evaluate_strategy(TestComboId(player_a_hand),
+                               TestComboId(player_b_hand));
+  const double range_value =
+      solver.evaluate_strategy(5, player_a_range, player_b_range);
 
   Expect(solver.get_tree_node_count() > 0,
          "compact training should allocate public-state rows");
   Expect(CFRSolverRegretTestPeer::LegacyGameTreeNodeCount(solver) == 0,
-         "compact training should not allocate legacy game-tree nodes");
+         "compact training/evaluation should not allocate legacy game-tree nodes");
+  Expect(std::isfinite(exact_value),
+         "compact exact-hand evaluation should return a finite value");
+  Expect(std::isfinite(range_value),
+         "compact range evaluation should return a finite value");
 }
 
 void CheckMaxTreeNodesCapsTrainingAllocations() {
