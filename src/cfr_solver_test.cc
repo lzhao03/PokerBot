@@ -105,6 +105,18 @@ class CFRSolverRegretTestPeer {
            solver.make_public_state_key(TestGameState(right));
   }
 
+  static uint64_t PublicCardsId(const CFRSolver& solver,
+                                const BoardState& state) {
+    return solver.card_abstraction_.public_id(TestGameState(state));
+  }
+
+  static uint16_t PrivateId(const CFRSolver& solver,
+                            const BoardState& state,
+                            const Hand& hand) {
+    return solver.card_abstraction_.private_id(TestComboId(hand),
+                                               TestGameState(state));
+  }
+
   static int CompactInfoSetId(CFRSolver& solver,
                               const BoardState& state,
                               int player,
@@ -442,7 +454,7 @@ bool StrategyHasCombo(const CFRSolver::StrategyProfile& profile,
       profile.info_sets.begin(), profile.info_sets.end(),
       [&](const CFRSolver::StrategyInfoSet& info_set) {
         return info_set.key.player == player &&
-               info_set.key.private_combo == combo;
+               info_set.key.private_id == combo;
       });
 }
 
@@ -456,7 +468,7 @@ bool StrategiesApproximatelyEqual(const CFRSolver::StrategyProfile& left,
     const CFRSolver::StrategyInfoSet& right_info_set = right.info_sets[i];
     if (left_info_set.key.public_state_id !=
             right_info_set.key.public_state_id ||
-        left_info_set.key.private_combo != right_info_set.key.private_combo ||
+        left_info_set.key.private_id != right_info_set.key.private_id ||
         left_info_set.key.player != right_info_set.key.player ||
         left_info_set.action_ids != right_info_set.action_ids ||
         left_info_set.probabilities.size() !=
@@ -647,6 +659,20 @@ void CheckPublicStateKeyIgnoresBoardOrder() {
 
   Expect(CFRSolverRegretTestPeer::SamePublicStateKey(solver, first, second),
          "public state key should not depend on public board card order");
+  Expect(CFRSolverRegretTestPeer::PublicCardsId(solver, first) ==
+             CFRSolverRegretTestPeer::PublicCardsId(solver, second),
+         "identity public-card abstraction should canonicalize by board mask");
+}
+
+void CheckIdentityPrivateAbstractionUsesExactCombo() {
+  PokerConfig config;
+  CFRSolver solver(TestSolverConfig(config));
+  BoardState state = InitialRootState(config);
+  Hand aces = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+
+  Expect(CFRSolverRegretTestPeer::PrivateId(solver, state, aces) ==
+             TestComboId(aces),
+         "identity private abstraction should use exact combo ids");
 }
 
 void CheckCompactInfoSetIdsUseExactCombos() {
@@ -2115,6 +2141,7 @@ int main() {
   CheckCfrUsesLegalActions();
   CheckCfrDistinguishesActionAmounts();
   CheckPublicStateKeyIgnoresBoardOrder();
+  CheckIdentityPrivateAbstractionUsesExactCombo();
   CheckCompactInfoSetIdsUseExactCombos();
   CheckTerminalUtilityCacheReusesScores();
   CheckSingletonRangeMatchesExactEvaluationAndBestResponse();

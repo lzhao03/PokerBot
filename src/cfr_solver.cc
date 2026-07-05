@@ -248,6 +248,11 @@ void HashCombine(size_t& seed, int value) {
   seed ^= std::hash<int>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 }
 
+void HashCombine(size_t& seed, uint64_t value) {
+  seed ^= std::hash<uint64_t>{}(value) + 0x9e3779b9 + (seed << 6) +
+          (seed >> 2);
+}
+
 template <size_t N>
 void HashArray(size_t& seed, const std::array<int, N>& values) {
   for (int value : values) {
@@ -321,7 +326,7 @@ bool CFRSolver::PublicStateKey::operator==(
          player_to_act == other.player_to_act &&
          player_contribution_size == other.player_contribution_size &&
          player_contributions == other.player_contributions &&
-         board_size == other.board_size && board_cards == other.board_cards &&
+         public_cards_id == other.public_cards_id &&
          history_size == other.history_size &&
          history_values == other.history_values &&
          history_overflow == other.history_overflow;
@@ -339,8 +344,7 @@ size_t CFRSolver::PublicStateKeyHash::operator()(
   HashCombine(seed, key.player_to_act);
   HashCombine(seed, key.player_contribution_size);
   HashArray(seed, key.player_contributions);
-  HashCombine(seed, key.board_size);
-  HashArray(seed, key.board_cards);
+  HashCombine(seed, key.public_cards_id);
   HashCombine(seed, key.history_size);
   HashArray(seed, key.history_values);
   for (int value : key.history_overflow) {
@@ -537,13 +541,7 @@ CFRSolver::PublicStateKey CFRSolver::make_public_state_key(
     key.player_contributions[i] = RoundedContribution(state, i);
   }
 
-  key.board_size = std::min(static_cast<int>(state.board_cards.size()),
-                            PublicStateKey::kMaxCards);
-  for (int i = 0; i < key.board_size; ++i) {
-    key.board_cards[i] = EncodedCard(state.board_cards[i]);
-  }
-  std::sort(key.board_cards.begin(),
-            key.board_cards.begin() + key.board_size);
+  key.public_cards_id = card_abstraction_.public_id(state);
 
   const int history_value_count = state.history.size() * 3;
   if (history_value_count > PublicStateKey::kInlineHistoryValues) {
@@ -610,12 +608,11 @@ uint32_t CFRSolver::get_or_create_public_state_id(GameTree::Node& node) {
 int CFRSolver::get_or_create_compact_info_set_id(
     uint32_t public_state_id,
     int player,
-    ComboId combo_id,
+    uint16_t private_id,
     const int* action_ids,
     int num_actions) {
   const CompactInfoSetKey compact_key = EncodeCompactInfoSetKey(
-      public_state_id, static_cast<uint16_t>(combo_id),
-      static_cast<uint8_t>(player));
+      public_state_id, private_id, static_cast<uint8_t>(player));
 
   const auto& compact_ids = strategy_compact_info_set_ids();
   auto existing_compact = compact_ids.find(compact_key);
@@ -638,7 +635,7 @@ int CFRSolver::get_or_create_compact_info_set_id(
   const int id = static_cast<int>(info_sets_.size());
   InfoSetData data;
   data.public_state_id = public_state_id;
-  data.private_combo = combo_id;
+  data.private_id = private_id;
   data.player = static_cast<uint8_t>(player);
   initialize_info_set_actions(data, action_ids, num_actions);
   info_sets_.push_back(std::move(data));
@@ -1033,7 +1030,8 @@ double CFRSolver::cfr_with_ranges(
   }
   const int info_set_id =
       get_or_create_compact_info_set_id(
-          public_state_id, player, player_cards.combo,
+          public_state_id, player,
+          card_abstraction_.private_id(player_cards.combo, node.state),
           action_key_buf, node.action_count);
   ActionChoices action_choices;
   action_choices.reserve(node.action_count);
@@ -1254,11 +1252,12 @@ void CFRSolver::average_strategy_probabilities(
   }
 
   const double uniform_probability = 1.0 / node.action_count;
-  const uint16_t private_combo = private_cards.combo;
+  const uint16_t private_id =
+      card_abstraction_.private_id(private_cards.combo, node.state);
   const uint8_t player_u8 = static_cast<uint8_t>(player);
   auto try_public_state = [&](uint32_t public_state_id) {
     const CompactInfoSetKey compact_key =
-        EncodeCompactInfoSetKey(public_state_id, private_combo, player_u8);
+        EncodeCompactInfoSetKey(public_state_id, private_id, player_u8);
     const auto& compact_info_set_ids = strategy_compact_info_set_ids();
     auto existing_compact = compact_info_set_ids.find(compact_key);
     if (existing_compact == compact_info_set_ids.end()) {
@@ -1398,8 +1397,10 @@ void CFRSolver::condition_ranges_for_actions(
     }
 
     double positive_regret_sum = 0.0;
+    const uint16_t private_id =
+        card_abstraction_.private_id(combo_id, node.state);
     const CompactInfoSetKey key =
-        EncodeCompactInfoSetKey(public_state_id, combo_id, player_u8);
+        EncodeCompactInfoSetKey(public_state_id, private_id, player_u8);
     auto found = compact_info_set_ids.find(key);
     const int32_t info_set_id =
         found != compact_info_set_ids.end() ? found->second : -1;
@@ -1498,7 +1499,7 @@ CFRSolver::StrategyProfile CFRSolver::get_strategy_profile() const {
 
     StrategyInfoSet exported;
     exported.key.public_state_id = info_set.public_state_id;
-    exported.key.private_combo = info_set.private_combo;
+    exported.key.private_id = info_set.private_id;
     exported.key.player = info_set.player;
     exported.action_ids.reserve(info_set.action_count);
     exported.probabilities.reserve(info_set.action_count);
@@ -1822,9 +1823,10 @@ double CFRSolver::best_response_value_against_range(
 
     if (public_state_id.has_value()) {
       const ComboId opponent_combo = opponent_hands.combo(i);
+      const uint16_t private_id =
+          card_abstraction_.private_id(opponent_combo, node.state);
       const CompactInfoSetKey key =
-          EncodeCompactInfoSetKey(public_state_id_value, opponent_combo,
-                                  player_u8);
+          EncodeCompactInfoSetKey(public_state_id_value, private_id, player_u8);
       auto found = compact_info_set_ids.find(key);
       if (found != compact_info_set_ids.end()) {
         average_strategy_probabilities(info_sets[found->second], node,

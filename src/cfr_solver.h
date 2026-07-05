@@ -49,7 +49,7 @@ public:
 
   struct StrategyInfoSetKey {
     uint32_t public_state_id = 0;
-    ComboId private_combo = 0;
+    uint16_t private_id = 0;
     int player = 0;
   };
 
@@ -201,7 +201,6 @@ private:
   };
 
   struct PublicStateKey {
-    static constexpr int kMaxCards = 5;
     static constexpr int kInlineHistoryValues = 48;
 
     int street = 0;
@@ -213,8 +212,7 @@ private:
     int player_to_act = 0;
     int player_contribution_size = 0;
     std::array<int, 2> player_contributions = {0, 0};
-    int board_size = 0;
-    std::array<int, kMaxCards> board_cards = {-1, -1, -1, -1, -1};
+    uint64_t public_cards_id = 0;
     int history_size = 0;
     std::array<int, kInlineHistoryValues> history_values = {};
     std::vector<int> history_overflow;
@@ -226,20 +224,34 @@ private:
     size_t operator()(const PublicStateKey& key) const;
   };
 
-  // Compact internal key: (public_state_id << 32) | (private_combo << 16) | player.
+  struct IdentityCardAbstraction {
+    uint64_t public_id(const GameState& state) const {
+      return state.board_mask;
+    }
+
+    uint16_t private_id(ComboId combo_id, const GameState&) const {
+      return combo_id;
+    }
+
+    uint32_t private_id_count(const GameState&) const {
+      return kComboCount;
+    }
+  };
+
+  // Compact internal key: (public_state_id << 32) | (private_id << 16) | player.
   using CompactInfoSetKey = uint64_t;
 
   static constexpr CompactInfoSetKey EncodeCompactInfoSetKey(
-      uint32_t public_state_id, uint16_t private_combo, uint8_t player) {
+      uint32_t public_state_id, uint16_t private_id, uint8_t player) {
     return (static_cast<CompactInfoSetKey>(public_state_id) << 32) |
-           (static_cast<CompactInfoSetKey>(private_combo) << 16) |
+           (static_cast<CompactInfoSetKey>(private_id) << 16) |
            static_cast<CompactInfoSetKey>(player);
   }
 
   static constexpr uint32_t DecodePublicStateId(CompactInfoSetKey key) {
     return static_cast<uint32_t>(key >> 32);
   }
-  static constexpr uint16_t DecodePrivateCombo(CompactInfoSetKey key) {
+  static constexpr uint16_t DecodePrivateId(CompactInfoSetKey key) {
     return static_cast<uint16_t>((key >> 16) & 0xFFFF);
   }
   static constexpr uint8_t DecodePlayer(CompactInfoSetKey key) {
@@ -248,7 +260,7 @@ private:
 
   struct InfoSetData {
     uint32_t public_state_id = 0;
-    ComboId private_combo = 0;
+    uint16_t private_id = 0;
     uint8_t player = 0;
     uint32_t action_offset = 0;
     uint16_t action_count = 0;
@@ -286,6 +298,7 @@ private:
   TraversalStats traversal_stats_;
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
+  IdentityCardAbstraction card_abstraction_;
   // Set to true after warmup; blocks all tree/info-set allocation so the
   // parallel training phase only writes to the atomic regret/strategy arrays.
   bool frozen_ = false;
@@ -355,7 +368,7 @@ private:
   int get_or_create_compact_info_set_id(
       uint32_t public_state_id,
       int player,
-      ComboId combo_id,
+      uint16_t private_id,
       const int* action_ids,
       int num_actions);
   StrategyTablesView strategy_tables_view();
