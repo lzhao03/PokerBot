@@ -640,6 +640,11 @@ int CFRSolver::get_or_create_compact_info_set_id(
     return existing_compact->second;
   }
 
+  if (config_.max_info_sets > 0 &&
+      static_cast<int>(info_sets_.size()) >= config_.max_info_sets) {
+    return -1;
+  }
+
   if (info_sets_.size() == info_sets_.capacity()) {
     const size_t new_capacity =
         info_sets_.empty() ? 1024 : info_sets_.capacity() * 2;
@@ -910,15 +915,14 @@ double CFRSolver::cfr_with_ranges(
           node.legal_action_ids);
   ActionChoices action_choices;
   action_choices.reserve(node.legal_actions.size());
-  {
-    InfoSetData& info_set = info_sets_[info_set_id];
+  for (size_t i = 0; i < node.legal_actions.size(); ++i) {
+    action_choices.push_back(
+        {std::cref(node.legal_actions[i]), node.legal_action_ids[i], 0.0,
+         0.0});
+  }
+  if (info_set_id >= 0) {
+    const InfoSetData& info_set = info_sets_[info_set_id];
     const size_t action_offset = info_set.action_offset;
-    for (size_t i = 0; i < node.legal_actions.size(); ++i) {
-      action_choices.push_back(
-          {std::cref(node.legal_actions[i]), node.legal_action_ids[i], 0.0,
-           0.0});
-    }
-
     double sum_positive_regrets = 0.0;
     for (size_t action_index = 0; action_index < action_choices.size();
          ++action_index) {
@@ -947,6 +951,12 @@ double CFRSolver::cfr_with_ranges(
       for (ActionChoice& choice : action_choices) {
         choice.probability = uniform_prob;
       }
+    }
+  } else if (!action_choices.empty()) {
+    // Info set cap reached: use uniform strategy, skip regret updates.
+    double uniform_prob = 1.0 / action_choices.size();
+    for (ActionChoice& choice : action_choices) {
+      choice.probability = uniform_prob;
     }
   }
   
@@ -1026,32 +1036,35 @@ double CFRSolver::cfr_with_ranges(
         break;
     }
 
-    // Compute the counterfactual reach probability of the opponent
-    double opponent_reach_prob = reach_probabilities[1 - player];
-    InfoSetData& info_set = info_sets_[info_set_id];
-    const size_t action_offset = info_set.action_offset;
-    // For each action, compute and accumulate the counterfactual regret
-    for (size_t action_index = 0; action_index < action_choices.size();
-         ++action_index) {
-      const ActionChoice& choice = action_choices[action_index];
-      // get_utility returns player A's utility; player B's regret uses the
-      // opposite payoff in this zero-sum game.
-      double utility_sign = player == 0 ? 1.0 : -1.0;
-      double regret =
-          opponent_reach_prob * utility_sign * (choice.value - node_value);
+    // Skip regret and strategy updates when no info set was allocated (cap hit).
+    if (info_set_id >= 0) {
+      // Compute the counterfactual reach probability of the opponent
+      double opponent_reach_prob = reach_probabilities[1 - player];
+      InfoSetData& info_set = info_sets_[info_set_id];
+      const size_t action_offset = info_set.action_offset;
+      // For each action, compute and accumulate the counterfactual regret
+      for (size_t action_index = 0; action_index < action_choices.size();
+           ++action_index) {
+        const ActionChoice& choice = action_choices[action_index];
+        // get_utility returns player A's utility; player B's regret uses the
+        // opposite payoff in this zero-sum game.
+        double utility_sign = player == 0 ? 1.0 : -1.0;
+        double regret =
+            opponent_reach_prob * utility_sign * (choice.value - node_value);
+
+        // CFR+ clips cumulative regrets at zero.
+        float& cumulative_regret =
+            cumulative_regrets_[action_offset + action_index];
+        POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.action_entry_touches += 2);
+        cumulative_regret =
+            static_cast<float>(std::max(0.0, cumulative_regret + regret));
+      }
       
-      // CFR+ clips cumulative regrets at zero.
-      float& cumulative_regret =
-          cumulative_regrets_[action_offset + action_index];
-      POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.action_entry_touches += 2);
-      cumulative_regret =
-          static_cast<float>(std::max(0.0, cumulative_regret + regret));
-    }
-    
-    if (!config_.regret_only_training) {
-      // CFR+ commonly weights later average-strategy samples more heavily.
-      update_strategy(info_set_id, action_choices,
-                      reach_probabilities[player] * (iteration + 1));
+      if (!config_.regret_only_training) {
+        // CFR+ commonly weights later average-strategy samples more heavily.
+        update_strategy(info_set_id, action_choices,
+                        reach_probabilities[player] * (iteration + 1));
+      }
     }
   }
   

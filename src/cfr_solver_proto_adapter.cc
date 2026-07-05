@@ -91,6 +91,7 @@ SolverConfig SolverConfigFromProto(const PokerConfig& config) {
   native.river_bet_sizes.assign(config.river_bet_sizes().begin(),
                                 config.river_bet_sizes().end());
   native.regret_only_training = config.regret_only_training();
+  native.max_info_sets = static_cast<int>(config.max_info_sets());
   return native;
 }
 
@@ -118,6 +119,7 @@ PokerConfig SolverConfigToProto(const SolverConfig& config) {
     proto.add_river_bet_sizes(bet_size);
   }
   proto.set_regret_only_training(config.regret_only_training);
+  proto.set_max_info_sets(config.max_info_sets);
   return proto;
 }
 

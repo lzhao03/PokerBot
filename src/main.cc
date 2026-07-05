@@ -3,26 +3,14 @@
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "src/hand_range.h"
-#include "src/poker.pb.h"
+#include "src/poker_config.h"
 
 #include <chrono>
 #include <cstdlib>
-#include <fstream>
 #include <iostream>
 #include <string>
 
 namespace {
-
-poker::PokerConfig DefaultConfig() {
-  poker::PokerConfig config;
-  config.add_bet_sizes(0.25);
-  config.add_bet_sizes(0.5);
-  config.add_bet_sizes(1.0);
-  config.set_starting_stack_size(100);
-  config.set_small_blind(1);
-  config.set_big_blind(2);
-  return config;
-}
 
 bool ConsumePrefix(const std::string& arg,
                    const std::string& prefix,
@@ -52,39 +40,6 @@ double ParseDouble(const std::string& value, const std::string& flag) {
   return parsed;
 }
 
-void LoadConfig(const std::string& path, poker::PokerConfig* config) {
-  std::ifstream file(path, std::ios::binary);
-  if (!file) {
-    throw std::runtime_error("Could not open config: " + path);
-  }
-  config->Clear();
-  if (!config->ParseFromIstream(&file)) {
-    throw std::runtime_error("Could not parse config: " + path);
-  }
-}
-
-void AddBetSize(poker::PokerConfig* config,
-                poker::Street street,
-                double size) {
-  switch (street) {
-    case poker::Street::PREFLOP:
-      config->add_preflop_bet_sizes(size);
-      break;
-    case poker::Street::FLOP:
-      config->add_flop_bet_sizes(size);
-      break;
-    case poker::Street::TURN:
-      config->add_turn_bet_sizes(size);
-      break;
-    case poker::Street::RIVER:
-      config->add_river_bet_sizes(size);
-      break;
-    default:
-      config->add_bet_sizes(size);
-      break;
-  }
-}
-
 void PrintUsage(const char* program) {
   std::cerr
       << "Usage: " << program << " [options]\n"
@@ -101,6 +56,7 @@ void PrintUsage(const char* program) {
       << "  --flop-bet-size=X\n"
       << "  --turn-bet-size=X\n"
       << "  --river-bet-size=X\n"
+      << "  --max-info-sets=N               cap info set allocations (0 = unlimited)\n"
       << "  --log                           show INFO logs and VLOG(1) progress\n";
 }
 
@@ -109,7 +65,7 @@ void PrintUsage(const char* program) {
 int main(int argc, char** argv) {
   absl::InitializeLog();
 
-  poker::PokerConfig config = DefaultConfig();
+  poker::PokerConfig config = poker::DefaultPokerConfig();
   int iterations = 100;
   int exploitability_samples = 0;
   bool saw_global_bet_size = false;
@@ -125,7 +81,7 @@ int main(int argc, char** argv) {
         absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
         absl::SetGlobalVLogLevel(1);
       } else if (ConsumePrefix(arg, "--config=", &value)) {
-        LoadConfig(value, &config);
+        poker::LoadPokerConfig(value, &config);
       } else if (ConsumePrefix(arg, "--iterations=", &value)) {
         iterations = ParseInt(value, "--iterations");
       } else if (ConsumePrefix(arg, "--exploitability-samples=", &value)) {
@@ -148,17 +104,19 @@ int main(int argc, char** argv) {
         }
         config.add_bet_sizes(ParseDouble(value, "--bet-size"));
       } else if (ConsumePrefix(arg, "--preflop-bet-size=", &value)) {
-        AddBetSize(&config, poker::Street::PREFLOP,
-                   ParseDouble(value, "--preflop-bet-size"));
+        poker::AddBetSize(&config, poker::Street::PREFLOP,
+                          ParseDouble(value, "--preflop-bet-size"));
       } else if (ConsumePrefix(arg, "--flop-bet-size=", &value)) {
-        AddBetSize(&config, poker::Street::FLOP,
-                   ParseDouble(value, "--flop-bet-size"));
+        poker::AddBetSize(&config, poker::Street::FLOP,
+                          ParseDouble(value, "--flop-bet-size"));
       } else if (ConsumePrefix(arg, "--turn-bet-size=", &value)) {
-        AddBetSize(&config, poker::Street::TURN,
-                   ParseDouble(value, "--turn-bet-size"));
+        poker::AddBetSize(&config, poker::Street::TURN,
+                          ParseDouble(value, "--turn-bet-size"));
       } else if (ConsumePrefix(arg, "--river-bet-size=", &value)) {
-        AddBetSize(&config, poker::Street::RIVER,
-                   ParseDouble(value, "--river-bet-size"));
+        poker::AddBetSize(&config, poker::Street::RIVER,
+                          ParseDouble(value, "--river-bet-size"));
+      } else if (ConsumePrefix(arg, "--max-info-sets=", &value)) {
+        config.set_max_info_sets(ParseInt(value, "--max-info-sets"));
       } else {
         throw std::invalid_argument("Unknown option: " + arg);
       }

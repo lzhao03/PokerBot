@@ -60,6 +60,10 @@ struct SolverConfig {
   std::vector<double> turn_bet_sizes;
   std::vector<double> river_bet_sizes;
   bool regret_only_training = false;
+  // Maximum number of info sets to allocate. 0 means unlimited.
+  // Once this limit is reached, new (combo, public_state) pairs fall back to
+  // uniform strategy rather than allocating new entries. Controls peak memory.
+  int max_info_sets = 0;
 };
 
 struct GameState {

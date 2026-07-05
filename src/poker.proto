@@ -18,6 +18,8 @@ message PokerConfig {
   repeated double turn_bet_sizes = 11;
   repeated double river_bet_sizes = 12;
   bool regret_only_training = 13;
+  // Maximum number of info sets to allocate. 0 means unlimited.
+  int64 max_info_sets = 14;
 }
 
 enum Suit {

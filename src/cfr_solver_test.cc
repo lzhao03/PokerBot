@@ -2060,6 +2060,29 @@ void CheckRegretOnlyTrainingSkipsAverageStrategyWrites() {
          "regret-only export should use current regret-matched strategy");
 }
 
+void CheckMaxInfoSetsCapsTrainingAllocations() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+  config.add_bet_sizes(1.0);
+  config.set_regret_only_training(true);
+  config.set_max_info_sets(1);
+
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
+  HandRange player_a_range;
+  AddHand(player_a_range, player_a_hand, 1.0);
+  HandRange player_b_range;
+  AddHand(player_b_range, player_b_hand, 1.0);
+
+  CFRSolver solver(TestSolverConfig(config));
+  solver.run(1, player_a_range, player_b_range);
+
+  Expect(solver.get_info_set_count() == 1,
+         "max_info_sets should cap training info set allocations");
+  Expect(solver.get_strategy_profile().size() == 1,
+         "capped solver should only export allocated info sets");
+}
+
 }  // namespace
 
 int main() {
@@ -2108,6 +2131,7 @@ int main() {
   CheckCfrPlusClipsNegativeRegrets();
   CheckCfrPlusWeightsLaterStrategies();
   CheckRegretOnlyTrainingSkipsAverageStrategyWrites();
+  CheckMaxInfoSetsCapsTrainingAllocations();
 
   PokerConfig config;
   config.add_bet_sizes(1.0);
