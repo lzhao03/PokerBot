@@ -39,6 +39,8 @@ public:
     int64_t fold_utility_calls = 0;
     int64_t showdown_utility_calls = 0;
     int64_t action_entry_touches = 0;
+    int64_t betting_history_transition_hits = 0;
+    int64_t betting_history_transition_misses = 0;
   };
 
   struct UtilityCacheStats {
@@ -286,6 +288,8 @@ private:
     const absl::flat_hash_map<BettingHistoryKey, uint32_t,
                               BettingHistoryKeyHash>*
         betting_history_ids = nullptr;
+    const std::vector<BettingHistoryTransitions>*
+        betting_history_transitions = nullptr;
     const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>*
         public_state_ids = nullptr;
     const std::vector<std::unique_ptr<PublicInfoSetSlab>>*
@@ -410,6 +414,8 @@ private:
   const absl::flat_hash_map<BettingHistoryKey, uint32_t,
                             BettingHistoryKeyHash>&
   strategy_betting_history_ids() const;
+  const std::vector<BettingHistoryTransitions>&
+  strategy_betting_history_transitions() const;
   const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>&
   strategy_public_state_ids() const;
   const std::vector<std::unique_ptr<PublicInfoSetSlab>>&

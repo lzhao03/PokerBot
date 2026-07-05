@@ -211,6 +211,27 @@ class CFRSolverRegretTestPeer {
         .action_child_ids[static_cast<size_t>(action_index)];
   }
 
+  static std::pair<uint32_t, CFRSolver::TraversalStats>
+  SharedViewActionTransitionChildId(CFRSolver& source,
+                                    const GameTree::Node& parent,
+                                    const GameTree::Node& child,
+                                    int action_index) {
+    absl::flat_hash_map<CFRSolver::BettingHistoryKey, uint32_t,
+                        CFRSolver::BettingHistoryKeyHash>
+        empty_betting_history_ids;
+    CFRSolver::StrategyTablesView tables = source.strategy_tables_view();
+    tables.betting_history_ids = &empty_betting_history_ids;
+
+    CFRSolver worker(source.config_);
+    worker.strategy_tables_view_ = &tables;
+    GameTree::Node parent_copy = parent;
+    GameTree::Node child_copy = child;
+    child_copy.betting_history_id = GameTree::Node::kInvalidBettingHistoryId;
+    worker.cache_action_betting_history_transition(parent_copy, action_index,
+                                                   child_copy);
+    return {child_copy.betting_history_id, worker.get_traversal_stats()};
+  }
+
   static size_t PublicStateInfoSetListSize(CFRSolver& solver,
                                            const GameTree::Node& node,
                                            int player) {
@@ -818,6 +839,20 @@ void CheckBettingHistoryActionTransitionsAreCached() {
   Expect(CFRSolverRegretTestPeer::ActionTransitionId(
              solver, root_betting_id, 0) == child_betting_id,
          "reused action child should preserve cached history transition");
+  Expect(solver.get_traversal_stats().betting_history_transition_misses == 1,
+         "first local transition lookup should miss before caching child id");
+  Expect(solver.get_traversal_stats().betting_history_transition_hits == 1,
+         "second local transition lookup should hit cached child id");
+
+  const auto shared_result =
+      CFRSolverRegretTestPeer::SharedViewActionTransitionChildId(
+          solver, root, child, 0);
+  Expect(shared_result.first == child_betting_id,
+         "shared strategy view should assign child id from transition table");
+  Expect(shared_result.second.betting_history_transition_hits == 1,
+         "shared transition table lookup should record a hit");
+  Expect(shared_result.second.betting_history_transition_misses == 0,
+         "shared transition table lookup should not fall back to key lookup");
 }
 
 void CheckSparseSlabRowsUseExactCombos() {
