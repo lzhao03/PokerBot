@@ -113,6 +113,10 @@ public:
   // Apply an action to a state to get the next state
   GameState apply_action(const GameState& state,
                          const GameAction& action) const;
+
+  // Apply sampled public cards at a chance node to get the next state.
+  GameState apply_chance(const GameState& state,
+                         absl::Span<const CardId> cards) const;
   
   // Get the utility at a terminal state
   double get_utility(const GameState& state, ComboId player_a_hand,

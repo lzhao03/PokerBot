@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -13,6 +14,7 @@
 #include <vector>
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/inlined_vector.h"
+#include "absl/types/span.h"
 #include "src/game_tree.h"
 #include "src/hand_range.h"
 #include "src/poker_types.h"
@@ -124,7 +126,10 @@ public:
   int get_iterations_run() const { return iterations_run_.load(std::memory_order_relaxed); }
   int64_t get_cfr_update_count() const { return cfr_update_count_.load(std::memory_order_relaxed); }
   size_t get_info_set_count() const { return info_set_count_; }
-  size_t get_tree_node_count() const { return game_tree_->node_count(); }
+  size_t get_tree_node_count() const {
+    return public_state_rows_.empty() ? game_tree_->node_count()
+                                      : public_state_rows_.size();
+  }
   TraversalStats get_traversal_stats() const { return traversal_stats_; }
   void add_traversal_stats(const TraversalStats& stats);
   UtilityCacheStats get_utility_cache_stats() const;
@@ -173,7 +178,6 @@ private:
       std::optional<std::reference_wrapper<const TrainingRangeView>>;
 
   struct ActionChoice {
-    std::reference_wrapper<const GameAction> action;
     int action_id = 0;
     double probability = 0.0;
     double value = 0.0;
@@ -284,6 +288,24 @@ private:
     PrivateBucketId private_bucket = 0;
   };
 
+  struct PublicStateRow {
+    PublicStateRow() {
+      action_ids.fill(0);
+      action_child_ids.fill(GameTree::Node::kInvalidPublicStateId);
+    }
+
+    GameState state;
+    uint32_t betting_history_id = GameTree::Node::kInvalidBettingHistoryId;
+    PublicBucketId public_bucket = 0;
+    bool is_terminal = false;
+    bool is_chance_node = false;
+    int player_to_act = -1;
+    uint8_t action_count = 0;
+    std::array<GameAction, GameTree::kMaxActionsPerNode> actions = {};
+    std::array<int, GameTree::kMaxActionsPerNode> action_ids = {};
+    std::array<uint32_t, GameTree::kMaxActionsPerNode> action_child_ids = {};
+  };
+
   static constexpr int kPrivateBucketChunkSize = 64;
   static constexpr int kPrivateBucketChunkCount =
       (kComboCount + kPrivateBucketChunkSize - 1) / kPrivateBucketChunkSize;
@@ -311,6 +333,9 @@ private:
     const std::vector<BettingHistoryRow>* betting_history_rows = nullptr;
     const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>*
         public_state_ids = nullptr;
+    const std::deque<PublicStateRow>* public_state_rows = nullptr;
+    const absl::flat_hash_map<uint64_t, uint32_t>* public_chance_child_ids =
+        nullptr;
     const std::vector<std::unique_ptr<PublicInfoSetSlab>>*
         public_info_set_slabs = nullptr;
     const std::vector<int>* action_ids = nullptr;
@@ -348,6 +373,8 @@ private:
       betting_history_ids_;
   absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>
       public_state_ids_;
+  std::deque<PublicStateRow> public_state_rows_;
+  absl::flat_hash_map<uint64_t, uint32_t> public_chance_child_ids_;
   std::vector<BettingHistoryRow> betting_history_rows_;
   size_t info_set_count_ = 0;
   std::vector<int> action_ids_;
@@ -424,6 +451,21 @@ private:
                                                GameTree::Node& child_node);
   void cache_betting_history_actions(uint32_t betting_history_id,
                                      const GameTree::Node& node);
+  void cache_betting_history_actions(uint32_t betting_history_id,
+                                     const PublicStateRow& row);
+  PublicStateRow make_public_state_row(uint32_t betting_history_id,
+                                       const GameState& state) const;
+  std::optional<uint32_t> get_or_create_public_state_row(
+      uint32_t betting_history_id,
+      const GameState& state);
+  std::optional<uint32_t> get_or_create_public_state_row(
+      const GameState& state);
+  std::optional<uint32_t> get_or_create_action_child_public_state(
+      uint32_t public_state_id,
+      int action_index);
+  std::optional<uint32_t> get_or_create_chance_child_public_state(
+      uint32_t public_state_id,
+      absl::Span<const CardId> cards);
   std::optional<InfoSetRow> get_or_create_info_set_row(
       InfoSetAddress address,
       const int* action_ids,
@@ -439,6 +481,9 @@ private:
   const std::vector<BettingHistoryRow>& strategy_betting_history_rows() const;
   const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>&
   strategy_public_state_ids() const;
+  const std::deque<PublicStateRow>& strategy_public_state_rows() const;
+  const absl::flat_hash_map<uint64_t, uint32_t>&
+  strategy_public_chance_child_ids() const;
   const std::vector<std::unique_ptr<PublicInfoSetSlab>>&
   strategy_public_info_set_slabs() const;
   const std::vector<int>& strategy_action_ids() const;

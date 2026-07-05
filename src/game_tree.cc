@@ -364,6 +364,17 @@ GameState GameTree::apply_action(const GameState& state,
   return new_state;
 }
 
+GameState GameTree::apply_chance(const GameState& state,
+                                 absl::Span<const CardId> cards) const {
+  if (is_terminal(state) || get_player_to_act(state) != -1) {
+    throw std::invalid_argument("State is not a chance node");
+  }
+
+  GameState new_state = state;
+  AdvanceStreet(new_state, cards);
+  return new_state;
+}
+
 double GameTree::get_utility(const GameState& state,
                              ComboId player_a_hand,
                              ComboId player_b_hand) const {

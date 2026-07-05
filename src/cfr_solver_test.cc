@@ -263,6 +263,68 @@ class CFRSolverRegretTestPeer {
     return {child_copy.betting_history_id, worker.get_traversal_stats()};
   }
 
+  static uint32_t CompactPublicStateId(CFRSolver& solver,
+                                       const GameState& state) {
+    std::optional<uint32_t> public_state_id =
+        solver.get_or_create_public_state_row(state);
+    if (!public_state_id.has_value()) {
+      throw std::runtime_error("Could not create compact public state row");
+    }
+    return *public_state_id;
+  }
+
+  static uint8_t CompactPublicStateActionCount(const CFRSolver& solver,
+                                               uint32_t public_state_id) {
+    return solver.public_state_rows_[public_state_id].action_count;
+  }
+
+  static uint32_t CompactPublicStateBettingHistoryId(
+      const CFRSolver& solver,
+      uint32_t public_state_id) {
+    return solver.public_state_rows_[public_state_id].betting_history_id;
+  }
+
+  static int CompactPublicStateActionId(const CFRSolver& solver,
+                                        uint32_t public_state_id,
+                                        int action_index) {
+    return solver.public_state_rows_[public_state_id]
+        .action_ids[static_cast<size_t>(action_index)];
+  }
+
+  static uint32_t CompactActionChild(CFRSolver& solver,
+                                     uint32_t public_state_id,
+                                     int action_index) {
+    std::optional<uint32_t> child_id =
+        solver.get_or_create_action_child_public_state(public_state_id,
+                                                       action_index);
+    if (!child_id.has_value()) {
+      throw std::runtime_error("Could not create compact action child");
+    }
+    return *child_id;
+  }
+
+  static uint32_t CompactChanceChild(CFRSolver& solver,
+                                     uint32_t public_state_id,
+                                     absl::Span<const CardId> cards) {
+    std::optional<uint32_t> child_id =
+        solver.get_or_create_chance_child_public_state(public_state_id, cards);
+    if (!child_id.has_value()) {
+      throw std::runtime_error("Could not create compact chance child");
+    }
+    return *child_id;
+  }
+
+  static StreetKind CompactPublicStateStreet(const CFRSolver& solver,
+                                             uint32_t public_state_id) {
+    return solver.public_state_rows_[public_state_id].state.street;
+  }
+
+  static int CompactPublicStateBoardSize(const CFRSolver& solver,
+                                         uint32_t public_state_id) {
+    return static_cast<int>(
+        solver.public_state_rows_[public_state_id].state.board_cards.size());
+  }
+
   static size_t PublicStateInfoSetListSize(CFRSolver& solver,
                                            const GameTree::Node& node,
                                            int player) {
@@ -399,7 +461,7 @@ class CFRSolverRegretTestPeer {
     for (size_t i = 0; i < legal_actions.size(); ++i) {
       const GameAction& action = legal_actions[i];
       const int action_id = GameTree::action_key(action);
-      choices.push_back({std::cref(action), action_id, 0.0, 0.0});
+      choices.push_back({action_id, 0.0, 0.0});
       if (action.kind == TestActionKind(action_type) &&
           action.amount == amount) {
         selected_index = i;
@@ -901,6 +963,81 @@ void CheckBettingHistoryActionTransitionsAreCached() {
          "shared transition table lookup should record a hit");
   Expect(shared_result.second.betting_history_transition_misses == 0,
          "shared transition table lookup should not fall back to key lookup");
+}
+
+void CheckCompactPublicStateActionTransitionsAreCached() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  CFRSolver solver(TestSolverConfig(config));
+  const GameState root_state = TestGameState(InitialRootState(config));
+
+  const uint32_t root_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, root_state);
+  const uint8_t action_count =
+      CFRSolverRegretTestPeer::CompactPublicStateActionCount(solver, root_id);
+  Expect(action_count > 0, "compact root row should store legal actions");
+
+  const uint32_t betting_history_id =
+      CFRSolverRegretTestPeer::CompactPublicStateBettingHistoryId(solver,
+                                                                  root_id);
+  Expect(CFRSolverRegretTestPeer::BettingHistoryActionCount(
+             solver, betting_history_id) == action_count,
+         "compact row should populate betting-history action count");
+  Expect(CFRSolverRegretTestPeer::BettingHistoryActionId(
+             solver, betting_history_id, 0) ==
+             CFRSolverRegretTestPeer::CompactPublicStateActionId(
+                 solver, root_id, 0),
+         "compact row should mirror action ids into betting history");
+
+  const uint32_t child_id =
+      CFRSolverRegretTestPeer::CompactActionChild(solver, root_id, 0);
+  const uint32_t repeated_child_id =
+      CFRSolverRegretTestPeer::CompactActionChild(solver, root_id, 0);
+
+  Expect(child_id == repeated_child_id,
+         "compact action transition should reuse the same public state id");
+  Expect(solver.get_tree_node_count() == 2,
+         "compact action transition should create one child row");
+}
+
+void CheckCompactPublicStateChanceTransitionsAreCached() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  CFRSolver solver(TestSolverConfig(config));
+
+  GameState chance_state;
+  chance_state.stack[0] = 18;
+  chance_state.stack[1] = 18;
+  chance_state.pot = 4;
+  chance_state.folded_player = -1;
+  chance_state.street = StreetKind::kPreflop;
+  chance_state.all_in = false;
+  chance_state.player_to_act = 0;
+  chance_state.player_contribution = {2, 2};
+  chance_state.history.push_back({ActionKind::kCall, 1, 0});
+  chance_state.history.push_back({ActionKind::kCheck, 0, 1});
+
+  const uint32_t chance_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, chance_state);
+  const std::array<CardId, 3> flop = {
+      MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(7, SuitKind::kDiamonds),
+      MakeCardId(11, SuitKind::kClubs),
+  };
+
+  const uint32_t child_id =
+      CFRSolverRegretTestPeer::CompactChanceChild(solver, chance_id, flop);
+  const uint32_t repeated_child_id =
+      CFRSolverRegretTestPeer::CompactChanceChild(solver, chance_id, flop);
+
+  Expect(child_id == repeated_child_id,
+         "compact chance transition should reuse the same public state id");
+  Expect(CFRSolverRegretTestPeer::CompactPublicStateStreet(
+             solver, child_id) == StreetKind::kFlop,
+         "compact chance transition should advance the street");
+  Expect(CFRSolverRegretTestPeer::CompactPublicStateBoardSize(
+             solver, child_id) == 3,
+         "compact chance transition should add dealt board cards");
 }
 
 void CheckSparseSlabRowsUseExactCombos() {
@@ -2404,6 +2541,8 @@ int main() {
   CheckPublicStateIdsAreDenseAndKeyedByState();
   CheckBettingHistoryIdsIgnorePublicCards();
   CheckBettingHistoryActionTransitionsAreCached();
+  CheckCompactPublicStateActionTransitionsAreCached();
+  CheckCompactPublicStateChanceTransitionsAreCached();
   CheckSparseSlabRowsUseExactCombos();
   CheckSparseSlabTracksInfoSets();
   CheckTerminalUtilityCacheReusesScores();
