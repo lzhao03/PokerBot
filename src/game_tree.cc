@@ -8,6 +8,34 @@
 
 namespace poker {
 
+// --- GameTree::Node inline method implementations ---
+
+void GameTree::Node::add_action(const GameAction& action, int key) {
+  if (action_count >= kMaxActionsPerNode) {
+    throw std::logic_error(
+        "GameTree::Node exceeded kMaxActionsPerNode (" +
+        std::to_string(kMaxActionsPerNode) + "). Increase the constant.");
+  }
+  actions[action_count++] = {action, key, kInvalidNodeId};
+}
+
+GameTree::NodeId GameTree::Node::find_child(int key) const {
+  for (uint8_t i = 0; i < action_count; ++i) {
+    if (actions[i].key == key) return actions[i].child_id;
+  }
+  return kInvalidNodeId;
+}
+
+void GameTree::Node::set_child(int key, NodeId child_id) {
+  for (uint8_t i = 0; i < action_count; ++i) {
+    if (actions[i].key == key) {
+      actions[i].child_id = child_id;
+      return;
+    }
+  }
+  throw std::logic_error("set_child: key not found in action table");
+}
+
 namespace {
 
 constexpr int kActionKeyMultiplier = 1000000;
@@ -86,11 +114,9 @@ void AddActionIfMissing(std::vector<GameAction>& actions,
 }
 
 void SetLegalActions(GameTree::Node& node, std::vector<GameAction> actions) {
-  node.legal_actions = std::move(actions);
-  node.legal_action_ids.clear();
-  node.legal_action_ids.reserve(node.legal_actions.size());
-  for (const GameAction& action : node.legal_actions) {
-    node.legal_action_ids.push_back(GameTree::action_key(action));
+  node.action_count = 0;
+  for (const GameAction& action : actions) {
+    node.add_action(action, GameTree::action_key(action));
   }
 }
 
@@ -133,7 +159,16 @@ void AdvanceStreet(GameState& state, const std::vector<CardId>& cards) {
 
 }  // namespace
 
-GameTree::GameTree(const SolverConfig& config) : config_(config) {}
+GameTree::GameTree(const SolverConfig& config) : config_(config) {
+  if (config.max_tree_nodes > 0) {
+    // Reserve the outer block-pointer vector so it never reallocates.
+    // Individual NodeBlock objects are still allocated lazily as nodes are
+    // added, but the outer vector itself is stable once reserved.
+    const size_t total_nodes = static_cast<size_t>(config.max_tree_nodes);
+    const size_t num_blocks = (total_nodes + kNodeBlockSize - 1) / kNodeBlockSize;
+    node_blocks_.reserve(num_blocks);
+  }
+}
 
 int GameTree::action_key(const GameAction& action) {
   if (action.amount < 0 || action.amount >= kActionKeyMultiplier) {
@@ -158,6 +193,7 @@ const GameTree::Node& GameTree::root() const {
 
 GameTree::Node& GameTree::build_tree(const GameState& initial_state) {
   node_blocks_.clear();
+  chance_children_.clear();
   node_count_ = 0;
   root_id_ = node_count_;
   Node& root = add_node(Node());
@@ -410,16 +446,44 @@ GameTree::Node GameTree::make_chance_child_node(
   return child;
 }
 
+GameTree::NodeId GameTree::find_chance_child(NodeId parent_id,
+                                             int child_key) const {
+  auto it = chance_children_.find(ChanceChildKey(parent_id, child_key));
+  if (it == chance_children_.end()) return kInvalidNodeId;
+  return it->second;
+}
+
+void GameTree::set_chance_child(NodeId parent_id, int child_key,
+                                NodeId child_id) {
+  chance_children_[ChanceChildKey(parent_id, child_key)] = child_id;
+}
+
 GameTree::Node& GameTree::add_child(Node& parent, int child_key, Node child) {
-  auto existing = parent.children.find(child_key);
-  if (existing != parent.children.end()) {
-    return node(existing->second);
+  // Route chance-node child lookup through the side-table.
+  if (parent.is_chance_node) {
+    NodeId existing = find_chance_child(parent.id, child_key);
+    if (existing != kInvalidNodeId) {
+      return node(existing);
+    }
+    const NodeId child_id = node_count_;
+    add_node(std::move(child));
+    // Node references are stable: each NodeBlock pre-reserves kNodeBlockSize
+    // entries, so no internal reallocation occurs.  parent is still valid.
+    set_chance_child(parent.id, child_key, child_id);
+    return node(child_id);
+  }
+
+  // Player-action node: the action key was pre-registered by SetLegalActions.
+  NodeId existing = parent.find_child(child_key);
+  if (existing != kInvalidNodeId) {
+    return node(existing);
   }
 
   const NodeId child_id = node_count_;
-  Node& child_ref = add_node(std::move(child));
-  parent.children.emplace(child_key, child_id);
-  return child_ref;
+  add_node(std::move(child));
+  // Node references are stable (pre-reserved blocks), so parent is still valid.
+  parent.set_child(child_key, child_id);
+  return node(child_id);
 }
 
 GameTree::Node& GameTree::node(NodeId id) {

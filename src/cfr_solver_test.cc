@@ -112,17 +112,18 @@ class CFRSolverRegretTestPeer {
     GameState native_state = TestGameState(state);
     std::vector<GameAction> legal_actions =
         solver.game_tree_->get_legal_actions(native_state);
-    std::vector<int> legal_action_ids;
-    legal_action_ids.reserve(legal_actions.size());
+    int action_id_buf[GameTree::kMaxActionsPerNode];
+    int num_actions = 0;
     for (const GameAction& action : legal_actions) {
-      legal_action_ids.push_back(GameTree::action_key(action));
+      action_id_buf[num_actions++] = GameTree::action_key(action);
     }
     GameTree::Node& root = solver.get_or_build_root();
     const uint32_t public_state_id =
         solver.get_or_create_public_state_id(
             native_state, static_cast<uint32_t>(root.id));
     return solver.get_or_create_compact_info_set_id(
-        public_state_id, &root, player, TestComboId(hand), legal_action_ids);
+        public_state_id, player, TestComboId(hand),
+        action_id_buf, num_actions);
   }
 
   static size_t CompactInfoSetCount(const CFRSolver& solver) {
@@ -133,17 +134,20 @@ class CFRSolverRegretTestPeer {
     return solver.get_or_build_root();
   }
 
-  static size_t PublicStateInfoSetListSize(const CFRSolver& solver,
+  static size_t PublicStateInfoSetListSize(CFRSolver& solver,
                                            const GameTree::Node& node,
                                            int player) {
-    auto public_state_info_sets =
-        solver.info_set_ids_by_public_state_[player].find(
-            static_cast<uint32_t>(node.id));
-    if (public_state_info_sets ==
-        solver.info_set_ids_by_public_state_[player].end()) {
-      return 0;
+    size_t count = 0;
+    const uint32_t public_state_id =
+        solver.get_or_create_public_state_id(
+            node.state, static_cast<uint32_t>(node.id));
+    for (const auto& entry : solver.compact_info_set_ids_) {
+      if (entry.first.public_state_id == public_state_id &&
+          entry.first.player == static_cast<uint8_t>(player)) {
+        ++count;
+      }
     }
-    return public_state_info_sets->second.size();
+    return count;
   }
 
   static double EvaluateNode(CFRSolver& solver, GameTree::Node& node,
@@ -201,17 +205,18 @@ class CFRSolverRegretTestPeer {
     GameState native_state = TestGameState(state);
     std::vector<GameAction> legal_actions =
         solver.game_tree_->get_legal_actions(native_state);
-    std::vector<int> legal_action_ids;
-    legal_action_ids.reserve(legal_actions.size());
+    int action_id_buf[GameTree::kMaxActionsPerNode];
+    int num_actions = 0;
     for (const GameAction& action : legal_actions) {
-      legal_action_ids.push_back(GameTree::action_key(action));
+      action_id_buf[num_actions++] = GameTree::action_key(action);
     }
     GameTree::Node& root = solver.get_or_build_root();
     const uint32_t public_state_id =
         solver.get_or_create_public_state_id(
             native_state, static_cast<uint32_t>(root.id));
     const int info_set_id = solver.get_or_create_compact_info_set_id(
-        public_state_id, &root, player, TestComboId(hand), legal_action_ids);
+        public_state_id, player, TestComboId(hand),
+        action_id_buf, num_actions);
     CFRSolver::InfoSetData& info_set = solver.info_sets_[info_set_id];
     std::optional<size_t> action_table_index;
     for (uint16_t i = 0; i < info_set.action_count; ++i) {
@@ -572,7 +577,7 @@ void CheckCfrUsesLegalActions() {
   AddCard(node.state, 3, Suit::DIAMONDS);
   AddCard(node.state, 4, Suit::CLUBS);
   node.player_to_act = 0;
-  node.legal_actions.push_back(MakeGameAction(ActionType::CHECK));
+  node.add_action(MakeGameAction(ActionType::CHECK), GameTree::action_key(MakeGameAction(ActionType::CHECK)));
 
   Hand player_a_hand;
   Hand player_b_hand;
@@ -605,11 +610,11 @@ void CheckCfrDistinguishesActionAmounts() {
   node.state.add_player_contribution(2);
   node.state.set_player_to_act(0);
   node.player_to_act = 0;
-  node.legal_actions.push_back(MakeGameAction(ActionType::FOLD));
-  node.legal_actions.push_back(MakeGameAction(ActionType::CALL, 1));
-  node.legal_actions.push_back(MakeGameAction(ActionType::RAISE, 3));
-  node.legal_actions.push_back(MakeGameAction(ActionType::RAISE, 5));
-  node.legal_actions.push_back(MakeGameAction(ActionType::RAISE, 7));
+  node.add_action(MakeGameAction(ActionType::FOLD), GameTree::action_key(MakeGameAction(ActionType::FOLD)));
+  node.add_action(MakeGameAction(ActionType::CALL, 1), GameTree::action_key(MakeGameAction(ActionType::CALL, 1)));
+  node.add_action(MakeGameAction(ActionType::RAISE, 3), GameTree::action_key(MakeGameAction(ActionType::RAISE, 3)));
+  node.add_action(MakeGameAction(ActionType::RAISE, 5), GameTree::action_key(MakeGameAction(ActionType::RAISE, 5)));
+  node.add_action(MakeGameAction(ActionType::RAISE, 7), GameTree::action_key(MakeGameAction(ActionType::RAISE, 7)));
 
   Hand player_a_hand;
   Hand player_b_hand;
@@ -721,8 +726,8 @@ void CheckSingletonRangeMatchesExactEvaluationAndBestResponse() {
   node.state.set_player_to_act(0);
   node.state.set_folded_player(-1);
   node.player_to_act = 0;
-  node.legal_actions.push_back(MakeGameAction(ActionType::FOLD));
-  node.legal_actions.push_back(MakeGameAction(ActionType::CALL, 1));
+  node.add_action(MakeGameAction(ActionType::FOLD), GameTree::action_key(MakeGameAction(ActionType::FOLD)));
+  node.add_action(MakeGameAction(ActionType::CALL, 1), GameTree::action_key(MakeGameAction(ActionType::CALL, 1)));
 
   auto folded_state = [](int folded_player) {
     GameState state;
@@ -1483,7 +1488,7 @@ void CheckDepthLimitUsesContinuationValueProvider() {
   node.state.set_player_to_act(0);
   node.state.set_folded_player(-1);
   node.player_to_act = 0;
-  node.legal_actions.push_back(MakeGameAction(ActionType::CHECK));
+  node.add_action(MakeGameAction(ActionType::CHECK), GameTree::action_key(MakeGameAction(ActionType::CHECK)));
 
   Hand player_a_hand;
   Hand player_b_hand;
@@ -1635,12 +1640,12 @@ void CheckZeroMaxDepthDoesNotCutOff() {
   GameTree::Node root;
   root.state.set_player_to_act(0);
   root.player_to_act = 0;
-  root.legal_actions.push_back(MakeGameAction(ActionType::CHECK));
+  root.add_action(MakeGameAction(ActionType::CHECK), GameTree::action_key(MakeGameAction(ActionType::CHECK)));
 
   GameTree::Node first_child;
   first_child.state.set_player_to_act(1);
   first_child.player_to_act = 1;
-  first_child.legal_actions.push_back(MakeGameAction(ActionType::CHECK));
+  first_child.add_action(MakeGameAction(ActionType::CHECK), GameTree::action_key(MakeGameAction(ActionType::CHECK)));
   GameTree::Node& first_child_ref = CFRSolverRegretTestPeer::AddChild(
       solver, root, TestActionKey(ActionType::CHECK),
       std::move(first_child));
@@ -1648,7 +1653,7 @@ void CheckZeroMaxDepthDoesNotCutOff() {
   GameTree::Node second_child;
   second_child.state.set_player_to_act(0);
   second_child.player_to_act = 0;
-  second_child.legal_actions.push_back(MakeGameAction(ActionType::CHECK));
+  second_child.add_action(MakeGameAction(ActionType::CHECK), GameTree::action_key(MakeGameAction(ActionType::CHECK)));
   GameTree::Node& second_child_ref = CFRSolverRegretTestPeer::AddChild(
       solver, first_child_ref, TestActionKey(ActionType::CHECK),
       std::move(second_child));
@@ -1819,8 +1824,8 @@ void CheckBestResponseActionSelectsBestLegalAction() {
 
   GameAction player_a_loses = MakeGameAction(ActionType::FOLD);
   GameAction player_a_wins = MakeGameAction(ActionType::CALL, 1);
-  node.legal_actions.push_back(player_a_loses);
-  node.legal_actions.push_back(player_a_wins);
+  node.add_action(player_a_loses, GameTree::action_key(player_a_loses));
+  node.add_action(player_a_wins, GameTree::action_key(player_a_wins));
 
   AddTerminalChild(solver, node, TestActionKey(ActionType::FOLD),
                    FoldedState(0));
@@ -1856,8 +1861,8 @@ void CheckRangeBestResponseDoesNotKnowOpponentHand() {
 
   GameAction first_board = MakeGameAction(ActionType::CHECK);
   GameAction second_board = MakeGameAction(ActionType::CALL, 1);
-  node.legal_actions.push_back(first_board);
-  node.legal_actions.push_back(second_board);
+  node.add_action(first_board, GameTree::action_key(first_board));
+  node.add_action(second_board, GameTree::action_key(second_board));
 
   CFRSolverRegretTestPeer::AddChild(
       solver, node, TestActionKey(ActionType::CHECK),
@@ -1938,8 +1943,8 @@ void CheckPlayerBRegretsUsePlayerBUtility() {
 
   GameAction player_b_loses = MakeGameAction(ActionType::FOLD);
   GameAction player_b_wins = MakeGameAction(ActionType::CALL, 1);
-  node.legal_actions.push_back(player_b_loses);
-  node.legal_actions.push_back(player_b_wins);
+  node.add_action(player_b_loses, GameTree::action_key(player_b_loses));
+  node.add_action(player_b_wins, GameTree::action_key(player_b_wins));
 
   AddTerminalChild(solver, node, TestActionKey(ActionType::FOLD),
                    FoldedState(1));
@@ -1971,8 +1976,8 @@ void CheckCfrPlusClipsNegativeRegrets() {
 
   GameAction player_a_loses = MakeGameAction(ActionType::FOLD);
   GameAction player_a_wins = MakeGameAction(ActionType::CALL, 1);
-  node.legal_actions.push_back(player_a_loses);
-  node.legal_actions.push_back(player_a_wins);
+  node.add_action(player_a_loses, GameTree::action_key(player_a_loses));
+  node.add_action(player_a_wins, GameTree::action_key(player_a_wins));
 
   AddTerminalChild(solver, node, TestActionKey(ActionType::FOLD),
                    FoldedState(0));
@@ -2006,8 +2011,8 @@ void CheckCfrPlusWeightsLaterStrategies() {
 
   GameAction player_a_loses = MakeGameAction(ActionType::FOLD);
   GameAction player_a_wins = MakeGameAction(ActionType::CALL, 1);
-  node.legal_actions.push_back(player_a_loses);
-  node.legal_actions.push_back(player_a_wins);
+  node.add_action(player_a_loses, GameTree::action_key(player_a_loses));
+  node.add_action(player_a_wins, GameTree::action_key(player_a_wins));
 
   AddTerminalChild(solver, node, TestActionKey(ActionType::FOLD),
                    FoldedState(0));
@@ -2038,8 +2043,8 @@ void CheckRegretOnlyTrainingSkipsAverageStrategyWrites() {
   node.state.set_folded_player(-1);
   node.player_to_act = 0;
 
-  node.legal_actions.push_back(MakeGameAction(ActionType::FOLD));
-  node.legal_actions.push_back(MakeGameAction(ActionType::CALL, 1));
+  node.add_action(MakeGameAction(ActionType::FOLD), GameTree::action_key(MakeGameAction(ActionType::FOLD)));
+  node.add_action(MakeGameAction(ActionType::CALL, 1), GameTree::action_key(MakeGameAction(ActionType::CALL, 1)));
 
   AddTerminalChild(solver, node, TestActionKey(ActionType::FOLD),
                    FoldedState(0));

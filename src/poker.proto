@@ -20,6 +20,12 @@ message PokerConfig {
   bool regret_only_training = 13;
   // Maximum number of info sets to allocate. 0 means unlimited.
   int64 max_info_sets = 14;
+  // Number of threads for parallel training. 0 or 1 = single-threaded.
+  int32 num_training_threads = 15;
+  // Single-threaded warmup iterations before parallel phase. 0 = auto.
+  int32 warmup_iterations = 16;
+  // Maximum number of game tree nodes to cache. 0 means unlimited.
+  int64 max_tree_nodes = 17;
 }
 
 enum Suit {

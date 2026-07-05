@@ -389,7 +389,7 @@ void CheckChanceAdvancesStreet(GameTree& tree) {
   Expect(child_ref.state.history.empty(),
          "chance clears street action history");
   Expect(child_ref.player_to_act == 1, "flop action starts with player 1");
-  Expect(!child_ref.legal_actions.empty(),
+  Expect(child_ref.action_count > 0,
          "chance child has legal player actions");
 }
 

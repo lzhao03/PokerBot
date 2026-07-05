@@ -92,6 +92,9 @@ SolverConfig SolverConfigFromProto(const PokerConfig& config) {
                                 config.river_bet_sizes().end());
   native.regret_only_training = config.regret_only_training();
   native.max_info_sets = static_cast<int>(config.max_info_sets());
+  native.max_tree_nodes = static_cast<int>(config.max_tree_nodes());
+  native.num_training_threads = config.num_training_threads();
+  native.warmup_iterations = config.warmup_iterations();
   return native;
 }
 
@@ -120,6 +123,9 @@ PokerConfig SolverConfigToProto(const SolverConfig& config) {
   }
   proto.set_regret_only_training(config.regret_only_training);
   proto.set_max_info_sets(config.max_info_sets);
+  proto.set_max_tree_nodes(config.max_tree_nodes);
+  proto.set_num_training_threads(config.num_training_threads);
+  proto.set_warmup_iterations(config.warmup_iterations);
   return proto;
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -116,9 +117,10 @@ public:
   
   // Get the expected value of the game for a player
   double get_expected_value(int player_id) const;
-  int get_iterations_run() const { return iterations_run_; }
-  int64_t get_cfr_update_count() const { return cfr_update_count_; }
+  int get_iterations_run() const { return iterations_run_.load(std::memory_order_relaxed); }
+  int64_t get_cfr_update_count() const { return cfr_update_count_.load(std::memory_order_relaxed); }
   size_t get_info_set_count() const { return info_sets_.size(); }
+  size_t get_tree_node_count() const { return game_tree_->node_count(); }
   TraversalStats get_traversal_stats() const { return traversal_stats_; }
   UtilityCacheStats get_utility_cache_stats() const;
   void set_continuation_value_provider(
@@ -234,24 +236,6 @@ private:
     size_t operator()(const CompactInfoSetKey& key) const;
   };
 
-  struct ComboInfoSetIndex {
-    ComboInfoSetIndex() { info_set_ids.fill(-1); }
-
-    std::array<int32_t, kComboCount> info_set_ids;
-  };
-
-  static constexpr size_t kComboInfoSetIndexBlockSize = 128;
-
-  struct ComboInfoSetIndexBlock {
-    ComboInfoSetIndexBlock() {
-      indexes.reserve(kComboInfoSetIndexBlockSize);
-    }
-
-    std::vector<ComboInfoSetIndex> indexes;
-  };
-
-  using InfoSetIdsByPublicState =
-      std::array<absl::flat_hash_map<uint32_t, std::vector<int32_t>>, 2>;
 
   struct InfoSetData {
     uint32_t public_state_id = 0;
@@ -268,9 +252,9 @@ private:
         compact_info_set_ids = nullptr;
     const std::vector<InfoSetData>* info_sets = nullptr;
     const std::vector<int>* action_ids = nullptr;
-    const std::vector<float>* cumulative_regrets = nullptr;
-    const std::vector<float>* cumulative_strategies = nullptr;
-    const InfoSetIdsByPublicState* info_set_ids_by_public_state = nullptr;
+    // The cumulative arrays are shared read/write across worker threads.
+    std::vector<float>* cumulative_regrets = nullptr;
+    std::vector<float>* cumulative_strategies = nullptr;
   };
 
   CFRSolver(const SolverConfig& config,
@@ -285,14 +269,17 @@ private:
 
   SolverConfig config_;
   GameState initial_state_;
-  std::unique_ptr<GameTree> game_tree_;
+  std::shared_ptr<GameTree> game_tree_;
   std::mt19937 rng_;
   double cumulative_root_utility_;
-  int iterations_run_;
-  int64_t cfr_update_count_;
+  std::atomic<int> iterations_run_{0};
+  std::atomic<int64_t> cfr_update_count_{0};
   TraversalStats traversal_stats_;
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
+  // Set to true after warmup; blocks all tree/info-set allocation so the
+  // parallel training phase only writes to the atomic regret/strategy arrays.
+  bool frozen_ = false;
   
   absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>
       public_state_ids_;
@@ -302,12 +289,6 @@ private:
   std::vector<float> cumulative_strategies_;
   absl::flat_hash_map<CompactInfoSetKey, int, CompactInfoSetKeyHash>
       compact_info_set_ids_;
-  InfoSetIdsByPublicState info_set_ids_by_public_state_;
-  std::vector<std::unique_ptr<ComboInfoSetIndexBlock>>
-      combo_info_set_index_blocks_;
-  size_t combo_info_set_index_count_ = 0;
-  std::array<absl::flat_hash_map<uint32_t, int32_t>, 2>
-      combo_info_set_index_ids_by_public_state_;
   const StrategyTablesView* strategy_tables_view_ = nullptr;
   
   // Helper methods
@@ -315,6 +296,11 @@ private:
   void run_iterations(int iterations,
                       const HandRange& player_a_range,
                       const HandRange& player_b_range);
+  void run_iterations_parallel(int iterations,
+                                int num_threads,
+                                RangeSampler& range_sampler,
+                                const TrainingRange& player_a_training_range,
+                                const TrainingRange& player_b_training_range);
   double cfr_with_ranges(
       GameTree::Node& node,
       ComboId player_a_hand,
@@ -344,7 +330,7 @@ private:
       StrategyProbabilities& probabilities);
   void average_strategy_probabilities(
       const InfoSetData& info_set,
-      const std::vector<GameAction>& legal_actions,
+      const GameTree::Node& node,
       double fallback_probability,
       StrategyProbabilities& probabilities);
   void condition_ranges_for_actions(
@@ -360,24 +346,11 @@ private:
   uint32_t get_or_create_public_state_id(GameTree::Node& node);
   int get_or_create_compact_info_set_id(
       uint32_t public_state_id,
-      GameTree::Node* node,
       int player,
       ComboId combo_id,
-      const std::vector<int>& legal_action_ids);
-  ComboInfoSetIndex& get_or_build_combo_info_set_index(
-      GameTree::Node& node,
-      int player,
-      uint32_t public_state_id);
-  ComboInfoSetIndex& ensure_combo_info_set_index(GameTree::Node* node,
-                                                 int player,
-                                                 uint32_t public_state_id);
-  ComboInfoSetIndex* combo_info_set_index(GameTree::Node* node,
-                                          int player,
-                                          uint32_t public_state_id);
-  int32_t allocate_combo_info_set_index_id();
-  ComboInfoSetIndex& combo_info_set_index_at(int32_t index_id);
-  const ComboInfoSetIndex& combo_info_set_index_at(int32_t index_id) const;
-  StrategyTablesView strategy_tables_view() const;
+      const int* action_ids,
+      int num_actions);
+  StrategyTablesView strategy_tables_view();
   std::optional<uint32_t> strategy_public_state_id(GameTree::Node& node);
   const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>&
   strategy_public_state_ids() const;
@@ -387,9 +360,11 @@ private:
   const std::vector<int>& strategy_action_ids() const;
   const std::vector<float>& strategy_cumulative_regrets() const;
   const std::vector<float>& strategy_cumulative_strategies() const;
-  const InfoSetIdsByPublicState& strategy_info_set_ids_by_public_state() const;
+  std::vector<float>& mutable_strategy_cumulative_regrets();
+  std::vector<float>& mutable_strategy_cumulative_strategies();
   void initialize_info_set_actions(InfoSetData& info_set,
-                                   const std::vector<int>& legal_action_ids);
+                                   const int* action_ids,
+                                   int num_actions);
   ContinuationContext build_continuation_context(
       const GameState& state,
       ComboId player_a_hand,
