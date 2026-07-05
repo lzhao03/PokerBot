@@ -325,6 +325,10 @@ class CFRSolverRegretTestPeer {
         solver.public_state_rows_[public_state_id].state.board_cards.size());
   }
 
+  static size_t LegacyGameTreeNodeCount(const CFRSolver& solver) {
+    return solver.game_tree_->node_count();
+  }
+
   static size_t PublicStateInfoSetListSize(CFRSolver& solver,
                                            const GameTree::Node& node,
                                            int player) {
@@ -472,11 +476,10 @@ class CFRSolverRegretTestPeer {
     }
 
     CFRSolver::ConditionedRanges conditioned_ranges;
-    GameTree::Node& root = solver.get_or_build_root();
     const uint32_t public_state_id =
         solver.get_or_create_public_state_id(native_state);
     solver.condition_ranges_for_actions(
-        range, root, public_state_id, player, choices,
+        range, native_state, public_state_id, player, choices,
         conditioned_ranges);
     return std::move(conditioned_ranges[selected_index]);
   }
@@ -2510,6 +2513,28 @@ void CheckMaxInfoSetsCapsTrainingAllocations() {
          "capped solver should only export allocated info sets");
 }
 
+void CheckRangeTrainingUsesCompactPublicStates() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+  config.add_bet_sizes(1.0);
+  config.set_regret_only_training(true);
+
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
+  HandRange player_a_range;
+  AddHand(player_a_range, player_a_hand, 1.0);
+  HandRange player_b_range;
+  AddHand(player_b_range, player_b_hand, 1.0);
+
+  CFRSolver solver(TestSolverConfig(config));
+  solver.run(5, player_a_range, player_b_range);
+
+  Expect(solver.get_tree_node_count() > 0,
+         "compact training should allocate public-state rows");
+  Expect(CFRSolverRegretTestPeer::LegacyGameTreeNodeCount(solver) == 0,
+         "compact training should not allocate legacy game-tree nodes");
+}
+
 void CheckMaxTreeNodesCapsTrainingAllocations() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -2587,6 +2612,7 @@ int main() {
   CheckCfrPlusWeightsLaterStrategies();
   CheckRegretOnlyTrainingSkipsAverageStrategyWrites();
   CheckMaxInfoSetsCapsTrainingAllocations();
+  CheckRangeTrainingUsesCompactPublicStates();
   CheckMaxTreeNodesCapsTrainingAllocations();
 
   PokerConfig config;

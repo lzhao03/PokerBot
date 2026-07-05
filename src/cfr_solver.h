@@ -390,6 +390,7 @@ private:
                       const HandRange& player_b_range);
   void run_iterations_parallel(int iterations,
                                 int num_threads,
+                                uint32_t root_public_state_id,
                                 const RangeSampler& range_sampler,
                                 const TrainingRange& player_a_training_range,
                                 const TrainingRange& player_b_training_range);
@@ -415,6 +416,17 @@ private:
       TraversalScratch& scratch,
       OptionalTrainingRange player_a_range,
       OptionalTrainingRange player_b_range);
+  double cfr_with_ranges(
+      uint32_t public_state_id,
+      const PrivateCards& player_a_cards,
+      const PrivateCards& player_b_cards,
+      std::array<double, 2>& reach_probabilities,
+      int iteration,
+      int depth,
+      int max_depth,
+      TraversalScratch& scratch,
+      OptionalTrainingRange player_a_range,
+      OptionalTrainingRange player_b_range);
   void average_strategy_probabilities(
       GameTree::Node& node,
       int player,
@@ -427,7 +439,7 @@ private:
       StrategyProbabilities& probabilities);
   void condition_ranges_for_actions(
       const TrainingRangeView& range,
-      GameTree::Node& node,
+      const GameState& state,
       uint32_t public_state_id,
       int player,
       const ActionChoices& action_choices,
@@ -545,6 +557,17 @@ private:
                        double reach_prob);
   double chance_sampling_cfr(
       GameTree::Node& node,
+      const PrivateCards& player_a_cards,
+      const PrivateCards& player_b_cards,
+      std::array<double, 2>& reach_probabilities,
+      int iteration,
+      int depth,
+      int max_depth,
+      TraversalScratch& scratch,
+      OptionalTrainingRange player_a_range,
+      OptionalTrainingRange player_b_range);
+  double chance_sampling_cfr(
+      uint32_t public_state_id,
       const PrivateCards& player_a_cards,
       const PrivateCards& player_b_cards,
       std::array<double, 2>& reach_probabilities,
