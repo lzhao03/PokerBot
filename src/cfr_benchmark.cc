@@ -23,6 +23,8 @@ constexpr bool kProdBenchmarkDefaults = POKER_BENCHMARK_PROD_DEFAULTS != 0;
 constexpr int kDefaultIterations = kProdBenchmarkDefaults ? 5000 : 100;
 constexpr int kDefaultEvalSamples = kProdBenchmarkDefaults ? 1 : 100;
 constexpr int kDefaultExploitabilitySamples = 10;
+constexpr int kDefaultMaxInfoSets = kProdBenchmarkDefaults ? 500000 : 0;
+constexpr int kDefaultMaxTreeNodes = kProdBenchmarkDefaults ? 200000 : 0;
 constexpr bool kDefaultSkipExploitability = kProdBenchmarkDefaults;
 constexpr const char* kDefaultRange =
     kProdBenchmarkDefaults ? "all" : "premium";
@@ -106,7 +108,12 @@ void PrintUsage(const char* program) {
       << "  --big-blind=N                   solver config override\n"
       << "  --max-depth=N                   solver config override\n"
       << "  --chance-samples=N              solver config override\n"
-      << "  --max-info-sets=N               solver config override\n"
+      << "  --max-info-sets=N               solver config override"
+      << " (default " << kDefaultMaxInfoSets << ")\n"
+      << "  --max-tree-nodes=N              solver config override"
+      << " (default " << kDefaultMaxTreeNodes << ")\n"
+      << "  --threads=N                     solver config override\n"
+      << "  --warmup-iterations=N           solver config override\n"
       << "  --regret-only                   solver config override\n"
       << "  --bet-size=X                    replaces default global sizes on first use\n"
       << "  --preflop-bet-size=X            solver config override\n"
@@ -188,6 +195,8 @@ ParsedOptions ParseOptions(int argc, char** argv) {
   if (kProdBenchmarkDefaults) {
     parsed.config.set_max_depth(0);
     parsed.config.set_regret_only_training(true);
+    parsed.config.set_max_info_sets(kDefaultMaxInfoSets);
+    parsed.config.set_max_tree_nodes(kDefaultMaxTreeNodes);
   }
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
@@ -222,6 +231,13 @@ ParsedOptions ParseOptions(int argc, char** argv) {
       parsed.config.set_big_blind(ParseInt(value, "--big-blind"));
     } else if (ConsumePrefix(arg, "--max-info-sets=", &value)) {
       parsed.config.set_max_info_sets(ParseInt(value, "--max-info-sets"));
+    } else if (ConsumePrefix(arg, "--max-tree-nodes=", &value)) {
+      parsed.config.set_max_tree_nodes(ParseInt(value, "--max-tree-nodes"));
+    } else if (ConsumePrefix(arg, "--threads=", &value)) {
+      parsed.config.set_num_training_threads(ParseInt(value, "--threads"));
+    } else if (ConsumePrefix(arg, "--warmup-iterations=", &value)) {
+      parsed.config.set_warmup_iterations(
+          ParseInt(value, "--warmup-iterations"));
     } else if (ConsumePrefix(arg, "--bet-size=", &value)) {
       if (!saw_global_bet_size) {
         parsed.config.clear_bet_sizes();

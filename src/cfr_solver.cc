@@ -202,18 +202,24 @@ GameTree::Node& CachedChanceChild(GameTree& game_tree,
   return *CachedChanceChildOrNull(game_tree, node, cards, created_nodes);
 }
 
-// Returns nullptr if frozen and the child does not already exist.
+// Returns nullptr if the child does not already exist AND either frozen is true
+// or the total tree-node cap has already been reached.
 GameTree::Node* CachedActionChildOrNull(GameTree& game_tree,
                                         GameTree::Node& node,
                                         const GameAction& action,
                                         int action_id,
                                         int64_t* created_nodes,
-                                        bool frozen = false) {
+                                        bool frozen = false,
+                                        int max_tree_nodes = 0) {
   GameTree::NodeId existing = node.find_child(action_id);
   if (existing != GameTree::kInvalidNodeId) {
     return &game_tree.node(existing);
   }
   if (frozen) {
+    return nullptr;
+  }
+  if (max_tree_nodes > 0 &&
+      static_cast<int>(game_tree.node_count()) >= max_tree_nodes) {
     return nullptr;
   }
   if (created_nodes != nullptr) {
@@ -442,6 +448,7 @@ CFRSolver::RangeSampler::RangeSampler(const TrainingRange& player_a_range,
     const float player_a_weight = player_a_range.weights[player_a_combo];
     if (player_a_weight <= 0.0f) {
       player_a_sample_weights.push_back(0.0f);
+      player_a_cumulative_weights.push_back(total_weight);
       continue;
     }
     const size_t offset = compatible_player_b_combos.size();
@@ -467,19 +474,28 @@ CFRSolver::RangeSampler::RangeSampler(const TrainingRange& player_a_range,
         player_a_weight * compatible_player_b_weight[player_a_combo];
     player_a_sample_weights.push_back(sample_weight);
     total_weight += sample_weight;
+    player_a_cumulative_weights.push_back(total_weight);
   }
 
   if (total_weight <= 0.0f) {
     throw std::invalid_argument(
         "Could not sample non-overlapping hands from ranges");
   }
-
-  player_a_distribution = std::discrete_distribution<size_t>(
-      player_a_sample_weights.begin(), player_a_sample_weights.end());
+  total_player_a_weight = total_weight;
 }
 
-CFRSolver::RangeDeal CFRSolver::RangeSampler::sample(std::mt19937& rng) {
-  const size_t player_a_active_index = player_a_distribution(rng);
+CFRSolver::RangeDeal CFRSolver::RangeSampler::sample(std::mt19937& rng) const {
+  std::uniform_real_distribution<float> player_a_distribution(
+      0.0f, total_player_a_weight);
+  const float player_a_sample = player_a_distribution(rng);
+  auto player_a_sampled = std::upper_bound(
+      player_a_cumulative_weights.begin(), player_a_cumulative_weights.end(),
+      player_a_sample);
+  if (player_a_sampled == player_a_cumulative_weights.end()) {
+    player_a_sampled = player_a_cumulative_weights.end() - 1;
+  }
+  const size_t player_a_active_index = static_cast<size_t>(
+      player_a_sampled - player_a_cumulative_weights.begin());
   const ComboId player_a_combo = player_a_range.active[player_a_active_index];
   const float total_player_b_weight =
       compatible_player_b_weight[player_a_combo];
@@ -848,7 +864,7 @@ void CFRSolver::run_iterations(int iterations,
 void CFRSolver::run_iterations_parallel(
     int iterations,
     int num_threads,
-    RangeSampler& range_sampler,
+    const RangeSampler& range_sampler,
     const TrainingRange& player_a_training_range,
     const TrainingRange& player_b_training_range) {
   // Each worker gets a snapshot of the frozen strategy tables via
@@ -1096,8 +1112,8 @@ double CFRSolver::cfr_with_ranges(
     GameTree::Node* child_node_ptr = CachedActionChildOrNull(
         *game_tree_, node, action, action_id,
         POKER_TRAVERSAL_STAT_PTR(traversal_stats_.child_nodes_created),
-        frozen_);
-    // When frozen, unexplored actions are treated as zero value.
+        frozen_, config_.max_tree_nodes);
+    // When frozen or capped, unexplored actions are treated as zero value.
     if (child_node_ptr == nullptr) {
       continue;
     }

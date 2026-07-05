@@ -143,17 +143,18 @@ private:
     RangeSampler(const TrainingRange& player_a_range,
                  const TrainingRange& player_b_range);
 
-    RangeDeal sample(std::mt19937& rng);
+    RangeDeal sample(std::mt19937& rng) const;
 
     const TrainingRange& player_a_range;
     const TrainingRange& player_b_range;
     std::vector<float> compatible_player_b_weight;
     std::vector<float> player_a_sample_weights;
+    std::vector<float> player_a_cumulative_weights;
+    float total_player_a_weight = 0.0f;
     std::vector<uint32_t> compatible_player_b_offsets;
     std::vector<uint16_t> compatible_player_b_counts;
     std::vector<ComboId> compatible_player_b_combos;
     std::vector<float> compatible_player_b_cumulative_weights;
-    std::discrete_distribution<size_t> player_a_distribution;
   };
 
   struct PrivateCards {
@@ -305,7 +306,7 @@ private:
                       const HandRange& player_b_range);
   void run_iterations_parallel(int iterations,
                                 int num_threads,
-                                RangeSampler& range_sampler,
+                                const RangeSampler& range_sampler,
                                 const TrainingRange& player_a_training_range,
                                 const TrainingRange& player_b_training_range);
   double cfr_with_ranges(

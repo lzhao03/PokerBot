@@ -2088,6 +2088,27 @@ void CheckMaxInfoSetsCapsTrainingAllocations() {
          "capped solver should only export allocated info sets");
 }
 
+void CheckMaxTreeNodesCapsTrainingAllocations() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+  config.add_bet_sizes(1.0);
+  config.set_regret_only_training(true);
+  config.set_max_tree_nodes(3);
+
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
+  HandRange player_a_range;
+  AddHand(player_a_range, player_a_hand, 1.0);
+  HandRange player_b_range;
+  AddHand(player_b_range, player_b_hand, 1.0);
+
+  CFRSolver solver(TestSolverConfig(config));
+  solver.run(20, player_a_range, player_b_range);
+
+  Expect(solver.get_tree_node_count() <= 3,
+         "max_tree_nodes should cap total cached training nodes");
+}
+
 }  // namespace
 
 int main() {
@@ -2137,6 +2158,7 @@ int main() {
   CheckCfrPlusWeightsLaterStrategies();
   CheckRegretOnlyTrainingSkipsAverageStrategyWrites();
   CheckMaxInfoSetsCapsTrainingAllocations();
+  CheckMaxTreeNodesCapsTrainingAllocations();
 
   PokerConfig config;
   config.add_bet_sizes(1.0);
