@@ -352,6 +352,19 @@ void CheckActionKeyRejectsCollidingAmounts() {
                          "action key should reject million-chip amounts");
 }
 
+void CheckIndexedActionChildReuse() {
+  GameTree tree(TestConfig());
+  GameTree::Node& root = tree.build_tree(PreflopState());
+  Expect(root.action_count > 0, "root should have legal actions");
+
+  GameTree::Node& first_child = tree.create_child_node(root, 0);
+  Expect(root.child_for_action_index(0) == first_child.id,
+         "indexed child creation should write the inline child id");
+  GameTree::Node& second_child = tree.create_child_node(root, 0);
+  Expect(&first_child == &second_child,
+         "indexed child creation should reuse an existing child");
+}
+
 void CheckShowdownUtility(GameTree& tree) {
   GameState showdown = ShowdownState();
   ComboId player_a =
@@ -412,6 +425,7 @@ int main() {
   poker::CheckStreetBetSizesOverrideGlobal();
   poker::CheckRaisesRemainAvailableAfterPriorRaise();
   poker::CheckActionKeyRejectsCollidingAmounts();
+  poker::CheckIndexedActionChildReuse();
   poker::CheckShowdownUtility(tree);
   poker::CheckChanceAdvancesStreet(tree);
   return 0;

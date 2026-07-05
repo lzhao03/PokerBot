@@ -64,6 +64,9 @@ public:
     // Set the child_id for a given key. Key must already be present.
     void set_child(int key, NodeId child_id);
 
+    NodeId child_for_action_index(int action_index) const;
+    void set_child_for_action_index(int action_index, NodeId child_id);
+
     // Iterate over legal actions as a span-like view (used by callers that
     // previously iterated node.legal_actions).
     const ActionEntry* actions_begin() const { return actions.data(); }
@@ -87,6 +90,8 @@ public:
   Node& create_child_node(Node& parent,
                           int child_key,
                           const GameAction& action);
+
+  Node& create_child_node(Node& parent, int action_index);
 
   // Create a child node for a sampled chance outcome
   Node& create_chance_child_node(

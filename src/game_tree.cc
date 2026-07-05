@@ -36,6 +36,22 @@ void GameTree::Node::set_child(int key, NodeId child_id) {
   throw std::logic_error("set_child: key not found in action table");
 }
 
+GameTree::NodeId GameTree::Node::child_for_action_index(
+    int action_index) const {
+  if (action_index < 0 || action_index >= action_count) {
+    throw std::logic_error("child_for_action_index: action index out of range");
+  }
+  return actions[action_index].child_id;
+}
+
+void GameTree::Node::set_child_for_action_index(int action_index,
+                                                NodeId child_id) {
+  if (action_index < 0 || action_index >= action_count) {
+    throw std::logic_error("set_child_for_action_index: action index out of range");
+  }
+  actions[action_index].child_id = child_id;
+}
+
 namespace {
 
 constexpr int kActionKeyMultiplier = 1000000;
@@ -396,6 +412,24 @@ GameTree::Node& GameTree::create_child_node(Node& parent,
                                             int child_key,
                                             const GameAction& action) {
   return add_child(parent, child_key, make_child_node(parent, action));
+}
+
+GameTree::Node& GameTree::create_child_node(Node& parent, int action_index) {
+  if (parent.is_chance_node) {
+    throw std::invalid_argument("Use create_chance_child_node for chance nodes");
+  }
+  if (action_index < 0 || action_index >= parent.action_count) {
+    throw std::logic_error("create_child_node: action index out of range");
+  }
+  const NodeId existing = parent.child_for_action_index(action_index);
+  if (existing != kInvalidNodeId) {
+    return node(existing);
+  }
+
+  const NodeId child_id = node_count_;
+  add_node(make_child_node(parent, parent.actions[action_index].action));
+  parent.set_child_for_action_index(action_index, child_id);
+  return node(child_id);
 }
 
 GameTree::Node GameTree::make_child_node(
