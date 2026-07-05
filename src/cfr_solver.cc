@@ -556,6 +556,22 @@ CFRSolver::BettingHistoryKey CFRSolver::make_betting_history_key(
   return key;
 }
 
+CFRSolver::BettingHistoryRow CFRSolver::make_betting_history_row(
+    const GameState& state) const {
+  BettingHistoryRow row;
+  row.street = static_cast<int>(state.street);
+  row.pot = state.pot;
+  row.stack = {state.stack[0], state.stack[1]};
+  row.all_in = state.all_in ? 1 : 0;
+  row.folded_player = state.folded_player;
+  row.player_to_act = state.player_to_act;
+  row.player_contributions = {
+      RoundedContribution(state, 0),
+      RoundedContribution(state, 1),
+  };
+  return row;
+}
+
 CFRSolver::PublicStateKey CFRSolver::make_public_state_key(
     uint32_t betting_history_id,
     const GameState& state) const {
@@ -610,26 +626,26 @@ uint32_t CFRSolver::get_or_create_betting_history_id(const GameState& state) {
   BettingHistoryKey key = make_betting_history_key(state);
   auto existing = betting_history_ids_.find(key);
   if (existing != betting_history_ids_.end()) {
-    if (betting_history_transitions_.size() <= existing->second) {
-      betting_history_transitions_.resize(static_cast<size_t>(existing->second) +
-                                          1);
+    if (betting_history_rows_.size() <= existing->second) {
+      betting_history_rows_.resize(static_cast<size_t>(existing->second) + 1);
     }
     return existing->second;
   }
   const uint32_t betting_history_id =
       static_cast<uint32_t>(betting_history_ids_.size());
   betting_history_ids_.emplace(std::move(key), betting_history_id);
-  betting_history_transitions_.emplace_back();
+  betting_history_rows_.push_back(make_betting_history_row(state));
   return betting_history_id;
 }
 
 uint32_t CFRSolver::get_or_create_betting_history_id(GameTree::Node& node) {
-  if (node.betting_history_id !=
-      GameTree::Node::kInvalidBettingHistoryId) {
-    return node.betting_history_id;
+  uint32_t betting_history_id = node.betting_history_id;
+  if (betting_history_id == GameTree::Node::kInvalidBettingHistoryId) {
+    betting_history_id = get_or_create_betting_history_id(node.state);
+    node.betting_history_id = betting_history_id;
   }
-  node.betting_history_id = get_or_create_betting_history_id(node.state);
-  return node.betting_history_id;
+  cache_betting_history_actions(betting_history_id, node);
+  return betting_history_id;
 }
 
 uint32_t CFRSolver::get_or_create_public_state_id(GameTree::Node& node) {
@@ -640,6 +656,22 @@ uint32_t CFRSolver::get_or_create_public_state_id(GameTree::Node& node) {
   node.public_state_id =
       get_or_create_public_state_id(betting_history_id, node.state);
   return node.public_state_id;
+}
+
+void CFRSolver::cache_betting_history_actions(
+    uint32_t betting_history_id,
+    const GameTree::Node& node) {
+  if (node.action_count == 0 ||
+      betting_history_id >= betting_history_rows_.size()) {
+    return;
+  }
+
+  BettingHistoryRow& row =
+      betting_history_rows_[static_cast<size_t>(betting_history_id)];
+  row.action_count = node.action_count;
+  for (int i = 0; i < node.action_count; ++i) {
+    row.action_ids[static_cast<size_t>(i)] = node.actions[i].key;
+  }
 }
 
 void CFRSolver::cache_action_betting_history_transition(
@@ -653,19 +685,19 @@ void CFRSolver::cache_action_betting_history_transition(
 
   if (strategy_tables_view_ == nullptr) {
     const uint32_t parent_id = get_or_create_betting_history_id(node);
-    if (betting_history_transitions_.size() <= parent_id) {
-      betting_history_transitions_.resize(static_cast<size_t>(parent_id) + 1);
+    if (betting_history_rows_.size() <= parent_id) {
+      betting_history_rows_.resize(static_cast<size_t>(parent_id) + 1);
     }
     const size_t parent_index = static_cast<size_t>(parent_id);
     const size_t action_slot = static_cast<size_t>(action_index);
     uint32_t child_id =
-        betting_history_transitions_[parent_index].action_child_ids[action_slot];
+        betting_history_rows_[parent_index].action_child_ids[action_slot];
     if (child_id == GameTree::Node::kInvalidBettingHistoryId) {
       POKER_RECORD_TRAVERSAL_STAT(
           ++traversal_stats_.betting_history_transition_misses);
       child_id = get_or_create_betting_history_id(child_node);
-      betting_history_transitions_[parent_index]
-          .action_child_ids[action_slot] = child_id;
+      betting_history_rows_[parent_index].action_child_ids[action_slot] =
+          child_id;
     } else {
       POKER_RECORD_TRAVERSAL_STAT(
           ++traversal_stats_.betting_history_transition_hits);
@@ -684,11 +716,10 @@ void CFRSolver::cache_action_betting_history_transition(
 
   const uint32_t parent_id = *parent_lookup;
   node.betting_history_id = parent_id;
-  const auto& transitions = strategy_betting_history_transitions();
-  if (parent_id < transitions.size()) {
+  const auto& rows = strategy_betting_history_rows();
+  if (parent_id < rows.size()) {
     const uint32_t child_id =
-        transitions[parent_id]
-            .action_child_ids[static_cast<size_t>(action_index)];
+        rows[parent_id].action_child_ids[static_cast<size_t>(action_index)];
     if (child_id != GameTree::Node::kInvalidBettingHistoryId) {
       POKER_RECORD_TRAVERSAL_STAT(
           ++traversal_stats_.betting_history_transition_hits);
@@ -711,17 +742,16 @@ void CFRSolver::cache_chance_betting_history_transition(
     GameTree::Node& child_node) {
   if (strategy_tables_view_ == nullptr) {
     const uint32_t parent_id = get_or_create_betting_history_id(node);
-    if (betting_history_transitions_.size() <= parent_id) {
-      betting_history_transitions_.resize(static_cast<size_t>(parent_id) + 1);
+    if (betting_history_rows_.size() <= parent_id) {
+      betting_history_rows_.resize(static_cast<size_t>(parent_id) + 1);
     }
     const size_t parent_index = static_cast<size_t>(parent_id);
-    uint32_t child_id =
-        betting_history_transitions_[parent_index].chance_child_id;
+    uint32_t child_id = betting_history_rows_[parent_index].chance_child_id;
     if (child_id == GameTree::Node::kInvalidBettingHistoryId) {
       POKER_RECORD_TRAVERSAL_STAT(
           ++traversal_stats_.betting_history_transition_misses);
       child_id = get_or_create_betting_history_id(child_node);
-      betting_history_transitions_[parent_index].chance_child_id = child_id;
+      betting_history_rows_[parent_index].chance_child_id = child_id;
     } else {
       POKER_RECORD_TRAVERSAL_STAT(
           ++traversal_stats_.betting_history_transition_hits);
@@ -740,9 +770,9 @@ void CFRSolver::cache_chance_betting_history_transition(
 
   const uint32_t parent_id = *parent_lookup;
   node.betting_history_id = parent_id;
-  const auto& transitions = strategy_betting_history_transitions();
-  if (parent_id < transitions.size()) {
-    const uint32_t child_id = transitions[parent_id].chance_child_id;
+  const auto& rows = strategy_betting_history_rows();
+  if (parent_id < rows.size()) {
+    const uint32_t child_id = rows[parent_id].chance_child_id;
     if (child_id != GameTree::Node::kInvalidBettingHistoryId) {
       POKER_RECORD_TRAVERSAL_STAT(
           ++traversal_stats_.betting_history_transition_hits);
@@ -859,7 +889,7 @@ std::optional<CFRSolver::InfoSetRow> CFRSolver::get_or_create_info_set_row(
 
 CFRSolver::StrategyTablesView CFRSolver::strategy_tables_view() {
   return {&betting_history_ids_,
-          &betting_history_transitions_,
+          &betting_history_rows_,
           &public_state_ids_,
           &public_info_set_slabs_,
           &action_ids_,
@@ -932,11 +962,11 @@ CFRSolver::strategy_betting_history_ids() const {
              : betting_history_ids_;
 }
 
-const std::vector<CFRSolver::BettingHistoryTransitions>&
-CFRSolver::strategy_betting_history_transitions() const {
+const std::vector<CFRSolver::BettingHistoryRow>&
+CFRSolver::strategy_betting_history_rows() const {
   return strategy_tables_view_ != nullptr
-             ? *strategy_tables_view_->betting_history_transitions
-             : betting_history_transitions_;
+             ? *strategy_tables_view_->betting_history_rows
+             : betting_history_rows_;
 }
 
 const std::vector<std::unique_ptr<CFRSolver::PublicInfoSetSlab>>&

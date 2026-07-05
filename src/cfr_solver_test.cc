@@ -204,11 +204,37 @@ class CFRSolverRegretTestPeer {
   static uint32_t ActionTransitionId(const CFRSolver& solver,
                                      uint32_t betting_history_id,
                                      int action_index) {
-    if (betting_history_id >= solver.betting_history_transitions_.size()) {
+    if (betting_history_id >= solver.betting_history_rows_.size()) {
       return GameTree::Node::kInvalidBettingHistoryId;
     }
-    return solver.betting_history_transitions_[betting_history_id]
+    return solver.betting_history_rows_[betting_history_id]
         .action_child_ids[static_cast<size_t>(action_index)];
+  }
+
+  static uint8_t BettingHistoryActionCount(const CFRSolver& solver,
+                                           uint32_t betting_history_id) {
+    if (betting_history_id >= solver.betting_history_rows_.size()) {
+      return 0;
+    }
+    return solver.betting_history_rows_[betting_history_id].action_count;
+  }
+
+  static int BettingHistoryActionId(const CFRSolver& solver,
+                                    uint32_t betting_history_id,
+                                    int action_index) {
+    if (betting_history_id >= solver.betting_history_rows_.size()) {
+      return 0;
+    }
+    return solver.betting_history_rows_[betting_history_id]
+        .action_ids[static_cast<size_t>(action_index)];
+  }
+
+  static int BettingHistoryPot(const CFRSolver& solver,
+                               uint32_t betting_history_id) {
+    if (betting_history_id >= solver.betting_history_rows_.size()) {
+      return -1;
+    }
+    return solver.betting_history_rows_[betting_history_id].pot;
   }
 
   static std::pair<uint32_t, CFRSolver::TraversalStats>
@@ -820,6 +846,15 @@ void CheckBettingHistoryActionTransitionsAreCached() {
 
   const uint32_t root_betting_id =
       CFRSolverRegretTestPeer::NodeBettingHistoryId(solver, root);
+  Expect(CFRSolverRegretTestPeer::BettingHistoryPot(
+             solver, root_betting_id) == root.state.pot,
+         "betting history row should store pot metadata");
+  Expect(CFRSolverRegretTestPeer::BettingHistoryActionCount(
+             solver, root_betting_id) == root.action_count,
+         "betting history row should store legal action count");
+  Expect(CFRSolverRegretTestPeer::BettingHistoryActionId(
+             solver, root_betting_id, 0) == root.actions[0].key,
+         "betting history row should store legal action keys");
   GameTree::Node& child =
       CFRSolverRegretTestPeer::ActionChild(solver, root, 0);
   const uint32_t child_betting_id = child.betting_history_id;

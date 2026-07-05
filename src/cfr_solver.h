@@ -236,11 +236,21 @@ private:
     size_t operator()(const PublicStateKey& key) const;
   };
 
-  struct BettingHistoryTransitions {
-    BettingHistoryTransitions() {
+  struct BettingHistoryRow {
+    BettingHistoryRow() {
+      action_ids.fill(0);
       action_child_ids.fill(GameTree::Node::kInvalidBettingHistoryId);
     }
 
+    int street = 0;
+    int pot = 0;
+    std::array<int, 2> stack = {0, 0};
+    int all_in = 0;
+    int folded_player = 0;
+    int player_to_act = 0;
+    std::array<int, 2> player_contributions = {0, 0};
+    uint8_t action_count = 0;
+    std::array<int, GameTree::kMaxActionsPerNode> action_ids;
     std::array<uint32_t, GameTree::kMaxActionsPerNode> action_child_ids;
     uint32_t chance_child_id = GameTree::Node::kInvalidBettingHistoryId;
   };
@@ -288,8 +298,7 @@ private:
     const absl::flat_hash_map<BettingHistoryKey, uint32_t,
                               BettingHistoryKeyHash>*
         betting_history_ids = nullptr;
-    const std::vector<BettingHistoryTransitions>*
-        betting_history_transitions = nullptr;
+    const std::vector<BettingHistoryRow>* betting_history_rows = nullptr;
     const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>*
         public_state_ids = nullptr;
     const std::vector<std::unique_ptr<PublicInfoSetSlab>>*
@@ -329,7 +338,7 @@ private:
       betting_history_ids_;
   absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>
       public_state_ids_;
-  std::vector<BettingHistoryTransitions> betting_history_transitions_;
+  std::vector<BettingHistoryRow> betting_history_rows_;
   size_t info_set_count_ = 0;
   std::vector<int> action_ids_;
   std::vector<float> cumulative_regrets_;
@@ -387,6 +396,7 @@ private:
       const ActionChoices& action_choices,
       ConditionedRanges& conditioned_ranges);
   BettingHistoryKey make_betting_history_key(const GameState& state) const;
+  BettingHistoryRow make_betting_history_row(const GameState& state) const;
   PublicStateKey make_public_state_key(uint32_t betting_history_id,
                                        const GameState& state) const;
   uint32_t get_or_create_betting_history_id(const GameState& state);
@@ -400,6 +410,8 @@ private:
                                                GameTree::Node& child_node);
   void cache_chance_betting_history_transition(GameTree::Node& node,
                                                GameTree::Node& child_node);
+  void cache_betting_history_actions(uint32_t betting_history_id,
+                                     const GameTree::Node& node);
   std::optional<InfoSetRow> get_or_create_info_set_row(
       uint32_t public_state_id,
       int player,
@@ -414,8 +426,7 @@ private:
   const absl::flat_hash_map<BettingHistoryKey, uint32_t,
                             BettingHistoryKeyHash>&
   strategy_betting_history_ids() const;
-  const std::vector<BettingHistoryTransitions>&
-  strategy_betting_history_transitions() const;
+  const std::vector<BettingHistoryRow>& strategy_betting_history_rows() const;
   const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>&
   strategy_public_state_ids() const;
   const std::vector<std::unique_ptr<PublicInfoSetSlab>>&
