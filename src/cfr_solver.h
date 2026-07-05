@@ -266,14 +266,21 @@ private:
     uint16_t action_count = 0;
   };
 
-  struct PublicInfoSetIndex {
-    PublicInfoSetIndex() {
-      for (auto& player_index : info_set_ids) {
-        player_index.fill(-1);
-      }
-    }
+  struct InfoSetRow {
+    uint32_t action_offset = 0;
+    uint16_t action_count = 0;
+    int32_t info_set_id = -1;
+  };
 
-    std::array<std::array<int32_t, kComboCount>, kPlayerCount> info_set_ids;
+  struct PublicInfoSetSlabPlayer {
+    PublicInfoSetSlabPlayer() { private_rows.fill(-1); }
+
+    std::array<int32_t, kComboCount> private_rows;
+    std::vector<InfoSetRow> rows;
+  };
+
+  struct PublicInfoSetSlab {
+    std::array<PublicInfoSetSlabPlayer, kPlayerCount> players;
   };
 
   struct StrategyTablesView {
@@ -281,8 +288,8 @@ private:
         public_state_ids = nullptr;
     const absl::flat_hash_map<CompactInfoSetKey, int>* compact_info_set_ids =
         nullptr;
-    const std::vector<std::unique_ptr<PublicInfoSetIndex>>*
-        public_info_set_indexes = nullptr;
+    const std::vector<std::unique_ptr<PublicInfoSetSlab>>*
+        public_info_set_slabs = nullptr;
     const std::vector<InfoSetData>* info_sets = nullptr;
     const std::vector<int>* action_ids = nullptr;
     // The cumulative arrays are shared read/write across worker threads.
@@ -322,7 +329,7 @@ private:
   std::vector<float> cumulative_regrets_;
   std::vector<float> cumulative_strategies_;
   absl::flat_hash_map<CompactInfoSetKey, int> compact_info_set_ids_;
-  std::vector<std::unique_ptr<PublicInfoSetIndex>> public_info_set_indexes_;
+  std::vector<std::unique_ptr<PublicInfoSetSlab>> public_info_set_slabs_;
   const StrategyTablesView* strategy_tables_view_ = nullptr;
   
   // Helper methods
@@ -363,7 +370,7 @@ private:
       const PrivateCards& private_cards,
       StrategyProbabilities& probabilities);
   void average_strategy_probabilities(
-      const InfoSetData& info_set,
+      const InfoSetRow& row,
       const GameTree::Node& node,
       double fallback_probability,
       StrategyProbabilities& probabilities);
@@ -389,8 +396,8 @@ private:
   strategy_public_state_ids() const;
   const absl::flat_hash_map<CompactInfoSetKey, int>&
   strategy_compact_info_set_ids() const;
-  const std::vector<std::unique_ptr<PublicInfoSetIndex>>&
-  strategy_public_info_set_indexes() const;
+  const std::vector<std::unique_ptr<PublicInfoSetSlab>>&
+  strategy_public_info_set_slabs() const;
   const std::vector<InfoSetData>& strategy_info_sets() const;
   const std::vector<int>& strategy_action_ids() const;
   const std::vector<float>& strategy_cumulative_regrets() const;
@@ -400,10 +407,13 @@ private:
   void initialize_info_set_actions(InfoSetData& info_set,
                                    const int* action_ids,
                                    int num_actions);
-  PublicInfoSetIndex& get_or_build_public_info_set_index(
+  PublicInfoSetSlab& get_or_create_public_info_set_slab(
       uint32_t public_state_id);
-  const PublicInfoSetIndex* public_info_set_index(
+  const PublicInfoSetSlab* public_info_set_slab(
       uint32_t public_state_id) const;
+  const InfoSetRow* find_info_set_row(uint32_t public_state_id,
+                                      int player,
+                                      uint16_t private_id) const;
   ContinuationContext build_continuation_context(
       const GameState& state,
       ComboId player_a_hand,

@@ -609,41 +609,46 @@ uint32_t CFRSolver::get_or_create_public_state_id(GameTree::Node& node) {
   return node.public_state_id;
 }
 
-CFRSolver::PublicInfoSetIndex& CFRSolver::get_or_build_public_info_set_index(
+CFRSolver::PublicInfoSetSlab& CFRSolver::get_or_create_public_info_set_slab(
     uint32_t public_state_id) {
-  bool created = false;
-  if (public_info_set_indexes_.size() <= public_state_id) {
-    public_info_set_indexes_.resize(static_cast<size_t>(public_state_id) + 1);
+  if (public_info_set_slabs_.size() <= public_state_id) {
+    public_info_set_slabs_.resize(static_cast<size_t>(public_state_id) + 1);
   }
-  std::unique_ptr<PublicInfoSetIndex>& index =
-      public_info_set_indexes_[public_state_id];
-  if (index == nullptr) {
-    index = std::make_unique<PublicInfoSetIndex>();
-    created = true;
+  std::unique_ptr<PublicInfoSetSlab>& slab =
+      public_info_set_slabs_[public_state_id];
+  if (slab == nullptr) {
+    slab = std::make_unique<PublicInfoSetSlab>();
   }
-  if (created) {
-    for (int player = 0; player < kPlayerCount; ++player) {
-      for (uint32_t private_id = 0; private_id < kComboCount; ++private_id) {
-        const CompactInfoSetKey key = EncodeCompactInfoSetKey(
-            public_state_id, static_cast<uint16_t>(private_id),
-            static_cast<uint8_t>(player));
-        auto found = compact_info_set_ids_.find(key);
-        if (found != compact_info_set_ids_.end()) {
-          index->info_set_ids[player][private_id] = found->second;
-        }
-      }
-    }
-  }
-  return *index;
+  return *slab;
 }
 
-const CFRSolver::PublicInfoSetIndex* CFRSolver::public_info_set_index(
+const CFRSolver::PublicInfoSetSlab* CFRSolver::public_info_set_slab(
     uint32_t public_state_id) const {
-  const auto& indexes = strategy_public_info_set_indexes();
-  if (public_state_id >= indexes.size()) {
+  const auto& slabs = strategy_public_info_set_slabs();
+  if (public_state_id >= slabs.size()) {
     return nullptr;
   }
-  return indexes[public_state_id].get();
+  return slabs[public_state_id].get();
+}
+
+const CFRSolver::InfoSetRow* CFRSolver::find_info_set_row(
+    uint32_t public_state_id,
+    int player,
+    uint16_t private_id) const {
+  if (player < 0 || player >= kPlayerCount || private_id >= kComboCount) {
+    return nullptr;
+  }
+  const PublicInfoSetSlab* slab = public_info_set_slab(public_state_id);
+  if (slab == nullptr) {
+    return nullptr;
+  }
+  const PublicInfoSetSlabPlayer& player_slab = slab->players[player];
+  const int32_t row_id = player_slab.private_rows[private_id];
+  if (row_id < 0 ||
+      static_cast<size_t>(row_id) >= player_slab.rows.size()) {
+    return nullptr;
+  }
+  return &player_slab.rows[row_id];
 }
 
 int CFRSolver::get_or_create_compact_info_set_id(
@@ -655,14 +660,26 @@ int CFRSolver::get_or_create_compact_info_set_id(
   const CompactInfoSetKey compact_key = EncodeCompactInfoSetKey(
       public_state_id, private_id, static_cast<uint8_t>(player));
 
+  if (const InfoSetRow* row =
+          find_info_set_row(public_state_id, player, private_id)) {
+    return row->info_set_id;
+  }
+
   const auto& compact_ids = strategy_compact_info_set_ids();
   auto existing_compact = compact_ids.find(compact_key);
   if (existing_compact != compact_ids.end()) {
-    if (strategy_tables_view_ == nullptr &&
-        public_state_id < public_info_set_indexes_.size() &&
-        public_info_set_indexes_[public_state_id] != nullptr) {
-      public_info_set_indexes_[public_state_id]
-          ->info_set_ids[player][private_id] = existing_compact->second;
+    if (strategy_tables_view_ == nullptr) {
+      PublicInfoSetSlab& slab =
+          get_or_create_public_info_set_slab(public_state_id);
+      PublicInfoSetSlabPlayer& player_slab = slab.players[player];
+      int32_t& row_id = player_slab.private_rows[private_id];
+      if (row_id < 0) {
+        const InfoSetData& info_set = info_sets_[existing_compact->second];
+        row_id = static_cast<int32_t>(player_slab.rows.size());
+        player_slab.rows.push_back({info_set.action_offset,
+                                    info_set.action_count,
+                                    existing_compact->second});
+      }
     }
     return existing_compact->second;
   }
@@ -685,20 +702,22 @@ int CFRSolver::get_or_create_compact_info_set_id(
   data.private_id = private_id;
   data.player = static_cast<uint8_t>(player);
   initialize_info_set_actions(data, action_ids, num_actions);
+  const uint32_t action_offset = data.action_offset;
+  const uint16_t action_count = data.action_count;
   info_sets_.push_back(std::move(data));
   compact_info_set_ids_.emplace(compact_key, id);
-  if (public_state_id < public_info_set_indexes_.size() &&
-      public_info_set_indexes_[public_state_id] != nullptr) {
-    public_info_set_indexes_[public_state_id]
-        ->info_set_ids[player][private_id] = id;
-  }
+  PublicInfoSetSlab& slab = get_or_create_public_info_set_slab(public_state_id);
+  PublicInfoSetSlabPlayer& player_slab = slab.players[player];
+  int32_t& row_id = player_slab.private_rows[private_id];
+  row_id = static_cast<int32_t>(player_slab.rows.size());
+  player_slab.rows.push_back({action_offset, action_count, id});
   return id;
 }
 
 CFRSolver::StrategyTablesView CFRSolver::strategy_tables_view() {
   return {&public_state_ids_,
           &compact_info_set_ids_,
-          &public_info_set_indexes_,
+          &public_info_set_slabs_,
           &info_sets_,
           &action_ids_,
           &cumulative_regrets_,
@@ -736,11 +755,11 @@ CFRSolver::strategy_compact_info_set_ids() const {
              : compact_info_set_ids_;
 }
 
-const std::vector<std::unique_ptr<CFRSolver::PublicInfoSetIndex>>&
-CFRSolver::strategy_public_info_set_indexes() const {
+const std::vector<std::unique_ptr<CFRSolver::PublicInfoSetSlab>>&
+CFRSolver::strategy_public_info_set_slabs() const {
   return strategy_tables_view_ != nullptr
-             ? *strategy_tables_view_->public_info_set_indexes
-             : public_info_set_indexes_;
+             ? *strategy_tables_view_->public_info_set_slabs
+             : public_info_set_slabs_;
 }
 
 const std::vector<CFRSolver::InfoSetData>& CFRSolver::strategy_info_sets()
@@ -1314,18 +1333,14 @@ void CFRSolver::average_strategy_probabilities(
   const double uniform_probability = 1.0 / node.action_count;
   const uint16_t private_id =
       card_abstraction_.private_id(private_cards.combo, node.state);
-  const uint8_t player_u8 = static_cast<uint8_t>(player);
   auto try_public_state = [&](uint32_t public_state_id) {
-    const CompactInfoSetKey compact_key =
-        EncodeCompactInfoSetKey(public_state_id, private_id, player_u8);
-    const auto& compact_info_set_ids = strategy_compact_info_set_ids();
-    auto existing_compact = compact_info_set_ids.find(compact_key);
-    if (existing_compact == compact_info_set_ids.end()) {
+    const InfoSetRow* row =
+        find_info_set_row(public_state_id, player, private_id);
+    if (row == nullptr) {
       return false;
     }
     average_strategy_probabilities(
-        strategy_info_sets()[existing_compact->second], node,
-        uniform_probability, probabilities);
+        *row, node, uniform_probability, probabilities);
     return true;
   };
 
@@ -1349,7 +1364,7 @@ void CFRSolver::average_strategy_probabilities(
 }
 
 void CFRSolver::average_strategy_probabilities(
-    const InfoSetData& info_set,
+    const InfoSetRow& row,
     const GameTree::Node& node,
     double fallback_probability,
     StrategyProbabilities& probabilities) {
@@ -1357,7 +1372,7 @@ void CFRSolver::average_strategy_probabilities(
   probabilities.clear();
   probabilities.resize(num_actions, 0.0);
   double probability_sum = 0.0;
-  const size_t action_offset = info_set.action_offset;
+  const size_t action_offset = row.action_offset;
   const std::vector<int>& action_ids = strategy_action_ids();
   const std::vector<float>& cumulative_regrets =
       strategy_cumulative_regrets();
@@ -1365,7 +1380,7 @@ void CFRSolver::average_strategy_probabilities(
       strategy_cumulative_strategies();
 
   const bool aligned_action_ids =
-      num_actions == info_set.action_count &&
+      num_actions == row.action_count &&
       [&]() {
         for (int i = 0; i < num_actions; ++i) {
           if (node.actions[i].key != action_ids[action_offset + i]) return false;
@@ -1389,7 +1404,7 @@ void CFRSolver::average_strategy_probabilities(
     for (int legal_action_index = 0; legal_action_index < num_actions;
          ++legal_action_index) {
       const int legal_action_id = node.actions[legal_action_index].key;
-      for (uint16_t action_index = 0; action_index < info_set.action_count;
+      for (uint16_t action_index = 0; action_index < row.action_count;
            ++action_index) {
         POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
         const size_t table_index = action_offset + action_index;
@@ -1443,17 +1458,13 @@ void CFRSolver::condition_ranges_for_actions(
 
   const double fallback_probability = 1.0 / action_count;
   const CardMask board_mask = node.state.board_mask;
-  const PublicInfoSetIndex* public_index =
-      public_info_set_index(public_state_id);
-  if (public_index == nullptr && strategy_tables_view_ == nullptr) {
-    public_index = &get_or_build_public_info_set_index(public_state_id);
-  }
-  const auto& compact_info_set_ids = strategy_compact_info_set_ids();
-  const auto& info_sets = strategy_info_sets();
+  const PublicInfoSetSlab* public_slab =
+      public_info_set_slab(public_state_id);
+  const PublicInfoSetSlabPlayer* player_slab =
+      public_slab != nullptr ? &public_slab->players[player] : nullptr;
   const auto& action_ids = strategy_action_ids();
   const auto& regrets = strategy_cumulative_regrets();
   absl::InlinedVector<double, 8> positive_regrets(action_count, 0.0);
-  const uint8_t player_u8 = static_cast<uint8_t>(player);
   for (size_t i = 0; i < range_size; ++i) {
     const float range_weight = range.weight(i);
     const ComboId combo_id = range.combo(i);
@@ -1464,23 +1475,21 @@ void CFRSolver::condition_ranges_for_actions(
     double positive_regret_sum = 0.0;
     const uint16_t private_id =
         card_abstraction_.private_id(combo_id, node.state);
-    int32_t info_set_id = -1;
-    if (public_index != nullptr) {
-      info_set_id = public_index->info_set_ids[player][private_id];
-    } else {
-      const CompactInfoSetKey key =
-          EncodeCompactInfoSetKey(public_state_id, private_id, player_u8);
-      auto found = compact_info_set_ids.find(key);
-      info_set_id = found != compact_info_set_ids.end() ? found->second : -1;
+    const InfoSetRow* row = nullptr;
+    if (player_slab != nullptr && private_id < kComboCount) {
+      const int32_t row_id = player_slab->private_rows[private_id];
+      if (row_id >= 0 &&
+          static_cast<size_t>(row_id) < player_slab->rows.size()) {
+        row = &player_slab->rows[row_id];
+      }
     }
 
-    if (info_set_id >= 0) {
-      const InfoSetData& info_set = info_sets[info_set_id];
-      const size_t table_offset = info_set.action_offset;
+    if (row != nullptr) {
+      const size_t table_offset = row->action_offset;
       std::fill(positive_regrets.begin(), positive_regrets.end(), 0.0);
       const size_t info_set_action_count =
           std::min(action_count,
-                   static_cast<size_t>(info_set.action_count));
+                   static_cast<size_t>(row->action_count));
       for (size_t action_index = 0; action_index < info_set_action_count;
            ++action_index) {
         const size_t table_index = table_offset + action_index;
@@ -1880,26 +1889,28 @@ double CFRSolver::best_response_value_against_range(
     child_opponent.reserve(opponent_hands.size());
   }
 
-  const auto& compact_info_set_ids = strategy_compact_info_set_ids();
-  const auto& info_sets = strategy_info_sets();
+  const PublicInfoSetSlab* public_slab =
+      public_state_id.has_value() ? public_info_set_slab(*public_state_id)
+                                  : nullptr;
+  const PublicInfoSetSlabPlayer* player_slab =
+      public_slab != nullptr ? &public_slab->players[player] : nullptr;
   StrategyProbabilities probabilities;
   probabilities.reserve(node.action_count);
-  const uint8_t player_u8 = static_cast<uint8_t>(player);
-  const uint32_t public_state_id_value = public_state_id.value_or(0);
   for (size_t i = 0; i < opponent_hands.size(); ++i) {
     probabilities.clear();
     probabilities.resize(node.action_count, fallback_probability);
 
-    if (public_state_id.has_value()) {
+    if (player_slab != nullptr) {
       const ComboId opponent_combo = opponent_hands.combo(i);
       const uint16_t private_id =
           card_abstraction_.private_id(opponent_combo, node.state);
-      const CompactInfoSetKey key =
-          EncodeCompactInfoSetKey(public_state_id_value, private_id, player_u8);
-      auto found = compact_info_set_ids.find(key);
-      if (found != compact_info_set_ids.end()) {
-        average_strategy_probabilities(info_sets[found->second], node,
-                                       fallback_probability, probabilities);
+      if (private_id < kComboCount) {
+        const int32_t row_id = player_slab->private_rows[private_id];
+        if (row_id >= 0 &&
+            static_cast<size_t>(row_id) < player_slab->rows.size()) {
+          average_strategy_probabilities(player_slab->rows[row_id], node,
+                                         fallback_probability, probabilities);
+        }
       }
     }
 

@@ -145,28 +145,30 @@ class CFRSolverRegretTestPeer {
         action_id_buf, num_actions);
   }
 
-  static int IndexedInfoSetId(CFRSolver& solver,
-                              const BoardState& state,
-                              int player,
-                              const Hand& hand) {
+  static bool HasPublicInfoSetSlab(CFRSolver& solver,
+                                   const BoardState& state) {
     const GameState native_state = TestGameState(state);
     const uint32_t public_state_id =
         solver.get_or_create_public_state_id(native_state);
-    if (public_state_id >= solver.public_info_set_indexes_.size() ||
-        solver.public_info_set_indexes_[public_state_id] == nullptr) {
-      return -1;
-    }
-    const uint16_t private_id =
-        solver.card_abstraction_.private_id(TestComboId(hand), native_state);
-    return solver.public_info_set_indexes_[public_state_id]
-        ->info_set_ids[player][private_id];
+    return public_state_id < solver.public_info_set_slabs_.size() &&
+           solver.public_info_set_slabs_[public_state_id] != nullptr;
   }
 
-  static void BuildPublicInfoSetIndex(CFRSolver& solver,
-                                      const BoardState& state) {
+  static int SlabInfoSetId(CFRSolver& solver,
+                           const BoardState& state,
+                           int player,
+                           const Hand& hand) {
+    const GameState native_state = TestGameState(state);
     const uint32_t public_state_id =
-        solver.get_or_create_public_state_id(TestGameState(state));
-    (void)solver.get_or_build_public_info_set_index(public_state_id);
+        solver.get_or_create_public_state_id(native_state);
+    const uint16_t private_id =
+        solver.card_abstraction_.private_id(TestComboId(hand), native_state);
+    const CFRSolver::InfoSetRow* row =
+        solver.find_info_set_row(public_state_id, player, private_id);
+    if (row == nullptr) {
+      return -1;
+    }
+    return row->info_set_id;
   }
 
   static size_t CompactInfoSetCount(const CFRSolver& solver) {
@@ -755,7 +757,7 @@ void CheckCompactInfoSetIdsUseExactCombos() {
          "compact infosets should export through strategy profiles");
 }
 
-void CheckPublicInfoSetIndexTracksCompactInfoSets() {
+void CheckSparseSlabTracksCompactInfoSets() {
   PokerConfig config;
   config.set_starting_stack_size(20);
 
@@ -764,24 +766,26 @@ void CheckPublicInfoSetIndexTracksCompactInfoSets() {
   Hand aces = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
   Hand kings = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
 
+  CFRSolverRegretTestPeer::PublicStateId(solver, state);
+  Expect(!CFRSolverRegretTestPeer::HasPublicInfoSetSlab(solver, state),
+         "sparse slab should not be allocated for a public state alone");
+
   const int aces_id =
       CFRSolverRegretTestPeer::CompactInfoSetId(solver, state, 0, aces);
 
-  Expect(CFRSolverRegretTestPeer::IndexedInfoSetId(solver, state, 0, aces) ==
-             -1,
-         "public infoset index should not be allocated eagerly");
-  CFRSolverRegretTestPeer::BuildPublicInfoSetIndex(solver, state);
-  Expect(CFRSolverRegretTestPeer::IndexedInfoSetId(solver, state, 0, aces) ==
+  Expect(CFRSolverRegretTestPeer::HasPublicInfoSetSlab(solver, state),
+         "sparse slab should be allocated when the first infoset is created");
+  Expect(CFRSolverRegretTestPeer::SlabInfoSetId(solver, state, 0, aces) ==
              aces_id,
-         "public infoset index should point at created infosets");
-  Expect(CFRSolverRegretTestPeer::IndexedInfoSetId(solver, state, 0, kings) ==
+         "sparse slab should point at created infosets");
+  Expect(CFRSolverRegretTestPeer::SlabInfoSetId(solver, state, 0, kings) ==
              -1,
-         "public infoset index should mark missing private ids");
+         "sparse slab should mark missing private ids");
   const int kings_id =
       CFRSolverRegretTestPeer::CompactInfoSetId(solver, state, 0, kings);
-  Expect(CFRSolverRegretTestPeer::IndexedInfoSetId(solver, state, 0, kings) ==
+  Expect(CFRSolverRegretTestPeer::SlabInfoSetId(solver, state, 0, kings) ==
              kings_id,
-         "public infoset index should track new infosets after it is built");
+         "sparse slab should track new infosets after it is built");
 }
 
 void CheckTerminalUtilityCacheReusesScores() {
@@ -2223,7 +2227,7 @@ int main() {
   CheckIdentityPrivateAbstractionUsesExactCombo();
   CheckPublicStateIdsAreDenseAndKeyedByState();
   CheckCompactInfoSetIdsUseExactCombos();
-  CheckPublicInfoSetIndexTracksCompactInfoSets();
+  CheckSparseSlabTracksCompactInfoSets();
   CheckTerminalUtilityCacheReusesScores();
   CheckSingletonRangeMatchesExactEvaluationAndBestResponse();
   CheckExploitabilityZeroSamples();
