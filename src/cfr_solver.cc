@@ -609,6 +609,43 @@ uint32_t CFRSolver::get_or_create_public_state_id(GameTree::Node& node) {
   return node.public_state_id;
 }
 
+CFRSolver::PublicInfoSetIndex& CFRSolver::get_or_build_public_info_set_index(
+    uint32_t public_state_id) {
+  bool created = false;
+  if (public_info_set_indexes_.size() <= public_state_id) {
+    public_info_set_indexes_.resize(static_cast<size_t>(public_state_id) + 1);
+  }
+  std::unique_ptr<PublicInfoSetIndex>& index =
+      public_info_set_indexes_[public_state_id];
+  if (index == nullptr) {
+    index = std::make_unique<PublicInfoSetIndex>();
+    created = true;
+  }
+  if (created) {
+    for (int player = 0; player < kPlayerCount; ++player) {
+      for (uint32_t private_id = 0; private_id < kComboCount; ++private_id) {
+        const CompactInfoSetKey key = EncodeCompactInfoSetKey(
+            public_state_id, static_cast<uint16_t>(private_id),
+            static_cast<uint8_t>(player));
+        auto found = compact_info_set_ids_.find(key);
+        if (found != compact_info_set_ids_.end()) {
+          index->info_set_ids[player][private_id] = found->second;
+        }
+      }
+    }
+  }
+  return *index;
+}
+
+const CFRSolver::PublicInfoSetIndex* CFRSolver::public_info_set_index(
+    uint32_t public_state_id) const {
+  const auto& indexes = strategy_public_info_set_indexes();
+  if (public_state_id >= indexes.size()) {
+    return nullptr;
+  }
+  return indexes[public_state_id].get();
+}
+
 int CFRSolver::get_or_create_compact_info_set_id(
     uint32_t public_state_id,
     int player,
@@ -621,6 +658,12 @@ int CFRSolver::get_or_create_compact_info_set_id(
   const auto& compact_ids = strategy_compact_info_set_ids();
   auto existing_compact = compact_ids.find(compact_key);
   if (existing_compact != compact_ids.end()) {
+    if (strategy_tables_view_ == nullptr &&
+        public_state_id < public_info_set_indexes_.size() &&
+        public_info_set_indexes_[public_state_id] != nullptr) {
+      public_info_set_indexes_[public_state_id]
+          ->info_set_ids[player][private_id] = existing_compact->second;
+    }
     return existing_compact->second;
   }
 
@@ -644,12 +687,18 @@ int CFRSolver::get_or_create_compact_info_set_id(
   initialize_info_set_actions(data, action_ids, num_actions);
   info_sets_.push_back(std::move(data));
   compact_info_set_ids_.emplace(compact_key, id);
+  if (public_state_id < public_info_set_indexes_.size() &&
+      public_info_set_indexes_[public_state_id] != nullptr) {
+    public_info_set_indexes_[public_state_id]
+        ->info_set_ids[player][private_id] = id;
+  }
   return id;
 }
 
 CFRSolver::StrategyTablesView CFRSolver::strategy_tables_view() {
   return {&public_state_ids_,
           &compact_info_set_ids_,
+          &public_info_set_indexes_,
           &info_sets_,
           &action_ids_,
           &cumulative_regrets_,
@@ -685,6 +734,13 @@ CFRSolver::strategy_compact_info_set_ids() const {
   return strategy_tables_view_ != nullptr
              ? *strategy_tables_view_->compact_info_set_ids
              : compact_info_set_ids_;
+}
+
+const std::vector<std::unique_ptr<CFRSolver::PublicInfoSetIndex>>&
+CFRSolver::strategy_public_info_set_indexes() const {
+  return strategy_tables_view_ != nullptr
+             ? *strategy_tables_view_->public_info_set_indexes
+             : public_info_set_indexes_;
 }
 
 const std::vector<CFRSolver::InfoSetData>& CFRSolver::strategy_info_sets()
@@ -1387,6 +1443,11 @@ void CFRSolver::condition_ranges_for_actions(
 
   const double fallback_probability = 1.0 / action_count;
   const CardMask board_mask = node.state.board_mask;
+  const PublicInfoSetIndex* public_index =
+      public_info_set_index(public_state_id);
+  if (public_index == nullptr && strategy_tables_view_ == nullptr) {
+    public_index = &get_or_build_public_info_set_index(public_state_id);
+  }
   const auto& compact_info_set_ids = strategy_compact_info_set_ids();
   const auto& info_sets = strategy_info_sets();
   const auto& action_ids = strategy_action_ids();
@@ -1403,11 +1464,15 @@ void CFRSolver::condition_ranges_for_actions(
     double positive_regret_sum = 0.0;
     const uint16_t private_id =
         card_abstraction_.private_id(combo_id, node.state);
-    const CompactInfoSetKey key =
-        EncodeCompactInfoSetKey(public_state_id, private_id, player_u8);
-    auto found = compact_info_set_ids.find(key);
-    const int32_t info_set_id =
-        found != compact_info_set_ids.end() ? found->second : -1;
+    int32_t info_set_id = -1;
+    if (public_index != nullptr) {
+      info_set_id = public_index->info_set_ids[player][private_id];
+    } else {
+      const CompactInfoSetKey key =
+          EncodeCompactInfoSetKey(public_state_id, private_id, player_u8);
+      auto found = compact_info_set_ids.find(key);
+      info_set_id = found != compact_info_set_ids.end() ? found->second : -1;
+    }
 
     if (info_set_id >= 0) {
       const InfoSetData& info_set = info_sets[info_set_id];
