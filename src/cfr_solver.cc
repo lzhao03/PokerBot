@@ -383,7 +383,6 @@ CFRSolver::CFRSolver(
     constexpr int kAvgActionsPerInfoSet = 4;
     const size_t info_set_cap = static_cast<size_t>(config_.max_info_sets);
     const size_t action_cap = info_set_cap * kAvgActionsPerInfoSet;
-    info_sets_.reserve(info_set_cap);
     action_ids_.reserve(action_cap);
     cumulative_regrets_.reserve(action_cap);
     cumulative_strategies_.reserve(action_cap);
@@ -548,12 +547,12 @@ CFRSolver::PublicStateKey CFRSolver::make_public_state_key(
   return key;
 }
 
-void CFRSolver::initialize_info_set_actions(
-    InfoSetData& info_set,
+CFRSolver::InfoSetRow CFRSolver::append_info_set_actions(
     const int* action_ids,
     int num_actions) {
-  info_set.action_offset = static_cast<uint32_t>(action_ids_.size());
-  info_set.action_count = static_cast<uint16_t>(num_actions);
+  InfoSetRow row;
+  row.action_offset = static_cast<uint32_t>(action_ids_.size());
+  row.action_count = static_cast<uint16_t>(num_actions);
   const size_t required_action_capacity = action_ids_.size() + num_actions;
   if (required_action_capacity > action_ids_.capacity()) {
     const size_t new_capacity =
@@ -570,6 +569,7 @@ void CFRSolver::initialize_info_set_actions(
     cumulative_strategies_.push_back(0.0f);
     POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
   }
+  return row;
 }
 
 uint32_t CFRSolver::get_or_create_public_state_id(const GameState& state) {
@@ -663,7 +663,7 @@ int32_t& CFRSolver::get_or_create_private_row_slot(
   return chunk->rows[chunk_offset];
 }
 
-int CFRSolver::get_or_create_info_set_id(
+std::optional<CFRSolver::InfoSetRow> CFRSolver::get_or_create_info_set_row(
     uint32_t public_state_id,
     int player,
     uint16_t private_id,
@@ -671,41 +671,27 @@ int CFRSolver::get_or_create_info_set_id(
     int num_actions) {
   if (const InfoSetRow* row =
           find_info_set_row(public_state_id, player, private_id)) {
-    return row->info_set_id;
+    return *row;
   }
 
   if (frozen_ || (config_.max_info_sets > 0 &&
-                  static_cast<int>(info_sets_.size()) >= config_.max_info_sets)) {
-    return -1;
+                  static_cast<int>(info_set_count_) >= config_.max_info_sets)) {
+    return std::nullopt;
   }
 
-  if (info_sets_.size() == info_sets_.capacity()) {
-    const size_t new_capacity =
-        info_sets_.empty() ? 1024 : info_sets_.capacity() * 2;
-    info_sets_.reserve(new_capacity);
-  }
-
-  const int id = static_cast<int>(info_sets_.size());
-  InfoSetData data;
-  data.public_state_id = public_state_id;
-  data.private_id = private_id;
-  data.player = static_cast<uint8_t>(player);
-  initialize_info_set_actions(data, action_ids, num_actions);
-  const uint32_t action_offset = data.action_offset;
-  const uint16_t action_count = data.action_count;
-  info_sets_.push_back(std::move(data));
+  InfoSetRow row = append_info_set_actions(action_ids, num_actions);
   PublicInfoSetSlab& slab = get_or_create_public_info_set_slab(public_state_id);
   PublicInfoSetSlabPlayer& player_slab = slab.players[player];
   int32_t& row_id = get_or_create_private_row_slot(player_slab, private_id);
   row_id = static_cast<int32_t>(player_slab.rows.size());
-  player_slab.rows.push_back({action_offset, action_count, id});
-  return id;
+  player_slab.rows.push_back(row);
+  ++info_set_count_;
+  return row;
 }
 
 CFRSolver::StrategyTablesView CFRSolver::strategy_tables_view() {
   return {&public_state_ids_,
           &public_info_set_slabs_,
-          &info_sets_,
           &action_ids_,
           &cumulative_regrets_,
           &cumulative_strategies_};
@@ -740,12 +726,6 @@ CFRSolver::strategy_public_info_set_slabs() const {
   return strategy_tables_view_ != nullptr
              ? *strategy_tables_view_->public_info_set_slabs
              : public_info_set_slabs_;
-}
-
-const std::vector<CFRSolver::InfoSetData>& CFRSolver::strategy_info_sets()
-    const {
-  return strategy_tables_view_ != nullptr ? *strategy_tables_view_->info_sets
-                                          : info_sets_;
 }
 
 const std::vector<int>& CFRSolver::strategy_action_ids() const {
@@ -902,7 +882,7 @@ void CFRSolver::run_iterations(int iterations,
   if (remaining > 0) {
     // Phase 2: freeze the tables and run remaining iterations in parallel.
     frozen_ = true;
-    LOG(INFO) << "Frozen after warmup: " << info_sets_.size()
+    LOG(INFO) << "Frozen after warmup: " << get_info_set_count()
               << " info sets, " << iterations_run_.load(std::memory_order_relaxed)
               << " warmup iterations. Starting parallel phase ("
               << remaining << " iterations, " << num_threads << " threads)...";
@@ -912,7 +892,7 @@ void CFRSolver::run_iterations(int iterations,
 
   LOG(INFO) << "CFR iterations completed";
   LOG(INFO) << "Iterations run: " << iterations_run_.load(std::memory_order_relaxed);
-  LOG(INFO) << "Information sets: " << info_sets_.size();
+  LOG(INFO) << "Information sets: " << get_info_set_count();
   LOG(INFO) << "Tree nodes: " << game_tree_->node_count();
   LOG(INFO) << "Player A average EV: " << get_expected_value(0);
 }
@@ -1087,8 +1067,8 @@ double CFRSolver::cfr_with_ranges(
   for (int i = 0; i < node.action_count; ++i) {
     action_key_buf[i] = node.actions[i].key;
   }
-  const int info_set_id =
-      get_or_create_info_set_id(
+  const std::optional<InfoSetRow> info_set_row =
+      get_or_create_info_set_row(
           public_state_id, player,
           card_abstraction_.private_id(player_cards.combo, node.state),
           action_key_buf, node.action_count);
@@ -1098,11 +1078,9 @@ double CFRSolver::cfr_with_ranges(
     action_choices.push_back(
         {std::cref(node.actions[i].action), node.actions[i].key, 0.0, 0.0});
   }
-  const auto& info_sets = strategy_info_sets();
   auto& regrets = mutable_strategy_cumulative_regrets();
-  if (info_set_id >= 0) {
-    const InfoSetData& info_set = info_sets[info_set_id];
-    const size_t action_offset = info_set.action_offset;
+  if (info_set_row.has_value()) {
+    const size_t action_offset = info_set_row->action_offset;
     double sum_positive_regrets = 0.0;
     for (size_t action_index = 0; action_index < action_choices.size();
          ++action_index) {
@@ -1223,11 +1201,10 @@ double CFRSolver::cfr_with_ranges(
     }
 
     // Skip regret and strategy updates when no info set was allocated (cap hit).
-    if (info_set_id >= 0) {
+    if (info_set_row.has_value()) {
       // Compute the counterfactual reach probability of the opponent
       double opponent_reach_prob = reach_probabilities[1 - player];
-      const InfoSetData& info_set = info_sets[info_set_id];
-      const size_t action_offset = info_set.action_offset;
+      const size_t action_offset = info_set_row->action_offset;
       // For each action, compute and accumulate the counterfactual regret
       for (size_t action_index = 0; action_index < action_choices.size();
            ++action_index) {
@@ -1249,7 +1226,7 @@ double CFRSolver::cfr_with_ranges(
 
       if (!config_.regret_only_training) {
         // CFR+ commonly weights later average-strategy samples more heavily.
-        update_strategy(info_set_id, action_choices,
+        update_strategy(*info_set_row, action_choices,
                         reach_probabilities[player] * (iteration + 1));
       }
     }
@@ -1534,40 +1511,43 @@ double StrategyWeight(const SolverConfig& config,
 }  // namespace
 
 CFRSolver::StrategyProfile CFRSolver::get_strategy_profile() const {
-  const auto& info_sets = strategy_info_sets();
+  const auto& slabs = strategy_public_info_set_slabs();
   const auto& action_ids = strategy_action_ids();
   const auto& regrets = strategy_cumulative_regrets();
   const auto& strategies = strategy_cumulative_strategies();
 
   StrategyProfile profile;
-  profile.info_sets.reserve(info_sets.size());
+  profile.info_sets.reserve(get_info_set_count());
 
-  for (const InfoSetData& info_set : info_sets) {
+  auto export_row = [&](uint32_t public_state_id,
+                        uint8_t player,
+                        uint16_t private_id,
+                        const InfoSetRow& row) {
     double sum = 0.0;
-    const size_t action_offset = info_set.action_offset;
-    for (uint16_t action_index = 0; action_index < info_set.action_count;
+    const size_t action_offset = row.action_offset;
+    for (uint16_t action_index = 0; action_index < row.action_count;
          ++action_index) {
       const size_t table_index = action_offset + action_index;
       sum += StrategyWeight(config_, regrets, strategies, table_index);
     }
 
     StrategyInfoSet exported;
-    exported.key.public_state_id = info_set.public_state_id;
-    exported.key.private_id = info_set.private_id;
-    exported.key.player = info_set.player;
-    exported.action_ids.reserve(info_set.action_count);
-    exported.probabilities.reserve(info_set.action_count);
+    exported.key.public_state_id = public_state_id;
+    exported.key.private_id = private_id;
+    exported.key.player = player;
+    exported.action_ids.reserve(row.action_count);
+    exported.probabilities.reserve(row.action_count);
     if (sum > 0.0) {
-      for (uint16_t action_index = 0; action_index < info_set.action_count;
+      for (uint16_t action_index = 0; action_index < row.action_count;
            ++action_index) {
         const size_t table_index = action_offset + action_index;
         exported.action_ids.push_back(action_ids[table_index]);
         exported.probabilities.push_back(
             StrategyWeight(config_, regrets, strategies, table_index) / sum);
       }
-    } else if (info_set.action_count > 0) {
-      double uniform_prob = 1.0 / info_set.action_count;
-      for (uint16_t action_index = 0; action_index < info_set.action_count;
+    } else if (row.action_count > 0) {
+      double uniform_prob = 1.0 / row.action_count;
+      for (uint16_t action_index = 0; action_index < row.action_count;
            ++action_index) {
         const size_t table_index = action_offset + action_index;
         exported.action_ids.push_back(action_ids[table_index]);
@@ -1576,6 +1556,41 @@ CFRSolver::StrategyProfile CFRSolver::get_strategy_profile() const {
     }
 
     profile.info_sets.push_back(std::move(exported));
+  };
+
+  for (uint32_t public_state_id = 0; public_state_id < slabs.size();
+       ++public_state_id) {
+    const std::unique_ptr<PublicInfoSetSlab>& slab = slabs[public_state_id];
+    if (slab == nullptr) {
+      continue;
+    }
+    for (uint8_t player = 0; player < kPlayerCount; ++player) {
+      const PublicInfoSetSlabPlayer& player_slab = slab->players[player];
+      for (size_t chunk_index = 0;
+           chunk_index < player_slab.private_row_chunks.size();
+           ++chunk_index) {
+        const std::unique_ptr<PrivateRowChunk>& chunk =
+            player_slab.private_row_chunks[chunk_index];
+        if (chunk == nullptr) {
+          continue;
+        }
+        for (size_t chunk_offset = 0; chunk_offset < chunk->rows.size();
+             ++chunk_offset) {
+          const uint16_t private_id = static_cast<uint16_t>(
+              chunk_index * kPrivateIdChunkSize + chunk_offset);
+          if (private_id >= kComboCount) {
+            break;
+          }
+          const int32_t row_id = chunk->rows[chunk_offset];
+          if (row_id < 0 ||
+              static_cast<size_t>(row_id) >= player_slab.rows.size()) {
+            continue;
+          }
+          export_row(public_state_id, player, private_id,
+                     player_slab.rows[row_id]);
+        }
+      }
+    }
   }
 
   return profile;
@@ -2215,13 +2230,11 @@ double CFRSolver::uncached_utility(const GameState& state,
       state, player_a_cards.combo, player_b_cards.combo);
 }
 
-void CFRSolver::update_strategy(int info_set_id,
+void CFRSolver::update_strategy(const InfoSetRow& row,
                                 const ActionChoices& choices,
                                 double reach_prob) {
-  const auto& info_sets = strategy_info_sets();
   auto& strategies = mutable_strategy_cumulative_strategies();
-  const InfoSetData& info_set = info_sets[info_set_id];
-  const size_t action_offset = info_set.action_offset;
+  const size_t action_offset = row.action_offset;
   for (size_t action_index = 0; action_index < choices.size();
        ++action_index) {
     POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.action_entry_touches += 2);

@@ -119,7 +119,7 @@ public:
   double get_expected_value(int player_id) const;
   int get_iterations_run() const { return iterations_run_.load(std::memory_order_relaxed); }
   int64_t get_cfr_update_count() const { return cfr_update_count_.load(std::memory_order_relaxed); }
-  size_t get_info_set_count() const { return info_sets_.size(); }
+  size_t get_info_set_count() const { return info_set_count_; }
   size_t get_tree_node_count() const { return game_tree_->node_count(); }
   TraversalStats get_traversal_stats() const { return traversal_stats_; }
   void add_traversal_stats(const TraversalStats& stats);
@@ -238,18 +238,9 @@ private:
     }
   };
 
-  struct InfoSetData {
-    uint32_t public_state_id = 0;
-    uint16_t private_id = 0;
-    uint8_t player = 0;
-    uint32_t action_offset = 0;
-    uint16_t action_count = 0;
-  };
-
   struct InfoSetRow {
     uint32_t action_offset = 0;
     uint16_t action_count = 0;
-    int32_t info_set_id = -1;
   };
 
   static constexpr int kPrivateIdChunkSize = 64;
@@ -277,7 +268,6 @@ private:
         public_state_ids = nullptr;
     const std::vector<std::unique_ptr<PublicInfoSetSlab>>*
         public_info_set_slabs = nullptr;
-    const std::vector<InfoSetData>* info_sets = nullptr;
     const std::vector<int>* action_ids = nullptr;
     // The cumulative arrays are shared read/write across worker threads.
     std::vector<float>* cumulative_regrets = nullptr;
@@ -311,7 +301,7 @@ private:
   
   absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>
       public_state_ids_;
-  std::vector<InfoSetData> info_sets_;
+  size_t info_set_count_ = 0;
   std::vector<int> action_ids_;
   std::vector<float> cumulative_regrets_;
   std::vector<float> cumulative_strategies_;
@@ -370,7 +360,7 @@ private:
   PublicStateKey make_public_state_key(const GameState& state) const;
   uint32_t get_or_create_public_state_id(const GameState& state);
   uint32_t get_or_create_public_state_id(GameTree::Node& node);
-  int get_or_create_info_set_id(
+  std::optional<InfoSetRow> get_or_create_info_set_row(
       uint32_t public_state_id,
       int player,
       uint16_t private_id,
@@ -382,15 +372,12 @@ private:
   strategy_public_state_ids() const;
   const std::vector<std::unique_ptr<PublicInfoSetSlab>>&
   strategy_public_info_set_slabs() const;
-  const std::vector<InfoSetData>& strategy_info_sets() const;
   const std::vector<int>& strategy_action_ids() const;
   const std::vector<float>& strategy_cumulative_regrets() const;
   const std::vector<float>& strategy_cumulative_strategies() const;
   std::vector<float>& mutable_strategy_cumulative_regrets();
   std::vector<float>& mutable_strategy_cumulative_strategies();
-  void initialize_info_set_actions(InfoSetData& info_set,
-                                   const int* action_ids,
-                                   int num_actions);
+  InfoSetRow append_info_set_actions(const int* action_ids, int num_actions);
   PublicInfoSetSlab& get_or_create_public_info_set_slab(
       uint32_t public_state_id);
   const PublicInfoSetSlab* public_info_set_slab(
@@ -441,7 +428,7 @@ private:
       const WeightedHandRange& best_response_hands,
       const WeightedHandRange& opponent_hands,
       int best_response_player);
-  void update_strategy(int info_set_id,
+  void update_strategy(const InfoSetRow& row,
                        const ActionChoices& choices,
                        double reach_prob);
   double chance_sampling_cfr(

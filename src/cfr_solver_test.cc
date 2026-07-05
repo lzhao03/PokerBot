@@ -87,13 +87,11 @@ class CFRSolverRegretTestPeer {
     const CFRSolver::InfoSetRow* row =
         solver.find_info_set_row(public_state->second, player,
                                  TestComboId(hand));
-    if (row == nullptr || row->info_set_id < 0) {
+    if (row == nullptr) {
       throw std::runtime_error("Regret info set was not created");
     }
-    const CFRSolver::InfoSetData& info_set =
-        solver.info_sets_[row->info_set_id];
-    for (uint16_t i = 0; i < info_set.action_count; ++i) {
-      const size_t table_index = info_set.action_offset + i;
+    for (uint16_t i = 0; i < row->action_count; ++i) {
+      const size_t table_index = row->action_offset + i;
       if (solver.action_ids_[table_index] == action_id) {
         return solver.cumulative_regrets_[table_index];
       }
@@ -124,10 +122,10 @@ class CFRSolverRegretTestPeer {
     return solver.get_or_create_public_state_id(TestGameState(state));
   }
 
-  static int InfoSetId(CFRSolver& solver,
-                       const BoardState& state,
-                       int player,
-                       const Hand& hand) {
+  static int InfoSetOffset(CFRSolver& solver,
+                           const BoardState& state,
+                           int player,
+                           const Hand& hand) {
     GameState native_state = TestGameState(state);
     std::vector<GameAction> legal_actions =
         solver.game_tree_->get_legal_actions(native_state);
@@ -138,9 +136,14 @@ class CFRSolverRegretTestPeer {
     }
     const uint32_t public_state_id =
         solver.get_or_create_public_state_id(native_state);
-    return solver.get_or_create_info_set_id(
+    std::optional<CFRSolver::InfoSetRow> row =
+        solver.get_or_create_info_set_row(
         public_state_id, player, TestComboId(hand),
         action_id_buf, num_actions);
+    if (!row.has_value()) {
+      return -1;
+    }
+    return static_cast<int>(row->action_offset);
   }
 
   static bool HasPublicInfoSetSlab(CFRSolver& solver,
@@ -152,10 +155,10 @@ class CFRSolverRegretTestPeer {
            solver.public_info_set_slabs_[public_state_id] != nullptr;
   }
 
-  static int SlabInfoSetId(CFRSolver& solver,
-                           const BoardState& state,
-                           int player,
-                           const Hand& hand) {
+  static int SlabInfoSetOffset(CFRSolver& solver,
+                               const BoardState& state,
+                               int player,
+                               const Hand& hand) {
     const GameState native_state = TestGameState(state);
     const uint32_t public_state_id =
         solver.get_or_create_public_state_id(native_state);
@@ -166,7 +169,7 @@ class CFRSolverRegretTestPeer {
     if (row == nullptr) {
       return -1;
     }
-    return row->info_set_id;
+    return static_cast<int>(row->action_offset);
   }
 
   static const GameTree::Node& Root(CFRSolver& solver) {
@@ -248,13 +251,16 @@ class CFRSolverRegretTestPeer {
     }
     const uint32_t public_state_id =
         solver.get_or_create_public_state_id(native_state);
-    const int info_set_id = solver.get_or_create_info_set_id(
+    std::optional<CFRSolver::InfoSetRow> row =
+        solver.get_or_create_info_set_row(
         public_state_id, player, TestComboId(hand),
         action_id_buf, num_actions);
-    CFRSolver::InfoSetData& info_set = solver.info_sets_[info_set_id];
+    if (!row.has_value()) {
+      throw std::runtime_error("Could not create seeded regret row");
+    }
     std::optional<size_t> action_table_index;
-    for (uint16_t i = 0; i < info_set.action_count; ++i) {
-      const size_t table_index = info_set.action_offset + i;
+    for (uint16_t i = 0; i < row->action_count; ++i) {
+      const size_t table_index = row->action_offset + i;
       if (solver.action_ids_[table_index] == action_id) {
         action_table_index = table_index;
         break;
@@ -719,7 +725,7 @@ void CheckPublicStateIdsAreDenseAndKeyedByState() {
          "same public state key should reuse its dense id");
 }
 
-void CheckSparseSlabInfoSetIdsUseExactCombos() {
+void CheckSparseSlabRowsUseExactCombos() {
   PokerConfig config;
   config.set_starting_stack_size(20);
 
@@ -729,24 +735,24 @@ void CheckSparseSlabInfoSetIdsUseExactCombos() {
   Hand kings = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
 
   const int first_aces_id =
-      CFRSolverRegretTestPeer::InfoSetId(solver, state, 0, aces);
+      CFRSolverRegretTestPeer::InfoSetOffset(solver, state, 0, aces);
   const int second_aces_id =
-      CFRSolverRegretTestPeer::InfoSetId(solver, state, 0, aces);
+      CFRSolverRegretTestPeer::InfoSetOffset(solver, state, 0, aces);
   const int kings_id =
-      CFRSolverRegretTestPeer::InfoSetId(solver, state, 0, kings);
+      CFRSolverRegretTestPeer::InfoSetOffset(solver, state, 0, kings);
   const GameTree::Node& root = CFRSolverRegretTestPeer::Root(solver);
 
   Expect(first_aces_id == second_aces_id,
-         "sparse slab infoset should reuse the same exact combo id");
+         "sparse slab row should reuse the same exact combo");
   Expect(first_aces_id != kings_id,
-         "sparse slab infoset should distinguish different exact combos");
+         "sparse slab row should distinguish different exact combos");
   Expect(CFRSolverRegretTestPeer::PublicStateInfoSetListSize(
              solver, root, 0) == 2,
          "public-state infoset list should track created infosets");
   Expect(solver.get_info_set_count() == 2,
          "sparse slab should only create distinct info sets");
   Expect(solver.get_strategy_profile().size() == 2,
-         "sparse slab infosets should export through strategy profiles");
+         "sparse slab rows should export through strategy profiles");
 }
 
 void CheckSparseSlabTracksInfoSets() {
@@ -763,19 +769,19 @@ void CheckSparseSlabTracksInfoSets() {
          "sparse slab should not be allocated for a public state alone");
 
   const int aces_id =
-      CFRSolverRegretTestPeer::InfoSetId(solver, state, 0, aces);
+      CFRSolverRegretTestPeer::InfoSetOffset(solver, state, 0, aces);
 
   Expect(CFRSolverRegretTestPeer::HasPublicInfoSetSlab(solver, state),
          "sparse slab should be allocated when the first infoset is created");
-  Expect(CFRSolverRegretTestPeer::SlabInfoSetId(solver, state, 0, aces) ==
+  Expect(CFRSolverRegretTestPeer::SlabInfoSetOffset(solver, state, 0, aces) ==
              aces_id,
          "sparse slab should point at created infosets");
-  Expect(CFRSolverRegretTestPeer::SlabInfoSetId(solver, state, 0, kings) ==
+  Expect(CFRSolverRegretTestPeer::SlabInfoSetOffset(solver, state, 0, kings) ==
              -1,
          "sparse slab should mark missing private ids");
   const int kings_id =
-      CFRSolverRegretTestPeer::InfoSetId(solver, state, 0, kings);
-  Expect(CFRSolverRegretTestPeer::SlabInfoSetId(solver, state, 0, kings) ==
+      CFRSolverRegretTestPeer::InfoSetOffset(solver, state, 0, kings);
+  Expect(CFRSolverRegretTestPeer::SlabInfoSetOffset(solver, state, 0, kings) ==
              kings_id,
          "sparse slab should track new infosets after it is built");
 }
@@ -2218,7 +2224,7 @@ int main() {
   CheckPublicStateKeyIgnoresBoardOrder();
   CheckIdentityPrivateAbstractionUsesExactCombo();
   CheckPublicStateIdsAreDenseAndKeyedByState();
-  CheckSparseSlabInfoSetIdsUseExactCombos();
+  CheckSparseSlabRowsUseExactCombos();
   CheckSparseSlabTracksInfoSets();
   CheckTerminalUtilityCacheReusesScores();
   CheckSingletonRangeMatchesExactEvaluationAndBestResponse();
