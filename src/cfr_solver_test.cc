@@ -79,10 +79,15 @@ class CFRSolverRegretTestPeer {
                        int player,
                        const Hand& hand,
                        int action_id) {
+    auto public_state =
+        solver.public_state_ids_.find(solver.make_public_state_key(node.state));
+    if (public_state == solver.public_state_ids_.end()) {
+      throw std::runtime_error("Public state was not created");
+    }
     const CFRSolver::CompactInfoSetKey compact_key =
-        CFRSolver::EncodeCompactInfoSetKey(
-            static_cast<uint32_t>(node.id), TestComboId(hand),
-            static_cast<uint8_t>(player));
+        CFRSolver::EncodeCompactInfoSetKey(public_state->second,
+                                           TestComboId(hand),
+                                           static_cast<uint8_t>(player));
     auto info_set_id = solver.compact_info_set_ids_.find(compact_key);
     if (info_set_id == solver.compact_info_set_ids_.end()) {
       throw std::runtime_error("Regret info set was not created");
@@ -117,6 +122,10 @@ class CFRSolverRegretTestPeer {
                                                TestGameState(state));
   }
 
+  static uint32_t PublicStateId(CFRSolver& solver, const BoardState& state) {
+    return solver.get_or_create_public_state_id(TestGameState(state));
+  }
+
   static int CompactInfoSetId(CFRSolver& solver,
                               const BoardState& state,
                               int player,
@@ -129,10 +138,8 @@ class CFRSolverRegretTestPeer {
     for (const GameAction& action : legal_actions) {
       action_id_buf[num_actions++] = GameTree::action_key(action);
     }
-    GameTree::Node& root = solver.get_or_build_root();
     const uint32_t public_state_id =
-        solver.get_or_create_public_state_id(
-            native_state, static_cast<uint32_t>(root.id));
+        solver.get_or_create_public_state_id(native_state);
     return solver.get_or_create_compact_info_set_id(
         public_state_id, player, TestComboId(hand),
         action_id_buf, num_actions);
@@ -151,8 +158,7 @@ class CFRSolverRegretTestPeer {
                                            int player) {
     size_t count = 0;
     const uint32_t public_state_id =
-        solver.get_or_create_public_state_id(
-            node.state, static_cast<uint32_t>(node.id));
+        solver.get_or_create_public_state_id(node.state);
     for (const auto& entry : solver.compact_info_set_ids_) {
       if (CFRSolver::DecodePublicStateId(entry.first) == public_state_id &&
           CFRSolver::DecodePlayer(entry.first) == static_cast<uint8_t>(player)) {
@@ -222,10 +228,8 @@ class CFRSolverRegretTestPeer {
     for (const GameAction& action : legal_actions) {
       action_id_buf[num_actions++] = GameTree::action_key(action);
     }
-    GameTree::Node& root = solver.get_or_build_root();
     const uint32_t public_state_id =
-        solver.get_or_create_public_state_id(
-            native_state, static_cast<uint32_t>(root.id));
+        solver.get_or_create_public_state_id(native_state);
     const int info_set_id = solver.get_or_create_compact_info_set_id(
         public_state_id, player, TestComboId(hand),
         action_id_buf, num_actions);
@@ -294,8 +298,7 @@ class CFRSolverRegretTestPeer {
     CFRSolver::ConditionedRanges conditioned_ranges;
     GameTree::Node& root = solver.get_or_build_root();
     const uint32_t public_state_id =
-        solver.get_or_create_public_state_id(
-            native_state, static_cast<uint32_t>(root.id));
+        solver.get_or_create_public_state_id(native_state);
     solver.condition_ranges_for_actions(
         range, root, public_state_id, player, choices,
         conditioned_ranges);
@@ -673,6 +676,29 @@ void CheckIdentityPrivateAbstractionUsesExactCombo() {
   Expect(CFRSolverRegretTestPeer::PrivateId(solver, state, aces) ==
              TestComboId(aces),
          "identity private abstraction should use exact combo ids");
+}
+
+void CheckPublicStateIdsAreDenseAndKeyedByState() {
+  PokerConfig config;
+  CFRSolver solver(TestSolverConfig(config));
+  BoardState root = InitialRootState(config);
+  BoardState flop = InitialRootState(config);
+  flop.set_street(Street::FLOP);
+  AddCard(flop, 2, Suit::HEARTS);
+  AddCard(flop, 7, Suit::DIAMONDS);
+  AddCard(flop, 11, Suit::CLUBS);
+
+  const uint32_t root_id =
+      CFRSolverRegretTestPeer::PublicStateId(solver, root);
+  const uint32_t flop_id =
+      CFRSolverRegretTestPeer::PublicStateId(solver, flop);
+  const uint32_t repeated_flop_id =
+      CFRSolverRegretTestPeer::PublicStateId(solver, flop);
+
+  Expect(root_id == 0, "first public state should get dense id zero");
+  Expect(flop_id == 1, "different public state should get next dense id");
+  Expect(repeated_flop_id == flop_id,
+         "same public state key should reuse its dense id");
 }
 
 void CheckCompactInfoSetIdsUseExactCombos() {
@@ -2142,6 +2168,7 @@ int main() {
   CheckCfrDistinguishesActionAmounts();
   CheckPublicStateKeyIgnoresBoardOrder();
   CheckIdentityPrivateAbstractionUsesExactCombo();
+  CheckPublicStateIdsAreDenseAndKeyedByState();
   CheckCompactInfoSetIdsUseExactCombos();
   CheckTerminalUtilityCacheReusesScores();
   CheckSingletonRangeMatchesExactEvaluationAndBestResponse();

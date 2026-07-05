@@ -589,19 +589,23 @@ void CFRSolver::initialize_info_set_actions(
   }
 }
 
-uint32_t CFRSolver::get_or_create_public_state_id(const GameState& state,
-                                                  uint32_t node_id) {
-  auto inserted = public_state_ids_.emplace(make_public_state_key(state),
-                                            node_id);
-  return inserted.first->second;
+uint32_t CFRSolver::get_or_create_public_state_id(const GameState& state) {
+  PublicStateKey key = make_public_state_key(state);
+  auto existing = public_state_ids_.find(key);
+  if (existing != public_state_ids_.end()) {
+    return existing->second;
+  }
+  const uint32_t public_state_id =
+      static_cast<uint32_t>(public_state_ids_.size());
+  public_state_ids_.emplace(std::move(key), public_state_id);
+  return public_state_id;
 }
 
 uint32_t CFRSolver::get_or_create_public_state_id(GameTree::Node& node) {
   if (node.public_state_id != GameTree::Node::kInvalidPublicStateId) {
     return node.public_state_id;
   }
-  node.public_state_id = get_or_create_public_state_id(
-      node.state, static_cast<uint32_t>(node.id));
+  node.public_state_id = get_or_create_public_state_id(node.state);
   return node.public_state_id;
 }
 
