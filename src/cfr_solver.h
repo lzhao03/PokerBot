@@ -238,26 +238,6 @@ private:
     }
   };
 
-  // Compact internal key: (public_state_id << 32) | (private_id << 16) | player.
-  using CompactInfoSetKey = uint64_t;
-
-  static constexpr CompactInfoSetKey EncodeCompactInfoSetKey(
-      uint32_t public_state_id, uint16_t private_id, uint8_t player) {
-    return (static_cast<CompactInfoSetKey>(public_state_id) << 32) |
-           (static_cast<CompactInfoSetKey>(private_id) << 16) |
-           static_cast<CompactInfoSetKey>(player);
-  }
-
-  static constexpr uint32_t DecodePublicStateId(CompactInfoSetKey key) {
-    return static_cast<uint32_t>(key >> 32);
-  }
-  static constexpr uint16_t DecodePrivateId(CompactInfoSetKey key) {
-    return static_cast<uint16_t>((key >> 16) & 0xFFFF);
-  }
-  static constexpr uint8_t DecodePlayer(CompactInfoSetKey key) {
-    return static_cast<uint8_t>(key & 0xFF);
-  }
-
   struct InfoSetData {
     uint32_t public_state_id = 0;
     uint16_t private_id = 0;
@@ -286,8 +266,6 @@ private:
   struct StrategyTablesView {
     const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>*
         public_state_ids = nullptr;
-    const absl::flat_hash_map<CompactInfoSetKey, int>* compact_info_set_ids =
-        nullptr;
     const std::vector<std::unique_ptr<PublicInfoSetSlab>>*
         public_info_set_slabs = nullptr;
     const std::vector<InfoSetData>* info_sets = nullptr;
@@ -328,7 +306,6 @@ private:
   std::vector<int> action_ids_;
   std::vector<float> cumulative_regrets_;
   std::vector<float> cumulative_strategies_;
-  absl::flat_hash_map<CompactInfoSetKey, int> compact_info_set_ids_;
   std::vector<std::unique_ptr<PublicInfoSetSlab>> public_info_set_slabs_;
   const StrategyTablesView* strategy_tables_view_ = nullptr;
   
@@ -384,7 +361,7 @@ private:
   PublicStateKey make_public_state_key(const GameState& state) const;
   uint32_t get_or_create_public_state_id(const GameState& state);
   uint32_t get_or_create_public_state_id(GameTree::Node& node);
-  int get_or_create_compact_info_set_id(
+  int get_or_create_info_set_id(
       uint32_t public_state_id,
       int player,
       uint16_t private_id,
@@ -394,8 +371,6 @@ private:
   std::optional<uint32_t> strategy_public_state_id(GameTree::Node& node);
   const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>&
   strategy_public_state_ids() const;
-  const absl::flat_hash_map<CompactInfoSetKey, int>&
-  strategy_compact_info_set_ids() const;
   const std::vector<std::unique_ptr<PublicInfoSetSlab>>&
   strategy_public_info_set_slabs() const;
   const std::vector<InfoSetData>& strategy_info_sets() const;
