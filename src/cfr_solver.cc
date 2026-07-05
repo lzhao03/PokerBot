@@ -1314,21 +1314,33 @@ double CFRSolver::cfr_with_ranges(
   
   EnsureLegalActionIds(node);
   const uint32_t public_state_id = get_or_create_public_state_id(node);
-  // Build a small local array of action keys for the info set initializer.
-  int action_key_buf[GameTree::kMaxActionsPerNode];
-  for (int i = 0; i < node.action_count; ++i) {
-    action_key_buf[i] = node.actions[i].key;
+  const uint32_t betting_history_id = get_or_create_betting_history_id(node);
+  const auto& betting_history_rows = strategy_betting_history_rows();
+  if (betting_history_id >= betting_history_rows.size()) {
+    throw std::logic_error("Betting history row is missing");
+  }
+  const BettingHistoryRow& betting_history =
+      betting_history_rows[betting_history_id];
+  if (betting_history.action_count != node.action_count) {
+    throw std::logic_error("Betting history actions are not aligned");
+  }
+  for (int i = 0; i < betting_history.action_count; ++i) {
+    if (betting_history.action_ids[static_cast<size_t>(i)] !=
+        node.actions[i].key) {
+      throw std::logic_error("Betting history action key mismatch");
+    }
   }
   const std::optional<InfoSetRow> info_set_row =
       get_or_create_info_set_row(
           public_state_id, player,
           card_abstraction_.private_id(player_cards.combo, node.state),
-          action_key_buf, node.action_count);
+          betting_history.action_ids.data(), betting_history.action_count);
   ActionChoices action_choices;
-  action_choices.reserve(node.action_count);
-  for (int i = 0; i < node.action_count; ++i) {
+  action_choices.reserve(betting_history.action_count);
+  for (int i = 0; i < betting_history.action_count; ++i) {
     action_choices.push_back(
-        {std::cref(node.actions[i].action), node.actions[i].key, 0.0, 0.0});
+        {std::cref(node.actions[i].action),
+         betting_history.action_ids[static_cast<size_t>(i)], 0.0, 0.0});
   }
   auto& regrets = mutable_strategy_cumulative_regrets();
   if (info_set_row.has_value()) {

@@ -855,6 +855,11 @@ void CheckBettingHistoryActionTransitionsAreCached() {
   Expect(CFRSolverRegretTestPeer::BettingHistoryActionId(
              solver, root_betting_id, 0) == root.actions[0].key,
          "betting history row should store legal action keys");
+  for (int i = 0; i < root.action_count; ++i) {
+    Expect(CFRSolverRegretTestPeer::BettingHistoryActionId(
+               solver, root_betting_id, i) == root.actions[i].key,
+           "betting history row should mirror every legal action key");
+  }
   GameTree::Node& child =
       CFRSolverRegretTestPeer::ActionChild(solver, root, 0);
   const uint32_t child_betting_id = child.betting_history_id;
