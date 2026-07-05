@@ -182,6 +182,35 @@ class CFRSolverRegretTestPeer {
     return solver.get_or_build_root();
   }
 
+  static GameTree::Node& MutableRoot(CFRSolver& solver) {
+    return solver.get_or_build_root();
+  }
+
+  static uint32_t NodeBettingHistoryId(CFRSolver& solver,
+                                       GameTree::Node& node) {
+    return solver.get_or_create_betting_history_id(node);
+  }
+
+  static GameTree::Node& ActionChild(CFRSolver& solver,
+                                     GameTree::Node& node,
+                                     int action_index) {
+    GameTree::Node& child =
+        solver.game_tree_->create_child_node(node, action_index);
+    solver.cache_action_betting_history_transition(
+        node, action_index, child);
+    return child;
+  }
+
+  static uint32_t ActionTransitionId(const CFRSolver& solver,
+                                     uint32_t betting_history_id,
+                                     int action_index) {
+    if (betting_history_id >= solver.betting_history_transitions_.size()) {
+      return GameTree::Node::kInvalidBettingHistoryId;
+    }
+    return solver.betting_history_transitions_[betting_history_id]
+        .action_child_ids[static_cast<size_t>(action_index)];
+  }
+
   static size_t PublicStateInfoSetListSize(CFRSolver& solver,
                                            const GameTree::Node& node,
                                            int player) {
@@ -759,6 +788,36 @@ void CheckBettingHistoryIdsIgnorePublicCards() {
          "betting history ids should ignore public card identity");
   Expect(first_public_id != second_public_id,
          "public state ids should still distinguish public card ids");
+}
+
+void CheckBettingHistoryActionTransitionsAreCached() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  CFRSolver solver(TestSolverConfig(config));
+  GameTree::Node& root = CFRSolverRegretTestPeer::MutableRoot(solver);
+  Expect(root.action_count > 0, "root should have legal actions");
+
+  const uint32_t root_betting_id =
+      CFRSolverRegretTestPeer::NodeBettingHistoryId(solver, root);
+  GameTree::Node& child =
+      CFRSolverRegretTestPeer::ActionChild(solver, root, 0);
+  const uint32_t child_betting_id = child.betting_history_id;
+
+  Expect(root_betting_id != GameTree::Node::kInvalidBettingHistoryId,
+         "root should cache its betting history id");
+  Expect(child_betting_id != GameTree::Node::kInvalidBettingHistoryId,
+         "action child should cache its betting history id");
+  Expect(CFRSolverRegretTestPeer::ActionTransitionId(
+             solver, root_betting_id, 0) == child_betting_id,
+         "parent betting history should cache action child history id");
+
+  GameTree::Node& repeated_child =
+      CFRSolverRegretTestPeer::ActionChild(solver, root, 0);
+  Expect(&repeated_child == &child,
+         "action child lookup should reuse the same game tree node");
+  Expect(CFRSolverRegretTestPeer::ActionTransitionId(
+             solver, root_betting_id, 0) == child_betting_id,
+         "reused action child should preserve cached history transition");
 }
 
 void CheckSparseSlabRowsUseExactCombos() {
@@ -2261,6 +2320,7 @@ int main() {
   CheckIdentityPrivateAbstractionUsesExactCombo();
   CheckPublicStateIdsAreDenseAndKeyedByState();
   CheckBettingHistoryIdsIgnorePublicCards();
+  CheckBettingHistoryActionTransitionsAreCached();
   CheckSparseSlabRowsUseExactCombos();
   CheckSparseSlabTracksInfoSets();
   CheckTerminalUtilityCacheReusesScores();

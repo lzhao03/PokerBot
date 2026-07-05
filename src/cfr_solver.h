@@ -234,6 +234,15 @@ private:
     size_t operator()(const PublicStateKey& key) const;
   };
 
+  struct BettingHistoryTransitions {
+    BettingHistoryTransitions() {
+      action_child_ids.fill(GameTree::Node::kInvalidBettingHistoryId);
+    }
+
+    std::array<uint32_t, GameTree::kMaxActionsPerNode> action_child_ids;
+    uint32_t chance_child_id = GameTree::Node::kInvalidBettingHistoryId;
+  };
+
   struct IdentityCardAbstraction {
     uint64_t public_id(const GameState& state) const {
       return state.board_mask;
@@ -316,6 +325,7 @@ private:
       betting_history_ids_;
   absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>
       public_state_ids_;
+  std::vector<BettingHistoryTransitions> betting_history_transitions_;
   size_t info_set_count_ = 0;
   std::vector<int> action_ids_;
   std::vector<float> cumulative_regrets_;
@@ -376,8 +386,16 @@ private:
   PublicStateKey make_public_state_key(uint32_t betting_history_id,
                                        const GameState& state) const;
   uint32_t get_or_create_betting_history_id(const GameState& state);
+  uint32_t get_or_create_betting_history_id(GameTree::Node& node);
+  uint32_t get_or_create_public_state_id(uint32_t betting_history_id,
+                                         const GameState& state);
   uint32_t get_or_create_public_state_id(const GameState& state);
   uint32_t get_or_create_public_state_id(GameTree::Node& node);
+  void cache_action_betting_history_transition(GameTree::Node& node,
+                                               int action_index,
+                                               GameTree::Node& child_node);
+  void cache_chance_betting_history_transition(GameTree::Node& node,
+                                               GameTree::Node& child_node);
   std::optional<InfoSetRow> get_or_create_info_set_row(
       uint32_t public_state_id,
       int player,
@@ -387,6 +405,7 @@ private:
   StrategyTablesView strategy_tables_view();
   std::optional<uint32_t> strategy_betting_history_id(
       const GameState& state) const;
+  std::optional<uint32_t> strategy_betting_history_id(GameTree::Node& node);
   std::optional<uint32_t> strategy_public_state_id(GameTree::Node& node);
   const absl::flat_hash_map<BettingHistoryKey, uint32_t,
                             BettingHistoryKeyHash>&

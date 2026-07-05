@@ -37,6 +37,8 @@ public:
   struct Node {
     static constexpr uint32_t kInvalidPublicStateId =
         std::numeric_limits<uint32_t>::max();
+    static constexpr uint32_t kInvalidBettingHistoryId =
+        std::numeric_limits<uint32_t>::max();
 
     GameState state;
     bool is_terminal   = false;
@@ -47,6 +49,7 @@ public:
     uint8_t action_count = 0;
     std::array<ActionEntry, kMaxActionsPerNode> actions = {};
 
+    uint32_t betting_history_id = kInvalidBettingHistoryId;
     uint32_t public_state_id = kInvalidPublicStateId;
     NodeId   id              = 0;
 
