@@ -30,18 +30,6 @@ class CFRSolverRegretTestPeer {
     return solver.card_abstraction_.public_bucket(state);
   }
 
-  static CFRSolver::PrivateBucketId PrivateBucket(
-      const CFRSolver& solver,
-      ComboId combo_id,
-      const GameState& state) {
-    return solver.card_abstraction_.private_bucket(combo_id, state);
-  }
-
-  static uint32_t PrivateBucketCount(const CFRSolver& solver,
-                                     const GameState& state) {
-    return solver.card_abstraction_.private_bucket_count(state);
-  }
-
   static uint32_t PublicStateId(CFRSolver& solver, const GameState& state) {
     const std::optional<uint32_t> public_state_id =
         solver.get_or_create_public_state_row(state);
@@ -49,11 +37,6 @@ class CFRSolverRegretTestPeer {
       throw std::runtime_error("public state was not created");
     }
     return *public_state_id;
-  }
-
-  static bool PublicStateIsExact(CFRSolver& solver, uint32_t public_state_id) {
-    return solver.frozen_tables_->public_state_rows[public_state_id]
-        .public_state_is_exact;
   }
 
   static uint32_t CompactBettingHistoryId(CFRSolver& solver,
@@ -297,97 +280,6 @@ GameState TerminalRiverState(CardId first,
   state.player_contribution = {10, 10};
   state.player_contribution_count = 2;
   return state;
-}
-
-void CheckTexturePublicBucketsMergeBoardsByTexture() {
-  SolverConfig config;
-  CFRSolver solver(config);
-
-  const GameState first_flop =
-      PublicState(StreetKind::kFlop,
-                  MakeCardId(2, SuitKind::kHearts),
-                  MakeCardId(7, SuitKind::kDiamonds),
-                  MakeCardId(11, SuitKind::kClubs));
-  const GameState same_texture_flop =
-      PublicState(StreetKind::kFlop,
-                  MakeCardId(3, SuitKind::kHearts),
-                  MakeCardId(8, SuitKind::kDiamonds),
-                  MakeCardId(12, SuitKind::kClubs));
-  const GameState reordered_flop =
-      PublicState(StreetKind::kFlop,
-                  MakeCardId(7, SuitKind::kDiamonds),
-                  MakeCardId(2, SuitKind::kHearts),
-                  MakeCardId(11, SuitKind::kClubs));
-  const GameState paired_flop =
-      PublicState(StreetKind::kFlop,
-                  MakeCardId(2, SuitKind::kHearts),
-                  MakeCardId(2, SuitKind::kDiamonds),
-                  MakeCardId(11, SuitKind::kClubs));
-  const GameState monotone_flop =
-      PublicState(StreetKind::kFlop,
-                  MakeCardId(2, SuitKind::kHearts),
-                  MakeCardId(7, SuitKind::kHearts),
-                  MakeCardId(11, SuitKind::kHearts));
-  const GameState turn =
-      PublicState(StreetKind::kTurn,
-                  MakeCardId(2, SuitKind::kHearts),
-                  MakeCardId(7, SuitKind::kDiamonds),
-                  MakeCardId(11, SuitKind::kClubs),
-                  MakeCardId(14, SuitKind::kSpades));
-
-  Expect(CFRSolverRegretTestPeer::PublicBucket(solver, first_flop) ==
-             CFRSolverRegretTestPeer::PublicBucket(solver,
-                                                   same_texture_flop),
-         "texture buckets should merge similar disconnected rainbow flops");
-  Expect(CFRSolverRegretTestPeer::PublicBucket(solver, first_flop) ==
-             CFRSolverRegretTestPeer::PublicBucket(solver, reordered_flop),
-         "texture buckets should not depend on board-card order");
-  Expect(CFRSolverRegretTestPeer::PublicBucket(solver, first_flop) !=
-             CFRSolverRegretTestPeer::PublicBucket(solver, paired_flop),
-         "texture buckets should split paired flops");
-  Expect(CFRSolverRegretTestPeer::PublicBucket(solver, first_flop) !=
-             CFRSolverRegretTestPeer::PublicBucket(solver, monotone_flop),
-         "texture buckets should split monotone flops");
-  Expect(CFRSolverRegretTestPeer::PublicBucket(solver, first_flop) !=
-             CFRSolverRegretTestPeer::PublicBucket(solver, turn),
-         "texture buckets should include the street");
-
-  const uint32_t first_id =
-      CFRSolverRegretTestPeer::PublicStateId(solver, first_flop);
-  Expect(first_id ==
-             CFRSolverRegretTestPeer::PublicStateId(solver,
-                                                    same_texture_flop),
-         "same-texture public states should reuse the representative row");
-  Expect(!CFRSolverRegretTestPeer::PublicStateIsExact(solver, first_id),
-         "coarse public bucket rows should be representative");
-}
-
-void CheckCoarsePrivateBucketsMergeCombos() {
-  SolverConfig config;
-  CFRSolver solver(config);
-  const GameState preflop = BettingState(3, 19, 18, 1, 2);
-  const ComboId ace_king_spades =
-      ExactCombo(14, SuitKind::kSpades, 13, SuitKind::kSpades);
-  const ComboId ace_king_hearts =
-      ExactCombo(14, SuitKind::kHearts, 13, SuitKind::kHearts);
-  const ComboId ace_king_offsuit =
-      ExactCombo(14, SuitKind::kSpades, 13, SuitKind::kHearts);
-
-  Expect(ace_king_spades != ace_king_hearts,
-         "fixture should use distinct exact combos");
-  Expect(CFRSolverRegretTestPeer::PrivateBucket(
-             solver, ace_king_spades, preflop) ==
-             CFRSolverRegretTestPeer::PrivateBucket(
-                 solver, ace_king_hearts, preflop),
-         "coarse private buckets should merge equivalent suited combos");
-  Expect(CFRSolverRegretTestPeer::PrivateBucket(
-             solver, ace_king_spades, preflop) !=
-             CFRSolverRegretTestPeer::PrivateBucket(
-                 solver, ace_king_offsuit, preflop),
-         "coarse private buckets should keep suitedness shape");
-  Expect(CFRSolverRegretTestPeer::PrivateBucketCount(solver, preflop) <
-             kComboCount,
-         "coarse private bucket count should be smaller than exact combos");
 }
 
 void CheckTextureBucketTerminalUtilityUsesExactBoard() {
@@ -679,8 +571,6 @@ void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
 }  // namespace poker
 
 int main() {
-  poker::CheckTexturePublicBucketsMergeBoardsByTexture();
-  poker::CheckCoarsePrivateBucketsMergeCombos();
   poker::CheckTextureBucketTerminalUtilityUsesExactBoard();
   poker::CheckCoarseBettingHistoryBucketsChipState();
   poker::CheckCoarseBettingHistoryKeepsActionSlotsDistinct();

@@ -97,6 +97,33 @@ cc_test(
 )
 
 cc_library(
+    name = "card_abstraction",
+    hdrs = ["card_abstraction.h"],
+    deps = [
+        ":combo",
+        ":poker_types",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "card_abstraction_test",
+    srcs = ["card_abstraction_test.cc"],
+    deps = [
+        ":card_abstraction",
+    ],
+)
+
+cc_test(
+    name = "card_abstraction_coarse_test",
+    srcs = ["card_abstraction_test.cc"],
+    copts = ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
+    deps = [
+        ":card_abstraction",
+    ],
+)
+
+cc_library(
     name = "game_tree",
     srcs = ["game_tree.cc"],
     hdrs = ["game_tree.h"],
@@ -233,6 +260,7 @@ cc_library(
 )
 
 CFR_SOLVER_DEPS = [
+    ":card_abstraction",
     ":card_utils",
     ":continuation_value",
     ":game_tree",

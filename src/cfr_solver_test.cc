@@ -135,13 +135,6 @@ class CFRSolverRegretTestPeer {
     return solver.card_abstraction_.public_bucket(TestGameState(state));
   }
 
-  static CFRSolver::PrivateBucketId PrivateBucket(const CFRSolver& solver,
-                                                  const BoardState& state,
-                                                  const Hand& hand) {
-    return solver.card_abstraction_.private_bucket(TestComboId(hand),
-                                                   TestGameState(state));
-  }
-
   static uint32_t PublicStateId(CFRSolver& solver, const BoardState& state) {
     return CompactPublicStateId(solver, TestGameState(state));
   }
@@ -1149,17 +1142,6 @@ void CheckPublicStateKeyIgnoresBoardOrder() {
          "exact public-card buckets should canonicalize by board mask");
   Expect(CFRSolverRegretTestPeer::PublicStateIsExact(solver, first),
          "exact public-card buckets should store exact public states");
-}
-
-void CheckExactPrivateBucketsUseExactCombo() {
-  PokerConfig config;
-  CFRSolver solver(TestSolverConfig(config));
-  BoardState state = InitialRootState(config);
-  Hand aces = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
-
-  Expect(CFRSolverRegretTestPeer::PrivateBucket(solver, state, aces) ==
-             TestComboId(aces),
-         "exact private buckets should use exact combo ids");
 }
 
 void CheckPublicStateIdsAreDenseAndKeyedByState() {
@@ -3487,7 +3469,6 @@ int main() {
   CheckCfrUsesLegalActions();
   CheckCfrDistinguishesActionAmounts();
   CheckPublicStateKeyIgnoresBoardOrder();
-  CheckExactPrivateBucketsUseExactCombo();
   CheckPublicStateIdsAreDenseAndKeyedByState();
   CheckBettingHistoryIdsIgnorePublicCards();
   CheckExactBettingHistoryIdsUseChipState();
