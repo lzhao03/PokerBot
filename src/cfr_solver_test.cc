@@ -2142,10 +2142,14 @@ void CheckRangeRunTracksParallelTrainingStats() {
       solver.get_last_training_run_stats();
   Expect(stats.public_state_prebuild_complete,
          "parallel run should prebuild a complete public-state graph");
+  Expect(stats.chance_transition_prebuild_complete,
+         "parallel run should validate complete chance transitions");
   Expect(stats.action_transition_prebuild_complete,
          "parallel run should validate complete action transitions");
   Expect(stats.info_set_prebuild_complete,
          "parallel run should prebuild a complete infoset table");
+  Expect(stats.missing_chance_transitions == 0,
+         "complete public-state prebuild should not miss chance transitions");
   Expect(stats.prebuild_action_transitions > 0,
          "public-state prebuild should create action transitions");
   Expect(stats.missing_action_transitions == 0,
@@ -2191,6 +2195,8 @@ void CheckAutoWarmupDoesNotFreezeAfterPublicStateCap() {
          "auto warmup should grow public states until the cap");
   Expect(!stats.public_state_prebuild_complete,
          "capped public-state prebuild should report incomplete graph");
+  Expect(!stats.chance_transition_prebuild_complete,
+         "incomplete public-state prebuild should not validate chance transitions");
   Expect(!stats.action_transition_prebuild_complete,
          "incomplete public-state prebuild should not validate action transitions");
   Expect(stats.warmup_iterations == 20,
@@ -2222,6 +2228,8 @@ void CheckInfosetPrebuildCapPreventsFreeze() {
       solver.get_last_training_run_stats();
   Expect(stats.public_state_prebuild_complete,
          "fixture should complete public-state prebuild");
+  Expect(stats.chance_transition_prebuild_complete,
+         "fixture should validate chance transitions before infosets");
   Expect(stats.action_transition_prebuild_complete,
          "fixture should validate action transitions before infosets");
   Expect(!stats.info_set_prebuild_complete,

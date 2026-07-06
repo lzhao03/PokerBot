@@ -121,6 +121,11 @@ class FrozenStrategyTables {
     uint16_t action_count = 0;
   };
 
+  struct ChanceChildEntry {
+    int key = 0;
+    uint32_t public_state_id = GameTree::Node::kInvalidPublicStateId;
+  };
+
   struct InfoSetAddress {
     uint32_t public_state_id = 0;
     int player = 0;
@@ -144,6 +149,8 @@ class FrozenStrategyTables {
     std::array<GameAction, GameTree::kMaxActionsPerNode> actions = {};
     std::array<int, GameTree::kMaxActionsPerNode> action_ids = {};
     std::array<uint32_t, GameTree::kMaxActionsPerNode> action_child_ids = {};
+    uint32_t chance_child_offset = 0;
+    uint32_t chance_child_count = 0;
   };
 
   static constexpr int kPrivateBucketChunkSize = 64;
@@ -172,6 +179,7 @@ class FrozenStrategyTables {
       public_state_ids;
   std::vector<PublicStateRow> public_state_rows;
   absl::flat_hash_map<uint64_t, uint32_t> public_chance_child_ids;
+  std::vector<ChanceChildEntry> chance_child_entries;
   std::vector<BettingHistoryRow> betting_history_rows;
   size_t info_set_count = 0;
   std::vector<int> action_ids;

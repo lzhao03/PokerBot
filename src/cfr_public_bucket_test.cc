@@ -141,10 +141,27 @@ class CFRSolverRegretTestPeer {
     solver.mutable_tables_->public_chance_child_ids.clear();
   }
 
+  static void ClearCompactChanceChildEntries(CFRSolver& solver,
+                                             uint32_t public_state_id) {
+    solver.mutable_tables_->public_state_rows[public_state_id]
+        .chance_child_count = 0;
+  }
+
   static bool PrebuildPublicStates(CFRSolver& solver,
                                    uint32_t root_public_state_id,
                                    int max_depth) {
     return solver.prebuild_public_state_rows(root_public_state_id, max_depth);
+  }
+
+  static bool ValidatePrebuiltChanceTransitions(
+      const CFRSolver& solver,
+      uint32_t root_public_state_id,
+      int max_depth,
+      int64_t& chance_transitions,
+      int64_t& missing_chance_transitions) {
+    return solver.validate_prebuilt_chance_transitions(
+        root_public_state_id, max_depth, &chance_transitions,
+        &missing_chance_transitions);
   }
 
   static void FreezeTables(CFRSolver& solver) {
@@ -503,6 +520,7 @@ void CheckFrozenChanceLookupCoversTextureBuckets() {
       CFRSolverRegretTestPeer::CompactPublicStateId(solver, state);
   Expect(CFRSolverRegretTestPeer::PrebuildPublicStates(solver, public_id, 0),
          "texture prebuild should complete from a chance node");
+  CFRSolverRegretTestPeer::ClearCompactChanceChildren(solver);
   CFRSolverRegretTestPeer::FreezeTables(solver);
 
   const std::array<CardId, 3> rainbow = {
@@ -535,6 +553,36 @@ void CheckFrozenChanceLookupCoversTextureBuckets() {
          "frozen lookup should contain monotone flop texture");
 }
 
+void CheckChanceTransitionValidationCatchesMissingRowEntry() {
+  SolverConfig config;
+  CFRSolver solver(config);
+  const uint32_t public_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, ChanceState());
+
+  Expect(CFRSolverRegretTestPeer::PrebuildPublicStates(solver, public_id, 0),
+         "texture prebuild should complete from a chance node");
+  int64_t chance_transitions = 0;
+  int64_t missing_chance_transitions = 0;
+  Expect(CFRSolverRegretTestPeer::ValidatePrebuiltChanceTransitions(
+             solver, public_id, 0, chance_transitions,
+             missing_chance_transitions),
+         "complete prebuild should validate chance transitions");
+  Expect(chance_transitions > 0,
+         "chance-transition validation should count chance edges");
+  Expect(missing_chance_transitions == 0,
+         "complete prebuild should not miss chance transitions");
+
+  CFRSolverRegretTestPeer::ClearCompactChanceChildEntries(solver, public_id);
+  chance_transitions = 0;
+  missing_chance_transitions = 0;
+  Expect(!CFRSolverRegretTestPeer::ValidatePrebuiltChanceTransitions(
+             solver, public_id, 0, chance_transitions,
+             missing_chance_transitions),
+         "validation should fail after clearing row-local chance entries");
+  Expect(missing_chance_transitions > 0,
+         "validation should report missing row-local chance entries");
+}
+
 void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
   SolverConfig config;
   config.starting_stack_size = 20;
@@ -562,6 +610,10 @@ void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
          "texture prebuild should create action transitions");
   Expect(stats.missing_action_transitions == 0,
          "texture prebuild should not miss action transitions");
+  Expect(stats.chance_transition_prebuild_complete,
+         "texture public buckets should validate chance transitions");
+  Expect(stats.missing_chance_transitions == 0,
+         "texture prebuild should not miss chance transitions");
   Expect(stats.info_set_prebuild_complete,
          "texture/private buckets should prebuild full-range infosets before freezing");
   Expect(stats.prebuild_info_sets > 0,
@@ -584,6 +636,7 @@ int main() {
   poker::CheckCoarseActionChildUsesBettingHistoryTransition();
   poker::CheckCoarseChanceChildUsesBettingHistoryTransition();
   poker::CheckFrozenChanceLookupCoversTextureBuckets();
+  poker::CheckChanceTransitionValidationCatchesMissingRowEntry();
   poker::CheckTexturePublicBucketsEnterFrozenParallelPhase();
   return 0;
 }

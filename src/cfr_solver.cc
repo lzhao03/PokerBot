@@ -152,6 +152,15 @@ uint64_t PublicChanceChildKey(uint32_t parent_id, int child_key) {
          static_cast<uint64_t>(static_cast<uint32_t>(child_key));
 }
 
+uint32_t PublicChanceChildParentId(uint64_t map_key) {
+  return static_cast<uint32_t>(map_key >> 32);
+}
+
+int PublicChanceChildLookupKey(uint64_t map_key) {
+  return static_cast<int>(static_cast<int32_t>(
+      static_cast<uint32_t>(map_key & 0xffffffffu)));
+}
+
 CompactPublicState StateWithBoardFrom(CompactPublicState state,
                                       const CompactPublicState& board_source) {
   state.board_cards = board_source.board_cards;
@@ -427,6 +436,7 @@ CFRSolver::CFRSolver(
     mutable_tables_->public_state_ids.reserve(public_state_cap);
     mutable_tables_->public_state_rows.reserve(public_state_cap);
     mutable_tables_->public_chance_child_ids.reserve(public_state_cap);
+    mutable_tables_->chance_child_entries.reserve(public_state_cap);
     mutable_tables_->public_info_set_slabs.reserve(public_state_cap);
     mutable_tables_->betting_history_ids.reserve(public_state_cap);
     mutable_tables_->betting_history_rows.reserve(public_state_cap);
@@ -1074,15 +1084,28 @@ std::optional<uint32_t> CFRSolver::chance_child_public_state(
   if (public_state_id >= rows.size()) {
     return std::nullopt;
   }
-  const int child_key =
-      chance_child_lookup_key(rows[public_state_id], child_state, cards);
-  const uint64_t map_key = PublicChanceChildKey(public_state_id, child_key);
-  const auto& chance_children = frozen_tables_->public_chance_child_ids;
-  auto existing = chance_children.find(map_key);
-  if (existing == chance_children.end()) {
+  const PublicStateRow& row = rows[public_state_id];
+  const size_t begin = row.chance_child_offset;
+  const size_t end = begin + row.chance_child_count;
+  const auto& entries = frozen_tables_->chance_child_entries;
+  if (begin > entries.size() || end > entries.size()) {
     return std::nullopt;
   }
-  return existing->second;
+  const int child_key = chance_child_lookup_key(row, child_state, cards);
+  size_t low = begin;
+  size_t high = end;
+  while (low < high) {
+    const size_t mid = low + (high - low) / 2;
+    if (entries[mid].key < child_key) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  if (low == end || entries[low].key != child_key) {
+    return std::nullopt;
+  }
+  return entries[low].public_state_id;
 }
 
 std::optional<uint32_t> CFRSolver::chance_child_public_state(
@@ -1374,7 +1397,63 @@ bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
     }
   }
 
+  rebuild_chance_child_entries();
   return true;
+}
+
+void CFRSolver::rebuild_chance_child_entries() {
+  FrozenStrategyTables& tables = mutable_tables();
+  struct PendingChanceChild {
+    uint32_t parent_id = 0;
+    int key = 0;
+    uint32_t public_state_id = GameTree::Node::kInvalidPublicStateId;
+  };
+
+  std::vector<PendingChanceChild> pending;
+  pending.reserve(tables.public_chance_child_ids.size());
+  for (const auto& [map_key, child_id] : tables.public_chance_child_ids) {
+    const uint32_t parent_id = PublicChanceChildParentId(map_key);
+    if (parent_id >= tables.public_state_rows.size()) {
+      continue;
+    }
+    pending.push_back({
+        parent_id,
+        PublicChanceChildLookupKey(map_key),
+        child_id,
+    });
+  }
+
+  std::sort(pending.begin(), pending.end(),
+            [](const PendingChanceChild& left,
+               const PendingChanceChild& right) {
+              if (left.parent_id != right.parent_id) {
+                return left.parent_id < right.parent_id;
+              }
+              return left.key < right.key;
+            });
+
+  for (PublicStateRow& row : tables.public_state_rows) {
+    row.chance_child_offset = 0;
+    row.chance_child_count = 0;
+  }
+  tables.chance_child_entries.clear();
+  tables.chance_child_entries.reserve(pending.size());
+  uint32_t current_parent_id = GameTree::Node::kInvalidPublicStateId;
+  for (const PendingChanceChild& child : pending) {
+    if (child.public_state_id >= tables.public_state_rows.size()) {
+      continue;
+    }
+    if (child.parent_id != current_parent_id) {
+      current_parent_id = child.parent_id;
+      tables.public_state_rows[current_parent_id].chance_child_offset =
+          static_cast<uint32_t>(tables.chance_child_entries.size());
+    }
+    tables.chance_child_entries.push_back({
+        child.key,
+        child.public_state_id,
+    });
+    ++tables.public_state_rows[current_parent_id].chance_child_count;
+  }
 }
 
 bool CFRSolver::validate_prebuilt_action_transitions(
@@ -1461,6 +1540,92 @@ bool CFRSolver::validate_prebuilt_action_transitions(
   }
 
   return complete && *missing_action_transitions == 0;
+}
+
+bool CFRSolver::validate_prebuilt_chance_transitions(
+    uint32_t root_public_state_id,
+    int max_depth,
+    int64_t* chance_transitions,
+    int64_t* missing_chance_transitions) const {
+  *chance_transitions = 0;
+  *missing_chance_transitions = 0;
+  const auto& rows = frozen_tables_->public_state_rows;
+  if (root_public_state_id >= rows.size()) {
+    return false;
+  }
+
+  struct QueueEntry {
+    uint32_t public_state_id = 0;
+    int depth = 0;
+  };
+
+  std::vector<QueueEntry> queue;
+  std::vector<char> queued(rows.size(), 0);
+  queue.reserve(1024);
+  queue.push_back({root_public_state_id, 0});
+  queued[root_public_state_id] = 1;
+
+  auto enqueue = [&](uint32_t public_state_id, int depth) {
+    if (public_state_id >= rows.size()) {
+      return false;
+    }
+    if (!queued[public_state_id]) {
+      queued[public_state_id] = 1;
+      queue.push_back({public_state_id, depth});
+    }
+    return true;
+  };
+
+  bool complete = true;
+  for (size_t cursor = 0; cursor < queue.size(); ++cursor) {
+    const QueueEntry entry = queue[cursor];
+    if (entry.public_state_id >= rows.size()) {
+      return false;
+    }
+    const PublicStateRow& row = rows[entry.public_state_id];
+    if (row.is_terminal) {
+      continue;
+    }
+
+    if (row.is_chance_node) {
+      ForEachNextStreetDeal(row.state, [&](absl::Span<const CardId> cards) {
+        ++*chance_transitions;
+        const std::optional<uint32_t> child_public_state_id =
+            chance_child_public_state(entry.public_state_id, cards);
+        if (!child_public_state_id.has_value()) {
+          ++*missing_chance_transitions;
+          complete = false;
+          return true;
+        }
+        if (!enqueue(*child_public_state_id, entry.depth)) {
+          ++*missing_chance_transitions;
+          complete = false;
+        }
+        return true;
+      });
+      continue;
+    }
+
+    if (max_depth > 0 && entry.depth >= max_depth) {
+      continue;
+    }
+
+    for (int action_index = 0; action_index < row.action_count;
+         ++action_index) {
+      const uint32_t child_id =
+          row.action_child_ids[static_cast<size_t>(action_index)];
+      if (child_id == GameTree::Node::kInvalidPublicStateId ||
+          child_id == kCappedPublicStateId || child_id >= rows.size()) {
+        complete = false;
+        continue;
+      }
+      if (!enqueue(child_id, entry.depth + 1)) {
+        complete = false;
+      }
+    }
+  }
+
+  return complete && *missing_chance_transitions == 0;
 }
 
 bool CFRSolver::prebuild_info_set_rows(
@@ -1923,8 +2088,24 @@ void CFRSolver::run_iterations(int iterations,
       should_prebuild_public_states
           ? static_cast<int64_t>(frozen_tables_->betting_history_rows.size())
           : 0;
-  bool action_transition_prebuild_complete = false;
+  bool chance_transition_prebuild_complete = false;
   if (should_prebuild_public_states && public_state_prebuild_complete) {
+    chance_transition_prebuild_complete =
+        validate_prebuilt_chance_transitions(
+            *root_public_state_id, max_depth,
+            &last_training_run_stats_.prebuild_chance_transitions,
+            &last_training_run_stats_.missing_chance_transitions);
+    if (!chance_transition_prebuild_complete) {
+      LOG(INFO) << "Chance-transition prebuild validation failed; "
+                << "continuing without a parallel frozen phase";
+    }
+  }
+  last_training_run_stats_.chance_transition_prebuild_complete =
+      should_prebuild_public_states && public_state_prebuild_complete &&
+      chance_transition_prebuild_complete;
+  bool action_transition_prebuild_complete = false;
+  if (should_prebuild_public_states && public_state_prebuild_complete &&
+      chance_transition_prebuild_complete) {
     action_transition_prebuild_complete =
         validate_prebuilt_action_transitions(
             *root_public_state_id, max_depth,
@@ -1937,9 +2118,10 @@ void CFRSolver::run_iterations(int iterations,
   }
   last_training_run_stats_.action_transition_prebuild_complete =
       should_prebuild_public_states && public_state_prebuild_complete &&
-      action_transition_prebuild_complete;
+      chance_transition_prebuild_complete && action_transition_prebuild_complete;
   bool info_set_prebuild_complete = false;
   if (should_prebuild_public_states && public_state_prebuild_complete &&
+      chance_transition_prebuild_complete &&
       action_transition_prebuild_complete) {
     VLOG(1) << "Prebuilding infoset rows...";
     const auto info_set_prebuild_start = std::chrono::steady_clock::now();
@@ -1957,10 +2139,11 @@ void CFRSolver::run_iterations(int iterations,
   }
   last_training_run_stats_.info_set_prebuild_complete =
       should_prebuild_public_states && public_state_prebuild_complete &&
+      chance_transition_prebuild_complete &&
       action_transition_prebuild_complete && info_set_prebuild_complete;
   const bool prebuild_tables_are_action_complete =
       should_prebuild_public_states && public_state_prebuild_complete &&
-      action_transition_prebuild_complete;
+      chance_transition_prebuild_complete && action_transition_prebuild_complete;
   last_training_run_stats_.prebuild_info_sets =
       prebuild_tables_are_action_complete
           ? static_cast<int64_t>(get_info_set_count())
@@ -1971,6 +2154,7 @@ void CFRSolver::run_iterations(int iterations,
           : 0;
   const bool can_run_frozen_parallel =
       last_training_run_stats_.public_state_prebuild_complete &&
+      last_training_run_stats_.chance_transition_prebuild_complete &&
       last_training_run_stats_.action_transition_prebuild_complete &&
       last_training_run_stats_.info_set_prebuild_complete;
 
