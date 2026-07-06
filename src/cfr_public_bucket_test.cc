@@ -624,7 +624,9 @@ void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
       solver.get_last_training_run_stats();
   Expect(stats.public_state_prebuild_complete,
          "texture public buckets should complete shallow prebuild");
-  Expect(stats.parallel_iterations == 2,
+  Expect(stats.warmup_iterations == 2,
+         "alternating updates should warm both players before freezing");
+  Expect(stats.parallel_iterations == 1,
          "complete shallow prebuild should enter the frozen parallel phase");
   Expect(stats.parallel_cfr_updates > 0,
          "frozen parallel phase should do CFR work");

@@ -2087,9 +2087,9 @@ void CheckRangeRunTracksParallelTrainingStats() {
       solver.get_last_training_run_stats();
   Expect(stats.public_state_prebuild_complete,
          "parallel run should prebuild a complete public-state graph");
-  Expect(stats.warmup_iterations == 1,
-         "parallel run should report configured warmup iterations");
-  Expect(stats.parallel_iterations == 2,
+  Expect(stats.warmup_iterations == 2,
+         "parallel alternating run should warm both update players");
+  Expect(stats.parallel_iterations == 1,
          "parallel run should report remaining parallel iterations");
   Expect(stats.warmup_cfr_updates > 0,
          "parallel run should report warmup CFR updates");

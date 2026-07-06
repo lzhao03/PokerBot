@@ -1771,7 +1771,8 @@ void CFRSolver::run_iterations(int iterations,
       num_threads > 1 && !frozen_ && config_.warmup_iterations <= 0;
   int warmup_count =
       num_threads > 1 && !frozen_ && config_.warmup_iterations > 0
-          ? std::min(config_.warmup_iterations, iterations)
+          ? std::min(std::max(config_.warmup_iterations, kPlayerCount),
+                     iterations)
           : iterations;
   if (should_prebuild_public_states && !public_state_prebuild_complete) {
     warmup_count = iterations;
