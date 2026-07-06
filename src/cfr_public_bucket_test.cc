@@ -196,6 +196,17 @@ class CFRSolverRegretTestPeer {
         CFRSolver::PrivateCards::FromCombo(player_b_combo));
   }
 
+  static double EvaluatePublicState(CFRSolver& solver,
+                                    uint32_t public_state_id,
+                                    const GameState& state,
+                                    ComboId player_a_combo,
+                                    ComboId player_b_combo) {
+    return solver.evaluate_strategy_node(
+        public_state_id, solver.compact_public_state_from_game_state(state),
+        CFRSolver::PrivateCards::FromCombo(player_a_combo),
+        CFRSolver::PrivateCards::FromCombo(player_b_combo));
+  }
+
   static uint32_t CompactPublicStateBettingHistoryId(
       const CFRSolver& solver,
       uint32_t public_state_id) {
@@ -551,6 +562,13 @@ void CheckFrozenChanceLookupCoversTextureBuckets() {
              solver, public_id, state, monotone)
              .has_value(),
          "frozen lookup should contain monotone flop texture");
+
+  const double chance_value = CFRSolverRegretTestPeer::EvaluatePublicState(
+      solver, public_id, state,
+      ExactCombo(14, SuitKind::kHearts, 14, SuitKind::kSpades),
+      ExactCombo(13, SuitKind::kClubs, 13, SuitKind::kDiamonds));
+  Expect(std::isfinite(chance_value),
+         "frozen chance evaluation should use row-local chance children");
 }
 
 void CheckChanceTransitionValidationCatchesMissingRowEntry() {

@@ -191,6 +191,11 @@ private:
     ComboId combo = 0;
   };
 
+  struct SampledChanceTransition {
+    uint32_t child_public_state_id = GameTree::Node::kInvalidPublicStateId;
+    CompactPublicState exact_child_state;
+  };
+
   using OptionalTrainingRange =
       std::optional<std::reference_wrapper<const TrainingRangeView>>;
 
@@ -446,6 +451,10 @@ private:
                        const double* action_probabilities,
                        size_t action_count,
                        double reach_prob);
+  std::optional<SampledChanceTransition> sample_chance_transition(
+      uint32_t public_state_id,
+      const CompactPublicState& state,
+      CardMask known_private_cards);
   double chance_sampling_cfr(
       uint32_t public_state_id,
       const CompactPublicState& state,
