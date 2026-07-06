@@ -288,7 +288,7 @@ class CFRSolverRegretTestPeer {
   static uint32_t CompactPublicStateBettingHistoryId(
       const CFRSolver& solver,
       uint32_t public_state_id) {
-    return solver.public_state_rows_[public_state_id].betting_history_id;
+    return solver.public_state_rows_[public_state_id].state.betting_history_id;
   }
 
   static int CompactPublicStateActionId(const CFRSolver& solver,
@@ -359,8 +359,12 @@ class CFRSolverRegretTestPeer {
 
   static int CompactPublicStateBoardSize(const CFRSolver& solver,
                                          uint32_t public_state_id) {
-    return static_cast<int>(
-        solver.public_state_rows_[public_state_id].state.board_cards.size());
+    return solver.public_state_rows_[public_state_id].state.board_count;
+  }
+
+  static int CompactPublicStateHistorySize(const CFRSolver& solver,
+                                           uint32_t public_state_id) {
+    return solver.public_state_rows_[public_state_id].state.history_size;
   }
 
   static size_t LegacyGameTreeNodeCount(const CFRSolver& solver) {
@@ -547,7 +551,8 @@ class CFRSolverRegretTestPeer {
     const uint32_t public_state_id =
         solver.get_or_create_public_state_id(native_state);
     solver.condition_ranges_for_actions(
-        range, native_state, public_state_id, player, action_ids,
+        range, solver.public_state_rows_[public_state_id].state,
+        public_state_id, player, action_ids,
         action_count,
         conditioned_ranges);
     return std::move(conditioned_ranges[selected_index]);
@@ -1098,6 +1103,9 @@ void CheckCompactPublicStateActionTransitionsAreCached() {
 
   Expect(child_id == repeated_child_id,
          "compact action transition should reuse the same public state id");
+  Expect(CFRSolverRegretTestPeer::CompactPublicStateHistorySize(
+             solver, child_id) == 1,
+         "compact action transition should preserve applied action history");
   Expect(solver.get_public_state_count() == 2,
          "compact action transition should create one child row");
 }
@@ -1190,6 +1198,9 @@ void CheckCompactPublicStateChanceTransitionsAreCached() {
   Expect(CFRSolverRegretTestPeer::CompactPublicStateBoardSize(
              solver, child_id) == 3,
          "compact chance transition should add dealt board cards");
+  Expect(CFRSolverRegretTestPeer::CompactPublicStateHistorySize(
+             solver, child_id) == 0,
+         "compact chance transition should clear betting-round history");
 }
 
 void CheckSparseSlabRowsUseExactCombos() {

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <random>
@@ -244,15 +245,18 @@ private:
   };
 
   struct IdentityCardAbstraction {
-    PublicBucketId public_bucket(const GameState& state) const {
+    template <typename State>
+    PublicBucketId public_bucket(const State& state) const {
       return state.board_mask;
     }
 
-    PrivateBucketId private_bucket(ComboId combo_id, const GameState&) const {
+    template <typename State>
+    PrivateBucketId private_bucket(ComboId combo_id, const State&) const {
       return combo_id;
     }
 
-    uint32_t private_bucket_count(const GameState&) const {
+    template <typename State>
+    uint32_t private_bucket_count(const State&) const {
       return kComboCount;
     }
   };
@@ -268,14 +272,42 @@ private:
     PrivateBucketId private_bucket = 0;
   };
 
+  struct CompactAction {
+    int amount = 0;
+    int8_t player = -1;
+    ActionKind kind = ActionKind::kNoAction;
+  };
+
+  struct CompactPublicState {
+    static constexpr int kMaxHistoryActions = 32;
+
+    std::array<int, kPlayerCount> stack = {0, 0};
+    int pot = 0;
+    std::array<CardId, kMaxBoardCards> board_cards = {};
+    uint8_t board_count = 0;
+    CardMask board_mask = 0;
+    std::array<int, kMaxHistoryActions> history_amounts = {};
+    std::array<int8_t, kMaxHistoryActions> history_players = {};
+    std::array<ActionKind, kMaxHistoryActions> history_kinds = {};
+    uint16_t history_size = 0;
+    uint32_t history_overflow_offset = std::numeric_limits<uint32_t>::max();
+    uint16_t history_overflow_size = 0;
+    StreetKind street = StreetKind::kPreflop;
+    bool all_in = false;
+    int folded_player = -1;
+    int player_to_act = 0;
+    std::array<int, kPlayerCount> player_contribution = {0, 0};
+    int player_contribution_count = 0;
+    uint32_t betting_history_id = GameTree::Node::kInvalidBettingHistoryId;
+  };
+
   struct PublicStateRow {
     PublicStateRow() {
       action_ids.fill(0);
       action_child_ids.fill(GameTree::Node::kInvalidPublicStateId);
     }
 
-    GameState state;
-    uint32_t betting_history_id = GameTree::Node::kInvalidBettingHistoryId;
+    CompactPublicState state;
     PublicBucketId public_bucket = 0;
     bool is_terminal = false;
     bool is_chance_node = false;
@@ -316,6 +348,7 @@ private:
     const std::vector<PublicStateRow>* public_state_rows = nullptr;
     const absl::flat_hash_map<uint64_t, uint32_t>* public_chance_child_ids =
         nullptr;
+    const std::vector<CompactAction>* public_state_history_overflow = nullptr;
     const std::vector<std::unique_ptr<PublicInfoSetSlab>>*
         public_info_set_slabs = nullptr;
     const std::vector<int>* action_ids = nullptr;
@@ -357,6 +390,7 @@ private:
       public_state_ids_;
   std::vector<PublicStateRow> public_state_rows_;
   absl::flat_hash_map<uint64_t, uint32_t> public_chance_child_ids_;
+  std::vector<CompactAction> public_state_history_overflow_;
   std::vector<BettingHistoryRow> betting_history_rows_;
   size_t info_set_count_ = 0;
   std::vector<int> action_ids_;
@@ -410,7 +444,7 @@ private:
       StrategyProbabilities& probabilities);
   void condition_ranges_for_actions(
       const TrainingRangeView& range,
-      const GameState& state,
+      const CompactPublicState& state,
       uint32_t public_state_id,
       int player,
       const int* action_ids,
@@ -438,8 +472,12 @@ private:
                                      const GameTree::Node& node);
   void cache_betting_history_actions(uint32_t betting_history_id,
                                      const PublicStateRow& row);
+  CompactPublicState compact_public_state_from_game_state(
+      uint32_t betting_history_id,
+      const GameState& state);
+  GameState materialize_game_state(const CompactPublicState& state) const;
   PublicStateRow make_public_state_row(uint32_t betting_history_id,
-                                       const GameState& state) const;
+                                       const GameState& state);
   std::optional<uint32_t> get_or_create_public_state_row(
       uint32_t betting_history_id,
       const GameState& state);
@@ -469,6 +507,8 @@ private:
   const std::vector<PublicStateRow>& strategy_public_state_rows() const;
   const absl::flat_hash_map<uint64_t, uint32_t>&
   strategy_public_chance_child_ids() const;
+  const std::vector<CompactAction>&
+  strategy_public_state_history_overflow() const;
   const std::vector<std::unique_ptr<PublicInfoSetSlab>>&
   strategy_public_info_set_slabs() const;
   const std::vector<int>& strategy_action_ids() const;
