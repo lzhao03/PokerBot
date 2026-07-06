@@ -506,21 +506,34 @@ private:
       uint32_t child_betting_history_id);
   void reset_compact_history(CompactPublicState& state);
   int compact_first_player_for_street(const CompactPublicState& state) const;
+  bool compact_board_complete(const CompactPublicState& state) const;
+  bool compact_is_betting_round_over(const CompactPublicState& state) const;
+  bool compact_is_hand_over(const CompactPublicState& state) const;
+  bool compact_is_terminal(const CompactPublicState& state) const;
+  int compact_player_to_act(const CompactPublicState& state) const;
   void add_compact_board_card(CompactPublicState& state, CardId card);
   CompactPublicState apply_compact_chance(
       const CompactPublicState& parent,
       absl::Span<const CardId> cards,
       uint32_t child_betting_history_id);
-  int compact_street_bet_size_count(StreetKind street) const;
-  double compact_bet_size_for_street(StreetKind street, int index) const;
-  int compact_bet_size_count(StreetKind street) const;
+  const std::vector<double>& compact_bet_sizes_for_street(
+      StreetKind street) const;
   int compact_concrete_bet_amount(const CompactPublicState& state,
                                   double size) const;
+  void append_compact_action(
+      std::array<GameAction, GameTree::kMaxActionsPerNode>& actions,
+      uint8_t& action_count,
+      ActionKind kind,
+      int amount) const;
   bool append_compact_action_if_missing(
       std::array<GameAction, GameTree::kMaxActionsPerNode>& actions,
       uint8_t& action_count,
       ActionKind kind,
       int amount) const;
+  uint8_t compact_legal_actions(
+      const CompactPublicState& state,
+      int player,
+      std::array<GameAction, GameTree::kMaxActionsPerNode>& actions) const;
   uint8_t compact_legal_actions(
       const CompactPublicState& state,
       std::array<GameAction, GameTree::kMaxActionsPerNode>& actions) const;

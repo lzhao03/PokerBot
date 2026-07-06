@@ -332,6 +332,25 @@ class CFRSolverRegretTestPeer {
     return solver.public_state_rows_[public_state_id].action_count;
   }
 
+  static void CompactPublicStateRowMetadata(CFRSolver& solver,
+                                            const GameState& state,
+                                            bool& is_terminal,
+                                            int& player_to_act,
+                                            bool& is_chance_node,
+                                            int& action_count) {
+    const uint32_t betting_history_id =
+        solver.get_or_create_betting_history_id(state);
+    CFRSolver::CompactPublicState compact =
+        solver.compact_public_state_from_game_state(
+            betting_history_id, state);
+    const CFRSolver::PublicStateRow row =
+        solver.make_public_state_row(std::move(compact));
+    is_terminal = row.is_terminal;
+    player_to_act = row.player_to_act;
+    is_chance_node = row.is_chance_node;
+    action_count = row.action_count;
+  }
+
   static uint32_t CompactPublicStateBettingHistoryId(
       const CFRSolver& solver,
       uint32_t public_state_id) {
@@ -1270,6 +1289,32 @@ void ExpectCompactLegalActionsMatchGameTree(CFRSolver& solver,
   Expect(SameActions(compact_actions, engine_actions), message);
 }
 
+void ExpectCompactPublicStateRowMetadataMatchesGameTree(
+    CFRSolver& solver,
+    GameTree& game_tree,
+    const GameState& state,
+    const char* message) {
+  bool compact_terminal = false;
+  int compact_player_to_act = -2;
+  bool compact_chance_node = false;
+  int compact_action_count = -1;
+  CFRSolverRegretTestPeer::CompactPublicStateRowMetadata(
+      solver, state, compact_terminal, compact_player_to_act,
+      compact_chance_node, compact_action_count);
+
+  const bool engine_terminal = game_tree.is_terminal(state);
+  const int engine_player_to_act = game_tree.get_player_to_act(state);
+  const bool engine_chance_node =
+      !engine_terminal && engine_player_to_act == -1;
+  const int engine_action_count =
+      static_cast<int>(game_tree.get_legal_actions(state).size());
+
+  Expect(compact_terminal == engine_terminal, message);
+  Expect(compact_player_to_act == engine_player_to_act, message);
+  Expect(compact_chance_node == engine_chance_node, message);
+  Expect(compact_action_count == engine_action_count, message);
+}
+
 void CheckCompactLegalActionsMatchGameTree() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -1295,6 +1340,46 @@ void CheckCompactLegalActionsMatchGameTree() {
   ExpectCompactLegalActionsMatchGameTree(
       solver, game_tree, all_in_state,
       "compact legal actions should match GameTree when call is all-in");
+}
+
+void CheckCompactPublicStateRowMetadataMatchesGameTree() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.add_bet_sizes(0.5);
+  CFRSolver solver(TestSolverConfig(config));
+  GameTree game_tree(TestSolverConfig(config));
+
+  const GameState root = TestGameState(InitialRootState(config));
+  ExpectCompactPublicStateRowMetadataMatchesGameTree(
+      solver, game_tree, root,
+      "compact root row metadata should match GameTree");
+
+  GameState preflop_chance =
+      game_tree.apply_action(root, MakeGameAction(ActionType::CALL, 1));
+  preflop_chance =
+      game_tree.apply_action(preflop_chance, MakeGameAction(ActionType::CHECK));
+  ExpectCompactPublicStateRowMetadataMatchesGameTree(
+      solver, game_tree, preflop_chance,
+      "compact preflop chance row metadata should match GameTree");
+
+  const GameState folded =
+      game_tree.apply_action(root, MakeGameAction(ActionType::FOLD));
+  ExpectCompactPublicStateRowMetadataMatchesGameTree(
+      solver, game_tree, folded,
+      "compact folded row metadata should match GameTree");
+
+  GameState river = TestFlopDecisionState(
+      MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(7, SuitKind::kDiamonds),
+      MakeCardId(11, SuitKind::kClubs));
+  AddBoardCard(river, MakeCardId(5, SuitKind::kSpades));
+  AddBoardCard(river, MakeCardId(9, SuitKind::kHearts));
+  river.street = StreetKind::kRiver;
+  river = game_tree.apply_action(river, MakeGameAction(ActionType::CHECK));
+  river = game_tree.apply_action(river, MakeGameAction(ActionType::CHECK));
+  ExpectCompactPublicStateRowMetadataMatchesGameTree(
+      solver, game_tree, river,
+      "compact river terminal row metadata should match GameTree");
 }
 
 void CheckBettingHistoryActionTransitionReusedAcrossPublicStates() {
@@ -2976,6 +3061,7 @@ int main() {
   CheckCompactPublicStateActionTransitionsAreCached();
   CheckCompactActionMatchesGameTreeApplyAction();
   CheckCompactLegalActionsMatchGameTree();
+  CheckCompactPublicStateRowMetadataMatchesGameTree();
   CheckBettingHistoryActionTransitionReusedAcrossPublicStates();
   CheckCompactPublicStateActionCapStoresSentinel();
   CheckCompactPublicStateActionValidationCatchesMismatch();
