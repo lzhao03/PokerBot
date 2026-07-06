@@ -1068,14 +1068,12 @@ std::optional<uint32_t> CFRSolver::action_child_public_state(
 
 std::optional<uint32_t> CFRSolver::chance_child_public_state(
     uint32_t public_state_id,
-    const CompactPublicState& state,
+    const CompactPublicState& child_state,
     absl::Span<const CardId> cards) const {
   const auto& rows = frozen_tables_->public_state_rows;
   if (public_state_id >= rows.size()) {
     return std::nullopt;
   }
-  const CompactPublicState child_state =
-      game_tree_->apply_chance(state, cards);
   const int child_key =
       chance_child_lookup_key(rows[public_state_id], child_state, cards);
   const uint64_t map_key = PublicChanceChildKey(public_state_id, child_key);
@@ -1094,8 +1092,10 @@ std::optional<uint32_t> CFRSolver::chance_child_public_state(
   if (public_state_id >= rows.size()) {
     return std::nullopt;
   }
-  return chance_child_public_state(public_state_id, rows[public_state_id].state,
-                                   cards);
+  return chance_child_public_state(
+      public_state_id, game_tree_->apply_chance(rows[public_state_id].state,
+                                                cards),
+      cards);
 }
 
 int CFRSolver::chance_child_lookup_key(
@@ -1208,22 +1208,14 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
 
 std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
     uint32_t public_state_id,
-    const CompactPublicState& state,
+    const CompactPublicState& child_state,
     absl::Span<const CardId> cards) {
   const auto& rows = frozen_tables_->public_state_rows;
   if (public_state_id >= rows.size()) {
     return std::nullopt;
   }
   const PublicStateRow& row = rows[public_state_id];
-  std::optional<CompactPublicState> child_state_for_bucket;
-  if (!row.public_state_is_exact) {
-    child_state_for_bucket = game_tree_->apply_chance(state, cards);
-  }
-  const int child_key = child_state_for_bucket.has_value()
-                            ? chance_child_lookup_key(row,
-                                                      *child_state_for_bucket,
-                                                      cards)
-                            : ChanceCardsKey(cards);
+  const int child_key = chance_child_lookup_key(row, child_state, cards);
   const uint64_t map_key = PublicChanceChildKey(public_state_id, child_key);
   const auto& chance_children = frozen_tables_->public_chance_child_ids;
   auto existing = chance_children.find(map_key);
@@ -1273,16 +1265,13 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
 
   const uint32_t parent_betting_history_id =
       row.betting_history_id;
-  CompactPublicState child_state =
-      child_state_for_bucket.has_value()
-          ? std::move(*child_state_for_bucket)
-          : game_tree_->apply_chance(state, cards);
+  CompactPublicState stored_child_state = child_state;
   const uint32_t child_betting_history_id =
       get_or_create_chance_child_betting_history_id(
-          parent_betting_history_id, child_state);
+          parent_betting_history_id, stored_child_state);
   std::optional<uint32_t> child_id =
       get_or_create_public_state_row(child_betting_history_id,
-                                     std::move(child_state));
+                                     std::move(stored_child_state));
   if (!child_id.has_value()) {
     POKER_RECORD_TRAVERSAL_STAT(
         ++traversal_stats_.betting_history_transition_misses);
@@ -1304,7 +1293,9 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
     return std::nullopt;
   }
   return get_or_create_chance_child_public_state(
-      public_state_id, rows[public_state_id].state, cards);
+      public_state_id, game_tree_->apply_chance(rows[public_state_id].state,
+                                                cards),
+      cards);
 }
 
 bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
@@ -2231,17 +2222,18 @@ double CFRSolver::chance_sampling_cfr(
   for (int i = 0; i < samples; ++i) {
     const auto cards = SampleStreetCards(
         state, player_a_cards.mask() | player_b_cards.mask(), rng_);
+    const CompactPublicState sampled_child_state =
+        game_tree_->apply_chance(state, cards);
     std::optional<uint32_t> child_public_state_id =
-        frozen_ ? chance_child_public_state(public_state_id, state, cards)
+        frozen_ ? chance_child_public_state(public_state_id,
+                                            sampled_child_state, cards)
                 : get_or_create_chance_child_public_state(public_state_id,
-                                                          state,
+                                                          sampled_child_state,
                                                           cards);
     if (!child_public_state_id.has_value()) {
       continue;
     }
 
-    const CompactPublicState sampled_child_state =
-        game_tree_->apply_chance(state, cards);
     const PublicStateRow& child_row =
         frozen_tables_->public_state_rows[*child_public_state_id];
     const CompactPublicState child_state =
@@ -2712,16 +2704,17 @@ double CFRSolver::evaluate_strategy_node(
     for (int i = 0; i < samples; ++i) {
       const auto cards = SampleStreetCards(
           state, player_a_cards.mask() | player_b_cards.mask(), rng_);
+      const CompactPublicState sampled_child_state =
+          game_tree_->apply_chance(state, cards);
       std::optional<uint32_t> child_public_state_id =
-          frozen_ ? chance_child_public_state(public_state_id, state, cards)
+          frozen_ ? chance_child_public_state(public_state_id,
+                                              sampled_child_state, cards)
                   : get_or_create_chance_child_public_state(public_state_id,
-                                                            state,
+                                                            sampled_child_state,
                                                             cards);
       if (!child_public_state_id.has_value()) {
         continue;
       }
-      const CompactPublicState sampled_child_state =
-          game_tree_->apply_chance(state, cards);
       const PublicStateRow& child_row =
           frozen_tables_->public_state_rows[*child_public_state_id];
       const CompactPublicState child_state =

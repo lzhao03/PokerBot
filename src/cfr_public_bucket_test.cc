@@ -163,9 +163,10 @@ class CFRSolverRegretTestPeer {
       uint32_t public_state_id,
       const GameState& state,
       absl::Span<const CardId> cards) {
+    const CompactPublicState parent =
+        solver.compact_public_state_from_game_state(state);
     return solver.chance_child_public_state(
-        public_state_id, solver.compact_public_state_from_game_state(state),
-        cards);
+        public_state_id, solver.game_tree_->apply_chance(parent, cards), cards);
   }
 
   static double EvaluateExactBoard(CFRSolver& solver,

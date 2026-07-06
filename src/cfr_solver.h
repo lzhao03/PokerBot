@@ -501,7 +501,7 @@ private:
       int action_index) const;
   std::optional<uint32_t> chance_child_public_state(
       uint32_t public_state_id,
-      const CompactPublicState& state,
+      const CompactPublicState& child_state,
       absl::Span<const CardId> cards) const;
   std::optional<uint32_t> chance_child_public_state(
       uint32_t public_state_id,
@@ -514,7 +514,7 @@ private:
       int action_index);
   std::optional<uint32_t> get_or_create_chance_child_public_state(
       uint32_t public_state_id,
-      const CompactPublicState& state,
+      const CompactPublicState& child_state,
       absl::Span<const CardId> cards);
   std::optional<uint32_t> get_or_create_chance_child_public_state(
       uint32_t public_state_id,
