@@ -1935,6 +1935,8 @@ void CheckRangeRunTracksParallelTrainingStats() {
 
   const CFRSolver::TrainingRunStats stats =
       solver.get_last_training_run_stats();
+  Expect(stats.public_state_prebuild_complete,
+         "parallel run should prebuild a complete public-state graph");
   Expect(stats.warmup_iterations == 1,
          "parallel run should report configured warmup iterations");
   Expect(stats.parallel_iterations == 2,
@@ -1970,6 +1972,8 @@ void CheckAutoWarmupDoesNotFreezeAfterPublicStateCap() {
       solver.get_last_training_run_stats();
   Expect(solver.get_public_state_count() == 100,
          "auto warmup should grow public states until the cap");
+  Expect(!stats.public_state_prebuild_complete,
+         "capped public-state prebuild should report incomplete graph");
   Expect(stats.warmup_iterations == 20,
          "auto warmup should consume the run after hitting a cap");
   Expect(stats.parallel_iterations == 0,

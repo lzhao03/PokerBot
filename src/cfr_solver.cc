@@ -148,6 +148,48 @@ uint64_t PublicChanceChildKey(uint32_t parent_id, int child_key) {
          static_cast<uint64_t>(static_cast<uint32_t>(child_key));
 }
 
+template <typename Callback>
+bool ForEachNextStreetDeal(const CompactPublicState& state,
+                           Callback callback) {
+  const int remaining_board_slots =
+      std::max(0, kMaxBoardCards - static_cast<int>(state.board_count));
+  const int count =
+      std::min(CardsForNextStreet(state.street), remaining_board_slots);
+  if (count <= 0) {
+    return callback(absl::Span<const CardId>());
+  }
+
+  std::array<CardId, kDeckCardCount> candidates = {};
+  int candidate_count = 0;
+  for (int card_id = 0; card_id < kDeckCardCount; ++card_id) {
+    const CardId candidate = static_cast<CardId>(card_id);
+    if ((state.board_mask & CardBit(candidate)) == 0) {
+      candidates[static_cast<size_t>(candidate_count)] = candidate;
+      ++candidate_count;
+    }
+  }
+  if (candidate_count < count) {
+    throw std::runtime_error("Not enough cards to enumerate next street");
+  }
+
+  absl::InlinedVector<CardId, 5> cards;
+  cards.resize(static_cast<size_t>(count));
+  auto choose = [&](auto& self, int start, int depth) -> bool {
+    if (depth == count) {
+      return callback(absl::Span<const CardId>(cards));
+    }
+    const int remaining = count - depth;
+    for (int i = start; i <= candidate_count - remaining; ++i) {
+      cards[static_cast<size_t>(depth)] = candidates[static_cast<size_t>(i)];
+      if (!self(self, i + 1, depth + 1)) {
+        return false;
+      }
+    }
+    return true;
+  };
+  return choose(choose, 0, 0);
+}
+
 int RoundedContribution(const GameState& state, int player) {
   return state.player_contribution[player];
 }
@@ -981,6 +1023,85 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
   return child_id;
 }
 
+bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
+                                           int max_depth) {
+  if (frozen_) {
+    return true;
+  }
+  if (root_public_state_id >= frozen_tables_->public_state_rows.size()) {
+    return false;
+  }
+
+  struct QueueEntry {
+    uint32_t public_state_id = 0;
+    int depth = 0;
+  };
+
+  std::vector<QueueEntry> queue;
+  std::vector<char> queued;
+  queue.reserve(1024);
+  queued.resize(frozen_tables_->public_state_rows.size(), 0);
+  queue.push_back({root_public_state_id, 0});
+  queued[root_public_state_id] = 1;
+
+  auto enqueue = [&](uint32_t public_state_id, int depth) {
+    if (public_state_id >= queued.size()) {
+      queued.resize(static_cast<size_t>(public_state_id) + 1, 0);
+    }
+    if (!queued[public_state_id]) {
+      queued[public_state_id] = 1;
+      queue.push_back({public_state_id, depth});
+    }
+  };
+
+  for (size_t cursor = 0; cursor < queue.size(); ++cursor) {
+    const QueueEntry entry = queue[cursor];
+    if (entry.public_state_id >= frozen_tables_->public_state_rows.size()) {
+      return false;
+    }
+    const PublicStateRow row =
+        frozen_tables_->public_state_rows[entry.public_state_id];
+    if (row.is_terminal) {
+      continue;
+    }
+
+    if (row.is_chance_node) {
+      const bool complete = ForEachNextStreetDeal(
+          row.state, [&](absl::Span<const CardId> cards) {
+            std::optional<uint32_t> child_public_state_id =
+                get_or_create_chance_child_public_state(entry.public_state_id,
+                                                        cards);
+            if (!child_public_state_id.has_value()) {
+              return false;
+            }
+            enqueue(*child_public_state_id, entry.depth);
+            return true;
+          });
+      if (!complete) {
+        return false;
+      }
+      continue;
+    }
+
+    if (max_depth > 0 && entry.depth >= max_depth) {
+      continue;
+    }
+
+    for (int action_index = 0; action_index < row.action_count;
+         ++action_index) {
+      std::optional<uint32_t> child_public_state_id =
+          get_or_create_action_child_public_state(entry.public_state_id,
+                                                  action_index);
+      if (!child_public_state_id.has_value()) {
+        return false;
+      }
+      enqueue(*child_public_state_id, entry.depth + 1);
+    }
+  }
+
+  return true;
+}
+
 void CFRSolver::cache_action_betting_history_transition(
     GameTree::Node& node,
     int action_index,
@@ -1336,6 +1457,31 @@ void CFRSolver::run_iterations(int iterations,
 
   const int num_threads =
       config_.num_training_threads <= 1 ? 1 : config_.num_training_threads;
+  const int max_depth = config_.max_depth;
+
+  bool public_state_prebuild_complete = true;
+  const bool should_prebuild_public_states =
+      num_threads > 1 && !frozen_ &&
+      (config_.max_public_states > 0 || max_depth > 0);
+  if (should_prebuild_public_states) {
+    VLOG(1) << "Prebuilding compact public-state rows...";
+    const auto prebuild_start = std::chrono::steady_clock::now();
+    public_state_prebuild_complete =
+        prebuild_public_state_rows(*root_public_state_id, max_depth);
+    const auto prebuild_end = std::chrono::steady_clock::now();
+    last_training_run_stats_.prebuild_seconds =
+        std::chrono::duration<double>(prebuild_end - prebuild_start).count();
+    if (!public_state_prebuild_complete) {
+      LOG(INFO) << "Public-state prebuild stopped before completion; "
+                << "continuing without a parallel frozen phase";
+    }
+  }
+  last_training_run_stats_.public_state_prebuild_complete =
+      public_state_prebuild_complete;
+  last_training_run_stats_.prebuild_public_states =
+      static_cast<int64_t>(get_public_state_count());
+  last_training_run_stats_.prebuild_betting_histories =
+      static_cast<int64_t>(frozen_tables_->betting_history_rows.size());
 
   const bool auto_warmup =
       num_threads > 1 && !frozen_ && config_.warmup_iterations <= 0;
@@ -1343,13 +1489,15 @@ void CFRSolver::run_iterations(int iterations,
       num_threads > 1 && !frozen_ && config_.warmup_iterations > 0
           ? std::min(config_.warmup_iterations, iterations)
           : iterations;
+  if (should_prebuild_public_states && !public_state_prebuild_complete) {
+    warmup_count = iterations;
+  }
 
   // Phase 1: single-threaded warmup (allocates public states + info sets).
   LOG(INFO) << "Starting CFR iterations...";
   VLOG(1) << "Warmup phase: "
           << (auto_warmup ? "adaptive" : std::to_string(warmup_count))
           << " single-threaded iterations";
-  const int max_depth = config_.max_depth;
   TraversalScratch scratch;
   scratch.reserve_depth(ScratchDepthReserve(config_, max_depth));
   const int64_t warmup_start_updates = cfr_update_count_;

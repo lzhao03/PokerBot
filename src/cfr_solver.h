@@ -53,6 +53,10 @@ public:
   };
 
   struct TrainingRunStats {
+    bool public_state_prebuild_complete = false;
+    int64_t prebuild_public_states = 0;
+    int64_t prebuild_betting_histories = 0;
+    double prebuild_seconds = 0.0;
     int warmup_iterations = 0;
     int parallel_iterations = 0;
     double warmup_seconds = 0.0;
@@ -383,6 +387,8 @@ private:
   std::optional<uint32_t> get_or_create_chance_child_public_state(
       uint32_t public_state_id,
       absl::Span<const CardId> cards);
+  bool prebuild_public_state_rows(uint32_t root_public_state_id,
+                                  int max_depth);
   const InfoSetRow* get_or_create_info_set_row(
       InfoSetAddress address,
       absl::Span<const int> action_ids);
