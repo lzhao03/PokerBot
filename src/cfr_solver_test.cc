@@ -1052,10 +1052,10 @@ void CheckPublicStateKeyIgnoresBoardOrder() {
          "public state key should not depend on public board card order");
   Expect(CFRSolverRegretTestPeer::PublicBucket(solver, first) ==
              CFRSolverRegretTestPeer::PublicBucket(solver, second),
-         "identity public-card abstraction should canonicalize by board mask");
+         "exact public-card buckets should canonicalize by board mask");
 }
 
-void CheckIdentityPrivateAbstractionUsesExactCombo() {
+void CheckExactPrivateBucketsUseExactCombo() {
   PokerConfig config;
   CFRSolver solver(TestSolverConfig(config));
   BoardState state = InitialRootState(config);
@@ -1063,7 +1063,7 @@ void CheckIdentityPrivateAbstractionUsesExactCombo() {
 
   Expect(CFRSolverRegretTestPeer::PrivateBucket(solver, state, aces) ==
              TestComboId(aces),
-         "identity private abstraction should use exact combo ids");
+         "exact private buckets should use exact combo ids");
 }
 
 void CheckPublicStateIdsAreDenseAndKeyedByState() {
@@ -3189,7 +3189,7 @@ int main() {
   CheckCfrUsesLegalActions();
   CheckCfrDistinguishesActionAmounts();
   CheckPublicStateKeyIgnoresBoardOrder();
-  CheckIdentityPrivateAbstractionUsesExactCombo();
+  CheckExactPrivateBucketsUseExactCombo();
   CheckPublicStateIdsAreDenseAndKeyedByState();
   CheckBettingHistoryIdsIgnorePublicCards();
   CheckBettingHistoryActionTransitionsAreCached();

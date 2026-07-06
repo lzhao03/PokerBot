@@ -214,20 +214,42 @@ private:
   using PublicStateKeyHash = FrozenStrategyTables::PublicStateKeyHash;
   using BettingHistoryRow = FrozenStrategyTables::BettingHistoryRow;
 
-  struct IdentityCardAbstraction {
+  struct ExactPublicCardBuckets {
     template <typename State>
-    PublicBucketId public_bucket(const State& state) const {
+    PublicBucketId bucket(const State& state) const {
       return state.board_mask;
     }
+  };
 
+  struct ExactPrivateBuckets {
     template <typename State>
-    PrivateBucketId private_bucket(ComboId combo_id, const State&) const {
+    PrivateBucketId bucket(ComboId combo_id, const State&) const {
       return combo_id;
     }
 
     template <typename State>
-    uint32_t private_bucket_count(const State&) const {
+    uint32_t bucket_count(const State&) const {
       return kComboCount;
+    }
+  };
+
+  struct ExactCardAbstraction {
+    ExactPublicCardBuckets public_buckets;
+    ExactPrivateBuckets private_buckets;
+
+    template <typename State>
+    PublicBucketId public_bucket(const State& state) const {
+      return public_buckets.bucket(state);
+    }
+
+    template <typename State>
+    PrivateBucketId private_bucket(ComboId combo_id, const State& state) const {
+      return private_buckets.bucket(combo_id, state);
+    }
+
+    template <typename State>
+    uint32_t private_bucket_count(const State& state) const {
+      return private_buckets.bucket_count(state);
     }
   };
 
@@ -261,7 +283,7 @@ private:
   TrainingRunStats last_training_run_stats_;
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
-  IdentityCardAbstraction card_abstraction_;
+  ExactCardAbstraction card_abstraction_;
   // Set to true after warmup; workers may only write cumulative arrays.
   bool frozen_ = false;
   std::shared_ptr<FrozenStrategyTables> mutable_tables_;
