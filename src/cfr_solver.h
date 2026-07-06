@@ -18,6 +18,7 @@
 #include "src/game_tree.h"
 #include "src/hand_range.h"
 #include "src/poker_types.h"
+#include "src/strategy_tables.h"
 #include "src/training_range.h"
 
 namespace poker {
@@ -51,7 +52,7 @@ public:
     int64_t entries = 0;
   };
 
-  using PrivateBucketId = uint16_t;
+  using PrivateBucketId = StrategyTables::PrivateBucketId;
 
   struct StrategyInfoSetKey {
     uint32_t public_state_id = 0;
@@ -112,8 +113,10 @@ public:
   double get_expected_value(int player_id) const;
   int get_iterations_run() const { return iterations_run_.load(std::memory_order_relaxed); }
   int64_t get_cfr_update_count() const { return cfr_update_count_.load(std::memory_order_relaxed); }
-  size_t get_info_set_count() const { return info_set_count_; }
-  size_t get_public_state_count() const { return public_state_rows_.size(); }
+  size_t get_info_set_count() const { return tables_->info_set_count; }
+  size_t get_public_state_count() const {
+    return tables_->public_state_rows.size();
+  }
   TraversalStats get_traversal_stats() const { return traversal_stats_; }
   void add_traversal_stats(const TraversalStats& stats);
   UtilityCacheStats get_utility_cache_stats() const;
@@ -189,60 +192,12 @@ private:
     std::vector<RangeScratchFrame> frames;
   };
 
-  struct BettingHistoryKey {
-    static constexpr int kInlineHistoryValues = 48;
-
-    int street = 0;
-    int pot = 0;
-    int stack_a = 0;
-    int stack_b = 0;
-    int all_in = 0;
-    int folded_player = 0;
-    int player_to_act = 0;
-    int player_contribution_size = 0;
-    std::array<int, 2> player_contributions = {0, 0};
-    int history_size = 0;
-    std::array<int, kInlineHistoryValues> history_values = {};
-    std::vector<int> history_overflow;
-
-    bool operator==(const BettingHistoryKey& other) const;
-  };
-
-  struct BettingHistoryKeyHash {
-    size_t operator()(const BettingHistoryKey& key) const;
-  };
-
-  using PublicBucketId = uint64_t;
-
-  struct PublicStateKey {
-    uint32_t betting_history_id = 0;
-    PublicBucketId public_bucket = 0;
-
-    bool operator==(const PublicStateKey& other) const;
-  };
-
-  struct PublicStateKeyHash {
-    size_t operator()(const PublicStateKey& key) const;
-  };
-
-  struct BettingHistoryRow {
-    BettingHistoryRow() {
-      action_ids.fill(0);
-      action_child_ids.fill(GameTree::Node::kInvalidBettingHistoryId);
-    }
-
-    int street = 0;
-    int pot = 0;
-    std::array<int, 2> stack = {0, 0};
-    int all_in = 0;
-    int folded_player = 0;
-    int player_to_act = 0;
-    std::array<int, 2> player_contributions = {0, 0};
-    uint8_t action_count = 0;
-    std::array<int, GameTree::kMaxActionsPerNode> action_ids;
-    std::array<uint32_t, GameTree::kMaxActionsPerNode> action_child_ids;
-    uint32_t chance_child_id = GameTree::Node::kInvalidBettingHistoryId;
-  };
+  using BettingHistoryKey = StrategyTables::BettingHistoryKey;
+  using BettingHistoryKeyHash = StrategyTables::BettingHistoryKeyHash;
+  using PublicBucketId = StrategyTables::PublicBucketId;
+  using PublicStateKey = StrategyTables::PublicStateKey;
+  using PublicStateKeyHash = StrategyTables::PublicStateKeyHash;
+  using BettingHistoryRow = StrategyTables::BettingHistoryRow;
 
   struct IdentityCardAbstraction {
     template <typename State>
@@ -261,72 +216,14 @@ private:
     }
   };
 
-  struct InfoSetRow {
-    uint32_t action_offset = 0;
-    uint16_t action_count = 0;
-  };
-
-  struct InfoSetAddress {
-    uint32_t public_state_id = 0;
-    int player = 0;
-    PrivateBucketId private_bucket = 0;
-  };
-
-  struct PublicStateRow {
-    PublicStateRow() {
-      action_ids.fill(0);
-      action_child_ids.fill(GameTree::Node::kInvalidPublicStateId);
-    }
-
-    CompactPublicState state;
-    uint32_t betting_history_id = GameTree::Node::kInvalidBettingHistoryId;
-    PublicBucketId public_bucket = 0;
-    bool is_terminal = false;
-    bool is_chance_node = false;
-    int player_to_act = -1;
-    uint8_t action_count = 0;
-    std::array<GameAction, GameTree::kMaxActionsPerNode> actions = {};
-    std::array<int, GameTree::kMaxActionsPerNode> action_ids = {};
-    std::array<uint32_t, GameTree::kMaxActionsPerNode> action_child_ids = {};
-  };
-
-  static constexpr int kPrivateBucketChunkSize = 64;
-  static constexpr int kPrivateBucketChunkCount =
-      (kComboCount + kPrivateBucketChunkSize - 1) / kPrivateBucketChunkSize;
-
-  struct PrivateRowChunk {
-    PrivateRowChunk() { rows.fill(-1); }
-
-    std::array<int32_t, kPrivateBucketChunkSize> rows;
-  };
-
-  struct PublicInfoSetSlabPlayer {
-    std::array<std::unique_ptr<PrivateRowChunk>, kPrivateBucketChunkCount>
-        private_row_chunks;
-    std::vector<InfoSetRow> rows;
-  };
-
-  struct PublicInfoSetSlab {
-    std::array<PublicInfoSetSlabPlayer, kPlayerCount> players;
-  };
-
-  struct StrategyTablesView {
-    const absl::flat_hash_map<BettingHistoryKey, uint32_t,
-                              BettingHistoryKeyHash>*
-        betting_history_ids = nullptr;
-    const std::vector<BettingHistoryRow>* betting_history_rows = nullptr;
-    const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>*
-        public_state_ids = nullptr;
-    const std::vector<PublicStateRow>* public_state_rows = nullptr;
-    const absl::flat_hash_map<uint64_t, uint32_t>* public_chance_child_ids =
-        nullptr;
-    const std::vector<std::unique_ptr<PublicInfoSetSlab>>*
-        public_info_set_slabs = nullptr;
-    const std::vector<int>* action_ids = nullptr;
-    // The cumulative arrays are shared read/write across worker threads.
-    std::vector<float>* cumulative_regrets = nullptr;
-    std::vector<float>* cumulative_strategies = nullptr;
-  };
+  using InfoSetRow = StrategyTables::InfoSetRow;
+  using InfoSetAddress = StrategyTables::InfoSetAddress;
+  using PublicStateRow = StrategyTables::PublicStateRow;
+  using PrivateRowChunk = StrategyTables::PrivateRowChunk;
+  using PublicInfoSetSlabPlayer = StrategyTables::PublicInfoSetSlabPlayer;
+  using PublicInfoSetSlab = StrategyTables::PublicInfoSetSlab;
+  static constexpr int kPrivateBucketChunkSize =
+      StrategyTables::kPrivateBucketChunkSize;
 
   CFRSolver(const SolverConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache);
@@ -350,24 +247,9 @@ private:
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
   IdentityCardAbstraction card_abstraction_;
   // Set to true after warmup; blocks info-set allocation so the parallel
-  // training phase only writes to the atomic regret/strategy arrays. Shared
-  // worker solvers also receive read-only public-state rows via
-  // StrategyTablesView.
+  // training phase only writes to the shared regret/strategy arrays.
   bool frozen_ = false;
-  
-  absl::flat_hash_map<BettingHistoryKey, uint32_t, BettingHistoryKeyHash>
-      betting_history_ids_;
-  absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>
-      public_state_ids_;
-  std::vector<PublicStateRow> public_state_rows_;
-  absl::flat_hash_map<uint64_t, uint32_t> public_chance_child_ids_;
-  std::vector<BettingHistoryRow> betting_history_rows_;
-  size_t info_set_count_ = 0;
-  std::vector<int> action_ids_;
-  std::vector<float> cumulative_regrets_;
-  std::vector<float> cumulative_strategies_;
-  std::vector<std::unique_ptr<PublicInfoSetSlab>> public_info_set_slabs_;
-  const StrategyTablesView* strategy_tables_view_ = nullptr;
+  std::shared_ptr<StrategyTables> tables_;
   
   // Helper methods
   GameTree::Node& get_or_build_root();
@@ -476,27 +358,10 @@ private:
       InfoSetAddress address,
       const int* action_ids,
       int num_actions);
-  StrategyTablesView strategy_tables_view();
   std::optional<uint32_t> strategy_betting_history_id(
       const GameState& state) const;
   std::optional<uint32_t> strategy_betting_history_id(GameTree::Node& node);
   std::optional<uint32_t> strategy_public_state_id(GameTree::Node& node);
-  const absl::flat_hash_map<BettingHistoryKey, uint32_t,
-                            BettingHistoryKeyHash>&
-  strategy_betting_history_ids() const;
-  const std::vector<BettingHistoryRow>& strategy_betting_history_rows() const;
-  const absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>&
-  strategy_public_state_ids() const;
-  const std::vector<PublicStateRow>& strategy_public_state_rows() const;
-  const absl::flat_hash_map<uint64_t, uint32_t>&
-  strategy_public_chance_child_ids() const;
-  const std::vector<std::unique_ptr<PublicInfoSetSlab>>&
-  strategy_public_info_set_slabs() const;
-  const std::vector<int>& strategy_action_ids() const;
-  const std::vector<float>& strategy_cumulative_regrets() const;
-  const std::vector<float>& strategy_cumulative_strategies() const;
-  std::vector<float>& mutable_strategy_cumulative_regrets();
-  std::vector<float>& mutable_strategy_cumulative_strategies();
   InfoSetRow append_info_set_actions(const int* action_ids, int num_actions);
   PublicInfoSetSlab& get_or_create_public_info_set_slab(
       uint32_t public_state_id);

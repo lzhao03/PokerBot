@@ -195,6 +195,19 @@ cc_library(
 )
 
 cc_library(
+    name = "strategy_tables",
+    srcs = ["strategy_tables.cc"],
+    hdrs = ["strategy_tables.h"],
+    deps = [
+        ":combo",
+        ":game_tree",
+        ":poker_types",
+        "@abseil-cpp//absl/container:flat_hash_map",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "cfr_solver_proto_adapter",
     srcs = ["cfr_solver_proto_adapter.cc"],
     hdrs = ["cfr_solver_proto_adapter.h"],
@@ -224,6 +237,7 @@ CFR_SOLVER_DEPS = [
     ":continuation_value",
     ":game_tree",
     ":hand_range",
+    ":strategy_tables",
     ":terminal_utility_cache",
     ":thread_pool",
     ":training_range",

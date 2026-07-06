@@ -1,0 +1,73 @@
+#include "src/strategy_tables.h"
+
+#include <functional>
+
+namespace poker {
+namespace {
+
+void HashCombine(size_t& seed, int value) {
+  seed ^= std::hash<int>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+
+void HashCombine(size_t& seed, uint64_t value) {
+  seed ^= std::hash<uint64_t>{}(value) + 0x9e3779b9 + (seed << 6) +
+          (seed >> 2);
+}
+
+template <size_t N>
+void HashArray(size_t& seed, const std::array<int, N>& values) {
+  for (int value : values) {
+    HashCombine(seed, value);
+  }
+}
+
+}  // namespace
+
+bool StrategyTables::BettingHistoryKey::operator==(
+    const BettingHistoryKey& other) const {
+  return street == other.street && pot == other.pot &&
+         stack_a == other.stack_a && stack_b == other.stack_b &&
+         all_in == other.all_in && folded_player == other.folded_player &&
+         player_to_act == other.player_to_act &&
+         player_contribution_size == other.player_contribution_size &&
+         player_contributions == other.player_contributions &&
+         history_size == other.history_size &&
+         history_values == other.history_values &&
+         history_overflow == other.history_overflow;
+}
+
+size_t StrategyTables::BettingHistoryKeyHash::operator()(
+    const BettingHistoryKey& key) const {
+  size_t seed = 0;
+  HashCombine(seed, key.street);
+  HashCombine(seed, key.pot);
+  HashCombine(seed, key.stack_a);
+  HashCombine(seed, key.stack_b);
+  HashCombine(seed, key.all_in);
+  HashCombine(seed, key.folded_player);
+  HashCombine(seed, key.player_to_act);
+  HashCombine(seed, key.player_contribution_size);
+  HashArray(seed, key.player_contributions);
+  HashCombine(seed, key.history_size);
+  HashArray(seed, key.history_values);
+  for (int value : key.history_overflow) {
+    HashCombine(seed, value);
+  }
+  return seed;
+}
+
+bool StrategyTables::PublicStateKey::operator==(
+    const PublicStateKey& other) const {
+  return betting_history_id == other.betting_history_id &&
+         public_bucket == other.public_bucket;
+}
+
+size_t StrategyTables::PublicStateKeyHash::operator()(
+    const PublicStateKey& key) const {
+  size_t seed = 0;
+  HashCombine(seed, static_cast<uint64_t>(key.betting_history_id));
+  HashCombine(seed, key.public_bucket);
+  return seed;
+}
+
+}  // namespace poker

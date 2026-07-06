@@ -89,8 +89,8 @@ class CFRSolverRegretTestPeer {
     }
     for (uint16_t i = 0; i < row->action_count; ++i) {
       const size_t table_index = row->action_offset + i;
-      if (solver.action_ids_[table_index] == action_id) {
-        return solver.cumulative_regrets_[table_index];
+      if (solver.tables_->action_ids[table_index] == action_id) {
+        return solver.tables_->cumulative_regrets[table_index];
       }
     }
     throw std::runtime_error("Regret action was not created");
@@ -201,8 +201,8 @@ class CFRSolverRegretTestPeer {
     const GameState native_state = TestGameState(state);
     const uint32_t public_state_id =
         CompactPublicStateId(solver, native_state);
-    return public_state_id < solver.public_info_set_slabs_.size() &&
-           solver.public_info_set_slabs_[public_state_id] != nullptr;
+    return public_state_id < solver.tables_->public_info_set_slabs.size() &&
+           solver.tables_->public_info_set_slabs[public_state_id] != nullptr;
   }
 
   static int SlabInfoSetOffset(CFRSolver& solver,
@@ -249,37 +249,37 @@ class CFRSolverRegretTestPeer {
   static uint32_t ActionTransitionId(const CFRSolver& solver,
                                      uint32_t betting_history_id,
                                      int action_index) {
-    if (betting_history_id >= solver.betting_history_rows_.size()) {
+    if (betting_history_id >= solver.tables_->betting_history_rows.size()) {
       return GameTree::Node::kInvalidBettingHistoryId;
     }
-    return solver.betting_history_rows_[betting_history_id]
+    return solver.tables_->betting_history_rows[betting_history_id]
         .action_child_ids[static_cast<size_t>(action_index)];
   }
 
   static uint8_t BettingHistoryActionCount(const CFRSolver& solver,
                                            uint32_t betting_history_id) {
-    if (betting_history_id >= solver.betting_history_rows_.size()) {
+    if (betting_history_id >= solver.tables_->betting_history_rows.size()) {
       return 0;
     }
-    return solver.betting_history_rows_[betting_history_id].action_count;
+    return solver.tables_->betting_history_rows[betting_history_id].action_count;
   }
 
   static int BettingHistoryActionId(const CFRSolver& solver,
                                     uint32_t betting_history_id,
                                     int action_index) {
-    if (betting_history_id >= solver.betting_history_rows_.size()) {
+    if (betting_history_id >= solver.tables_->betting_history_rows.size()) {
       return 0;
     }
-    return solver.betting_history_rows_[betting_history_id]
+    return solver.tables_->betting_history_rows[betting_history_id]
         .action_ids[static_cast<size_t>(action_index)];
   }
 
   static int BettingHistoryPot(const CFRSolver& solver,
                                uint32_t betting_history_id) {
-    if (betting_history_id >= solver.betting_history_rows_.size()) {
+    if (betting_history_id >= solver.tables_->betting_history_rows.size()) {
       return -1;
     }
-    return solver.betting_history_rows_[betting_history_id].pot;
+    return solver.tables_->betting_history_rows[betting_history_id].pot;
   }
 
   static std::pair<uint32_t, CFRSolver::TraversalStats>
@@ -287,14 +287,10 @@ class CFRSolverRegretTestPeer {
                                     const GameTree::Node& parent,
                                     const GameTree::Node& child,
                                     int action_index) {
-    absl::flat_hash_map<CFRSolver::BettingHistoryKey, uint32_t,
-                        CFRSolver::BettingHistoryKeyHash>
-        empty_betting_history_ids;
-    CFRSolver::StrategyTablesView tables = source.strategy_tables_view();
-    tables.betting_history_ids = &empty_betting_history_ids;
-
     CFRSolver worker(source.config_);
-    worker.strategy_tables_view_ = &tables;
+    worker.tables_ = std::make_shared<StrategyTables>();
+    worker.tables_->betting_history_rows = source.tables_->betting_history_rows;
+    worker.frozen_ = true;
     GameTree::Node parent_copy = parent;
     GameTree::Node child_copy = child;
     child_copy.betting_history_id = GameTree::Node::kInvalidBettingHistoryId;
@@ -315,7 +311,7 @@ class CFRSolverRegretTestPeer {
 
   static uint8_t CompactPublicStateActionCount(const CFRSolver& solver,
                                                uint32_t public_state_id) {
-    return solver.public_state_rows_[public_state_id].action_count;
+    return solver.tables_->public_state_rows[public_state_id].action_count;
   }
 
   static void CompactPublicStateRowMetadata(CFRSolver& solver,
@@ -339,13 +335,13 @@ class CFRSolverRegretTestPeer {
   static uint32_t CompactPublicStateBettingHistoryId(
       const CFRSolver& solver,
       uint32_t public_state_id) {
-    return solver.public_state_rows_[public_state_id].betting_history_id;
+    return solver.tables_->public_state_rows[public_state_id].betting_history_id;
   }
 
   static int CompactPublicStateActionId(const CFRSolver& solver,
                                         uint32_t public_state_id,
                                         int action_index) {
-    return solver.public_state_rows_[public_state_id]
+    return solver.tables_->public_state_rows[public_state_id]
         .action_ids[static_cast<size_t>(action_index)];
   }
 
@@ -372,7 +368,7 @@ class CFRSolverRegretTestPeer {
   static uint32_t CompactActionChildRawId(const CFRSolver& solver,
                                           uint32_t public_state_id,
                                           int action_index) {
-    return solver.public_state_rows_[public_state_id]
+    return solver.tables_->public_state_rows[public_state_id]
         .action_child_ids[static_cast<size_t>(action_index)];
   }
 
@@ -388,7 +384,7 @@ class CFRSolverRegretTestPeer {
   static void CorruptCompactPublicStateActionId(CFRSolver& solver,
                                                 uint32_t public_state_id,
                                                 int action_index) {
-    ++solver.public_state_rows_[public_state_id]
+    ++solver.tables_->public_state_rows[public_state_id]
           .action_ids[static_cast<size_t>(action_index)];
   }
 
@@ -405,17 +401,17 @@ class CFRSolverRegretTestPeer {
 
   static StreetKind CompactPublicStateStreet(const CFRSolver& solver,
                                              uint32_t public_state_id) {
-    return solver.public_state_rows_[public_state_id].state.street;
+    return solver.tables_->public_state_rows[public_state_id].state.street;
   }
 
   static int CompactPublicStateBoardSize(const CFRSolver& solver,
                                          uint32_t public_state_id) {
-    return solver.public_state_rows_[public_state_id].state.board_count;
+    return solver.tables_->public_state_rows[public_state_id].state.board_count;
   }
 
   static int CompactPublicStateHistorySize(const CFRSolver& solver,
                                            uint32_t public_state_id) {
-    return solver.public_state_rows_[public_state_id].state.history_size;
+    return solver.tables_->public_state_rows[public_state_id].state.history_size;
   }
 
   static size_t LegacyGameTreeNodeCount(const CFRSolver& solver) {
@@ -540,7 +536,7 @@ class CFRSolverRegretTestPeer {
     std::optional<size_t> action_table_index;
     for (uint16_t i = 0; i < row->action_count; ++i) {
       const size_t table_index = row->action_offset + i;
-      if (solver.action_ids_[table_index] == action_id) {
+      if (solver.tables_->action_ids[table_index] == action_id) {
         action_table_index = table_index;
         break;
       }
@@ -548,12 +544,12 @@ class CFRSolverRegretTestPeer {
     if (!action_table_index.has_value()) {
       throw std::runtime_error("Seeded regret action is not legal");
     }
-    solver.cumulative_regrets_[*action_table_index] = regret;
+    solver.tables_->cumulative_regrets[*action_table_index] = regret;
   }
 
   static double TotalCumulativeStrategy(const CFRSolver& solver) {
     double total = 0.0;
-    for (float cumulative_strategy : solver.cumulative_strategies_) {
+    for (float cumulative_strategy : solver.tables_->cumulative_strategies) {
       total += cumulative_strategy;
     }
     return total;
@@ -602,7 +598,7 @@ class CFRSolverRegretTestPeer {
     const uint32_t public_state_id =
         CompactPublicStateId(solver, native_state);
     solver.condition_ranges_for_actions(
-        range, solver.public_state_rows_[public_state_id].state,
+        range, solver.tables_->public_state_rows[public_state_id].state,
         public_state_id, player, action_ids,
         action_count,
         conditioned_ranges);
