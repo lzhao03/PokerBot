@@ -1143,6 +1143,37 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
     }
     return existing_child_id;
   }
+
+  const uint32_t parent_betting_history_id = read_row.betting_history_id;
+  const auto& betting_history_rows = frozen_tables_->betting_history_rows;
+  if (parent_betting_history_id < betting_history_rows.size()) {
+    const BettingHistoryRow& parent_betting_history =
+        betting_history_rows[parent_betting_history_id];
+    if (action_index >= 0 &&
+        action_index < parent_betting_history.action_count) {
+      const uint32_t child_betting_history_id =
+          parent_betting_history.action_child_ids[action_slot];
+      if (child_betting_history_id !=
+          GameTree::Node::kInvalidBettingHistoryId) {
+        const PublicStateKey child_key{
+            child_betting_history_id,
+            read_row.public_bucket,
+        };
+        auto existing_public_child =
+            frozen_tables_->public_state_ids.find(child_key);
+        if (existing_public_child != frozen_tables_->public_state_ids.end()) {
+          if (!frozen_) {
+            mutable_tables()
+                .public_state_rows[public_state_id]
+                .action_child_ids[action_slot] = existing_public_child->second;
+          }
+          POKER_RECORD_TRAVERSAL_STAT(
+              ++traversal_stats_.betting_history_transition_hits);
+          return existing_public_child->second;
+        }
+      }
+    }
+  }
   if (frozen_) {
     POKER_RECORD_TRAVERSAL_STAT(
         ++traversal_stats_.betting_history_transition_misses);
@@ -1161,8 +1192,6 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
 
   const GameAction action =
       frozen_tables_->public_state_rows[public_state_id].actions[action_slot];
-  const uint32_t parent_betting_history_id =
-      frozen_tables_->public_state_rows[public_state_id].betting_history_id;
   CompactPublicState child_state = game_tree_->apply_action(
       frozen_tables_->public_state_rows[public_state_id].state, action);
   const uint32_t child_betting_history_id =

@@ -104,6 +104,22 @@ class CFRSolverRegretTestPeer {
     return *child_id;
   }
 
+  static std::optional<uint32_t> CompactActionChildOptional(
+      CFRSolver& solver,
+      uint32_t public_state_id,
+      int action_index) {
+    return solver.get_or_create_action_child_public_state(public_state_id,
+                                                          action_index);
+  }
+
+  static void ClearCompactActionChild(CFRSolver& solver,
+                                      uint32_t public_state_id,
+                                      int action_index) {
+    solver.mutable_tables_->public_state_rows[public_state_id]
+        .action_child_ids[static_cast<size_t>(action_index)] =
+        GameTree::Node::kInvalidPublicStateId;
+  }
+
   static uint32_t CompactPublicStateBettingHistoryId(
       const CFRSolver& solver,
       uint32_t public_state_id) {
@@ -321,6 +337,42 @@ void CheckCoarseLegalActionsUseAbstractBettingState() {
          "same coarse action slot should reuse action id");
 }
 
+void CheckCoarseActionChildUsesBettingHistoryTransition() {
+  SolverConfig config;
+  config.max_public_states = 2;
+  CFRSolver solver(config);
+  const GameState state = BettingState(8, 18, 23, 4, 4);
+  const uint32_t public_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, state);
+
+  int all_in_index = -1;
+  const int action_count =
+      CFRSolverRegretTestPeer::CompactPublicStateActionCount(solver,
+                                                             public_id);
+  for (int i = 0; i < action_count; ++i) {
+    if (CFRSolverRegretTestPeer::CompactPublicStateActionKind(
+            solver, public_id, i) == ActionKind::kAllIn) {
+      all_in_index = i;
+      break;
+    }
+  }
+  Expect(all_in_index >= 0, "fixture should include all-in");
+
+  const uint32_t child_id =
+      CFRSolverRegretTestPeer::CompactActionChild(solver, public_id,
+                                                  all_in_index);
+  CFRSolverRegretTestPeer::ClearCompactActionChild(solver, public_id,
+                                                   all_in_index);
+
+  const std::optional<uint32_t> repeated_child_id =
+      CFRSolverRegretTestPeer::CompactActionChildOptional(solver, public_id,
+                                                          all_in_index);
+  Expect(repeated_child_id.has_value(),
+         "cached betting-history transition should recover existing public child at cap");
+  Expect(*repeated_child_id == child_id,
+         "cached betting-history transition should return existing public child");
+}
+
 void CheckStreetOnlyPublicBucketsEnterFrozenParallelPhase() {
   SolverConfig config;
   config.starting_stack_size = 20;
@@ -355,6 +407,7 @@ int main() {
   poker::CheckCoarseBettingHistoryBucketsChipState();
   poker::CheckCoarseBettingHistoryKeepsActionSlotsDistinct();
   poker::CheckCoarseLegalActionsUseAbstractBettingState();
+  poker::CheckCoarseActionChildUsesBettingHistoryTransition();
   poker::CheckStreetOnlyPublicBucketsEnterFrozenParallelPhase();
   return 0;
 }
