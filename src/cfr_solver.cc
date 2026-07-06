@@ -1384,7 +1384,7 @@ bool CFRSolver::prebuild_info_set_rows(
     return true;
   }
 
-  std::array<uint32_t, kComboCount> seen_buckets = {};
+  std::vector<uint32_t> seen_buckets;
   uint32_t seen_generation = 1;
 
   for (uint32_t public_state_id = 0;
@@ -1404,8 +1404,16 @@ bool CFRSolver::prebuild_info_set_rows(
       continue;
     }
 
+    const uint32_t bucket_count =
+        card_abstraction_.private_bucket_count(row.state);
+    if (bucket_count == 0 || bucket_count > kComboCount) {
+      return false;
+    }
+    if (seen_buckets.size() < bucket_count) {
+      seen_buckets.resize(bucket_count, 0);
+    }
     if (seen_generation == 0) {
-      seen_buckets.fill(0);
+      std::fill(seen_buckets.begin(), seen_buckets.end(), 0);
       seen_generation = 1;
     }
     const uint32_t generation = seen_generation++;
@@ -1422,7 +1430,7 @@ bool CFRSolver::prebuild_info_set_rows(
       }
       const PrivateBucketId private_bucket =
           card_abstraction_.private_bucket(combo_id, row.state);
-      if (private_bucket >= kComboCount) {
+      if (private_bucket >= bucket_count) {
         return false;
       }
       if (seen_buckets[private_bucket] == generation) {

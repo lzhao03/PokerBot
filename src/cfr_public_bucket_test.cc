@@ -30,6 +30,18 @@ class CFRSolverRegretTestPeer {
     return solver.card_abstraction_.public_bucket(state);
   }
 
+  static CFRSolver::PrivateBucketId PrivateBucket(
+      const CFRSolver& solver,
+      ComboId combo_id,
+      const GameState& state) {
+    return solver.card_abstraction_.private_bucket(combo_id, state);
+  }
+
+  static uint32_t PrivateBucketCount(const CFRSolver& solver,
+                                     const GameState& state) {
+    return solver.card_abstraction_.private_bucket_count(state);
+  }
+
   static uint32_t PublicStateId(CFRSolver& solver, const GameState& state) {
     const std::optional<uint32_t> public_state_id =
         solver.get_or_create_public_state_row(state);
@@ -350,6 +362,34 @@ void CheckTexturePublicBucketsMergeBoardsByTexture() {
          "coarse public bucket rows should be representative");
 }
 
+void CheckCoarsePrivateBucketsMergeCombos() {
+  SolverConfig config;
+  CFRSolver solver(config);
+  const GameState preflop = BettingState(3, 19, 18, 1, 2);
+  const ComboId ace_king_spades =
+      ExactCombo(14, SuitKind::kSpades, 13, SuitKind::kSpades);
+  const ComboId ace_king_hearts =
+      ExactCombo(14, SuitKind::kHearts, 13, SuitKind::kHearts);
+  const ComboId ace_king_offsuit =
+      ExactCombo(14, SuitKind::kSpades, 13, SuitKind::kHearts);
+
+  Expect(ace_king_spades != ace_king_hearts,
+         "fixture should use distinct exact combos");
+  Expect(CFRSolverRegretTestPeer::PrivateBucket(
+             solver, ace_king_spades, preflop) ==
+             CFRSolverRegretTestPeer::PrivateBucket(
+                 solver, ace_king_hearts, preflop),
+         "coarse private buckets should merge equivalent suited combos");
+  Expect(CFRSolverRegretTestPeer::PrivateBucket(
+             solver, ace_king_spades, preflop) !=
+             CFRSolverRegretTestPeer::PrivateBucket(
+                 solver, ace_king_offsuit, preflop),
+         "coarse private buckets should keep suitedness shape");
+  Expect(CFRSolverRegretTestPeer::PrivateBucketCount(solver, preflop) <
+             kComboCount,
+         "coarse private bucket count should be smaller than exact combos");
+}
+
 void CheckTextureBucketTerminalUtilityUsesExactBoard() {
   SolverConfig config;
   CFRSolver solver(config);
@@ -613,9 +653,9 @@ void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
   config.regret_only_training = true;
 
   HandRange player_a_range;
-  player_a_range.set_from_string("AA");
+  player_a_range.set_uniform_range();
   HandRange player_b_range;
-  player_b_range.set_from_string("KK");
+  player_b_range.set_uniform_range();
 
   CFRSolver solver(config);
   solver.run(3, player_a_range, player_b_range);
@@ -625,7 +665,9 @@ void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
   Expect(stats.public_state_prebuild_complete,
          "texture public buckets should complete shallow prebuild");
   Expect(stats.info_set_prebuild_complete,
-         "texture public buckets should prebuild infosets before freezing");
+         "texture/private buckets should prebuild full-range infosets before freezing");
+  Expect(stats.prebuild_info_sets > 0,
+         "shallow coarse prebuild should create infosets");
   Expect(stats.warmup_iterations == 2,
          "alternating updates should warm both players before freezing");
   Expect(stats.parallel_iterations == 1,
@@ -638,6 +680,7 @@ void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
 
 int main() {
   poker::CheckTexturePublicBucketsMergeBoardsByTexture();
+  poker::CheckCoarsePrivateBucketsMergeCombos();
   poker::CheckTextureBucketTerminalUtilityUsesExactBoard();
   poker::CheckCoarseBettingHistoryBucketsChipState();
   poker::CheckCoarseBettingHistoryKeepsActionSlotsDistinct();

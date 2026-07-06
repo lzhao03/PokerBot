@@ -349,9 +349,166 @@ private:
     }
   };
 
+#if POKER_COARSE_PUBLIC_BUCKETS
+  struct CoarsePrivateBuckets {
+    static constexpr uint32_t kPreflopBucketCount = 36;
+    static constexpr uint32_t kPostflopBucketsPerStreet = 36;
+    static constexpr uint32_t kBucketCount =
+        kPreflopBucketCount + 3 * kPostflopBucketsPerStreet;
+
+    template <typename State>
+    PrivateBucketId bucket(ComboId combo_id, const State& state) const {
+      const ComboInfo& combo = GetComboInfo(combo_id);
+      const int rank0 = RankFromCardId(combo.card0);
+      const int rank1 = RankFromCardId(combo.card1);
+      const int high = rank0 > rank1 ? rank0 : rank1;
+      const int low = rank0 > rank1 ? rank1 : rank0;
+      const bool pair = rank0 == rank1;
+      const bool suited = SuitFromCardId(combo.card0) ==
+                          SuitFromCardId(combo.card1);
+
+      if (state.street == StreetKind::kPreflop || BoardCount(state) == 0) {
+        const int shape = pair ? 0 : (suited ? 1 : 2);
+        return static_cast<PrivateBucketId>(
+            shape * 12 + HighRankGroup(high) * 3 + LowRankGroup(low));
+      }
+
+      const int street = static_cast<int>(state.street) - 1;
+      const int local_bucket =
+          MadeBucket(combo, state) * 9 + DrawBucket(combo, state) * 3 +
+          HoleStrengthBucket(high, low, pair, suited);
+      return static_cast<PrivateBucketId>(
+          kPreflopBucketCount + street * kPostflopBucketsPerStreet +
+          local_bucket);
+    }
+
+    template <typename State>
+    uint32_t bucket_count(const State&) const {
+      return kBucketCount;
+    }
+
+   private:
+    static int BoardCount(const GameState& state) {
+      return static_cast<int>(state.board_cards.size());
+    }
+
+    static int BoardCount(const CompactPublicState& state) {
+      return state.board_count;
+    }
+
+    static int HighRankGroup(int rank) {
+      if (rank >= 14) {
+        return 0;
+      }
+      if (rank >= 12) {
+        return 1;
+      }
+      return rank >= 9 ? 2 : 3;
+    }
+
+    static int LowRankGroup(int rank) {
+      if (rank >= 10) {
+        return 0;
+      }
+      return rank >= 7 ? 1 : 2;
+    }
+
+    static int HoleStrengthBucket(int high, int low, bool pair, bool suited) {
+      if (pair || high == 14 || (high >= 13 && low >= 10)) {
+        return 0;
+      }
+      const int gap = high - low;
+      if ((high >= 11 && low >= 8) || (suited && gap <= 2)) {
+        return 1;
+      }
+      return 2;
+    }
+
+    template <typename State>
+    static int MadeBucket(const ComboInfo& combo, const State& state) {
+      int rank_counts[15] = {};
+      ++rank_counts[RankFromCardId(combo.card0)];
+      ++rank_counts[RankFromCardId(combo.card1)];
+      for (int i = 0; i < BoardCount(state); ++i) {
+        ++rank_counts[
+            RankFromCardId(state.board_cards[static_cast<size_t>(i)])];
+      }
+
+      int pairs = 0;
+      int max_count = 0;
+      for (int rank = 2; rank <= 14; ++rank) {
+        if (rank_counts[rank] >= 2) {
+          ++pairs;
+        }
+        if (rank_counts[rank] > max_count) {
+          max_count = rank_counts[rank];
+        }
+      }
+      if (max_count >= 3) {
+        return 3;
+      }
+      if (pairs >= 2) {
+        return 2;
+      }
+      return pairs == 1 ? 1 : 0;
+    }
+
+    template <typename State>
+    static int DrawBucket(const ComboInfo& combo, const State& state) {
+      int suit_counts[4] = {};
+      uint16_t rank_mask = 0;
+      auto add_card = [&](CardId card) {
+        ++suit_counts[SuitIndex(SuitFromCardId(card))];
+        rank_mask |=
+            static_cast<uint16_t>(1u << (RankFromCardId(card) - 2));
+      };
+      add_card(combo.card0);
+      add_card(combo.card1);
+      for (int i = 0; i < BoardCount(state); ++i) {
+        add_card(state.board_cards[static_cast<size_t>(i)]);
+      }
+
+      for (int count : suit_counts) {
+        if (count >= 4) {
+          return 2;
+        }
+      }
+      return BestStraightWindowDensity(rank_mask) >= 4 ? 1 : 0;
+    }
+
+    static int CountBits(uint16_t value) {
+      int count = 0;
+      while (value != 0) {
+        count += value & 1u;
+        value >>= 1;
+      }
+      return count;
+    }
+
+    static int BestStraightWindowDensity(uint16_t rank_mask) {
+      int best = 0;
+      for (int start = 0; start <= 8; ++start) {
+        const int count = CountBits(
+            static_cast<uint16_t>((rank_mask >> start) & 0x1F));
+        if (count > best) {
+          best = count;
+        }
+      }
+      const uint16_t wheel_mask =
+          static_cast<uint16_t>((1u << 12) | 0x0F);
+      const int wheel_count = CountBits(rank_mask & wheel_mask);
+      return wheel_count > best ? wheel_count : best;
+    }
+  };
+#endif
+
   struct CardAbstraction {
     DefaultPublicCardBuckets public_buckets;
+#if POKER_COARSE_PUBLIC_BUCKETS
+    CoarsePrivateBuckets private_buckets;
+#else
     ExactPrivateBuckets private_buckets;
+#endif
 
     template <typename State>
     PublicBucketId public_bucket(const State& state) const {
