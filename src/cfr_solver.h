@@ -471,7 +471,7 @@ private:
       const CompactPublicState& child_state);
   uint32_t get_or_create_chance_child_betting_history_id(
       uint32_t parent_betting_history_id,
-      const GameState& child_state);
+      const CompactPublicState& child_state);
   uint32_t get_or_create_public_state_id(uint32_t betting_history_id,
                                          const GameState& state);
   uint32_t get_or_create_public_state_id(const GameState& state);
@@ -503,6 +503,13 @@ private:
   CompactPublicState apply_compact_action(
       const CompactPublicState& parent,
       const GameAction& action,
+      uint32_t child_betting_history_id);
+  void reset_compact_history(CompactPublicState& state);
+  int compact_first_player_for_street(const CompactPublicState& state) const;
+  void add_compact_board_card(CompactPublicState& state, CardId card);
+  CompactPublicState apply_compact_chance(
+      const CompactPublicState& parent,
+      absl::Span<const CardId> cards,
       uint32_t child_betting_history_id);
   PublicStateRow make_public_state_row(uint32_t betting_history_id,
                                        const GameState& state);

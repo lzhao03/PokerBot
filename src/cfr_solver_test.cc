@@ -151,6 +151,21 @@ class CFRSolverRegretTestPeer {
     return solver.materialize_game_state(child);
   }
 
+  static GameState ApplyCompactChance(CFRSolver& solver,
+                                      const GameState& state,
+                                      absl::Span<const CardId> cards) {
+    const uint32_t parent_betting_history_id =
+        solver.get_or_create_betting_history_id(state);
+    CFRSolver::CompactPublicState parent =
+        solver.compact_public_state_from_game_state(
+            parent_betting_history_id, state);
+    CFRSolver::CompactPublicState child =
+        solver.apply_compact_chance(
+            parent, cards, GameTree::Node::kInvalidBettingHistoryId);
+    child.betting_history_id = solver.get_or_create_betting_history_id(child);
+    return solver.materialize_game_state(child);
+  }
+
   static int InfoSetOffset(CFRSolver& solver,
                            const BoardState& state,
                            int player,
@@ -1351,6 +1366,36 @@ void CheckCompactPublicStateChanceTransitionsAreCached() {
   Expect(CFRSolverRegretTestPeer::CompactPublicStateHistorySize(
              solver, child_id) == 0,
          "compact chance transition should clear betting-round history");
+}
+
+void CheckCompactChanceMatchesGameTreeApplyChance() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  CFRSolver solver(TestSolverConfig(config));
+  GameTree game_tree(TestSolverConfig(config));
+
+  GameState chance_state;
+  chance_state.stack[0] = 18;
+  chance_state.stack[1] = 18;
+  chance_state.pot = 4;
+  chance_state.folded_player = -1;
+  chance_state.street = StreetKind::kPreflop;
+  chance_state.all_in = false;
+  chance_state.player_to_act = 0;
+  chance_state.player_contribution = {2, 2};
+  chance_state.history.push_back({ActionKind::kCall, 1, 0});
+  chance_state.history.push_back({ActionKind::kCheck, 0, 1});
+  const std::array<CardId, 3> flop = {
+      MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(7, SuitKind::kDiamonds),
+      MakeCardId(11, SuitKind::kClubs),
+  };
+
+  const GameState compact_child =
+      CFRSolverRegretTestPeer::ApplyCompactChance(solver, chance_state, flop);
+  const GameState engine_child = game_tree.apply_chance(chance_state, flop);
+  Expect(SameGameState(compact_child, engine_child),
+         "compact chance should match GameTree::apply_chance");
 }
 
 void CheckSparseSlabRowsUseExactCombos() {
@@ -2866,6 +2911,7 @@ int main() {
   CheckCompactPublicStateActionCapStoresSentinel();
   CheckCompactPublicStateActionValidationCatchesMismatch();
   CheckCompactPublicStateChanceTransitionsAreCached();
+  CheckCompactChanceMatchesGameTreeApplyChance();
   CheckSparseSlabRowsUseExactCombos();
   CheckSparseSlabTracksInfoSets();
   CheckTerminalUtilityCacheReusesScores();

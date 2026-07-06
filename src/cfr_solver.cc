@@ -927,6 +927,60 @@ CFRSolver::CompactPublicState CFRSolver::apply_compact_action(
   return child;
 }
 
+void CFRSolver::reset_compact_history(CompactPublicState& state) {
+  state.history_size = 0;
+  state.history_overflow_offset = std::numeric_limits<uint32_t>::max();
+  state.history_overflow_size = 0;
+}
+
+int CFRSolver::compact_first_player_for_street(
+    const CompactPublicState& state) const {
+  return state.street == StreetKind::kPreflop ? 0 : 1;
+}
+
+void CFRSolver::add_compact_board_card(CompactPublicState& state,
+                                       CardId card) {
+  if (state.board_count >= state.board_cards.size()) {
+    throw std::invalid_argument("Board already has five cards");
+  }
+  const CardMask card_bit = CardBit(card);
+  if ((state.board_mask & card_bit) != 0) {
+    throw std::invalid_argument("Duplicate board card");
+  }
+  state.board_cards[state.board_count] = card;
+  state.board_count += 1;
+  state.board_mask |= card_bit;
+}
+
+CFRSolver::CompactPublicState CFRSolver::apply_compact_chance(
+    const CompactPublicState& parent,
+    absl::Span<const CardId> cards,
+    uint32_t child_betting_history_id) {
+  CompactPublicState child = parent;
+  child.betting_history_id = child_betting_history_id;
+
+  switch (child.street) {
+    case StreetKind::kPreflop:
+      child.street = StreetKind::kFlop;
+      break;
+    case StreetKind::kFlop:
+      child.street = StreetKind::kTurn;
+      break;
+    case StreetKind::kTurn:
+      child.street = StreetKind::kRiver;
+      break;
+    case StreetKind::kRiver:
+      break;
+  }
+
+  for (CardId card : cards) {
+    add_compact_board_card(child, card);
+  }
+  reset_compact_history(child);
+  child.player_to_act = compact_first_player_for_street(child);
+  return child;
+}
+
 CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
     uint32_t betting_history_id,
     const GameState& state) {
@@ -1159,7 +1213,7 @@ uint32_t CFRSolver::get_or_create_action_child_betting_history_id(
 
 uint32_t CFRSolver::get_or_create_chance_child_betting_history_id(
     uint32_t parent_betting_history_id,
-    const GameState& child_state) {
+    const CompactPublicState& child_state) {
   if (parent_betting_history_id < betting_history_rows_.size()) {
     BettingHistoryRow& parent_row =
         betting_history_rows_[parent_betting_history_id];
@@ -1369,16 +1423,17 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
     return std::nullopt;
   }
 
-  const GameState parent_state =
-      materialize_game_state(public_state_rows_[public_state_id].state);
   const uint32_t parent_betting_history_id =
       public_state_rows_[public_state_id].state.betting_history_id;
-  const GameState child_state = game_tree_->apply_chance(parent_state, cards);
+  CompactPublicState child_state = apply_compact_chance(
+      public_state_rows_[public_state_id].state, cards,
+      GameTree::Node::kInvalidBettingHistoryId);
   const uint32_t child_betting_history_id =
       get_or_create_chance_child_betting_history_id(
           parent_betting_history_id, child_state);
+  child_state.betting_history_id = child_betting_history_id;
   std::optional<uint32_t> child_id =
-      get_or_create_public_state_row(child_betting_history_id, child_state);
+      get_or_create_public_state_row(std::move(child_state));
   if (!child_id.has_value()) {
     POKER_RECORD_TRAVERSAL_STAT(
         ++traversal_stats_.betting_history_transition_misses);
