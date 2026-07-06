@@ -23,20 +23,12 @@ namespace {
 #define POKER_STREET_ONLY_PUBLIC_BUCKETS 0
 #endif
 
-#ifndef POKER_BENCHMARK_MAX_DEPTH
-#define POKER_BENCHMARK_MAX_DEPTH -1
-#endif
-
 constexpr bool kProdBenchmarkDefaults = POKER_BENCHMARK_PROD_DEFAULTS != 0;
 constexpr bool kStreetOnlyPublicBuckets = POKER_STREET_ONLY_PUBLIC_BUCKETS != 0;
-constexpr int kBenchmarkMaxDepth = POKER_BENCHMARK_MAX_DEPTH;
 constexpr int kDefaultIterations = kProdBenchmarkDefaults ? 5000 : 100;
 constexpr int kDefaultEvalSamples = kProdBenchmarkDefaults ? 1 : 100;
 constexpr int kDefaultExploitabilitySamples = 10;
-constexpr int kDefaultMaxDepth =
-    kBenchmarkMaxDepth >= 0
-        ? kBenchmarkMaxDepth
-        : (kProdBenchmarkDefaults && kStreetOnlyPublicBuckets ? 1 : 0);
+constexpr int kDefaultMaxDepth = 0;
 constexpr int kDefaultWarmupIterations =
     kProdBenchmarkDefaults && kStreetOnlyPublicBuckets ? 1 : 0;
 constexpr int kDefaultMaxInfoSets = kProdBenchmarkDefaults ? 500000 : 0;
