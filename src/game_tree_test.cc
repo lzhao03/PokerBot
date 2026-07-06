@@ -50,6 +50,18 @@ GameState PreflopState() {
   return state;
 }
 
+CompactPublicState CompactPreflopState() {
+  CompactPublicState state;
+  state.stack = {99, 98};
+  state.pot = 3;
+  state.street = StreetKind::kPreflop;
+  state.all_in = false;
+  state.folded_player = -1;
+  state.player_contribution = {1, 2};
+  state.player_to_act = 0;
+  return state;
+}
+
 GameState FlopState() {
   GameState state;
   state.stack[0] = 98;
@@ -406,6 +418,23 @@ void CheckChanceAdvancesStreet(GameTree& tree) {
          "chance child has legal player actions");
 }
 
+void CheckCompactHistoryCap(GameTree& tree) {
+  CompactPublicState state = CompactPreflopState();
+  for (int i = 0; i < CompactPublicState::kMaxHistoryActions; ++i) {
+    AppendHistoryAction(state, {ActionKind::kCheck, 0, 0});
+  }
+
+  bool threw = false;
+  try {
+    (void)tree.apply_action(
+        state, MakeAction(ActionKind::kCall),
+        CompactPublicState::kInvalidBettingHistoryId);
+  } catch (const std::logic_error&) {
+    threw = true;
+  }
+  Expect(threw, "compact action append should enforce history cap");
+}
+
 }  // namespace
 }  // namespace poker
 
@@ -428,5 +457,6 @@ int main() {
   poker::CheckIndexedActionChildReuse();
   poker::CheckShowdownUtility(tree);
   poker::CheckChanceAdvancesStreet(tree);
+  poker::CheckCompactHistoryCap(tree);
   return 0;
 }

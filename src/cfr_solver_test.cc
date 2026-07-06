@@ -145,7 +145,7 @@ class CFRSolverRegretTestPeer {
         solver.compact_public_state_from_game_state(
             parent_betting_history_id, state);
     CompactPublicState child =
-        solver.apply_compact_action(
+        solver.game_tree_->apply_action(
             parent, action, GameTree::Node::kInvalidBettingHistoryId);
     child.betting_history_id = solver.get_or_create_betting_history_id(child);
     return solver.materialize_game_state(child);
@@ -160,7 +160,7 @@ class CFRSolverRegretTestPeer {
         solver.compact_public_state_from_game_state(
             parent_betting_history_id, state);
     CompactPublicState child =
-        solver.apply_compact_chance(
+        solver.game_tree_->apply_chance(
             parent, cards, GameTree::Node::kInvalidBettingHistoryId);
     child.betting_history_id = solver.get_or_create_betting_history_id(child);
     return solver.materialize_game_state(child);

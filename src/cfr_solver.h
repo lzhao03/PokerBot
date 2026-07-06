@@ -319,7 +319,6 @@ private:
     const std::vector<PublicStateRow>* public_state_rows = nullptr;
     const absl::flat_hash_map<uint64_t, uint32_t>* public_chance_child_ids =
         nullptr;
-    const std::vector<CompactAction>* public_state_history_overflow = nullptr;
     const std::vector<std::unique_ptr<PublicInfoSetSlab>>*
         public_info_set_slabs = nullptr;
     const std::vector<int>* action_ids = nullptr;
@@ -361,7 +360,6 @@ private:
       public_state_ids_;
   std::vector<PublicStateRow> public_state_rows_;
   absl::flat_hash_map<uint64_t, uint32_t> public_chance_child_ids_;
-  std::vector<CompactAction> public_state_history_overflow_;
   std::vector<BettingHistoryRow> betting_history_rows_;
   size_t info_set_count_ = 0;
   std::vector<int> action_ids_;
@@ -456,26 +454,6 @@ private:
       uint32_t betting_history_id,
       const GameState& state);
   GameState materialize_game_state(const CompactPublicState& state) const;
-  CompactAction compact_history_action(const CompactPublicState& state,
-                                       uint16_t action_index) const;
-  int compact_outstanding_to_call(const CompactPublicState& state,
-                                  int player) const;
-  int compact_commit_chips(CompactPublicState& state,
-                           int player,
-                           int requested);
-  void append_compact_history_action(CompactPublicState& state,
-                                     const GameAction& action);
-  CompactPublicState apply_compact_action(
-      const CompactPublicState& parent,
-      const GameAction& action,
-      uint32_t child_betting_history_id);
-  void reset_compact_history(CompactPublicState& state);
-  int compact_first_player_for_street(const CompactPublicState& state) const;
-  void add_compact_board_card(CompactPublicState& state, CardId card);
-  CompactPublicState apply_compact_chance(
-      const CompactPublicState& parent,
-      absl::Span<const CardId> cards,
-      uint32_t child_betting_history_id);
   PublicStateRow make_public_state_row(uint32_t betting_history_id,
                                        const GameState& state);
   PublicStateRow make_public_state_row(CompactPublicState state);
@@ -510,8 +488,6 @@ private:
   const std::vector<PublicStateRow>& strategy_public_state_rows() const;
   const absl::flat_hash_map<uint64_t, uint32_t>&
   strategy_public_chance_child_ids() const;
-  const std::vector<CompactAction>&
-  strategy_public_state_history_overflow() const;
   const std::vector<std::unique_ptr<PublicInfoSetSlab>>&
   strategy_public_info_set_slabs() const;
   const std::vector<int>& strategy_action_ids() const;

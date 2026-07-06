@@ -62,6 +62,11 @@ int StackForState(const State& state, int player) {
 }
 
 template <typename State>
+void SetStackForState(State& state, int player, int stack) {
+  state.stack[player] = stack;
+}
+
+template <typename State>
 int ContributionForState(const State& state, int player) {
   return state.player_contribution[player];
 }
@@ -87,8 +92,7 @@ GameAction LastAction(const GameState& state) {
 }
 
 GameAction LastAction(const CompactPublicState& state) {
-  return {state.last_action.kind, state.last_action.amount,
-          state.last_action.player};
+  return MakeGameAction(state.last_action);
 }
 
 template <typename State>
@@ -307,22 +311,40 @@ void SetLegalActions(GameTree::Node& node, std::vector<GameAction> actions) {
   }
 }
 
-int CommitChips(GameState& state, int player, int requested) {
+void AppendStateHistory(GameState& state, const GameAction& action) {
+  state.history.push_back(action);
+}
+
+void AppendStateHistory(CompactPublicState& state, const GameAction& action) {
+  AppendHistoryAction(state, action);
+}
+
+void ResetStateHistory(GameState& state) {
+  state.history.clear();
+}
+
+void ResetStateHistory(CompactPublicState& state) {
+  ResetHistory(state);
+}
+
+template <typename State>
+int CommitChips(State& state, int player, int requested) {
   if (requested <= 0) {
     throw std::invalid_argument("Action amount must be positive");
   }
 
-  const int committed = std::min(requested, Stack(state, player));
+  const int committed = std::min(requested, StackForState(state, player));
   state.player_contribution[player] += committed;
-  SetStack(state, player, Stack(state, player) - committed);
+  SetStackForState(state, player, StackForState(state, player) - committed);
   state.pot += committed;
-  if (Stack(state, player) == 0) {
+  if (StackForState(state, player) == 0) {
     state.all_in = true;
   }
   return committed;
 }
 
-void AdvanceStreet(GameState& state, absl::Span<const CardId> cards) {
+template <typename State>
+void AdvanceStreet(State& state, absl::Span<const CardId> cards) {
   switch (state.street) {
     case StreetKind::kPreflop:
       state.street = StreetKind::kFlop;
@@ -340,8 +362,96 @@ void AdvanceStreet(GameState& state, absl::Span<const CardId> cards) {
   for (CardId card : cards) {
     AddBoardCard(state, card);
   }
-  state.history.clear();
+  ResetStateHistory(state);
   state.player_to_act = FirstPlayerForStreet(state);
+}
+
+template <typename State>
+State ApplyActionForState(const State& state, const GameAction& action) {
+  State new_state = state;
+
+  int player = new_state.player_to_act;
+  if (!IsPlayer(player)) {
+    player = PlayerToAct(new_state);
+  }
+  if (!IsPlayer(player)) {
+    throw std::invalid_argument("No player can act in this state");
+  }
+  if (new_state.folded_player >= 0) {
+    throw std::invalid_argument("Cannot act after a player has folded");
+  }
+  if (StackForState(new_state, player) <= 0) {
+    throw std::invalid_argument("Player has no chips to act");
+  }
+
+  const int opponent = Opponent(player);
+  const int to_call = OutstandingToCall(new_state, player);
+  GameAction applied = action;
+  applied.player = player;
+
+  switch (action.kind) {
+    case ActionKind::kFold:
+      applied.amount = 0;
+      new_state.folded_player = player;
+      new_state.player_to_act = -1;
+      break;
+    case ActionKind::kCheck:
+      if (to_call != 0) {
+        throw std::invalid_argument("Cannot check facing a bet");
+      }
+      applied.amount = 0;
+      new_state.player_to_act = opponent;
+      break;
+    case ActionKind::kCall: {
+      if (to_call == 0) {
+        throw std::invalid_argument("Cannot call without a bet");
+      }
+      const int committed = CommitChips(new_state, player, to_call);
+      applied.amount = committed;
+      new_state.player_to_act = opponent;
+      break;
+    }
+    case ActionKind::kBet: {
+      if (to_call != 0) {
+        throw std::invalid_argument("Cannot bet facing a bet");
+      }
+      if (action.amount >= StackForState(new_state, player)) {
+        throw std::invalid_argument("Use all-in for full-stack bets");
+      }
+      const int committed = CommitChips(new_state, player, action.amount);
+      applied.amount = committed;
+      new_state.player_to_act = opponent;
+      break;
+    }
+    case ActionKind::kRaise: {
+      if (to_call == 0) {
+        throw std::invalid_argument("Cannot raise without a bet");
+      }
+      if (action.amount <= to_call ||
+          StackForState(new_state, player) <= to_call) {
+        throw std::invalid_argument("Raise must exceed the call amount");
+      }
+      if (action.amount >= StackForState(new_state, player)) {
+        throw std::invalid_argument("Use all-in for full-stack raises");
+      }
+      const int committed = CommitChips(new_state, player, action.amount);
+      applied.amount = committed;
+      new_state.player_to_act = opponent;
+      break;
+    }
+    case ActionKind::kAllIn: {
+      const int committed =
+          CommitChips(new_state, player, StackForState(new_state, player));
+      applied.amount = committed;
+      new_state.player_to_act = opponent;
+      break;
+    }
+    case ActionKind::kNoAction:
+      throw std::invalid_argument("Unknown action type");
+  }
+
+  AppendStateHistory(new_state, applied);
+  return new_state;
 }
 
 }  // namespace
@@ -417,89 +527,16 @@ uint8_t GameTree::get_legal_actions(
 
 GameState GameTree::apply_action(const GameState& state,
                                  const GameAction& action) const {
-  GameState new_state = state;
+  return ApplyActionForState(state, action);
+}
 
-  int player = new_state.player_to_act;
-  if (!IsPlayer(player)) {
-    player = get_player_to_act(new_state);
-  }
-  if (!IsPlayer(player)) {
-    throw std::invalid_argument("No player can act in this state");
-  }
-  if (new_state.folded_player >= 0) {
-    throw std::invalid_argument("Cannot act after a player has folded");
-  }
-  if (Stack(new_state, player) <= 0) {
-    throw std::invalid_argument("Player has no chips to act");
-  }
-
-  const int opponent = Opponent(player);
-  const int to_call = OutstandingToCall(new_state, player);
-  GameAction applied = action;
-  applied.player = player;
-
-  switch (action.kind) {
-    case ActionKind::kFold:
-      applied.amount = 0;
-      new_state.folded_player = player;
-      new_state.player_to_act = -1;
-      break;
-    case ActionKind::kCheck:
-      if (to_call != 0) {
-        throw std::invalid_argument("Cannot check facing a bet");
-      }
-      applied.amount = 0;
-      new_state.player_to_act = opponent;
-      break;
-    case ActionKind::kCall: {
-      if (to_call == 0) {
-        throw std::invalid_argument("Cannot call without a bet");
-      }
-      const int committed = CommitChips(new_state, player, to_call);
-      applied.amount = committed;
-      new_state.player_to_act = opponent;
-      break;
-    }
-    case ActionKind::kBet: {
-      if (to_call != 0) {
-        throw std::invalid_argument("Cannot bet facing a bet");
-      }
-      if (action.amount >= Stack(new_state, player)) {
-        throw std::invalid_argument("Use all-in for full-stack bets");
-      }
-      const int committed = CommitChips(new_state, player, action.amount);
-      applied.amount = committed;
-      new_state.player_to_act = opponent;
-      break;
-    }
-    case ActionKind::kRaise: {
-      if (to_call == 0) {
-        throw std::invalid_argument("Cannot raise without a bet");
-      }
-      if (action.amount <= to_call || Stack(new_state, player) <= to_call) {
-        throw std::invalid_argument("Raise must exceed the call amount");
-      }
-      if (action.amount >= Stack(new_state, player)) {
-        throw std::invalid_argument("Use all-in for full-stack raises");
-      }
-      const int committed = CommitChips(new_state, player, action.amount);
-      applied.amount = committed;
-      new_state.player_to_act = opponent;
-      break;
-    }
-    case ActionKind::kAllIn: {
-      const int committed =
-          CommitChips(new_state, player, Stack(new_state, player));
-      applied.amount = committed;
-      new_state.player_to_act = opponent;
-      break;
-    }
-    case ActionKind::kNoAction:
-      throw std::invalid_argument("Unknown action type");
-  }
-
-  new_state.history.push_back(applied);
-  return new_state;
+CompactPublicState GameTree::apply_action(
+    const CompactPublicState& state,
+    const GameAction& action,
+    uint32_t child_betting_history_id) const {
+  CompactPublicState child = ApplyActionForState(state, action);
+  child.betting_history_id = child_betting_history_id;
+  return child;
 }
 
 GameState GameTree::apply_chance(const GameState& state,
@@ -511,6 +548,20 @@ GameState GameTree::apply_chance(const GameState& state,
   GameState new_state = state;
   AdvanceStreet(new_state, cards);
   return new_state;
+}
+
+CompactPublicState GameTree::apply_chance(
+    const CompactPublicState& state,
+    absl::Span<const CardId> cards,
+    uint32_t child_betting_history_id) const {
+  if (is_terminal(state) || get_player_to_act(state) != -1) {
+    throw std::invalid_argument("State is not a chance node");
+  }
+
+  CompactPublicState child = state;
+  AdvanceStreet(child, cards);
+  child.betting_history_id = child_betting_history_id;
+  return child;
 }
 
 double GameTree::get_utility(const GameState& state,

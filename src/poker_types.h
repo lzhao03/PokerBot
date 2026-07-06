@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -129,8 +130,6 @@ struct CompactPublicState {
   std::array<ActionKind, kMaxHistoryActions> history_kinds = {};
   uint16_t history_size = 0;
   CompactAction last_action;
-  uint32_t history_overflow_offset = std::numeric_limits<uint32_t>::max();
-  uint16_t history_overflow_size = 0;
   StreetKind street = StreetKind::kPreflop;
   bool all_in = false;
   int folded_player = -1;
@@ -139,6 +138,44 @@ struct CompactPublicState {
   int player_contribution_count = 0;
   uint32_t betting_history_id = kInvalidBettingHistoryId;
 };
+
+inline CompactAction MakeCompactAction(const GameAction& action) {
+  return {action.amount, static_cast<int8_t>(action.player), action.kind};
+}
+
+inline GameAction MakeGameAction(const CompactAction& action) {
+  return {action.kind, action.amount, action.player};
+}
+
+inline CompactAction CompactHistoryAction(const CompactPublicState& state,
+                                          uint16_t action_index) {
+  if (action_index >= state.history_size ||
+      action_index >= CompactPublicState::kMaxHistoryActions) {
+    throw std::logic_error("Compact history action index out of range");
+  }
+  const size_t index = static_cast<size_t>(action_index);
+  return {state.history_amounts[index],
+          state.history_players[index],
+          state.history_kinds[index]};
+}
+
+inline void AppendHistoryAction(CompactPublicState& state,
+                                const GameAction& action) {
+  if (state.history_size >= CompactPublicState::kMaxHistoryActions) {
+    throw std::logic_error("Compact public state history is full");
+  }
+  const size_t index = static_cast<size_t>(state.history_size);
+  state.history_amounts[index] = action.amount;
+  state.history_players[index] = static_cast<int8_t>(action.player);
+  state.history_kinds[index] = action.kind;
+  state.last_action = MakeCompactAction(action);
+  ++state.history_size;
+}
+
+inline void ResetHistory(CompactPublicState& state) {
+  state.history_size = 0;
+  state.last_action = CompactAction{};
+}
 
 inline int SuitIndex(SuitKind suit) {
   return static_cast<int>(suit);
@@ -167,6 +204,18 @@ inline CardId MakeCardId(int rank, SuitKind suit) {
 
 inline CardMask CardBit(CardId card_id) {
   return CardMask{1} << card_id;
+}
+
+inline void AddBoardCard(CompactPublicState& state, CardId card_id) {
+  if (state.board_count >= kMaxBoardCards) {
+    throw std::invalid_argument("Board already has five cards");
+  }
+  if ((state.board_mask & CardBit(card_id)) != 0) {
+    throw std::invalid_argument("Duplicate board card");
+  }
+  state.board_cards[state.board_count] = card_id;
+  ++state.board_count;
+  state.board_mask |= CardBit(card_id);
 }
 
 inline void AddBoardCard(GameState& state, CardId card_id) {
