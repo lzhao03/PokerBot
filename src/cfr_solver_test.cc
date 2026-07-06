@@ -81,13 +81,26 @@ class CFRSolverRegretTestPeer {
                        int player,
                        const Hand& hand,
                        int action_id) {
+    std::optional<double> regret =
+        MaybeRegret(solver, state, player, hand, action_id);
+    if (!regret.has_value()) {
+      throw std::runtime_error("Regret info set/action was not created");
+    }
+    return *regret;
+  }
+
+  static std::optional<double> MaybeRegret(CFRSolver& solver,
+                                           const GameState& state,
+                                           int player,
+                                           const Hand& hand,
+                                           int action_id) {
     const uint32_t public_state = CompactPublicStateId(solver, state);
     const CFRSolver::PrivateBucketId private_bucket =
         solver.card_abstraction_.private_bucket(TestComboId(hand), state);
     const CFRSolver::InfoSetRow* row =
         solver.find_info_set_row({public_state, player, private_bucket});
     if (row == nullptr) {
-      throw std::runtime_error("Regret info set was not created");
+      return std::nullopt;
     }
     for (uint16_t i = 0; i < row->action_count; ++i) {
       const size_t table_index = row->action_offset + i;
@@ -95,7 +108,7 @@ class CFRSolverRegretTestPeer {
         return solver.cumulative_->cumulative_regrets[table_index];
       }
     }
-    throw std::runtime_error("Regret action was not created");
+    return std::nullopt;
   }
 
   static double Regret(CFRSolver& solver,
@@ -519,7 +532,8 @@ class CFRSolverRegretTestPeer {
         *public_state_id, compact_state,
         CFRSolver::PrivateCards::FromCombo(TestComboId(player_a_hand)),
         CFRSolver::PrivateCards::FromCombo(TestComboId(player_b_hand)),
-        reach_probabilities, iteration, depth, max_depth, scratch,
+        reach_probabilities, iteration % kPlayerCount, iteration, depth,
+        max_depth, scratch,
         std::nullopt, std::nullopt);
   }
 
@@ -2945,7 +2959,7 @@ void CheckChanceSamplesVisitMultipleBoards() {
   one_sample_node.state = TestGameState(state);
   std::array<double, 2> one_sample_reach = {1.0, 1.0};
   TestCfr(one_sample_solver, one_sample_node, player_a_hand, player_b_hand,
-                        one_sample_reach, 0, 0, 1);
+          one_sample_reach, 1, 0, 1);
 
   PokerConfig three_sample_config;
   three_sample_config.set_starting_stack_size(10);
@@ -2956,7 +2970,7 @@ void CheckChanceSamplesVisitMultipleBoards() {
   three_sample_node.state = TestGameState(state);
   std::array<double, 2> three_sample_reach = {1.0, 1.0};
   TestCfr(three_sample_solver, three_sample_node, player_a_hand, player_b_hand,
-                          three_sample_reach, 0, 0, 1);
+          three_sample_reach, 1, 0, 1);
 
   Expect(one_sample_solver.get_strategy_profile().size() == 1,
          "default chance sampling should visit one sampled board");
@@ -3165,9 +3179,9 @@ void CheckPlayerBRegretsUsePlayerBUtility() {
   Hand player_a_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   Hand player_b_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
-  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0,
-          0, 2);
   TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 1,
+          0, 2);
+  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 3,
           0, 2);
 
   const CFRSolver::StrategyProfile strategy = solver.get_strategy_profile();
@@ -3175,6 +3189,51 @@ void CheckPlayerBRegretsUsePlayerBUtility() {
   Expect(action_probs.at(TestActionKey(ActionType::CALL, 1)) >
              action_probs.at(TestActionKey(ActionType::FOLD)),
          "player B should prefer the action that lowers player A utility");
+}
+
+void CheckAlternatingCfrUpdatesOnlyCurrentPlayer() {
+  PokerConfig config;
+  config.set_starting_stack_size(10);
+
+  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
+  Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
+
+  CFRSolver player_a_solver(TestSolverConfig(config));
+  GameTree::Node player_a_node;
+  player_a_node.state = TestGameState(RiverPlayerAFacingSmallCallState());
+  std::array<double, 2> reach_probabilities = {1.0, 1.0};
+  TestCfr(player_a_solver, player_a_node, player_a_hand, player_b_hand,
+          reach_probabilities, 1, 0, 1);
+  Expect(!CFRSolverRegretTestPeer::MaybeRegret(
+              player_a_solver, player_a_node.state, 0, player_a_hand,
+              TestActionKey(ActionType::CALL, 1))
+              .has_value(),
+         "player 0 infoset should not be written on player 1 update");
+  TestCfr(player_a_solver, player_a_node, player_a_hand, player_b_hand,
+          reach_probabilities, 0, 0, 1);
+  Expect(CFRSolverRegretTestPeer::MaybeRegret(
+             player_a_solver, player_a_node.state, 0, player_a_hand,
+             TestActionKey(ActionType::CALL, 1))
+             .has_value(),
+         "player 0 infoset should be written on player 0 update");
+
+  CFRSolver player_b_solver(TestSolverConfig(config));
+  GameTree::Node player_b_node;
+  player_b_node.state = TestGameState(RiverPlayerBFacingSmallCallState());
+  TestCfr(player_b_solver, player_b_node, player_a_hand, player_b_hand,
+          reach_probabilities, 0, 0, 1);
+  Expect(!CFRSolverRegretTestPeer::MaybeRegret(
+              player_b_solver, player_b_node.state, 1, player_b_hand,
+              TestActionKey(ActionType::CALL, 1))
+              .has_value(),
+         "player 1 infoset should not be written on player 0 update");
+  TestCfr(player_b_solver, player_b_node, player_a_hand, player_b_hand,
+          reach_probabilities, 1, 0, 1);
+  Expect(CFRSolverRegretTestPeer::MaybeRegret(
+             player_b_solver, player_b_node.state, 1, player_b_hand,
+             TestActionKey(ActionType::CALL, 1))
+             .has_value(),
+         "player 1 infoset should be written on player 1 update");
 }
 
 void CheckCfrPlusClipsNegativeRegrets() {
@@ -3214,13 +3273,13 @@ void CheckCfrPlusWeightsLaterStrategies() {
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
   TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0,
           0, 1);
-  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 1,
+  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 2,
           0, 1);
 
   const CFRSolver::StrategyProfile strategy = solver.get_strategy_profile();
   const auto action_probs = StrategyActionMap(strategy);
   Expect(std::abs(action_probs.at(TestActionKey(ActionType::CALL, 1)) -
-                  (5.0 / 6.0)) < 0.000001,
+                  (7.0 / 8.0)) < 0.000001,
          "CFR+ average strategy should weight later iterations linearly");
 }
 
@@ -3388,6 +3447,7 @@ int main() {
   CheckRangeBestResponseDoesNotKnowOpponentHand();
   CheckRangeBestResponseChanceUsesSampledOpponent();
   CheckPlayerBRegretsUsePlayerBUtility();
+  CheckAlternatingCfrUpdatesOnlyCurrentPlayer();
   CheckCfrPlusClipsNegativeRegrets();
   CheckCfrPlusWeightsLaterStrategies();
   CheckRegretOnlyTrainingSkipsAverageStrategyWrites();

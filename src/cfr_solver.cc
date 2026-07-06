@@ -1684,10 +1684,12 @@ void CFRSolver::run(int iterations, ComboId player_a_hand,
   const auto start = std::chrono::steady_clock::now();
   for (int i = 0; i < iterations; ++i) {
     std::array<double, 2> reach_probabilities = {1.0, 1.0};
+    const int update_player = iterations_run_ % kPlayerCount;
     cumulative_root_utility_ += cfr_with_ranges(
         *root_public_state_id, root_state,
         player_a_cards, player_b_cards,
-        reach_probabilities, iterations_run_, 0, max_depth, scratch,
+        reach_probabilities, update_player, iterations_run_, 0, max_depth,
+        scratch,
         std::nullopt, std::nullopt);
     ++iterations_run_;
   }
@@ -1797,6 +1799,7 @@ void CFRSolver::run_iterations(int iterations,
 
     VLOG(2) << "Iteration " << i + 1 << "/" << iterations;
     int cfr_iteration = iterations_run_;
+    const int update_player = cfr_iteration % kPlayerCount;
     std::array<double, 2> reach_probabilities = {1.0, 1.0};
     OptionalTrainingRange player_a_context_range;
     OptionalTrainingRange player_b_context_range;
@@ -1807,7 +1810,7 @@ void CFRSolver::run_iterations(int iterations,
     double dealt_value = cfr_with_ranges(
         *root_public_state_id, root_state,
         player_a_cards, player_b_cards,
-        reach_probabilities,
+        reach_probabilities, update_player,
         cfr_iteration, 0, max_depth, scratch, player_a_context_range,
         player_b_context_range);
 
@@ -1948,6 +1951,7 @@ void CFRSolver::run_iterations_parallel(
                 PrivateCards::FromCombo(deal.player_b_combo);
 
             const int cfr_iteration = iteration_begin + i;
+            const int update_player = cfr_iteration % kPlayerCount;
             std::array<double, 2> reach_probabilities = {1.0, 1.0};
             OptionalTrainingRange player_a_context_range;
             OptionalTrainingRange player_b_context_range;
@@ -1958,8 +1962,9 @@ void CFRSolver::run_iterations_parallel(
             local_utility += worker.cfr_with_ranges(
                 root_public_state_id, root_state,
                 player_a_cards, player_b_cards,
-                reach_probabilities, cfr_iteration, 0, max_depth, scratch,
-                player_a_context_range, player_b_context_range);
+                reach_probabilities, update_player, cfr_iteration, 0,
+                max_depth, scratch, player_a_context_range,
+                player_b_context_range);
           }
           return WorkerResult{local_utility, worker.get_traversal_stats(),
                               worker.get_cfr_update_count(), shard};
@@ -1984,6 +1989,7 @@ double CFRSolver::cfr_with_ranges(
     const PrivateCards& player_a_cards,
     const PrivateCards& player_b_cards,
     std::array<double, 2>& reach_probabilities,
+    int update_player,
     int iteration,
     int depth,
     int max_depth,
@@ -2011,8 +2017,8 @@ double CFRSolver::cfr_with_ranges(
 
   if (row.is_chance_node) {
     return chance_sampling_cfr(public_state_id, state, player_a_cards,
-                               player_b_cards, reach_probabilities, iteration,
-                               depth,
+                               player_b_cards, reach_probabilities,
+                               update_player, iteration, depth,
                                max_depth, scratch, player_a_range,
                                player_b_range);
   }
@@ -2038,10 +2044,14 @@ double CFRSolver::cfr_with_ranges(
   const InfoSetAddress info_set_address{
       public_state_id, player,
       card_abstraction_.private_bucket(player_cards.combo, row.state)};
+  const bool is_update_player = player == update_player;
   const InfoSetRow* info_set_row =
-      get_or_create_info_set_row(info_set_address,
-                                 absl::Span<const int>(row.action_ids.data(),
-                                                       row.action_count));
+      is_update_player
+          ? get_or_create_info_set_row(
+                info_set_address,
+                absl::Span<const int>(row.action_ids.data(),
+                                      row.action_count))
+          : find_info_set_row(info_set_address);
 
   const size_t action_count = row.action_count;
   const size_t info_set_action_count =
@@ -2140,8 +2150,8 @@ double CFRSolver::cfr_with_ranges(
 
     const double action_value = cfr_with_ranges(
         *child_public_state_id, child_state, player_a_cards, player_b_cards,
-        reach_probabilities, iteration, depth + 1, max_depth, scratch,
-        child_player_a_range, child_player_b_range);
+        reach_probabilities, update_player, iteration, depth + 1, max_depth,
+        scratch, child_player_a_range, child_player_b_range);
     action_values[action_index] = action_value;
     reach_probabilities[player] = previous_reach_probability;
     node_value += action_probabilities[action_index] * action_value;
@@ -2167,7 +2177,7 @@ double CFRSolver::cfr_with_ranges(
       break;
   }
 
-  if (has_info_set_row) {
+  if (has_info_set_row && is_update_player) {
     const double opponent_reach_prob = reach_probabilities[1 - player];
     auto& regrets = cumulative_->cumulative_regrets;
     for (size_t action_index = 0; action_index < action_count; ++action_index) {
@@ -2198,6 +2208,7 @@ double CFRSolver::chance_sampling_cfr(
     const PrivateCards& player_a_cards,
     const PrivateCards& player_b_cards,
     std::array<double, 2>& reach_probabilities,
+    int update_player,
     int iteration,
     int depth,
     int max_depth,
@@ -2253,8 +2264,9 @@ double CFRSolver::chance_sampling_cfr(
 
     value += cfr_with_ranges(*child_public_state_id, child_state,
                              player_a_cards,
-                             player_b_cards, reach_probabilities, iteration,
-                             depth, max_depth, scratch, child_player_a_range,
+                             player_b_cards, reach_probabilities,
+                             update_player, iteration, depth, max_depth,
+                             scratch, child_player_a_range,
                              child_player_b_range);
     ++evaluated;
   }
