@@ -426,9 +426,7 @@ void CheckCompactHistoryCap(GameTree& tree) {
 
   bool threw = false;
   try {
-    (void)tree.apply_action(
-        state, MakeAction(ActionKind::kCall),
-        CompactPublicState::kInvalidBettingHistoryId);
+    (void)tree.apply_action(state, MakeAction(ActionKind::kCall));
   } catch (const std::logic_error&) {
     threw = true;
   }

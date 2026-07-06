@@ -279,6 +279,7 @@ private:
     }
 
     CompactPublicState state;
+    uint32_t betting_history_id = GameTree::Node::kInvalidBettingHistoryId;
     PublicBucketId public_bucket = 0;
     bool is_terminal = false;
     bool is_chance_node = false;
@@ -451,16 +452,17 @@ private:
   void cache_betting_history_actions(uint32_t betting_history_id,
                                      const PublicStateRow& row);
   CompactPublicState compact_public_state_from_game_state(
-      uint32_t betting_history_id,
       const GameState& state);
   GameState materialize_game_state(const CompactPublicState& state) const;
   PublicStateRow make_public_state_row(uint32_t betting_history_id,
                                        const GameState& state);
-  PublicStateRow make_public_state_row(CompactPublicState state);
+  PublicStateRow make_public_state_row(uint32_t betting_history_id,
+                                       CompactPublicState state);
   std::optional<uint32_t> get_or_create_public_state_row(
       uint32_t betting_history_id,
       const GameState& state);
   std::optional<uint32_t> get_or_create_public_state_row(
+      uint32_t betting_history_id,
       CompactPublicState state);
   std::optional<uint32_t> get_or_create_public_state_row(
       const GameState& state);

@@ -119,16 +119,14 @@ public:
   GameState apply_action(const GameState& state,
                          const GameAction& action) const;
   CompactPublicState apply_action(const CompactPublicState& state,
-                                  const GameAction& action,
-                                  uint32_t child_betting_history_id) const;
+                                  const GameAction& action) const;
 
   // Apply sampled public cards at a chance node to get the next state.
   GameState apply_chance(const GameState& state,
                          absl::Span<const CardId> cards) const;
   CompactPublicState apply_chance(
       const CompactPublicState& state,
-      absl::Span<const CardId> cards,
-      uint32_t child_betting_history_id) const;
+      absl::Span<const CardId> cards) const;
   
   // Get the utility at a terminal state
   double get_utility(const GameState& state, ComboId player_a_hand,

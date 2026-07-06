@@ -532,11 +532,8 @@ GameState GameTree::apply_action(const GameState& state,
 
 CompactPublicState GameTree::apply_action(
     const CompactPublicState& state,
-    const GameAction& action,
-    uint32_t child_betting_history_id) const {
-  CompactPublicState child = ApplyActionForState(state, action);
-  child.betting_history_id = child_betting_history_id;
-  return child;
+    const GameAction& action) const {
+  return ApplyActionForState(state, action);
 }
 
 GameState GameTree::apply_chance(const GameState& state,
@@ -552,15 +549,13 @@ GameState GameTree::apply_chance(const GameState& state,
 
 CompactPublicState GameTree::apply_chance(
     const CompactPublicState& state,
-    absl::Span<const CardId> cards,
-    uint32_t child_betting_history_id) const {
+    absl::Span<const CardId> cards) const {
   if (is_terminal(state) || get_player_to_act(state) != -1) {
     throw std::invalid_argument("State is not a chance node");
   }
 
   CompactPublicState child = state;
   AdvanceStreet(child, cards);
-  child.betting_history_id = child_betting_history_id;
   return child;
 }
 

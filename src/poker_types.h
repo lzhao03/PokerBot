@@ -4,7 +4,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -117,8 +116,6 @@ struct CompactAction {
 
 struct CompactPublicState {
   static constexpr int kMaxHistoryActions = 32;
-  static constexpr uint32_t kInvalidBettingHistoryId =
-      std::numeric_limits<uint32_t>::max();
 
   std::array<int, kPlayerCount> stack = {0, 0};
   int pot = 0;
@@ -136,7 +133,6 @@ struct CompactPublicState {
   int player_to_act = 0;
   std::array<int, kPlayerCount> player_contribution = {0, 0};
   int player_contribution_count = 0;
-  uint32_t betting_history_id = kInvalidBettingHistoryId;
 };
 
 inline CompactAction MakeCompactAction(const GameAction& action) {

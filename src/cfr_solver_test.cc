@@ -139,50 +139,34 @@ class CFRSolverRegretTestPeer {
   static GameState ApplyCompactAction(CFRSolver& solver,
                                       const GameState& state,
                                       const GameAction& action) {
-    const uint32_t parent_betting_history_id =
-        solver.get_or_create_betting_history_id(state);
     CompactPublicState parent =
-        solver.compact_public_state_from_game_state(
-            parent_betting_history_id, state);
+        solver.compact_public_state_from_game_state(state);
     CompactPublicState child =
-        solver.game_tree_->apply_action(
-            parent, action, GameTree::Node::kInvalidBettingHistoryId);
-    child.betting_history_id = solver.get_or_create_betting_history_id(child);
+        solver.game_tree_->apply_action(parent, action);
     return solver.materialize_game_state(child);
   }
 
   static GameState ApplyCompactChance(CFRSolver& solver,
                                       const GameState& state,
                                       absl::Span<const CardId> cards) {
-    const uint32_t parent_betting_history_id =
-        solver.get_or_create_betting_history_id(state);
     CompactPublicState parent =
-        solver.compact_public_state_from_game_state(
-            parent_betting_history_id, state);
+        solver.compact_public_state_from_game_state(state);
     CompactPublicState child =
-        solver.game_tree_->apply_chance(
-            parent, cards, GameTree::Node::kInvalidBettingHistoryId);
-    child.betting_history_id = solver.get_or_create_betting_history_id(child);
+        solver.game_tree_->apply_chance(parent, cards);
     return solver.materialize_game_state(child);
   }
 
   static std::vector<GameAction> CompactLegalActions(CFRSolver& solver,
                                                      const GameState& state) {
-    const uint32_t betting_history_id =
-        solver.get_or_create_betting_history_id(state);
     CompactPublicState compact =
-        solver.compact_public_state_from_game_state(
-            betting_history_id, state);
+        solver.compact_public_state_from_game_state(state);
     GameTree game_tree(solver.config_);
     return game_tree.get_legal_actions(compact);
   }
 
   static CompactPublicState CompactState(CFRSolver& solver,
                                          const GameState& state) {
-    const uint32_t betting_history_id =
-        solver.get_or_create_betting_history_id(state);
-    return solver.compact_public_state_from_game_state(
-        betting_history_id, state);
+    return solver.compact_public_state_from_game_state(state);
   }
 
   static int InfoSetOffset(CFRSolver& solver,
@@ -343,10 +327,9 @@ class CFRSolverRegretTestPeer {
     const uint32_t betting_history_id =
         solver.get_or_create_betting_history_id(state);
     CompactPublicState compact =
-        solver.compact_public_state_from_game_state(
-            betting_history_id, state);
+        solver.compact_public_state_from_game_state(state);
     const CFRSolver::PublicStateRow row =
-        solver.make_public_state_row(std::move(compact));
+        solver.make_public_state_row(betting_history_id, std::move(compact));
     is_terminal = row.is_terminal;
     player_to_act = row.player_to_act;
     is_chance_node = row.is_chance_node;
@@ -356,7 +339,7 @@ class CFRSolverRegretTestPeer {
   static uint32_t CompactPublicStateBettingHistoryId(
       const CFRSolver& solver,
       uint32_t public_state_id) {
-    return solver.public_state_rows_[public_state_id].state.betting_history_id;
+    return solver.public_state_rows_[public_state_id].betting_history_id;
   }
 
   static int CompactPublicStateActionId(const CFRSolver& solver,
