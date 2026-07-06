@@ -79,7 +79,7 @@ class CFRSolverRegretTestPeer {
                        int player,
                        const Hand& hand,
                        int action_id) {
-    auto public_state = solver.get_or_create_public_state_id(state);
+    const uint32_t public_state = CompactPublicStateId(solver, state);
     const CFRSolver::PrivateBucketId private_bucket =
         solver.card_abstraction_.private_bucket(TestComboId(hand), state);
     const CFRSolver::InfoSetRow* row =
@@ -128,7 +128,7 @@ class CFRSolverRegretTestPeer {
   }
 
   static uint32_t PublicStateId(CFRSolver& solver, const BoardState& state) {
-    return solver.get_or_create_public_state_id(TestGameState(state));
+    return CompactPublicStateId(solver, TestGameState(state));
   }
 
   static uint32_t BettingHistoryId(CFRSolver& solver,
@@ -198,7 +198,7 @@ class CFRSolverRegretTestPeer {
       action_id_buf[num_actions++] = GameTree::action_key(action);
     }
     const uint32_t public_state_id =
-        solver.get_or_create_public_state_id(native_state);
+        CompactPublicStateId(solver, native_state);
     const CFRSolver::PrivateBucketId private_bucket =
         solver.card_abstraction_.private_bucket(TestComboId(hand),
                                                 native_state);
@@ -216,7 +216,7 @@ class CFRSolverRegretTestPeer {
                                    const BoardState& state) {
     const GameState native_state = TestGameState(state);
     const uint32_t public_state_id =
-        solver.get_or_create_public_state_id(native_state);
+        CompactPublicStateId(solver, native_state);
     return public_state_id < solver.public_info_set_slabs_.size() &&
            solver.public_info_set_slabs_[public_state_id] != nullptr;
   }
@@ -227,7 +227,7 @@ class CFRSolverRegretTestPeer {
                                const Hand& hand) {
     const GameState native_state = TestGameState(state);
     const uint32_t public_state_id =
-        solver.get_or_create_public_state_id(native_state);
+        CompactPublicStateId(solver, native_state);
     const CFRSolver::PrivateBucketId private_bucket =
         solver.card_abstraction_.private_bucket(TestComboId(hand),
                                                 native_state);
@@ -443,7 +443,7 @@ class CFRSolverRegretTestPeer {
                                            const GameTree::Node& node,
                                            int player) {
     const uint32_t public_state_id =
-        solver.get_or_create_public_state_id(node.state);
+        CompactPublicStateId(solver, node.state);
     const CFRSolver::PublicInfoSetSlab* slab =
         solver.public_info_set_slab(public_state_id);
     if (slab == nullptr) {
@@ -543,7 +543,7 @@ class CFRSolverRegretTestPeer {
       action_id_buf[num_actions++] = GameTree::action_key(action);
     }
     const uint32_t public_state_id =
-        solver.get_or_create_public_state_id(native_state);
+        CompactPublicStateId(solver, native_state);
     const CFRSolver::PrivateBucketId private_bucket =
         solver.card_abstraction_.private_bucket(TestComboId(hand),
                                                 native_state);
@@ -617,7 +617,7 @@ class CFRSolverRegretTestPeer {
 
     CFRSolver::ConditionedRanges conditioned_ranges;
     const uint32_t public_state_id =
-        solver.get_or_create_public_state_id(native_state);
+        CompactPublicStateId(solver, native_state);
     solver.condition_ranges_for_actions(
         range, solver.public_state_rows_[public_state_id].state,
         public_state_id, player, action_ids,

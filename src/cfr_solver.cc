@@ -1048,17 +1048,6 @@ CFRSolver::InfoSetRow CFRSolver::append_info_set_actions(
   return row;
 }
 
-uint32_t CFRSolver::get_or_create_public_state_id(
-    uint32_t betting_history_id,
-    const GameState& state) {
-  const std::optional<uint32_t> public_state_id =
-      get_or_create_public_state_row(betting_history_id, state);
-  if (!public_state_id.has_value()) {
-    throw std::logic_error("Could not allocate public state row");
-  }
-  return *public_state_id;
-}
-
 std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
     uint32_t betting_history_id,
     const GameState& state) {
@@ -1141,11 +1130,6 @@ std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
 
   const uint32_t betting_history_id = get_or_create_betting_history_id(state);
   return get_or_create_public_state_row(betting_history_id, state);
-}
-
-uint32_t CFRSolver::get_or_create_public_state_id(const GameState& state) {
-  const uint32_t betting_history_id = get_or_create_betting_history_id(state);
-  return get_or_create_public_state_id(betting_history_id, state);
 }
 
 uint32_t CFRSolver::get_or_create_betting_history_id(const GameState& state) {
@@ -1237,46 +1221,6 @@ uint32_t CFRSolver::get_or_create_chance_child_betting_history_id(
         child_id;
   }
   return child_id;
-}
-
-uint32_t CFRSolver::get_or_create_public_state_id(GameTree::Node& node) {
-  const uint32_t betting_history_id = get_or_create_betting_history_id(node);
-  return get_or_create_public_state_id(node, betting_history_id);
-}
-
-uint32_t CFRSolver::get_or_create_public_state_id(
-    GameTree::Node& node,
-    uint32_t betting_history_id) {
-  if (node.public_state_id != GameTree::Node::kInvalidPublicStateId) {
-    return node.public_state_id;
-  }
-
-  PublicStateKey key = make_public_state_key(betting_history_id, node.state);
-  auto existing = public_state_ids_.find(key);
-  if (existing != public_state_ids_.end()) {
-    node.public_state_id = existing->second;
-    return node.public_state_id;
-  }
-
-  node.public_state_id = static_cast<uint32_t>(public_state_ids_.size());
-  public_state_ids_.emplace(std::move(key), node.public_state_id);
-  const bool can_store_row =
-      !frozen_ && (config_.max_public_states <= 0 ||
-                   static_cast<int>(public_state_rows_.size()) <
-                       config_.max_public_states);
-  if (can_store_row) {
-    PublicStateRow row = make_public_state_row(betting_history_id, node.state);
-    row.is_terminal = node.is_terminal;
-    row.is_chance_node = node.is_chance_node;
-    row.player_to_act = node.player_to_act;
-    row.action_count = node.action_count;
-    for (int i = 0; i < node.action_count; ++i) {
-      row.actions[static_cast<size_t>(i)] = node.actions[i].action;
-      row.action_ids[static_cast<size_t>(i)] = node.actions[i].key;
-    }
-    public_state_rows_.push_back(std::move(row));
-  }
-  return node.public_state_id;
 }
 
 void CFRSolver::cache_betting_history_actions(

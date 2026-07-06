@@ -443,12 +443,6 @@ private:
   uint32_t get_or_create_chance_child_betting_history_id(
       uint32_t parent_betting_history_id,
       const CompactPublicState& child_state);
-  uint32_t get_or_create_public_state_id(uint32_t betting_history_id,
-                                         const GameState& state);
-  uint32_t get_or_create_public_state_id(const GameState& state);
-  uint32_t get_or_create_public_state_id(GameTree::Node& node);
-  uint32_t get_or_create_public_state_id(GameTree::Node& node,
-                                         uint32_t betting_history_id);
   void cache_action_betting_history_transition(GameTree::Node& node,
                                                int action_index,
                                                GameTree::Node& child_node);
