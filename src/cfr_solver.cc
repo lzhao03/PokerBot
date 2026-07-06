@@ -1147,21 +1147,21 @@ int32_t& CFRSolver::get_or_create_private_row_slot(
   return chunk->rows[chunk_offset];
 }
 
-std::optional<CFRSolver::InfoSetRow> CFRSolver::get_or_create_info_set_row(
+const CFRSolver::InfoSetRow* CFRSolver::get_or_create_info_set_row(
     InfoSetAddress address,
     absl::Span<const int> action_ids) {
   if (address.player < 0 || address.player >= kPlayerCount ||
       address.private_bucket >= kComboCount) {
-    return std::nullopt;
+    return nullptr;
   }
 
   if (const InfoSetRow* row = find_info_set_row(address)) {
-    return *row;
+    return row;
   }
 
   if (frozen_ || (config_.max_info_sets > 0 &&
                   static_cast<int>(frozen_tables_->info_set_count) >= config_.max_info_sets)) {
-    return std::nullopt;
+    return nullptr;
   }
 
   InfoSetRow row = append_info_set_actions(action_ids);
@@ -1173,7 +1173,7 @@ std::optional<CFRSolver::InfoSetRow> CFRSolver::get_or_create_info_set_row(
   row_id = static_cast<int32_t>(player_slab.rows.size());
   player_slab.rows.push_back(row);
   ++mutable_tables().info_set_count;
-  return row;
+  return &player_slab.rows.back();
 }
 
 std::optional<uint32_t> CFRSolver::strategy_public_state_id(
@@ -1518,22 +1518,27 @@ double CFRSolver::cfr_with_ranges(
   const InfoSetAddress info_set_address{
       public_state_id, player,
       card_abstraction_.private_bucket(player_cards.combo, row.state)};
-  const std::optional<InfoSetRow> info_set_row =
+  const InfoSetRow* info_set_row =
       get_or_create_info_set_row(info_set_address,
                                  absl::Span<const int>(row.action_ids.data(),
                                                        row.action_count));
 
   const size_t action_count = row.action_count;
+  const size_t info_set_action_count =
+      info_set_row == nullptr
+          ? 0
+          : static_cast<size_t>(info_set_row->action_count);
+  const bool has_info_set_row =
+      info_set_row != nullptr && info_set_action_count == action_count;
+  const size_t info_set_action_offset =
+      has_info_set_row ? info_set_row->action_offset : 0;
   double action_probabilities[GameTree::kMaxActionsPerNode];
   double action_values[GameTree::kMaxActionsPerNode];
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     action_values[action_index] = 0.0;
   }
-  const InfoSetRow* info_set_row_ptr =
-      info_set_row.has_value() ? &*info_set_row : nullptr;
-  if (info_set_row_ptr != nullptr) {
+  if (has_info_set_row) {
     auto& regrets = cumulative_->cumulative_regrets;
-    const size_t action_offset = info_set_row_ptr->action_offset;
     double sum_positive_regrets = 0.0;
     for (size_t action_index = 0; action_index < action_count;
          ++action_index) {
@@ -1541,7 +1546,8 @@ double CFRSolver::cfr_with_ranges(
       const double positive_regret = std::max(
           0.0,
           static_cast<double>(
-              AtomicFloatLoad(&regrets[action_offset + action_index])));
+              AtomicFloatLoad(
+                  &regrets[info_set_action_offset + action_index])));
       action_probabilities[action_index] = positive_regret;
       sum_positive_regrets += positive_regret;
     }
@@ -1635,9 +1641,8 @@ double CFRSolver::cfr_with_ranges(
       break;
   }
 
-  if (info_set_row.has_value()) {
+  if (has_info_set_row) {
     const double opponent_reach_prob = reach_probabilities[1 - player];
-    const size_t action_offset = info_set_row->action_offset;
     auto& regrets = cumulative_->cumulative_regrets;
     for (size_t action_index = 0; action_index < action_count; ++action_index) {
       const double utility_sign = player == 0 ? 1.0 : -1.0;
@@ -1647,12 +1652,13 @@ double CFRSolver::cfr_with_ranges(
 
       POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.action_entry_touches += 2);
       AtomicCFRPlusRegretUpdate(
-          &regrets[action_offset + action_index],
+          &regrets[info_set_action_offset + action_index],
           static_cast<float>(regret));
     }
 
     if (!config_.regret_only_training) {
-      update_strategy(*info_set_row, action_probabilities, action_count,
+      update_strategy(info_set_action_offset, action_probabilities,
+                      action_count,
                       reach_probabilities[player] * (iteration + 1));
     }
   }
@@ -2344,12 +2350,11 @@ double CFRSolver::uncached_utility(const CompactPublicState& state,
       state, player_a_cards.combo, player_b_cards.combo);
 }
 
-void CFRSolver::update_strategy(const InfoSetRow& row,
+void CFRSolver::update_strategy(size_t action_offset,
                                 const double* action_probabilities,
                                 size_t action_count,
                                 double reach_prob) {
   auto& strategies = cumulative_->cumulative_strategies;
-  const size_t action_offset = row.action_offset;
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.action_entry_touches += 2);
     const float delta = static_cast<float>(

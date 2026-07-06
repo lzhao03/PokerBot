@@ -187,11 +187,11 @@ class CFRSolverRegretTestPeer {
     const CFRSolver::PrivateBucketId private_bucket =
         solver.card_abstraction_.private_bucket(TestComboId(hand),
                                                 native_state);
-    std::optional<CFRSolver::InfoSetRow> row =
+    const CFRSolver::InfoSetRow* row =
         solver.get_or_create_info_set_row(
             {public_state_id, player, private_bucket},
             absl::Span<const int>(action_id_buf, num_actions));
-    if (!row.has_value()) {
+    if (row == nullptr) {
       return -1;
     }
     return static_cast<int>(row->action_offset);
@@ -529,11 +529,11 @@ class CFRSolverRegretTestPeer {
     const CFRSolver::PrivateBucketId private_bucket =
         solver.card_abstraction_.private_bucket(TestComboId(hand),
                                                 native_state);
-    std::optional<CFRSolver::InfoSetRow> row =
+    const CFRSolver::InfoSetRow* row =
         solver.get_or_create_info_set_row(
             {public_state_id, player, private_bucket},
             absl::Span<const int>(action_id_buf, num_actions));
-    if (!row.has_value()) {
+    if (row == nullptr) {
       throw std::runtime_error("Could not create seeded regret row");
     }
     std::optional<size_t> action_table_index;

@@ -347,7 +347,7 @@ private:
   std::optional<uint32_t> get_or_create_chance_child_public_state(
       uint32_t public_state_id,
       absl::Span<const CardId> cards);
-  std::optional<InfoSetRow> get_or_create_info_set_row(
+  const InfoSetRow* get_or_create_info_set_row(
       InfoSetAddress address,
       absl::Span<const int> action_ids);
   std::optional<uint32_t> strategy_betting_history_id(
@@ -392,7 +392,7 @@ private:
       int samples,
       uint32_t root_public_state_id,
       RangeSampler range_sampler);
-  void update_strategy(const InfoSetRow& row,
+  void update_strategy(size_t action_offset,
                        const double* action_probabilities,
                        size_t action_count,
                        double reach_prob);
