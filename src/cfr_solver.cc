@@ -1235,6 +1235,32 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
         ++traversal_stats_.betting_history_transition_hits);
     return existing->second;
   }
+#if POKER_STREET_ONLY_PUBLIC_BUCKETS
+  const uint32_t cached_parent_betting_history_id = row.betting_history_id;
+  const auto& betting_history_rows = frozen_tables_->betting_history_rows;
+  if (cached_parent_betting_history_id < betting_history_rows.size()) {
+    const uint32_t child_betting_history_id =
+        betting_history_rows[cached_parent_betting_history_id].chance_child_id;
+    if (child_betting_history_id !=
+        GameTree::Node::kInvalidBettingHistoryId) {
+      const PublicStateKey child_public_key{
+          child_betting_history_id,
+          static_cast<PublicBucketId>(StreetAfterChance(row.state.street)),
+      };
+      auto existing_public_child =
+          frozen_tables_->public_state_ids.find(child_public_key);
+      if (existing_public_child != frozen_tables_->public_state_ids.end()) {
+        if (!frozen_) {
+          mutable_tables().public_chance_child_ids.emplace(
+              map_key, existing_public_child->second);
+        }
+        POKER_RECORD_TRAVERSAL_STAT(
+            ++traversal_stats_.betting_history_transition_hits);
+        return existing_public_child->second;
+      }
+    }
+  }
+#endif
   if (frozen_) {
     POKER_RECORD_TRAVERSAL_STAT(
         ++traversal_stats_.betting_history_transition_misses);

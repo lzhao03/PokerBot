@@ -120,6 +120,29 @@ class CFRSolverRegretTestPeer {
         GameTree::Node::kInvalidPublicStateId;
   }
 
+  static uint32_t CompactChanceChild(CFRSolver& solver,
+                                     uint32_t public_state_id,
+                                     absl::Span<const CardId> cards) {
+    std::optional<uint32_t> child_id =
+        solver.get_or_create_chance_child_public_state(public_state_id, cards);
+    if (!child_id.has_value()) {
+      throw std::runtime_error("chance child was not created");
+    }
+    return *child_id;
+  }
+
+  static std::optional<uint32_t> CompactChanceChildOptional(
+      CFRSolver& solver,
+      uint32_t public_state_id,
+      absl::Span<const CardId> cards) {
+    return solver.get_or_create_chance_child_public_state(public_state_id,
+                                                          cards);
+  }
+
+  static void ClearCompactChanceChildren(CFRSolver& solver) {
+    solver.mutable_tables_->public_chance_child_ids.clear();
+  }
+
   static uint32_t CompactPublicStateBettingHistoryId(
       const CFRSolver& solver,
       uint32_t public_state_id) {
@@ -187,6 +210,13 @@ GameState BettingState(int pot,
   state.player_contribution = {contribution_a, contribution_b};
   state.player_contribution_count = 2;
   state.folded_player = -1;
+  return state;
+}
+
+GameState ChanceState() {
+  GameState state = BettingState(8, 18, 23, 4, 4);
+  state.history.push_back({ActionKind::kCall, 0, 0});
+  state.history.push_back({ActionKind::kCheck, 0, 1});
   return state;
 }
 
@@ -373,6 +403,31 @@ void CheckCoarseActionChildUsesBettingHistoryTransition() {
          "cached betting-history transition should return existing public child");
 }
 
+void CheckCoarseChanceChildUsesBettingHistoryTransition() {
+  SolverConfig config;
+  config.max_public_states = 2;
+  CFRSolver solver(config);
+  const uint32_t public_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, ChanceState());
+  const std::array<CardId, 3> flop = {
+      MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(7, SuitKind::kDiamonds),
+      MakeCardId(11, SuitKind::kClubs),
+  };
+
+  const uint32_t child_id =
+      CFRSolverRegretTestPeer::CompactChanceChild(solver, public_id, flop);
+  CFRSolverRegretTestPeer::ClearCompactChanceChildren(solver);
+
+  const std::optional<uint32_t> repeated_child_id =
+      CFRSolverRegretTestPeer::CompactChanceChildOptional(solver, public_id,
+                                                          flop);
+  Expect(repeated_child_id.has_value(),
+         "cached betting-history chance transition should recover existing public child at cap");
+  Expect(*repeated_child_id == child_id,
+         "cached betting-history chance transition should return existing public child");
+}
+
 void CheckStreetOnlyPublicBucketsEnterFrozenParallelPhase() {
   SolverConfig config;
   config.starting_stack_size = 20;
@@ -408,6 +463,7 @@ int main() {
   poker::CheckCoarseBettingHistoryKeepsActionSlotsDistinct();
   poker::CheckCoarseLegalActionsUseAbstractBettingState();
   poker::CheckCoarseActionChildUsesBettingHistoryTransition();
+  poker::CheckCoarseChanceChildUsesBettingHistoryTransition();
   poker::CheckStreetOnlyPublicBucketsEnterFrozenParallelPhase();
   return 0;
 }
