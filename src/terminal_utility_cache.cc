@@ -18,10 +18,19 @@ std::array<int, N> EncodedSortedCards(
   return encoded;
 }
 
-std::array<int, 2> EncodedComboCards(ComboId combo_id) {
-  const ComboInfo& combo = GetComboInfo(combo_id);
-  std::array<CardId, 2> cards = {combo.card0, combo.card1};
-  return EncodedSortedCards(cards, cards.size());
+std::array<std::array<int, 2>, kComboCount> BuildEncodedComboCards() {
+  std::array<std::array<int, 2>, kComboCount> encoded = {};
+  for (size_t combo_id = 0; combo_id < encoded.size(); ++combo_id) {
+    const ComboInfo& combo = GetComboInfo(static_cast<ComboId>(combo_id));
+    std::array<CardId, 2> cards = {combo.card0, combo.card1};
+    encoded[combo_id] = EncodedSortedCards(cards, cards.size());
+  }
+  return encoded;
+}
+
+const std::array<int, 2>& EncodedComboCards(ComboId combo_id) {
+  static const auto encoded = BuildEncodedComboCards();
+  return encoded[combo_id];
 }
 
 std::array<int, 5> EncodedBoardCards(const GameState& state) {
