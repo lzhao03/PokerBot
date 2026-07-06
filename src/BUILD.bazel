@@ -248,16 +248,28 @@ CFR_SOLVER_DEPS = [
 
 cc_library(
     name = "cfr_solver",
-    srcs = ["cfr_solver.cc"],
-    hdrs = ["cfr_solver.h"],
+    srcs = [
+        "best_response.cc",
+        "cfr_solver.cc",
+    ],
+    hdrs = [
+        "best_response.h",
+        "cfr_solver.h",
+    ],
     deps = CFR_SOLVER_DEPS,
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "cfr_solver_no_stats",
-    srcs = ["cfr_solver.cc"],
-    hdrs = ["cfr_solver.h"],
+    srcs = [
+        "best_response.cc",
+        "cfr_solver.cc",
+    ],
+    hdrs = [
+        "best_response.h",
+        "cfr_solver.h",
+    ],
     copts = ["-DPOKER_ENABLE_TRAVERSAL_STATS=0"],
     deps = CFR_SOLVER_DEPS,
 )

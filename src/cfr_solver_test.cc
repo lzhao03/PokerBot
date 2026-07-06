@@ -3,6 +3,7 @@
 #include "absl/log/log_entry.h"
 #include "absl/log/log_sink.h"
 #include "absl/log/log_sink_registry.h"
+#include "src/best_response.h"
 #include "src/continuation_value.h"
 #include "src/cfr_solver_proto_adapter.h"
 #include "src/hand_range.h"
@@ -473,9 +474,8 @@ class CFRSolverRegretTestPeer {
                                  const Hand& player_a_hand,
                                  const Hand& player_b_hand,
                                  int best_response_player) {
-    return solver.best_response_value(
-        node, CFRSolver::PrivateCards::FromCombo(TestComboId(player_a_hand)),
-        CFRSolver::PrivateCards::FromCombo(TestComboId(player_b_hand)),
+    return BestResponseEvaluator(solver).best_response_value(
+        node, TestComboId(player_a_hand), TestComboId(player_b_hand),
         best_response_player);
   }
 
@@ -485,9 +485,9 @@ class CFRSolverRegretTestPeer {
       const WeightedHandRange& opponent_hands,
       int best_response_player) {
     WeightedHandRangeView opponent_view(opponent_hands);
-    return solver.best_response_value_against_range(
-        node, CFRSolver::PrivateCards::FromCombo(TestComboId(best_response_hand)),
-        opponent_view, best_response_player);
+    return BestResponseEvaluator(solver).best_response_value_against_range(
+        node, TestComboId(best_response_hand), opponent_view,
+        best_response_player);
   }
 
   static double Utility(CFRSolver& solver,

@@ -26,6 +26,7 @@ namespace poker {
 struct ContinuationContext;
 class ContinuationValueProvider;
 class TerminalUtilityCache;
+class BestResponseEvaluator;
 
 class CFRSolver {
 public:
@@ -124,6 +125,7 @@ public:
       std::shared_ptr<ContinuationValueProvider> provider);
 
 private:
+  friend class BestResponseEvaluator;
   friend class CFRSolverRegretTestPeer;
 
   struct RangeDeal {
@@ -274,20 +276,10 @@ private:
       OptionalTrainingRange player_a_range,
       OptionalTrainingRange player_b_range);
   void average_strategy_probabilities(
-      GameTree::Node& node,
-      int player,
-      const PrivateCards& private_cards,
-      StrategyProbabilities& probabilities);
-  void average_strategy_probabilities(
       uint32_t public_state_id,
       const PublicStateRow& row,
       int player,
       const PrivateCards& private_cards,
-      StrategyProbabilities& probabilities);
-  void average_strategy_probabilities(
-      const InfoSetRow& row,
-      const GameTree::Node& node,
-      double fallback_probability,
       StrategyProbabilities& probabilities);
   void average_strategy_probabilities(
       const InfoSetRow& info_set_row,
@@ -399,25 +391,6 @@ private:
       int samples,
       uint32_t root_public_state_id,
       RangeSampler range_sampler);
-  double best_response_value(GameTree::Node& node,
-                             const PrivateCards& player_a_cards,
-                             const PrivateCards& player_b_cards,
-                             int best_response_player);
-  double best_response_value_against_range(
-      GameTree::Node& node,
-      const PrivateCards& best_response_cards,
-      const WeightedHandRangeView& opponent_hands,
-      int best_response_player);
-  double sampled_range_best_response_value(
-      int samples,
-      const HandRange& best_response_range,
-      const HandRange& opponent_range,
-      int best_response_player);
-  double sampled_range_best_response_samples(
-      int samples,
-      const WeightedHandRange& best_response_hands,
-      const WeightedHandRange& opponent_hands,
-      int best_response_player);
   void update_strategy(const InfoSetRow& row,
                        const double* action_probabilities,
                        size_t action_count,
