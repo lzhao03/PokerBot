@@ -23,6 +23,7 @@ namespace poker {
 namespace {
 
 constexpr int kParallelEvaluationSampleThreshold = 32;
+constexpr int kAutoWarmupNoGrowthLimit = 100;
 
 // Atomically add `delta` to `*target` using a CAS loop.
 // Safe to call from multiple threads concurrently. Relaxed ordering is
@@ -1326,34 +1327,27 @@ void CFRSolver::run_iterations(int iterations,
   const int num_threads =
       config_.num_training_threads <= 1 ? 1 : config_.num_training_threads;
 
-  // Determine single-threaded warmup count.
-  // Warmup populates the game tree and info set table before we freeze.
-  // - If num_threads == 1 there is no parallel phase; warmup = all iterations.
-  // - If warmup_iterations is set explicitly, honour it (capped to iterations).
-  // - Otherwise: run until max_info_sets is reached OR info set growth stalls,
-  //   using at most half the requested iterations as a ceiling.
-  int warmup_count = iterations;
-  if (num_threads > 1 && !frozen_) {
-    if (config_.warmup_iterations > 0) {
-      warmup_count = std::min(config_.warmup_iterations, iterations);
-    } else if (config_.max_info_sets > 0) {
-      // Run until the cap is hit; cap the warmup at half the total budget.
-      warmup_count = std::min(iterations / 2 + 1, iterations);
-    } else {
-      // No cap: default warmup = 10% of iterations, minimum 100.
-      warmup_count = std::max(100, iterations / 10);
-      warmup_count = std::min(warmup_count, iterations);
-    }
-  }
+  const bool auto_warmup =
+      num_threads > 1 && !frozen_ && config_.warmup_iterations <= 0;
+  int warmup_count =
+      num_threads > 1 && !frozen_ && config_.warmup_iterations > 0
+          ? std::min(config_.warmup_iterations, iterations)
+          : iterations;
 
   // Phase 1: single-threaded warmup (allocates public states + info sets).
   LOG(INFO) << "Starting CFR iterations...";
-  VLOG(1) << "Warmup phase: " << warmup_count << " single-threaded iterations";
+  VLOG(1) << "Warmup phase: "
+          << (auto_warmup ? "adaptive" : std::to_string(warmup_count))
+          << " single-threaded iterations";
   const int max_depth = config_.max_depth;
   TraversalScratch scratch;
   scratch.reserve_depth(ScratchDepthReserve(config_, max_depth));
   const int64_t warmup_start_updates = cfr_update_count_;
   const auto warmup_start = std::chrono::steady_clock::now();
+  int completed_warmup = 0;
+  int no_growth_iterations = 0;
+  size_t previous_info_sets = get_info_set_count();
+  size_t previous_public_states = get_public_state_count();
   for (int i = 0; i < warmup_count; ++i) {
     const RangeDeal deal = range_sampler.sample(rng_);
     PrivateCards player_a_cards = PrivateCards::FromCombo(deal.player_a_combo);
@@ -1376,15 +1370,42 @@ void CFRSolver::run_iterations(int iterations,
 
     cumulative_root_utility_ += dealt_value;
     ++iterations_run_;
+    ++completed_warmup;
+
+    if (auto_warmup) {
+      const size_t current_info_sets = get_info_set_count();
+      const size_t current_public_states = get_public_state_count();
+      if (current_info_sets == previous_info_sets &&
+          current_public_states == previous_public_states) {
+        ++no_growth_iterations;
+      } else {
+        no_growth_iterations = 0;
+        previous_info_sets = current_info_sets;
+        previous_public_states = current_public_states;
+      }
+      const bool info_set_cap_hit =
+          config_.max_info_sets > 0 &&
+          current_info_sets >= static_cast<size_t>(config_.max_info_sets);
+      const bool public_state_cap_hit =
+          config_.max_public_states > 0 &&
+          current_public_states >=
+              static_cast<size_t>(config_.max_public_states);
+      // Cap hits mean the tree is incomplete; do not freeze and turn the
+      // parallel phase into mostly skipped missing-child branches.
+      if (!info_set_cap_hit && !public_state_cap_hit &&
+          no_growth_iterations >= kAutoWarmupNoGrowthLimit) {
+        break;
+      }
+    }
   }
   const auto warmup_end = std::chrono::steady_clock::now();
-  last_training_run_stats_.warmup_iterations = warmup_count;
+  last_training_run_stats_.warmup_iterations = completed_warmup;
   last_training_run_stats_.warmup_seconds =
       std::chrono::duration<double>(warmup_end - warmup_start).count();
   last_training_run_stats_.warmup_cfr_updates =
       cfr_update_count_ - warmup_start_updates;
 
-  const int remaining = iterations - warmup_count;
+  const int remaining = iterations - completed_warmup;
   if (remaining > 0) {
     // Phase 2: freeze the tables and run remaining iterations in parallel.
     frozen_tables_ = mutable_tables_;

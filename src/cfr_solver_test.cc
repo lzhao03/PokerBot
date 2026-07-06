@@ -1948,6 +1948,34 @@ void CheckRangeRunTracksParallelTrainingStats() {
          "phase CFR updates should add up to total CFR updates");
 }
 
+void CheckAutoWarmupDoesNotFreezeAfterPublicStateCap() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(0);
+  config.set_num_training_threads(2);
+  config.set_regret_only_training(true);
+  config.set_max_public_states(100);
+
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
+  HandRange player_a_range;
+  AddHand(player_a_range, player_a_hand, 1.0);
+  HandRange player_b_range;
+  AddHand(player_b_range, player_b_hand, 1.0);
+
+  CFRSolver solver(TestSolverConfig(config));
+  solver.run(20, player_a_range, player_b_range);
+
+  const CFRSolver::TrainingRunStats stats =
+      solver.get_last_training_run_stats();
+  Expect(solver.get_public_state_count() == 100,
+         "auto warmup should grow public states until the cap");
+  Expect(stats.warmup_iterations == 20,
+         "auto warmup should consume the run after hitting a cap");
+  Expect(stats.parallel_iterations == 0,
+         "auto warmup should not freeze a capped incomplete tree");
+}
+
 void CheckRunUsesProvidedPrivateRanges() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -3186,6 +3214,7 @@ int main() {
   CheckRunUsesConfiguredBlinds();
   CheckRunUpdatesExpectedValue();
   CheckRangeRunTracksParallelTrainingStats();
+  CheckAutoWarmupDoesNotFreezeAfterPublicStateCap();
   CheckRunUsesProvidedPrivateRanges();
   CheckRunFixedHandsUsesCustomInitialState();
   CheckRunWithoutDepthCutoffTerminates();
