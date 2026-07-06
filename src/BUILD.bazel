@@ -302,6 +302,18 @@ cc_binary(
 )
 
 cc_binary(
+    name = "poker_solver_no_stats",
+    srcs = ["main.cc"],
+    deps = [
+        ":cfr_solver_no_stats",
+        ":cfr_solver_proto_adapter",
+        ":poker_config",
+        "@abseil-cpp//absl/log:globals",
+        "@abseil-cpp//absl/log:initialize",
+    ],
+)
+
+cc_binary(
     name = "cfr_benchmark",
     srcs = ["cfr_benchmark.cc"],
     deps = [
