@@ -511,6 +511,20 @@ class CFRSolverRegretTestPeer {
     return slab->players[player].rows.size();
   }
 
+  static bool PrebuildInfoSets(CFRSolver& solver,
+                               const HandRange& player_a_range,
+                               const HandRange& player_b_range) {
+    const TrainingRange player_a_training_range =
+        BuildTrainingRange(player_a_range);
+    const TrainingRange player_b_training_range =
+        BuildTrainingRange(player_b_range);
+    TrainingRangeView player_a_view;
+    TrainingRangeView player_b_view;
+    player_a_view.reset_to_all(player_a_training_range);
+    player_b_view.reset_to_all(player_b_training_range);
+    return solver.prebuild_info_set_rows(player_a_view, player_b_view);
+  }
+
   static double CompactCfr(CFRSolver& solver,
                            const GameState& state,
                            const Hand& player_a_hand,
@@ -2087,6 +2101,12 @@ void CheckRangeRunTracksParallelTrainingStats() {
       solver.get_last_training_run_stats();
   Expect(stats.public_state_prebuild_complete,
          "parallel run should prebuild a complete public-state graph");
+  Expect(stats.info_set_prebuild_complete,
+         "parallel run should prebuild a complete infoset table");
+  Expect(stats.prebuild_info_sets > 0,
+         "infoset prebuild should create rows before warmup");
+  Expect(stats.prebuild_action_entries > 0,
+         "infoset prebuild should create action entries before warmup");
   Expect(stats.warmup_iterations == 2,
          "parallel alternating run should warm both update players");
   Expect(stats.parallel_iterations == 1,
@@ -2128,6 +2148,85 @@ void CheckAutoWarmupDoesNotFreezeAfterPublicStateCap() {
          "auto warmup should consume the run after hitting a cap");
   Expect(stats.parallel_iterations == 0,
          "auto warmup should not freeze a capped incomplete tree");
+}
+
+void CheckInfosetPrebuildCapPreventsFreeze() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+  config.set_num_training_threads(2);
+  config.set_warmup_iterations(1);
+  config.set_max_public_states(1000);
+  config.set_max_info_sets(1);
+
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
+  HandRange player_a_range;
+  AddHand(player_a_range, player_a_hand, 1.0);
+  HandRange player_b_range;
+  AddHand(player_b_range, player_b_hand, 1.0);
+
+  CFRSolver solver(TestSolverConfig(config));
+  solver.run(3, player_a_range, player_b_range);
+
+  const CFRSolver::TrainingRunStats stats =
+      solver.get_last_training_run_stats();
+  Expect(stats.public_state_prebuild_complete,
+         "fixture should complete public-state prebuild");
+  Expect(!stats.info_set_prebuild_complete,
+         "infoset cap should report incomplete prebuild");
+  Expect(stats.prebuild_info_sets == 1,
+         "infoset prebuild should stop at the configured cap");
+  Expect(stats.parallel_iterations == 0,
+         "incomplete infoset prebuild should not enter frozen parallel phase");
+}
+
+void CheckInfosetPrebuildSkipsBoardBlockedCombos() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+
+  BoardState state;
+  state.set_stack_a(20);
+  state.set_stack_b(20);
+  state.set_pot(0);
+  state.set_street(Street::FLOP);
+  state.set_all_in(false);
+  state.set_folded_player(-1);
+  state.set_player_to_act(0);
+  state.add_player_contribution(0);
+  state.add_player_contribution(0);
+  AddCard(state, 14, Suit::HEARTS);
+  AddCard(state, 2, Suit::DIAMONDS);
+  AddCard(state, 3, Suit::CLUBS);
+
+  Hand blocked = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
+  Hand unblocked = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
+  Hand player_b_hand = MakeHand(12, Suit::HEARTS, 12, Suit::SPADES);
+  HandRange player_a_range;
+  AddHand(player_a_range, blocked, 1.0);
+  AddHand(player_a_range, unblocked, 1.0);
+  HandRange player_b_range;
+  AddHand(player_b_range, player_b_hand, 1.0);
+
+  CFRSolver solver(TestSolverConfig(config));
+  const GameState native_state = TestGameState(state);
+  CFRSolverRegretTestPeer::CompactPublicStateId(solver, native_state);
+  Expect(CFRSolverRegretTestPeer::PrebuildInfoSets(
+             solver, player_a_range, player_b_range),
+         "infoset prebuild should complete for a small direct fixture");
+
+  GameTree game_tree(TestSolverConfig(config));
+  const std::vector<GameAction> legal_actions =
+      game_tree.get_legal_actions(native_state);
+  const int action_id = GameTree::action_key(legal_actions.front());
+  Expect(CFRSolverRegretTestPeer::MaybeRegret(
+             solver, native_state, 0, unblocked, action_id)
+             .has_value(),
+         "infoset prebuild should create unblocked private combos");
+  Expect(!CFRSolverRegretTestPeer::MaybeRegret(
+              solver, native_state, 0, blocked, action_id)
+              .has_value(),
+         "infoset prebuild should skip private combos blocked by the board");
 }
 
 void CheckRunUsesProvidedPrivateRanges() {
@@ -3416,6 +3515,8 @@ int main() {
   CheckRunUpdatesExpectedValue();
   CheckRangeRunTracksParallelTrainingStats();
   CheckAutoWarmupDoesNotFreezeAfterPublicStateCap();
+  CheckInfosetPrebuildCapPreventsFreeze();
+  CheckInfosetPrebuildSkipsBoardBlockedCombos();
   CheckRunUsesProvidedPrivateRanges();
   CheckRunFixedHandsUsesCustomInitialState();
   CheckRunWithoutDepthCutoffTerminates();

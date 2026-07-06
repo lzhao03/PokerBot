@@ -1377,6 +1377,69 @@ bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
   return true;
 }
 
+bool CFRSolver::prebuild_info_set_rows(
+    const TrainingRangeView& player_a_range,
+    const TrainingRangeView& player_b_range) {
+  if (frozen_) {
+    return true;
+  }
+
+  std::array<uint32_t, kComboCount> seen_buckets = {};
+  uint32_t seen_generation = 1;
+
+  for (uint32_t public_state_id = 0;
+       public_state_id < frozen_tables_->public_state_rows.size();
+       ++public_state_id) {
+    const PublicStateRow& row =
+        frozen_tables_->public_state_rows[public_state_id];
+    const int player = row.player_to_act;
+    if (row.is_terminal || row.is_chance_node || row.action_count == 0 ||
+        !IsPlayer(player)) {
+      continue;
+    }
+
+    const TrainingRangeView& range =
+        player == 0 ? player_a_range : player_b_range;
+    if (range.empty()) {
+      continue;
+    }
+
+    if (seen_generation == 0) {
+      seen_buckets.fill(0);
+      seen_generation = 1;
+    }
+    const uint32_t generation = seen_generation++;
+    const absl::Span<const int> action_ids(row.action_ids.data(),
+                                           row.action_count);
+    const CardMask board_mask = row.state.board_mask;
+    for (size_t i = 0; i < range.size(); ++i) {
+      if (range.weight(i) <= 0.0f) {
+        continue;
+      }
+      const ComboId combo_id = range.combo(i);
+      if ((ComboMask(combo_id) & board_mask) != 0) {
+        continue;
+      }
+      const PrivateBucketId private_bucket =
+          card_abstraction_.private_bucket(combo_id, row.state);
+      if (private_bucket >= kComboCount) {
+        return false;
+      }
+      if (seen_buckets[private_bucket] == generation) {
+        continue;
+      }
+      seen_buckets[private_bucket] = generation;
+      if (get_or_create_info_set_row(
+              {public_state_id, player, private_bucket}, action_ids) ==
+          nullptr) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 void CFRSolver::cache_action_betting_history_transition(
     GameTree::Node& node,
     int action_index,
@@ -1766,6 +1829,36 @@ void CFRSolver::run_iterations(int iterations,
       should_prebuild_public_states
           ? static_cast<int64_t>(frozen_tables_->betting_history_rows.size())
           : 0;
+  bool info_set_prebuild_complete = false;
+  if (should_prebuild_public_states && public_state_prebuild_complete) {
+    VLOG(1) << "Prebuilding infoset rows...";
+    const auto info_set_prebuild_start = std::chrono::steady_clock::now();
+    info_set_prebuild_complete =
+        prebuild_info_set_rows(player_a_hands_view, player_b_hands_view);
+    const auto info_set_prebuild_end = std::chrono::steady_clock::now();
+    last_training_run_stats_.info_set_prebuild_seconds =
+        std::chrono::duration<double>(info_set_prebuild_end -
+                                      info_set_prebuild_start)
+            .count();
+    if (!info_set_prebuild_complete) {
+      LOG(INFO) << "Infoset prebuild stopped before completion; "
+                << "continuing without a parallel frozen phase";
+    }
+  }
+  last_training_run_stats_.info_set_prebuild_complete =
+      should_prebuild_public_states && public_state_prebuild_complete &&
+      info_set_prebuild_complete;
+  last_training_run_stats_.prebuild_info_sets =
+      should_prebuild_public_states && public_state_prebuild_complete
+          ? static_cast<int64_t>(get_info_set_count())
+          : 0;
+  last_training_run_stats_.prebuild_action_entries =
+      should_prebuild_public_states && public_state_prebuild_complete
+          ? static_cast<int64_t>(cumulative_->cumulative_regrets.size())
+          : 0;
+  const bool can_run_frozen_parallel =
+      last_training_run_stats_.public_state_prebuild_complete &&
+      last_training_run_stats_.info_set_prebuild_complete;
 
   const bool auto_warmup =
       num_threads > 1 && !frozen_ && config_.warmup_iterations <= 0;
@@ -1774,7 +1867,7 @@ void CFRSolver::run_iterations(int iterations,
           ? std::min(std::max(config_.warmup_iterations, kPlayerCount),
                      iterations)
           : iterations;
-  if (should_prebuild_public_states && !public_state_prebuild_complete) {
+  if (num_threads > 1 && !frozen_ && !can_run_frozen_parallel) {
     warmup_count = iterations;
   }
 
