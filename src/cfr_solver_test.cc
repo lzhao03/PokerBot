@@ -1110,6 +1110,68 @@ void CheckCompactPublicStateActionTransitionsAreCached() {
          "compact action transition should create one child row");
 }
 
+GameState TestFlopDecisionState(CardId first, CardId second, CardId third) {
+  GameState state;
+  state.stack[0] = 20;
+  state.stack[1] = 20;
+  state.pot = 4;
+  state.folded_player = -1;
+  state.street = StreetKind::kFlop;
+  state.all_in = false;
+  state.player_to_act = 1;
+  state.player_contribution = {0, 0};
+  AddBoardCard(state, first);
+  AddBoardCard(state, second);
+  AddBoardCard(state, third);
+  return state;
+}
+
+void CheckBettingHistoryActionTransitionReusedAcrossPublicStates() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  CFRSolver solver(TestSolverConfig(config));
+
+  const GameState first_board = TestFlopDecisionState(
+      MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(7, SuitKind::kDiamonds),
+      MakeCardId(11, SuitKind::kClubs));
+  const GameState second_board = TestFlopDecisionState(
+      MakeCardId(3, SuitKind::kHearts),
+      MakeCardId(8, SuitKind::kDiamonds),
+      MakeCardId(12, SuitKind::kClubs));
+
+  const uint32_t first_public_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, first_board);
+  const uint32_t second_public_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, second_board);
+  const uint32_t parent_betting_history_id =
+      CFRSolverRegretTestPeer::CompactPublicStateBettingHistoryId(
+          solver, first_public_id);
+
+  Expect(CFRSolverRegretTestPeer::CompactPublicStateBettingHistoryId(
+             solver, second_public_id) == parent_betting_history_id,
+         "different boards with same betting history should share a betting-history row");
+  Expect(CFRSolverRegretTestPeer::CompactPublicStateActionCount(
+             solver, first_public_id) > 0,
+         "flop decision state should have legal actions");
+
+  const uint32_t first_child_id =
+      CFRSolverRegretTestPeer::CompactActionChild(solver, first_public_id, 0);
+  const uint32_t table_child_betting_history_id =
+      CFRSolverRegretTestPeer::ActionTransitionId(
+          solver, parent_betting_history_id, 0);
+  Expect(table_child_betting_history_id ==
+             CFRSolverRegretTestPeer::CompactPublicStateBettingHistoryId(
+                 solver, first_child_id),
+         "first action transition should populate the betting-history table");
+
+  const uint32_t second_child_id =
+      CFRSolverRegretTestPeer::CompactActionChild(solver, second_public_id, 0);
+  Expect(CFRSolverRegretTestPeer::CompactPublicStateBettingHistoryId(
+             solver, second_child_id) == table_child_betting_history_id,
+         "second public state should reuse the generated betting-history transition");
+}
+
 void CheckCompactPublicStateActionCapStoresSentinel() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -2711,6 +2773,7 @@ int main() {
   CheckBettingHistoryIdsIgnorePublicCards();
   CheckBettingHistoryActionTransitionsAreCached();
   CheckCompactPublicStateActionTransitionsAreCached();
+  CheckBettingHistoryActionTransitionReusedAcrossPublicStates();
   CheckCompactPublicStateActionCapStoresSentinel();
   CheckCompactPublicStateActionValidationCatchesMismatch();
   CheckCompactPublicStateChanceTransitionsAreCached();

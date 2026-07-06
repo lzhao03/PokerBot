@@ -844,6 +844,54 @@ uint32_t CFRSolver::get_or_create_betting_history_id(GameTree::Node& node) {
   return betting_history_id;
 }
 
+uint32_t CFRSolver::get_or_create_action_child_betting_history_id(
+    uint32_t parent_betting_history_id,
+    int action_index,
+    const GameState& child_state) {
+  if (parent_betting_history_id < betting_history_rows_.size()) {
+    BettingHistoryRow& parent_row =
+        betting_history_rows_[parent_betting_history_id];
+    if (action_index >= 0 && action_index < parent_row.action_count) {
+      const uint32_t child_id =
+          parent_row.action_child_ids[static_cast<size_t>(action_index)];
+      if (child_id != GameTree::Node::kInvalidBettingHistoryId) {
+        return child_id;
+      }
+    }
+  }
+
+  const uint32_t child_id = get_or_create_betting_history_id(child_state);
+  if (parent_betting_history_id < betting_history_rows_.size()) {
+    BettingHistoryRow& parent_row =
+        betting_history_rows_[parent_betting_history_id];
+    if (action_index >= 0 && action_index < parent_row.action_count) {
+      parent_row.action_child_ids[static_cast<size_t>(action_index)] =
+          child_id;
+    }
+  }
+  return child_id;
+}
+
+uint32_t CFRSolver::get_or_create_chance_child_betting_history_id(
+    uint32_t parent_betting_history_id,
+    const GameState& child_state) {
+  if (parent_betting_history_id < betting_history_rows_.size()) {
+    BettingHistoryRow& parent_row =
+        betting_history_rows_[parent_betting_history_id];
+    if (parent_row.chance_child_id !=
+        GameTree::Node::kInvalidBettingHistoryId) {
+      return parent_row.chance_child_id;
+    }
+  }
+
+  const uint32_t child_id = get_or_create_betting_history_id(child_state);
+  if (parent_betting_history_id < betting_history_rows_.size()) {
+    betting_history_rows_[parent_betting_history_id].chance_child_id =
+        child_id;
+  }
+  return child_id;
+}
+
 uint32_t CFRSolver::get_or_create_public_state_id(GameTree::Node& node) {
   const uint32_t betting_history_id = get_or_create_betting_history_id(node);
   return get_or_create_public_state_id(node, betting_history_id);
@@ -987,8 +1035,11 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
       public_state_rows_[public_state_id].state.betting_history_id;
   const GameState child_state =
       game_tree_->apply_action(parent_state, action);
+  const uint32_t child_betting_history_id =
+      get_or_create_action_child_betting_history_id(
+          parent_betting_history_id, action_index, child_state);
   std::optional<uint32_t> child_id =
-      get_or_create_public_state_row(child_state);
+      get_or_create_public_state_row(child_betting_history_id, child_state);
   if (!child_id.has_value()) {
     public_state_rows_[public_state_id].action_child_ids[action_slot] =
         kCappedPublicStateId;
@@ -998,11 +1049,6 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
   }
 
   public_state_rows_[public_state_id].action_child_ids[action_slot] = *child_id;
-  if (parent_betting_history_id < betting_history_rows_.size()) {
-    betting_history_rows_[parent_betting_history_id]
-        .action_child_ids[action_slot] =
-        public_state_rows_[*child_id].state.betting_history_id;
-  }
   POKER_RECORD_TRAVERSAL_STAT(
       ++traversal_stats_.betting_history_transition_misses);
   POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.child_nodes_created);
@@ -1043,8 +1089,11 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
   const uint32_t parent_betting_history_id =
       public_state_rows_[public_state_id].state.betting_history_id;
   const GameState child_state = game_tree_->apply_chance(parent_state, cards);
+  const uint32_t child_betting_history_id =
+      get_or_create_chance_child_betting_history_id(
+          parent_betting_history_id, child_state);
   std::optional<uint32_t> child_id =
-      get_or_create_public_state_row(child_state);
+      get_or_create_public_state_row(child_betting_history_id, child_state);
   if (!child_id.has_value()) {
     POKER_RECORD_TRAVERSAL_STAT(
         ++traversal_stats_.betting_history_transition_misses);
@@ -1052,10 +1101,6 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
   }
 
   public_chance_child_ids_.emplace(map_key, *child_id);
-  if (parent_betting_history_id < betting_history_rows_.size()) {
-    betting_history_rows_[parent_betting_history_id].chance_child_id =
-        public_state_rows_[*child_id].state.betting_history_id;
-  }
   POKER_RECORD_TRAVERSAL_STAT(
       ++traversal_stats_.betting_history_transition_misses);
   POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.child_nodes_created);

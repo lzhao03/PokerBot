@@ -457,6 +457,13 @@ private:
                                        const GameState& state) const;
   uint32_t get_or_create_betting_history_id(const GameState& state);
   uint32_t get_or_create_betting_history_id(GameTree::Node& node);
+  uint32_t get_or_create_action_child_betting_history_id(
+      uint32_t parent_betting_history_id,
+      int action_index,
+      const GameState& child_state);
+  uint32_t get_or_create_chance_child_betting_history_id(
+      uint32_t parent_betting_history_id,
+      const GameState& child_state);
   uint32_t get_or_create_public_state_id(uint32_t betting_history_id,
                                          const GameState& state);
   uint32_t get_or_create_public_state_id(const GameState& state);
