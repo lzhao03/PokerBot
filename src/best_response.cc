@@ -237,9 +237,8 @@ void BestResponseEvaluator::average_strategy_probabilities(
   double probability_sum = 0.0;
   const size_t action_offset = row.action_offset;
   const std::vector<int>& action_ids = solver_.frozen_tables_->action_ids;
-  const std::vector<float>& cumulative_regrets =
-      solver_.cumulative_->cumulative_regrets;
-  const std::vector<float>& cumulative_strategies =
+  const auto& cumulative_regrets = solver_.cumulative_->cumulative_regrets;
+  const auto& cumulative_strategies =
       solver_.cumulative_->cumulative_strategies;
 
   const bool aligned_action_ids =

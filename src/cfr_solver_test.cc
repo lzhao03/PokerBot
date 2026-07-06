@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -556,6 +557,17 @@ class CFRSolverRegretTestPeer {
       total += cumulative_strategy;
     }
     return total;
+  }
+
+  static bool CumulativeArraysAreCacheLineAligned(const CFRSolver& solver) {
+    return reinterpret_cast<std::uintptr_t>(
+               solver.cumulative_->cumulative_regrets.data()) %
+               kCacheLineBytes ==
+               0 &&
+           reinterpret_cast<std::uintptr_t>(
+               solver.cumulative_->cumulative_strategies.data()) %
+               kCacheLineBytes ==
+               0;
   }
 
   static std::vector<double> PlayerASampleWeights(
@@ -1642,6 +1654,29 @@ void CheckSparseSlabTracksInfoSets() {
   Expect(CFRSolverRegretTestPeer::SlabInfoSetOffset(solver, state, 0, kings) ==
              kings_id,
          "sparse slab should track new infosets after it is built");
+}
+
+void CheckInfoSetActionBlocksAreCacheLineAligned() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+
+  CFRSolver solver(TestSolverConfig(config));
+  BoardState state = InitialRootState(config);
+  const std::array<Hand, 3> hands = {
+      MakeHand(14, Suit::SPADES, 14, Suit::HEARTS),
+      MakeHand(13, Suit::SPADES, 13, Suit::HEARTS),
+      MakeHand(12, Suit::SPADES, 12, Suit::HEARTS),
+  };
+
+  for (const Hand& hand : hands) {
+    const int offset =
+        CFRSolverRegretTestPeer::InfoSetOffset(solver, state, 0, hand);
+    Expect(offset >= 0, "infoset should be created");
+    Expect(offset % kCumulativeActionBlockAlignment == 0,
+           "infoset action blocks should start on cache-line boundaries");
+  }
+  Expect(CFRSolverRegretTestPeer::CumulativeArraysAreCacheLineAligned(solver),
+         "cumulative arrays should have cache-line-aligned storage");
 }
 
 void CheckTerminalUtilityCacheReusesScores() {
@@ -3102,6 +3137,7 @@ int main() {
   CheckCompactChanceMatchesGameTreeApplyChance();
   CheckSparseSlabRowsUseExactCombos();
   CheckSparseSlabTracksInfoSets();
+  CheckInfoSetActionBlocksAreCacheLineAligned();
   CheckTerminalUtilityCacheReusesScores();
   CheckSingletonRangeMatchesExactEvaluationAndBestResponse();
   CheckExploitabilityZeroSamples();

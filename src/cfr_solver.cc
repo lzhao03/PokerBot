@@ -573,11 +573,17 @@ CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
 CFRSolver::InfoSetRow CFRSolver::append_info_set_actions(
     absl::Span<const int> action_ids) {
   FrozenStrategyTables& tables = mutable_tables();
+  // Keep each real infoset action block on a cache-line boundary to reduce
+  // false sharing between worker CAS updates.
+  const size_t padding =
+      (kCumulativeActionBlockAlignment -
+       tables.action_ids.size() % kCumulativeActionBlockAlignment) %
+      kCumulativeActionBlockAlignment;
   InfoSetRow row;
-  row.action_offset = static_cast<uint32_t>(tables.action_ids.size());
+  row.action_offset = static_cast<uint32_t>(tables.action_ids.size() + padding);
   row.action_count = static_cast<uint16_t>(action_ids.size());
   const size_t required_action_capacity =
-      tables.action_ids.size() + action_ids.size();
+      tables.action_ids.size() + padding + action_ids.size();
   if (required_action_capacity > tables.action_ids.capacity()) {
     const size_t new_capacity =
         std::max(required_action_capacity,
@@ -586,6 +592,11 @@ CFRSolver::InfoSetRow CFRSolver::append_info_set_actions(
     tables.action_ids.reserve(new_capacity);
     cumulative_->cumulative_regrets.reserve(new_capacity);
     cumulative_->cumulative_strategies.reserve(new_capacity);
+  }
+  for (size_t i = 0; i < padding; ++i) {
+    tables.action_ids.push_back(0);
+    cumulative_->cumulative_regrets.push_back(0.0f);
+    cumulative_->cumulative_strategies.push_back(0.0f);
   }
   for (int action_id : action_ids) {
     tables.action_ids.push_back(action_id);
@@ -1780,10 +1791,8 @@ void CFRSolver::average_strategy_probabilities(
   double probability_sum = 0.0;
   const size_t action_offset = info_set_row.action_offset;
   const std::vector<int>& action_ids = frozen_tables_->action_ids;
-  const std::vector<float>& cumulative_regrets =
-      cumulative_->cumulative_regrets;
-  const std::vector<float>& cumulative_strategies =
-      cumulative_->cumulative_strategies;
+  const auto& cumulative_regrets = cumulative_->cumulative_regrets;
+  const auto& cumulative_strategies = cumulative_->cumulative_strategies;
 
   const bool aligned_action_ids =
       num_actions == info_set_row.action_count &&
@@ -1950,9 +1959,10 @@ ContinuationContext CFRSolver::build_continuation_context(
 
 namespace {
 
+template <typename CumulativeArray>
 double StrategyWeight(const SolverConfig& config,
-                      const std::vector<float>& cumulative_regrets,
-                      const std::vector<float>& cumulative_strategies,
+                      const CumulativeArray& cumulative_regrets,
+                      const CumulativeArray& cumulative_strategies,
                       size_t table_index) {
   return config.regret_only_training
              ? std::max(0.0,
