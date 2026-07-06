@@ -219,11 +219,28 @@ private:
   using BettingHistoryRow = FrozenStrategyTables::BettingHistoryRow;
 
   struct ExactPublicCardBuckets {
+    static constexpr bool kExactPublicState = true;
+
     template <typename State>
     PublicBucketId bucket(const State& state) const {
       return state.board_mask;
     }
   };
+
+  struct StreetOnlyPublicCardBuckets {
+    static constexpr bool kExactPublicState = false;
+
+    template <typename State>
+    PublicBucketId bucket(const State& state) const {
+      return static_cast<PublicBucketId>(state.street);
+    }
+  };
+
+#if POKER_STREET_ONLY_PUBLIC_BUCKETS
+  using DefaultPublicCardBuckets = StreetOnlyPublicCardBuckets;
+#else
+  using DefaultPublicCardBuckets = ExactPublicCardBuckets;
+#endif
 
   struct ExactPrivateBuckets {
     template <typename State>
@@ -237,8 +254,8 @@ private:
     }
   };
 
-  struct ExactCardAbstraction {
-    ExactPublicCardBuckets public_buckets;
+  struct CardAbstraction {
+    DefaultPublicCardBuckets public_buckets;
     ExactPrivateBuckets private_buckets;
 
     template <typename State>
@@ -254,6 +271,10 @@ private:
     template <typename State>
     uint32_t private_bucket_count(const State& state) const {
       return private_buckets.bucket_count(state);
+    }
+
+    bool public_state_is_exact() const {
+      return DefaultPublicCardBuckets::kExactPublicState;
     }
   };
 
@@ -287,7 +308,7 @@ private:
   TrainingRunStats last_training_run_stats_;
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
-  ExactCardAbstraction card_abstraction_;
+  CardAbstraction card_abstraction_;
   // Set to true after warmup; workers may only write cumulative arrays.
   bool frozen_ = false;
   std::shared_ptr<FrozenStrategyTables> mutable_tables_;

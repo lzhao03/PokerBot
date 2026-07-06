@@ -143,9 +143,53 @@ int ChanceCardsKey(absl::Span<const CardId> cards) {
   return -1 - key;
 }
 
+StreetKind StreetAfterChance(StreetKind street) {
+  switch (street) {
+    case StreetKind::kPreflop:
+      return StreetKind::kFlop;
+    case StreetKind::kFlop:
+      return StreetKind::kTurn;
+    case StreetKind::kTurn:
+    case StreetKind::kRiver:
+      return StreetKind::kRiver;
+  }
+  return StreetKind::kRiver;
+}
+
+int PublicChanceChildLookupKey(
+    const FrozenStrategyTables::PublicStateRow& row,
+    absl::Span<const CardId> cards) {
+  if (row.public_state_is_exact) {
+    return ChanceCardsKey(cards);
+  }
+  return 1 + static_cast<int>(StreetAfterChance(row.state.street));
+}
+
 uint64_t PublicChanceChildKey(uint32_t parent_id, int child_key) {
   return (static_cast<uint64_t>(parent_id) << 32) |
          static_cast<uint64_t>(static_cast<uint32_t>(child_key));
+}
+
+absl::InlinedVector<CardId, 5> RepresentativeNextStreetDeal(
+    const CompactPublicState& state) {
+  const int remaining_board_slots =
+      std::max(0, kMaxBoardCards - static_cast<int>(state.board_count));
+  const int count =
+      std::min(CardsForNextStreet(state.street), remaining_board_slots);
+  absl::InlinedVector<CardId, 5> cards;
+  cards.reserve(count);
+  for (int card_id = 0; card_id < kDeckCardCount &&
+                        static_cast<int>(cards.size()) < count;
+       ++card_id) {
+    const CardId candidate = static_cast<CardId>(card_id);
+    if ((state.board_mask & CardBit(candidate)) == 0) {
+      cards.push_back(candidate);
+    }
+  }
+  if (static_cast<int>(cards.size()) < count) {
+    throw std::runtime_error("Not enough cards for representative next street");
+  }
+  return cards;
 }
 
 template <typename Callback>
@@ -604,6 +648,7 @@ CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
   PublicStateRow row;
   row.betting_history_id = betting_history_id;
   row.public_bucket = card_abstraction_.public_bucket(state);
+  row.public_state_is_exact = card_abstraction_.public_state_is_exact();
   row.is_terminal = game_tree_->is_terminal(state);
   row.player_to_act = game_tree_->get_player_to_act(state);
   row.state = std::move(state);
@@ -925,7 +970,12 @@ std::optional<uint32_t> CFRSolver::action_child_public_state(
 std::optional<uint32_t> CFRSolver::chance_child_public_state(
     uint32_t public_state_id,
     absl::Span<const CardId> cards) const {
-  const int child_key = ChanceCardsKey(cards);
+  const auto& rows = frozen_tables_->public_state_rows;
+  if (public_state_id >= rows.size()) {
+    return std::nullopt;
+  }
+  const int child_key =
+      PublicChanceChildLookupKey(rows[public_state_id], cards);
   const uint64_t map_key = PublicChanceChildKey(public_state_id, child_key);
   const auto& chance_children = frozen_tables_->public_chance_child_ids;
   auto existing = chance_children.find(map_key);
@@ -1011,7 +1061,8 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
   if (public_state_id >= rows.size()) {
     return std::nullopt;
   }
-  const int child_key = ChanceCardsKey(cards);
+  const PublicStateRow& row = rows[public_state_id];
+  const int child_key = PublicChanceChildLookupKey(row, cards);
   const uint64_t map_key = PublicChanceChildKey(public_state_id, child_key);
   const auto& chance_children = frozen_tables_->public_chance_child_ids;
   auto existing = chance_children.find(map_key);
@@ -1034,9 +1085,9 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
   }
 
   const uint32_t parent_betting_history_id =
-      frozen_tables_->public_state_rows[public_state_id].betting_history_id;
+      row.betting_history_id;
   CompactPublicState child_state = game_tree_->apply_chance(
-      frozen_tables_->public_state_rows[public_state_id].state, cards);
+      row.state, cards);
   const uint32_t child_betting_history_id =
       get_or_create_chance_child_betting_history_id(
           parent_betting_history_id, child_state);
@@ -1099,6 +1150,19 @@ bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
     }
 
     if (row.is_chance_node) {
+      if (!row.public_state_is_exact) {
+        const absl::InlinedVector<CardId, 5> cards =
+            RepresentativeNextStreetDeal(row.state);
+        std::optional<uint32_t> child_public_state_id =
+            get_or_create_chance_child_public_state(entry.public_state_id,
+                                                    cards);
+        if (!child_public_state_id.has_value()) {
+          return false;
+        }
+        enqueue(*child_public_state_id, entry.depth);
+        continue;
+      }
+
       const bool complete = ForEachNextStreetDeal(
           row.state, [&](absl::Span<const CardId> cards) {
             std::optional<uint32_t> child_public_state_id =

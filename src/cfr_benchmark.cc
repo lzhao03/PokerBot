@@ -19,10 +19,19 @@ namespace {
 #define POKER_BENCHMARK_PROD_DEFAULTS 0
 #endif
 
+#ifndef POKER_STREET_ONLY_PUBLIC_BUCKETS
+#define POKER_STREET_ONLY_PUBLIC_BUCKETS 0
+#endif
+
 constexpr bool kProdBenchmarkDefaults = POKER_BENCHMARK_PROD_DEFAULTS != 0;
+constexpr bool kStreetOnlyPublicBuckets = POKER_STREET_ONLY_PUBLIC_BUCKETS != 0;
 constexpr int kDefaultIterations = kProdBenchmarkDefaults ? 5000 : 100;
 constexpr int kDefaultEvalSamples = kProdBenchmarkDefaults ? 1 : 100;
 constexpr int kDefaultExploitabilitySamples = 10;
+constexpr int kDefaultMaxDepth =
+    kProdBenchmarkDefaults && kStreetOnlyPublicBuckets ? 1 : 0;
+constexpr int kDefaultWarmupIterations =
+    kProdBenchmarkDefaults && kStreetOnlyPublicBuckets ? 1 : 0;
 constexpr int kDefaultMaxInfoSets = kProdBenchmarkDefaults ? 500000 : 0;
 constexpr int kDefaultMaxPublicStates = kProdBenchmarkDefaults ? 200000 : 0;
 constexpr bool kDefaultSkipExploitability = kProdBenchmarkDefaults;
@@ -265,7 +274,8 @@ ParsedOptions ParseOptions(int argc, char** argv) {
   parsed.config = poker::DefaultPokerConfig();
   bool saw_global_bet_size = false;
   if (kProdBenchmarkDefaults) {
-    parsed.config.set_max_depth(0);
+    parsed.config.set_max_depth(kDefaultMaxDepth);
+    parsed.config.set_warmup_iterations(kDefaultWarmupIterations);
     parsed.config.set_regret_only_training(true);
     parsed.config.set_max_info_sets(kDefaultMaxInfoSets);
     parsed.config.set_max_public_states(kDefaultMaxPublicStates);

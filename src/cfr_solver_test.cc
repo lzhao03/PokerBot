@@ -133,6 +133,12 @@ class CFRSolverRegretTestPeer {
     return CompactPublicStateId(solver, TestGameState(state));
   }
 
+  static bool PublicStateIsExact(CFRSolver& solver, const BoardState& state) {
+    const uint32_t public_state_id = PublicStateId(solver, state);
+    return solver.frozen_tables_->public_state_rows[public_state_id]
+        .public_state_is_exact;
+  }
+
   static uint32_t BettingHistoryId(CFRSolver& solver,
                                    const BoardState& state) {
     return solver.get_or_create_betting_history_id(TestGameState(state));
@@ -1053,6 +1059,8 @@ void CheckPublicStateKeyIgnoresBoardOrder() {
   Expect(CFRSolverRegretTestPeer::PublicBucket(solver, first) ==
              CFRSolverRegretTestPeer::PublicBucket(solver, second),
          "exact public-card buckets should canonicalize by board mask");
+  Expect(CFRSolverRegretTestPeer::PublicStateIsExact(solver, first),
+         "exact public-card buckets should store exact public states");
 }
 
 void CheckExactPrivateBucketsUseExactCombo() {

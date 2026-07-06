@@ -132,6 +132,7 @@ class FrozenStrategyTables {
     CompactPublicState state;
     uint32_t betting_history_id = GameTree::Node::kInvalidBettingHistoryId;
     PublicBucketId public_bucket = 0;
+    bool public_state_is_exact = true;
     bool is_terminal = false;
     bool is_chance_node = false;
     int player_to_act = -1;
