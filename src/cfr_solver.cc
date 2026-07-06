@@ -1261,10 +1261,10 @@ void CFRSolver::run(int iterations, ComboId player_a_hand,
   for (int i = 0; i < iterations; ++i) {
     std::array<double, 2> reach_probabilities = {1.0, 1.0};
     cumulative_root_utility_ += cfr_with_ranges(
-        *root_public_state_id, player_a_cards, player_b_cards, reach_probabilities,
-        iterations_run_.load(std::memory_order_relaxed), 0, max_depth, scratch,
+        *root_public_state_id, player_a_cards, player_b_cards,
+        reach_probabilities, iterations_run_, 0, max_depth, scratch,
         std::nullopt, std::nullopt);
-    iterations_run_.fetch_add(1, std::memory_order_relaxed);
+    ++iterations_run_;
   }
 }
 
@@ -1336,7 +1336,7 @@ void CFRSolver::run_iterations(int iterations,
     PrivateCards player_b_cards = PrivateCards::FromCombo(deal.player_b_combo);
 
     VLOG(2) << "Iteration " << i + 1 << "/" << iterations;
-    int cfr_iteration = iterations_run_.load(std::memory_order_relaxed);
+    int cfr_iteration = iterations_run_;
     std::array<double, 2> reach_probabilities = {1.0, 1.0};
     OptionalTrainingRange player_a_context_range;
     OptionalTrainingRange player_b_context_range;
@@ -1351,7 +1351,7 @@ void CFRSolver::run_iterations(int iterations,
         player_b_context_range);
 
     cumulative_root_utility_ += dealt_value;
-    iterations_run_.fetch_add(1, std::memory_order_relaxed);
+    ++iterations_run_;
   }
 
   const int remaining = iterations - warmup_count;
@@ -1361,7 +1361,7 @@ void CFRSolver::run_iterations(int iterations,
     mutable_tables_.reset();
     frozen_ = true;
     LOG(INFO) << "Frozen after warmup: " << get_info_set_count()
-              << " info sets, " << iterations_run_.load(std::memory_order_relaxed)
+              << " info sets, " << iterations_run_
               << " warmup iterations. Starting parallel phase ("
               << remaining << " iterations, " << num_threads << " threads)...";
     run_iterations_parallel(remaining, num_threads, *root_public_state_id,
@@ -1370,7 +1370,7 @@ void CFRSolver::run_iterations(int iterations,
   }
 
   LOG(INFO) << "CFR iterations completed";
-  LOG(INFO) << "Iterations run: " << iterations_run_.load(std::memory_order_relaxed);
+  LOG(INFO) << "Iterations run: " << iterations_run_;
   LOG(INFO) << "Information sets: " << get_info_set_count();
   LOG(INFO) << "Public states: " << get_public_state_count();
   LOG(INFO) << "Player A average EV: " << get_expected_value(0);
@@ -1391,21 +1391,30 @@ void CFRSolver::run_iterations_parallel(
 
   ThreadPoolExecutor executor(num_threads);
   std::uniform_int_distribution<unsigned int> seed_dist;
-  std::vector<std::future<std::pair<double, TraversalStats>>> futures;
+  struct WorkerResult {
+    double utility = 0.0;
+    TraversalStats traversal_stats;
+    int64_t cfr_updates = 0;
+    int iterations = 0;
+  };
+  std::vector<std::future<WorkerResult>> futures;
   futures.reserve(num_threads);
 
   int iterations_remaining = iterations;
+  int next_iteration = iterations_run_;
   for (int t = 0; t < num_threads; ++t) {
     const int shard = iterations_remaining / (num_threads - t);
     iterations_remaining -= shard;
     if (shard <= 0) {
       continue;
     }
+    const int iteration_begin = next_iteration;
+    next_iteration += shard;
 
     const unsigned int seed = seed_dist(rng_);
     futures.push_back(executor.submit(
-        [this, shard, seed, root_public_state_id, &range_sampler,
-         frozen_tables, cumulative,
+        [this, shard, iteration_begin, seed, root_public_state_id,
+         &range_sampler, frozen_tables, cumulative,
          &player_a_training_range, &player_b_training_range]() mutable {
           // Build a lightweight worker that shares frozen tables.
           CFRSolver worker(config_, utility_cache_,
@@ -1433,9 +1442,7 @@ void CFRSolver::run_iterations_parallel(
             PrivateCards player_b_cards =
                 PrivateCards::FromCombo(deal.player_b_combo);
 
-            // Use the global iteration counter for CFR+ linear weighting.
-            const int cfr_iteration =
-                iterations_run_.fetch_add(1, std::memory_order_relaxed);
+            const int cfr_iteration = iteration_begin + i;
             std::array<double, 2> reach_probabilities = {1.0, 1.0};
             OptionalTrainingRange player_a_context_range;
             OptionalTrainingRange player_b_context_range;
@@ -1448,16 +1455,21 @@ void CFRSolver::run_iterations_parallel(
                 reach_probabilities, cfr_iteration, 0, max_depth, scratch,
                 player_a_context_range, player_b_context_range);
           }
-          return std::make_pair(local_utility, worker.get_traversal_stats());
+          return WorkerResult{local_utility, worker.get_traversal_stats(),
+                              worker.get_cfr_update_count(), shard};
         }));
   }
 
   // Accumulate per-worker root utilities and traversal stats into the main solver.
-  for (std::future<std::pair<double, TraversalStats>>& f : futures) {
-    const auto result = f.get();
-    cumulative_root_utility_ += result.first;
-    add_traversal_stats(result.second);
+  int completed_iterations = 0;
+  for (std::future<WorkerResult>& f : futures) {
+    const WorkerResult result = f.get();
+    cumulative_root_utility_ += result.utility;
+    add_traversal_stats(result.traversal_stats);
+    cfr_update_count_ += result.cfr_updates;
+    completed_iterations += result.iterations;
   }
+  iterations_run_ += completed_iterations;
 }
 
 double CFRSolver::cfr_with_ranges(
@@ -1621,7 +1633,7 @@ double CFRSolver::cfr_with_ranges(
     node_value += action_probabilities[action_index] * action_value;
   }
 
-  cfr_update_count_.fetch_add(1, std::memory_order_relaxed);
+  ++cfr_update_count_;
   POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.cfr_updates);
   POKER_RECORD_TRAVERSAL_STAT(
       traversal_stats_.max_decision_depth =
@@ -2255,7 +2267,7 @@ GameAction CFRSolver::get_best_response_action(GameTree::Node& node,
 }
 
 double CFRSolver::get_expected_value(int player_id) const {
-  const int iters = iterations_run_.load(std::memory_order_relaxed);
+  const int iters = iterations_run_;
   if (iters == 0) {
     return 0.0;
   }

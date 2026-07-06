@@ -1,7 +1,6 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -112,8 +111,10 @@ public:
   
   // Get the expected value of the game for a player
   double get_expected_value(int player_id) const;
-  int get_iterations_run() const { return iterations_run_.load(std::memory_order_relaxed); }
-  int64_t get_cfr_update_count() const { return cfr_update_count_.load(std::memory_order_relaxed); }
+  int get_iterations_run() const { return iterations_run_; }
+  int64_t get_cfr_update_count() const {
+    return cfr_update_count_;
+  }
   size_t get_info_set_count() const { return frozen_tables_->info_set_count; }
   size_t get_public_state_count() const {
     return frozen_tables_->public_state_rows.size();
@@ -242,8 +243,8 @@ private:
   std::shared_ptr<GameTree> game_tree_;
   std::mt19937 rng_;
   double cumulative_root_utility_;
-  std::atomic<int> iterations_run_{0};
-  std::atomic<int64_t> cfr_update_count_{0};
+  int iterations_run_ = 0;
+  int64_t cfr_update_count_ = 0;
   TraversalStats traversal_stats_;
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
