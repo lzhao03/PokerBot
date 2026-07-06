@@ -79,19 +79,6 @@ public:
   void run(int iterations, const HandRange& player_a_range,
            const HandRange& player_b_range);
   
-  // The core chance-sampled CFR+ algorithm.
-  // Uses CFR+ regret clipping. Unless config.regret_only_training is set,
-  // it also accumulates a linearly weighted average strategy.
-  // Returns the expected value of the game for player A.
-  // max_depth <= 0 disables the depth cutoff.
-  double cfr(GameTree::Node& node,
-             ComboId player_a_hand,
-             ComboId player_b_hand,
-             std::array<double, 2>& reach_probabilities,
-             int iteration,
-             int depth = 0,
-             int max_depth = 0);
-  
   // Get the computed strategy. Regret-only training exports the current
   // regret-matched policy because average-strategy sums are not accumulated.
   StrategyProfile get_strategy_profile() const;
@@ -125,10 +112,7 @@ public:
   int get_iterations_run() const { return iterations_run_.load(std::memory_order_relaxed); }
   int64_t get_cfr_update_count() const { return cfr_update_count_.load(std::memory_order_relaxed); }
   size_t get_info_set_count() const { return info_set_count_; }
-  size_t get_tree_node_count() const {
-    return public_state_rows_.empty() ? game_tree_->node_count()
-                                      : public_state_rows_.size();
-  }
+  size_t get_public_state_count() const { return public_state_rows_.size(); }
   TraversalStats get_traversal_stats() const { return traversal_stats_; }
   void add_traversal_stats(const TraversalStats& stats);
   UtilityCacheStats get_utility_cache_stats() const;
@@ -396,28 +380,6 @@ private:
                                 const TrainingRange& player_a_training_range,
                                 const TrainingRange& player_b_training_range);
   double cfr_with_ranges(
-      GameTree::Node& node,
-      ComboId player_a_hand,
-      ComboId player_b_hand,
-      std::array<double, 2>& reach_probabilities,
-      int iteration,
-      int depth,
-      int max_depth,
-      TraversalScratch& scratch,
-      OptionalTrainingRange player_a_range,
-      OptionalTrainingRange player_b_range);
-  double cfr_with_ranges(
-      GameTree::Node& node,
-      const PrivateCards& player_a_cards,
-      const PrivateCards& player_b_cards,
-      std::array<double, 2>& reach_probabilities,
-      int iteration,
-      int depth,
-      int max_depth,
-      TraversalScratch& scratch,
-      OptionalTrainingRange player_a_range,
-      OptionalTrainingRange player_b_range);
-  double cfr_with_ranges(
       uint32_t public_state_id,
       const PrivateCards& player_a_cards,
       const PrivateCards& player_b_cards,
@@ -539,9 +501,6 @@ private:
   double uncached_utility(const GameState& state,
                           const PrivateCards& player_a_cards,
                           const PrivateCards& player_b_cards);
-  double evaluate_strategy_node(GameTree::Node& node,
-                                const PrivateCards& player_a_cards,
-                                const PrivateCards& player_b_cards);
   double evaluate_strategy_node(uint32_t public_state_id,
                                 const PrivateCards& player_a_cards,
                                 const PrivateCards& player_b_cards);
@@ -571,17 +530,6 @@ private:
   void update_strategy(const InfoSetRow& row,
                        const ActionChoices& choices,
                        double reach_prob);
-  double chance_sampling_cfr(
-      GameTree::Node& node,
-      const PrivateCards& player_a_cards,
-      const PrivateCards& player_b_cards,
-      std::array<double, 2>& reach_probabilities,
-      int iteration,
-      int depth,
-      int max_depth,
-      TraversalScratch& scratch,
-      OptionalTrainingRange player_a_range,
-      OptionalTrainingRange player_b_range);
   double chance_sampling_cfr(
       uint32_t public_state_id,
       const PrivateCards& player_a_cards,

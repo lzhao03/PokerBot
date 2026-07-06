@@ -70,7 +70,7 @@ double ParseDouble(const std::string& value, const std::string& flag) {
 }
 
 constexpr int64_t kDefaultMaxInfoSets = 500000;
-constexpr int64_t kDefaultMaxTreeNodes = 200000;
+constexpr int64_t kDefaultMaxPublicStates = 200000;
 
 void PrintUsage(const char* program) {
   std::cerr
@@ -90,8 +90,8 @@ void PrintUsage(const char* program) {
       << "  --river-bet-size=X\n"
       << "  --max-info-sets=N               cap info set allocations (default "
       << kDefaultMaxInfoSets << ", 0 = unlimited)\n"
-      << "  --max-tree-nodes=N              cap game tree node cache (default "
-      << kDefaultMaxTreeNodes << ", 0 = unlimited)\n"
+      << "  --max-public-states=N           cap public-state rows (default "
+      << kDefaultMaxPublicStates << ", 0 = unlimited)\n"
       << "  --threads=N                     parallel training threads (0 or 1 = single-threaded)\n"
       << "  --warmup-iterations=N           single-threaded warmup before parallel phase (0 = auto)\n"
       << "  --max-memory-mb=N                hard memory limit in MB (default "
@@ -109,7 +109,7 @@ int main(int argc, char** argv) {
   int exploitability_samples = 0;
   bool saw_global_bet_size = false;
   bool saw_max_info_sets = false;
-  bool saw_max_tree_nodes = false;
+  bool saw_max_public_states = false;
   int64_t memory_limit_mb = kDefaultMemoryLimitMb;
 
   try {
@@ -160,9 +160,9 @@ int main(int argc, char** argv) {
       } else if (ConsumePrefix(arg, "--max-info-sets=", &value)) {
         config.set_max_info_sets(ParseInt(value, "--max-info-sets"));
         saw_max_info_sets = true;
-      } else if (ConsumePrefix(arg, "--max-tree-nodes=", &value)) {
-        config.set_max_tree_nodes(ParseInt(value, "--max-tree-nodes"));
-        saw_max_tree_nodes = true;
+      } else if (ConsumePrefix(arg, "--max-public-states=", &value)) {
+        config.set_max_public_states(ParseInt(value, "--max-public-states"));
+        saw_max_public_states = true;
       } else if (ConsumePrefix(arg, "--max-memory-mb=", &value)) {
         memory_limit_mb = ParseInt64(value, "--max-memory-mb");
         if (memory_limit_mb < 0) {
@@ -181,8 +181,8 @@ int main(int argc, char** argv) {
     if (!saw_max_info_sets) {
       config.set_max_info_sets(kDefaultMaxInfoSets);
     }
-    if (!saw_max_tree_nodes) {
-      config.set_max_tree_nodes(kDefaultMaxTreeNodes);
+    if (!saw_max_public_states) {
+      config.set_max_public_states(kDefaultMaxPublicStates);
     }
 
     poker::HandRange player_a_range;
@@ -200,7 +200,7 @@ int main(int argc, char** argv) {
 
     std::chrono::duration<double> elapsed = end - start;
     const size_t info_sets = solver.get_info_set_count();
-    const size_t tree_nodes = solver.get_tree_node_count();
+    const size_t public_states = solver.get_public_state_count();
     std::cout << "iterations=" << solver.get_iterations_run() << "\n";
     std::cout << "info_sets=" << info_sets << "\n";
     std::cout << "max_info_sets=" << native_config.max_info_sets << "\n";
@@ -210,11 +210,12 @@ int main(int argc, char** argv) {
               << "\n";
     std::cout << "player_a_ev=" << solver.get_expected_value(0) << "\n";
     std::cout << "seconds=" << elapsed.count() << "\n";
-    std::cout << "tree_nodes=" << tree_nodes << "\n";
-    std::cout << "max_tree_nodes=" << native_config.max_tree_nodes << "\n";
-    std::cout << "tree_node_cap_hit="
-              << (native_config.max_tree_nodes > 0 &&
-                  tree_nodes >= static_cast<size_t>(native_config.max_tree_nodes))
+    std::cout << "public_states=" << public_states << "\n";
+    std::cout << "max_public_states=" << native_config.max_public_states << "\n";
+    std::cout << "public_state_cap_hit="
+              << (native_config.max_public_states > 0 &&
+                  public_states >=
+                      static_cast<size_t>(native_config.max_public_states))
               << "\n";
     const int64_t touches =
         solver.get_traversal_stats().action_entry_touches;

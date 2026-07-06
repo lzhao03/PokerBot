@@ -64,11 +64,10 @@ struct SolverConfig {
   // Once this limit is reached, new (combo, public_state) pairs fall back to
   // uniform strategy rather than allocating new entries. Controls peak memory.
   int max_info_sets = 0;
-  // Maximum number of game tree nodes to cache. 0 means unlimited.
-  // Once hit, new chance child nodes (board runouts) are not stored in the
-  // tree and are reconstructed on the fly. Prevents unbounded memory growth
-  // on the full game where board runouts can number in the millions.
-  int max_tree_nodes = 0;
+  // Maximum number of compact public-state rows to allocate. 0 means
+  // unlimited. Once this limit is reached, new public states are skipped
+  // instead of expanding the sampled branch. Controls peak traversal memory.
+  int max_public_states = 0;
   // Number of threads to use for parallel training. 0 or 1 = single-threaded.
   int num_training_threads = 0;
   // Number of single-threaded warmup iterations before parallel training begins.

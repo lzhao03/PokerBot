@@ -176,12 +176,12 @@ void AdvanceStreet(GameState& state, absl::Span<const CardId> cards) {
 }  // namespace
 
 GameTree::GameTree(const SolverConfig& config) : config_(config) {
-  if (config.max_tree_nodes > 0) {
-    // Reserve the outer block-pointer vector so it never reallocates.
-    // Individual NodeBlock objects are still allocated lazily as nodes are
-    // added, but the outer vector itself is stable once reserved.
-    const size_t total_nodes = static_cast<size_t>(config.max_tree_nodes);
-    const size_t num_blocks = (total_nodes + kNodeBlockSize - 1) / kNodeBlockSize;
+  if (config.max_public_states > 0) {
+    // The legacy diagnostic tree still shares the public-state cap as its
+    // memory guard until best-response diagnostics move off GameTree nodes.
+    const size_t total_nodes = static_cast<size_t>(config.max_public_states);
+    const size_t num_blocks =
+        (total_nodes + kNodeBlockSize - 1) / kNodeBlockSize;
     node_blocks_.reserve(num_blocks);
   }
 }

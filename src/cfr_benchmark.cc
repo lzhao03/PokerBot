@@ -24,7 +24,7 @@ constexpr int kDefaultIterations = kProdBenchmarkDefaults ? 5000 : 100;
 constexpr int kDefaultEvalSamples = kProdBenchmarkDefaults ? 1 : 100;
 constexpr int kDefaultExploitabilitySamples = 10;
 constexpr int kDefaultMaxInfoSets = kProdBenchmarkDefaults ? 500000 : 0;
-constexpr int kDefaultMaxTreeNodes = kProdBenchmarkDefaults ? 200000 : 0;
+constexpr int kDefaultMaxPublicStates = kProdBenchmarkDefaults ? 200000 : 0;
 constexpr bool kDefaultSkipExploitability = kProdBenchmarkDefaults;
 constexpr const char* kDefaultRange =
     kProdBenchmarkDefaults ? "all" : "premium";
@@ -49,11 +49,11 @@ struct BenchmarkResult {
   poker::CFRSolver::TraversalStats traversal_stats;
   poker::CFRSolver::UtilityCacheStats utility_cache_stats;
   int64_t info_sets = 0;
-  int64_t tree_nodes = 0;
+  int64_t public_states = 0;
   int max_info_sets = 0;
-  int max_tree_nodes = 0;
+  int max_public_states = 0;
   bool info_set_cap_hit = false;
-  bool tree_node_cap_hit = false;
+  bool public_state_cap_hit = false;
 };
 
 bool ConsumePrefix(const std::string& arg,
@@ -116,8 +116,8 @@ void PrintUsage(const char* program) {
       << "  --chance-samples=N              solver config override\n"
       << "  --max-info-sets=N               solver config override"
       << " (default " << kDefaultMaxInfoSets << ")\n"
-      << "  --max-tree-nodes=N              solver config override"
-      << " (default " << kDefaultMaxTreeNodes << ")\n"
+      << "  --max-public-states=N           solver config override"
+      << " (default " << kDefaultMaxPublicStates << ")\n"
       << "  --threads=N                     solver config override\n"
       << "  --warmup-iterations=N           solver config override\n"
       << "  --regret-only                   solver config override\n"
@@ -143,11 +143,12 @@ BenchmarkResult WithSolverState(BenchmarkResult result,
                                 const poker::SolverConfig& config,
                                 const poker::CFRSolver& solver) {
   result.info_sets = static_cast<int64_t>(solver.get_info_set_count());
-  result.tree_nodes = static_cast<int64_t>(solver.get_tree_node_count());
+  result.public_states = static_cast<int64_t>(solver.get_public_state_count());
   result.max_info_sets = config.max_info_sets;
-  result.max_tree_nodes = config.max_tree_nodes;
+  result.max_public_states = config.max_public_states;
   result.info_set_cap_hit = CapHit(result.info_sets, result.max_info_sets);
-  result.tree_node_cap_hit = CapHit(result.tree_nodes, result.max_tree_nodes);
+  result.public_state_cap_hit =
+      CapHit(result.public_states, result.max_public_states);
   return result;
 }
 
@@ -193,11 +194,11 @@ void RunBenchmark(const std::string& name,
             << result.cfr_node_updates << "\t"
             << RatePerSecond(result.cfr_node_updates, elapsed.count()) << "\t"
             << result.info_sets << "\t"
-            << result.tree_nodes << "\t"
+            << result.public_states << "\t"
             << result.max_info_sets << "\t"
-            << result.max_tree_nodes << "\t"
+            << result.max_public_states << "\t"
             << result.info_set_cap_hit << "\t"
-            << result.tree_node_cap_hit << "\t"
+            << result.public_state_cap_hit << "\t"
             << result.traversal_stats.action_entry_touches << "\t"
             << RatePerSecond(result.traversal_stats.action_entry_touches,
                              elapsed.count()) << "\t"
@@ -224,7 +225,7 @@ ParsedOptions ParseOptions(int argc, char** argv) {
     parsed.config.set_max_depth(0);
     parsed.config.set_regret_only_training(true);
     parsed.config.set_max_info_sets(kDefaultMaxInfoSets);
-    parsed.config.set_max_tree_nodes(kDefaultMaxTreeNodes);
+    parsed.config.set_max_public_states(kDefaultMaxPublicStates);
   }
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
@@ -259,8 +260,9 @@ ParsedOptions ParseOptions(int argc, char** argv) {
       parsed.config.set_big_blind(ParseInt(value, "--big-blind"));
     } else if (ConsumePrefix(arg, "--max-info-sets=", &value)) {
       parsed.config.set_max_info_sets(ParseInt(value, "--max-info-sets"));
-    } else if (ConsumePrefix(arg, "--max-tree-nodes=", &value)) {
-      parsed.config.set_max_tree_nodes(ParseInt(value, "--max-tree-nodes"));
+    } else if (ConsumePrefix(arg, "--max-public-states=", &value)) {
+      parsed.config.set_max_public_states(
+          ParseInt(value, "--max-public-states"));
     } else if (ConsumePrefix(arg, "--threads=", &value)) {
       parsed.config.set_num_training_threads(ParseInt(value, "--threads"));
     } else if (ConsumePrefix(arg, "--warmup-iterations=", &value)) {
@@ -305,9 +307,9 @@ int main(int argc, char** argv) {
 
     std::cout << "case\tseconds\tresult\thands\thands_per_second"
               << "\tcfr_node_updates\tcfr_node_updates_per_second"
-              << "\tinfo_sets\ttree_nodes"
-              << "\tmax_info_sets\tmax_tree_nodes"
-              << "\tinfo_set_cap_hit\ttree_node_cap_hit"
+              << "\tinfo_sets\tpublic_states"
+              << "\tmax_info_sets\tmax_public_states"
+              << "\tinfo_set_cap_hit\tpublic_state_cap_hit"
               << "\taction_entry_touches\taction_entry_touches_per_second"
               << "\tpreflop_updates\tflop_updates\tturn_updates"
               << "\triver_updates\tmax_decision_depth"

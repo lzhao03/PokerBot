@@ -75,14 +75,13 @@ SolverConfig TestSolverConfig(const PokerConfig& config) {
 class CFRSolverRegretTestPeer {
  public:
   static double Regret(CFRSolver& solver,
-                       const GameTree::Node& node,
+                       const GameState& state,
                        int player,
                        const Hand& hand,
                        int action_id) {
-    auto public_state =
-        solver.get_or_create_public_state_id(node.state);
+    auto public_state = solver.get_or_create_public_state_id(state);
     const CFRSolver::PrivateBucketId private_bucket =
-        solver.card_abstraction_.private_bucket(TestComboId(hand), node.state);
+        solver.card_abstraction_.private_bucket(TestComboId(hand), state);
     const CFRSolver::InfoSetRow* row =
         solver.find_info_set_row({public_state, player, private_bucket});
     if (row == nullptr) {
@@ -95,6 +94,14 @@ class CFRSolverRegretTestPeer {
       }
     }
     throw std::runtime_error("Regret action was not created");
+  }
+
+  static double Regret(CFRSolver& solver,
+                       const GameTree::Node& node,
+                       int player,
+                       const Hand& hand,
+                       int action_id) {
+    return Regret(solver, node.state, player, hand, action_id);
   }
 
   static bool SamePublicStateKey(const CFRSolver& solver,
@@ -342,11 +349,41 @@ class CFRSolverRegretTestPeer {
     return slab->players[player].rows.size();
   }
 
-  static double EvaluateNode(CFRSolver& solver, GameTree::Node& node,
-                             const Hand& player_a_hand,
-                             const Hand& player_b_hand) {
+  static double CompactCfr(CFRSolver& solver,
+                           const GameState& state,
+                           const Hand& player_a_hand,
+                           const Hand& player_b_hand,
+                           std::array<double, 2>& reach_probabilities,
+                           int iteration,
+                           int depth,
+                           int max_depth) {
+    std::optional<uint32_t> public_state_id =
+        solver.get_or_create_public_state_row(state);
+    if (!public_state_id.has_value()) {
+      return 0.0;
+    }
+    CFRSolver::TraversalScratch scratch;
+    scratch.reserve_depth(max_depth > 0 ? max_depth + 8 : 32);
+    return solver.cfr_with_ranges(
+        *public_state_id,
+        CFRSolver::PrivateCards::FromCombo(TestComboId(player_a_hand)),
+        CFRSolver::PrivateCards::FromCombo(TestComboId(player_b_hand)),
+        reach_probabilities, iteration, depth, max_depth, scratch,
+        std::nullopt, std::nullopt);
+  }
+
+  static double EvaluateState(CFRSolver& solver,
+                              const GameState& state,
+                              const Hand& player_a_hand,
+                              const Hand& player_b_hand) {
+    std::optional<uint32_t> public_state_id =
+        solver.get_or_create_public_state_row(state);
+    if (!public_state_id.has_value()) {
+      return 0.0;
+    }
     return solver.evaluate_strategy_node(
-        node, CFRSolver::PrivateCards::FromCombo(TestComboId(player_a_hand)),
+        *public_state_id,
+        CFRSolver::PrivateCards::FromCombo(TestComboId(player_a_hand)),
         CFRSolver::PrivateCards::FromCombo(TestComboId(player_b_hand)));
   }
 
@@ -612,9 +649,9 @@ double TestCfr(CFRSolver& solver,
                int iteration,
                int depth = 0,
                int max_depth = 0) {
-  return solver.cfr(node, TestComboId(player_a_hand),
-                    TestComboId(player_b_hand), reach_probabilities,
-                    iteration, depth, max_depth);
+  return CFRSolverRegretTestPeer::CompactCfr(
+      solver, node.state, player_a_hand, player_b_hand, reach_probabilities,
+      iteration, depth, max_depth);
 }
 
 std::unordered_map<int, double> StrategyActionMap(
@@ -771,26 +808,34 @@ void CheckCfrUsesLegalActions() {
   AddCard(node.state, 3, Suit::DIAMONDS);
   AddCard(node.state, 4, Suit::CLUBS);
   node.player_to_act = 0;
-  node.add_action(MakeGameAction(ActionType::CHECK), GameTree::action_key(MakeGameAction(ActionType::CHECK)));
+  GameTree game_tree(TestSolverConfig(config));
+  std::vector<int> expected_action_ids;
+  for (const GameAction& action : game_tree.get_legal_actions(node.state)) {
+    expected_action_ids.push_back(GameTree::action_key(action));
+  }
 
-  Hand player_a_hand;
-  Hand player_b_hand;
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 13, Suit::SPADES);
+  Hand player_b_hand = MakeHand(12, Suit::HEARTS, 11, Suit::HEARTS);
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
   TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
 
   const CFRSolver::StrategyProfile strategy = solver.get_strategy_profile();
   Expect(strategy.size() == 1, "CFR should visit one info set");
   const auto action_probs = StrategyActionMap(strategy);
-  Expect(action_probs.size() == 1, "strategy should only include legal actions");
-  Expect(action_probs.count(TestActionKey(ActionType::CHECK)) == 1,
-         "strategy should include check");
-  Expect(action_probs.at(TestActionKey(ActionType::CHECK)) == 1.0,
-         "single legal action should get probability 1");
+  Expect(action_probs.size() == expected_action_ids.size(),
+         "strategy should only include legal actions");
+  for (int action_id : expected_action_ids) {
+    Expect(action_probs.count(action_id) == 1,
+           "strategy should include every legal action");
+  }
 }
 
 void CheckCfrDistinguishesActionAmounts() {
   PokerConfig config;
   config.set_starting_stack_size(20);
+  config.add_bet_sizes(0.25);
+  config.add_bet_sizes(0.5);
+  config.add_bet_sizes(1.0);
 
   CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
@@ -804,23 +849,35 @@ void CheckCfrDistinguishesActionAmounts() {
   node.state.add_player_contribution(2);
   node.state.set_player_to_act(0);
   node.player_to_act = 0;
-  node.add_action(MakeGameAction(ActionType::FOLD), GameTree::action_key(MakeGameAction(ActionType::FOLD)));
-  node.add_action(MakeGameAction(ActionType::CALL, 1), GameTree::action_key(MakeGameAction(ActionType::CALL, 1)));
-  node.add_action(MakeGameAction(ActionType::RAISE, 3), GameTree::action_key(MakeGameAction(ActionType::RAISE, 3)));
-  node.add_action(MakeGameAction(ActionType::RAISE, 5), GameTree::action_key(MakeGameAction(ActionType::RAISE, 5)));
-  node.add_action(MakeGameAction(ActionType::RAISE, 7), GameTree::action_key(MakeGameAction(ActionType::RAISE, 7)));
+  GameTree game_tree(TestSolverConfig(config));
+  std::vector<int> expected_action_ids;
+  int raise_count = 0;
+  for (const GameAction& action : game_tree.get_legal_actions(node.state)) {
+    expected_action_ids.push_back(GameTree::action_key(action));
+    if (action.kind == ActionKind::kRaise) {
+      ++raise_count;
+    }
+  }
 
-  Hand player_a_hand;
-  Hand player_b_hand;
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 13, Suit::SPADES);
+  Hand player_b_hand = MakeHand(12, Suit::HEARTS, 11, Suit::HEARTS);
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
   TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
 
   const CFRSolver::StrategyProfile strategy = solver.get_strategy_profile();
   Expect(strategy.size() == 1, "CFR should visit one info set");
   const auto action_probs = StrategyActionMap(strategy);
-  Expect(action_probs.size() == 5, "same action type with different amounts should not collide");
+  Expect(raise_count >= 2, "fixture should contain multiple raise amounts");
+  Expect(action_probs.size() == expected_action_ids.size(),
+         "same action type with different amounts should not collide");
+  for (int action_id : expected_action_ids) {
+    Expect(action_probs.count(action_id) == 1,
+           "strategy should include every legal action amount");
+  }
   for (const auto& action_prob : action_probs) {
-    Expect(std::abs(action_prob.second - 0.2) < 0.000001,
+    Expect(std::abs(action_prob.second -
+                    1.0 / static_cast<double>(expected_action_ids.size())) <
+               0.000001,
            "initial strategy should be uniform over all legal actions");
   }
 }
@@ -999,7 +1056,7 @@ void CheckCompactPublicStateActionTransitionsAreCached() {
 
   Expect(child_id == repeated_child_id,
          "compact action transition should reuse the same public state id");
-  Expect(solver.get_tree_node_count() == 2,
+  Expect(solver.get_public_state_count() == 2,
          "compact action transition should create one child row");
 }
 
@@ -1712,6 +1769,37 @@ BoardState RiverFacingCallState() {
   return state;
 }
 
+BoardState RiverPlayerAFacingSmallCallState() {
+  BoardState state;
+  state.set_stack_a(1);
+  state.set_stack_b(0);
+  state.set_pot(11);
+  state.set_street(Street::RIVER);
+  state.set_all_in(true);
+  state.set_folded_player(-1);
+  state.set_player_to_act(0);
+  state.add_player_contribution(5);
+  state.add_player_contribution(6);
+  *state.mutable_history()->add_actions() = MakeAction(ActionType::BET, 1);
+  AddCard(state, 2, Suit::HEARTS);
+  AddCard(state, 7, Suit::DIAMONDS);
+  AddCard(state, 9, Suit::CLUBS);
+  AddCard(state, 11, Suit::SPADES);
+  AddCard(state, 12, Suit::DIAMONDS);
+  return state;
+}
+
+BoardState RiverPlayerBFacingSmallCallState() {
+  BoardState state = RiverPlayerAFacingSmallCallState();
+  state.set_stack_a(0);
+  state.set_stack_b(1);
+  state.set_player_to_act(1);
+  state.clear_player_contribution();
+  state.add_player_contribution(6);
+  state.add_player_contribution(5);
+  return state;
+}
+
 void CheckExactHandNestedCfrContinuationSolvesRiverCallSubgame() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -2062,41 +2150,21 @@ void CheckZeroMaxDepthDoesNotCutOff() {
   config.set_starting_stack_size(10);
 
   CFRSolver solver(TestSolverConfig(config));
+  auto provider = std::make_shared<FixedContinuationValueProvider>(7.0);
+  solver.set_continuation_value_provider(provider);
   GameTree::Node root;
-  root.state.set_player_to_act(0);
-  root.player_to_act = 0;
-  root.add_action(MakeGameAction(ActionType::CHECK), GameTree::action_key(MakeGameAction(ActionType::CHECK)));
+  root.state = TestGameState(RiverFacingCallState());
 
-  GameTree::Node first_child;
-  first_child.state.set_player_to_act(1);
-  first_child.player_to_act = 1;
-  first_child.add_action(MakeGameAction(ActionType::CHECK), GameTree::action_key(MakeGameAction(ActionType::CHECK)));
-  GameTree::Node& first_child_ref = CFRSolverRegretTestPeer::AddChild(
-      solver, root, TestActionKey(ActionType::CHECK),
-      std::move(first_child));
-
-  GameTree::Node second_child;
-  second_child.state.set_player_to_act(0);
-  second_child.player_to_act = 0;
-  second_child.add_action(MakeGameAction(ActionType::CHECK), GameTree::action_key(MakeGameAction(ActionType::CHECK)));
-  GameTree::Node& second_child_ref = CFRSolverRegretTestPeer::AddChild(
-      solver, first_child_ref, TestActionKey(ActionType::CHECK),
-      std::move(second_child));
-
-  GameTree::Node terminal_child;
-  terminal_child.state = TestGameState(FoldedState(1));
-  terminal_child.is_terminal = true;
-  CFRSolverRegretTestPeer::AddChild(
-      solver, second_child_ref, TestActionKey(ActionType::CHECK),
-      std::move(terminal_child));
-
-  Hand player_a_hand;
-  Hand player_b_hand;
+  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
+  Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
   double value =
       TestCfr(solver, root, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 0);
 
-  Expect(value == 5.0, "zero max depth should not cut off CFR traversal");
+  Expect(std::abs(value - 2.5) < 0.000001,
+         "zero max depth should not cut off CFR traversal");
+  Expect(provider->calls() == 0,
+         "zero max depth should not call the continuation provider");
 }
 
 void CheckChanceDoesNotConsumeDepth() {
@@ -2128,15 +2196,17 @@ void CheckChanceDoesNotConsumeDepth() {
 
 void CheckChanceSamplesVisitMultipleBoards() {
   BoardState state;
-  state.set_stack_a(10);
-  state.set_stack_b(10);
-  state.set_pot(0);
+  state.set_stack_a(8);
+  state.set_stack_b(8);
+  state.set_pot(4);
   state.set_street(Street::PREFLOP);
   state.set_all_in(false);
   state.set_folded_player(-1);
   state.set_player_to_act(-1);
-  state.add_player_contribution(0);
-  state.add_player_contribution(0);
+  state.add_player_contribution(2);
+  state.add_player_contribution(2);
+  *state.mutable_history()->add_actions() = MakeAction(ActionType::BET, 1);
+  *state.mutable_history()->add_actions() = MakeAction(ActionType::CALL, 1);
 
   Hand player_a_hand = MakeHand(14, Suit::SPADES, 13, Suit::SPADES);
   Hand player_b_hand = MakeHand(12, Suit::HEARTS, 11, Suit::HEARTS);
@@ -2193,12 +2263,12 @@ void CheckEvaluationUsesChanceSamples() {
   one_sample_config.set_starting_stack_size(10);
   CFRSolver one_sample_solver(TestSolverConfig(one_sample_config));
   GameTree::Node one_sample_node = chance_node();
-  double first = CFRSolverRegretTestPeer::EvaluateNode(
-      one_sample_solver, one_sample_node, player_a_hand, player_b_hand);
-  double second = CFRSolverRegretTestPeer::EvaluateNode(
-      one_sample_solver, one_sample_node, player_a_hand, player_b_hand);
-  double third = CFRSolverRegretTestPeer::EvaluateNode(
-      one_sample_solver, one_sample_node, player_a_hand, player_b_hand);
+  double first = CFRSolverRegretTestPeer::EvaluateState(
+      one_sample_solver, one_sample_node.state, player_a_hand, player_b_hand);
+  double second = CFRSolverRegretTestPeer::EvaluateState(
+      one_sample_solver, one_sample_node.state, player_a_hand, player_b_hand);
+  double third = CFRSolverRegretTestPeer::EvaluateState(
+      one_sample_solver, one_sample_node.state, player_a_hand, player_b_hand);
   double expected_average = (first + second + third) / 3.0;
   Expect(std::abs(first - expected_average) > 0.000001,
          "chance sample fixture should have varied outcomes");
@@ -2208,8 +2278,9 @@ void CheckEvaluationUsesChanceSamples() {
   three_sample_config.set_chance_samples(3);
   CFRSolver three_sample_solver(TestSolverConfig(three_sample_config));
   GameTree::Node three_sample_node = chance_node();
-  double sampled_average = CFRSolverRegretTestPeer::EvaluateNode(
-      three_sample_solver, three_sample_node, player_a_hand, player_b_hand);
+  double sampled_average = CFRSolverRegretTestPeer::EvaluateState(
+      three_sample_solver, three_sample_node.state, player_a_hand,
+      player_b_hand);
   Expect(std::abs(sampled_average - expected_average) < 0.000001,
          "strategy evaluation should average configured chance samples");
 
@@ -2363,24 +2434,15 @@ void CheckPlayerBRegretsUsePlayerBUtility() {
 
   CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
-  node.state.set_player_to_act(1);
-  node.player_to_act = 1;
+  node.state = TestGameState(RiverPlayerBFacingSmallCallState());
 
-  GameAction player_b_loses = MakeGameAction(ActionType::FOLD);
-  GameAction player_b_wins = MakeGameAction(ActionType::CALL, 1);
-  node.add_action(player_b_loses, GameTree::action_key(player_b_loses));
-  node.add_action(player_b_wins, GameTree::action_key(player_b_wins));
-
-  AddTerminalChild(solver, node, TestActionKey(ActionType::FOLD),
-                   FoldedState(1));
-  AddTerminalChild(solver, node, TestActionKey(ActionType::CALL, 1),
-                   FoldedState(0));
-
-  Hand player_a_hand;
-  Hand player_b_hand;
+  Hand player_a_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
+  Hand player_b_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
-  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 2);
-  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 1, 0, 2);
+  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0,
+          0, 2);
+  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 1,
+          0, 2);
 
   const CFRSolver::StrategyProfile strategy = solver.get_strategy_profile();
   const auto action_probs = StrategyActionMap(strategy);
@@ -2395,24 +2457,13 @@ void CheckCfrPlusClipsNegativeRegrets() {
 
   CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
-  node.state.set_player_to_act(0);
-  node.state.set_folded_player(-1);
-  node.player_to_act = 0;
+  node.state = TestGameState(RiverPlayerAFacingSmallCallState());
 
-  GameAction player_a_loses = MakeGameAction(ActionType::FOLD);
-  GameAction player_a_wins = MakeGameAction(ActionType::CALL, 1);
-  node.add_action(player_a_loses, GameTree::action_key(player_a_loses));
-  node.add_action(player_a_wins, GameTree::action_key(player_a_wins));
-
-  AddTerminalChild(solver, node, TestActionKey(ActionType::FOLD),
-                   FoldedState(0));
-  AddTerminalChild(solver, node, TestActionKey(ActionType::CALL, 1),
-                   FoldedState(1));
-
-  Hand player_a_hand;
-  Hand player_b_hand;
+  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
+  Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
-  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
+  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0,
+          0, 1);
 
   Expect(CFRSolverRegretTestPeer::Regret(
              solver, node, 0, player_a_hand,
@@ -2430,25 +2481,15 @@ void CheckCfrPlusWeightsLaterStrategies() {
 
   CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
-  node.state.set_player_to_act(0);
-  node.state.set_folded_player(-1);
-  node.player_to_act = 0;
+  node.state = TestGameState(RiverPlayerAFacingSmallCallState());
 
-  GameAction player_a_loses = MakeGameAction(ActionType::FOLD);
-  GameAction player_a_wins = MakeGameAction(ActionType::CALL, 1);
-  node.add_action(player_a_loses, GameTree::action_key(player_a_loses));
-  node.add_action(player_a_wins, GameTree::action_key(player_a_wins));
-
-  AddTerminalChild(solver, node, TestActionKey(ActionType::FOLD),
-                   FoldedState(0));
-  AddTerminalChild(solver, node, TestActionKey(ActionType::CALL, 1),
-                   FoldedState(1));
-
-  Hand player_a_hand;
-  Hand player_b_hand;
+  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
+  Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
-  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
-  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 1, 0, 1);
+  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0,
+          0, 1);
+  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 1,
+          0, 1);
 
   const CFRSolver::StrategyProfile strategy = solver.get_strategy_profile();
   const auto action_probs = StrategyActionMap(strategy);
@@ -2464,22 +2505,13 @@ void CheckRegretOnlyTrainingSkipsAverageStrategyWrites() {
 
   CFRSolver solver(TestSolverConfig(config));
   GameTree::Node node;
-  node.state.set_player_to_act(0);
-  node.state.set_folded_player(-1);
-  node.player_to_act = 0;
+  node.state = TestGameState(RiverPlayerAFacingSmallCallState());
 
-  node.add_action(MakeGameAction(ActionType::FOLD), GameTree::action_key(MakeGameAction(ActionType::FOLD)));
-  node.add_action(MakeGameAction(ActionType::CALL, 1), GameTree::action_key(MakeGameAction(ActionType::CALL, 1)));
-
-  AddTerminalChild(solver, node, TestActionKey(ActionType::FOLD),
-                   FoldedState(0));
-  AddTerminalChild(solver, node, TestActionKey(ActionType::CALL, 1),
-                   FoldedState(1));
-
-  Hand player_a_hand;
-  Hand player_b_hand;
+  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
+  Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
   std::array<double, 2> reach_probabilities = {1.0, 1.0};
-  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 0, 1);
+  TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0,
+          0, 1);
 
   Expect(CFRSolverRegretTestPeer::TotalCumulativeStrategy(solver) == 0.0,
          "regret-only training should skip average strategy writes");
@@ -2534,7 +2566,7 @@ void CheckRangeTrainingUsesCompactPublicStates() {
   const double range_value =
       solver.evaluate_strategy(5, player_a_range, player_b_range);
 
-  Expect(solver.get_tree_node_count() > 0,
+  Expect(solver.get_public_state_count() > 0,
          "compact training should allocate public-state rows");
   Expect(CFRSolverRegretTestPeer::LegacyGameTreeNodeCount(solver) == 0,
          "compact training/evaluation should not allocate legacy game-tree nodes");
@@ -2544,12 +2576,12 @@ void CheckRangeTrainingUsesCompactPublicStates() {
          "compact range evaluation should return a finite value");
 }
 
-void CheckMaxTreeNodesCapsTrainingAllocations() {
+void CheckMaxPublicStatesCapsTrainingAllocations() {
   PokerConfig config;
   config.set_starting_stack_size(10);
   config.add_bet_sizes(1.0);
   config.set_regret_only_training(true);
-  config.set_max_tree_nodes(3);
+  config.set_max_public_states(3);
 
   Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
   Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
@@ -2561,8 +2593,8 @@ void CheckMaxTreeNodesCapsTrainingAllocations() {
   CFRSolver solver(TestSolverConfig(config));
   solver.run(20, player_a_range, player_b_range);
 
-  Expect(solver.get_tree_node_count() <= 3,
-         "max_tree_nodes should cap total cached training nodes");
+  Expect(solver.get_public_state_count() <= 3,
+         "max_public_states should cap total cached public-state rows");
 }
 
 }  // namespace
@@ -2622,7 +2654,7 @@ int main() {
   CheckRegretOnlyTrainingSkipsAverageStrategyWrites();
   CheckMaxInfoSetsCapsTrainingAllocations();
   CheckRangeTrainingUsesCompactPublicStates();
-  CheckMaxTreeNodesCapsTrainingAllocations();
+  CheckMaxPublicStatesCapsTrainingAllocations();
 
   PokerConfig config;
   config.add_bet_sizes(1.0);
