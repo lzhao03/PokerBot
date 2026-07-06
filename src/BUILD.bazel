@@ -275,7 +275,7 @@ cc_library(
 )
 
 cc_library(
-    name = "cfr_solver_street_buckets_no_stats",
+    name = "cfr_solver_coarse_buckets_no_stats",
     srcs = [
         "best_response.cc",
         "cfr_solver.cc",
@@ -286,7 +286,7 @@ cc_library(
     ],
     copts = [
         "-DPOKER_ENABLE_TRAVERSAL_STATS=0",
-        "-DPOKER_STREET_ONLY_PUBLIC_BUCKETS=1",
+        "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
     ],
     deps = CFR_SOLVER_DEPS,
 )
@@ -309,9 +309,9 @@ cc_test(
 cc_test(
     name = "cfr_public_bucket_test",
     srcs = ["cfr_public_bucket_test.cc"],
-    copts = ["-DPOKER_STREET_ONLY_PUBLIC_BUCKETS=1"],
+    copts = ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
     deps = [
-        ":cfr_solver_street_buckets_no_stats",
+        ":cfr_solver_coarse_buckets_no_stats",
         ":hand_range",
     ],
 )
@@ -370,10 +370,10 @@ cc_binary(
     srcs = ["cfr_benchmark.cc"],
     copts = [
         "-DPOKER_BENCHMARK_PROD_DEFAULTS=1",
-        "-DPOKER_STREET_ONLY_PUBLIC_BUCKETS=1",
+        "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
     ],
     deps = [
-        ":cfr_solver_street_buckets_no_stats",
+        ":cfr_solver_coarse_buckets_no_stats",
         ":cfr_solver_proto_adapter",
         ":hand_range",
         ":poker_config",

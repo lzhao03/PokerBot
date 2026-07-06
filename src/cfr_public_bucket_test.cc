@@ -8,8 +8,8 @@
 
 namespace poker {
 
-#if !POKER_STREET_ONLY_PUBLIC_BUCKETS
-#error "cfr_public_bucket_test must be compiled with street-only public buckets"
+#if !POKER_COARSE_PUBLIC_BUCKETS
+#error "cfr_public_bucket_test must be compiled with coarse public buckets"
 #endif
 
 void Expect(bool condition, const char* message) {
@@ -220,7 +220,7 @@ GameState ChanceState() {
   return state;
 }
 
-void CheckStreetOnlyPublicBucketsMergeBoardsByStreet() {
+void CheckTexturePublicBucketsMergeBoardsByTexture() {
   SolverConfig config;
   CFRSolver solver(config);
 
@@ -229,11 +229,26 @@ void CheckStreetOnlyPublicBucketsMergeBoardsByStreet() {
                   MakeCardId(2, SuitKind::kHearts),
                   MakeCardId(7, SuitKind::kDiamonds),
                   MakeCardId(11, SuitKind::kClubs));
-  const GameState second_flop =
+  const GameState same_texture_flop =
       PublicState(StreetKind::kFlop,
                   MakeCardId(3, SuitKind::kHearts),
                   MakeCardId(8, SuitKind::kDiamonds),
                   MakeCardId(12, SuitKind::kClubs));
+  const GameState reordered_flop =
+      PublicState(StreetKind::kFlop,
+                  MakeCardId(7, SuitKind::kDiamonds),
+                  MakeCardId(2, SuitKind::kHearts),
+                  MakeCardId(11, SuitKind::kClubs));
+  const GameState paired_flop =
+      PublicState(StreetKind::kFlop,
+                  MakeCardId(2, SuitKind::kHearts),
+                  MakeCardId(2, SuitKind::kDiamonds),
+                  MakeCardId(11, SuitKind::kClubs));
+  const GameState monotone_flop =
+      PublicState(StreetKind::kFlop,
+                  MakeCardId(2, SuitKind::kHearts),
+                  MakeCardId(7, SuitKind::kHearts),
+                  MakeCardId(11, SuitKind::kHearts));
   const GameState turn =
       PublicState(StreetKind::kTurn,
                   MakeCardId(2, SuitKind::kHearts),
@@ -241,18 +256,31 @@ void CheckStreetOnlyPublicBucketsMergeBoardsByStreet() {
                   MakeCardId(11, SuitKind::kClubs),
                   MakeCardId(14, SuitKind::kSpades));
 
-  Expect(CFRSolverRegretTestPeer::PublicBucket(solver, first_flop) == 1,
-         "flop bucket should be street id 1");
-  Expect(CFRSolverRegretTestPeer::PublicBucket(solver, turn) == 2,
-         "turn bucket should be street id 2");
   Expect(CFRSolverRegretTestPeer::PublicBucket(solver, first_flop) ==
-             CFRSolverRegretTestPeer::PublicBucket(solver, second_flop),
-         "street-only buckets should merge different flops");
-  Expect(CFRSolverRegretTestPeer::PublicStateId(solver, first_flop) ==
-             CFRSolverRegretTestPeer::PublicStateId(solver, second_flop),
-         "same-street public states should reuse the representative row");
-  Expect(!CFRSolverRegretTestPeer::PublicStateIsExact(solver, 0),
-         "street-only public bucket rows should be representative");
+             CFRSolverRegretTestPeer::PublicBucket(solver,
+                                                   same_texture_flop),
+         "texture buckets should merge similar disconnected rainbow flops");
+  Expect(CFRSolverRegretTestPeer::PublicBucket(solver, first_flop) ==
+             CFRSolverRegretTestPeer::PublicBucket(solver, reordered_flop),
+         "texture buckets should not depend on board-card order");
+  Expect(CFRSolverRegretTestPeer::PublicBucket(solver, first_flop) !=
+             CFRSolverRegretTestPeer::PublicBucket(solver, paired_flop),
+         "texture buckets should split paired flops");
+  Expect(CFRSolverRegretTestPeer::PublicBucket(solver, first_flop) !=
+             CFRSolverRegretTestPeer::PublicBucket(solver, monotone_flop),
+         "texture buckets should split monotone flops");
+  Expect(CFRSolverRegretTestPeer::PublicBucket(solver, first_flop) !=
+             CFRSolverRegretTestPeer::PublicBucket(solver, turn),
+         "texture buckets should include the street");
+
+  const uint32_t first_id =
+      CFRSolverRegretTestPeer::PublicStateId(solver, first_flop);
+  Expect(first_id ==
+             CFRSolverRegretTestPeer::PublicStateId(solver,
+                                                    same_texture_flop),
+         "same-texture public states should reuse the representative row");
+  Expect(!CFRSolverRegretTestPeer::PublicStateIsExact(solver, first_id),
+         "coarse public bucket rows should be representative");
 }
 
 void CheckCoarseBettingHistoryBucketsChipState() {
@@ -428,7 +456,7 @@ void CheckCoarseChanceChildUsesBettingHistoryTransition() {
          "cached betting-history chance transition should return existing public child");
 }
 
-void CheckStreetOnlyPublicBucketsEnterFrozenParallelPhase() {
+void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
   SolverConfig config;
   config.starting_stack_size = 20;
   config.max_depth = 1;
@@ -448,7 +476,7 @@ void CheckStreetOnlyPublicBucketsEnterFrozenParallelPhase() {
   const CFRSolver::TrainingRunStats stats =
       solver.get_last_training_run_stats();
   Expect(stats.public_state_prebuild_complete,
-         "street-only public buckets should complete shallow prebuild");
+         "texture public buckets should complete shallow prebuild");
   Expect(stats.parallel_iterations == 2,
          "complete shallow prebuild should enter the frozen parallel phase");
   Expect(stats.parallel_cfr_updates > 0,
@@ -458,12 +486,12 @@ void CheckStreetOnlyPublicBucketsEnterFrozenParallelPhase() {
 }  // namespace poker
 
 int main() {
-  poker::CheckStreetOnlyPublicBucketsMergeBoardsByStreet();
+  poker::CheckTexturePublicBucketsMergeBoardsByTexture();
   poker::CheckCoarseBettingHistoryBucketsChipState();
   poker::CheckCoarseBettingHistoryKeepsActionSlotsDistinct();
   poker::CheckCoarseLegalActionsUseAbstractBettingState();
   poker::CheckCoarseActionChildUsesBettingHistoryTransition();
   poker::CheckCoarseChanceChildUsesBettingHistoryTransition();
-  poker::CheckStreetOnlyPublicBucketsEnterFrozenParallelPhase();
+  poker::CheckTexturePublicBucketsEnterFrozenParallelPhase();
   return 0;
 }

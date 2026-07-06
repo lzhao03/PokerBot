@@ -513,8 +513,10 @@ class CFRSolverRegretTestPeer {
     }
     CFRSolver::TraversalScratch scratch;
     scratch.reserve_depth(max_depth > 0 ? max_depth + 8 : 32);
+    const CompactPublicState compact_state =
+        solver.frozen_tables_->public_state_rows[*public_state_id].state;
     return solver.cfr_with_ranges(
-        *public_state_id,
+        *public_state_id, compact_state,
         CFRSolver::PrivateCards::FromCombo(TestComboId(player_a_hand)),
         CFRSolver::PrivateCards::FromCombo(TestComboId(player_b_hand)),
         reach_probabilities, iteration, depth, max_depth, scratch,
@@ -530,8 +532,10 @@ class CFRSolverRegretTestPeer {
     if (!public_state_id.has_value()) {
       return 0.0;
     }
+    const CompactPublicState compact_state =
+        solver.frozen_tables_->public_state_rows[*public_state_id].state;
     return solver.evaluate_strategy_node(
-        *public_state_id,
+        *public_state_id, compact_state,
         CFRSolver::PrivateCards::FromCombo(TestComboId(player_a_hand)),
         CFRSolver::PrivateCards::FromCombo(TestComboId(player_b_hand)));
   }

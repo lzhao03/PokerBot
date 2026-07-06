@@ -227,17 +227,108 @@ private:
     }
   };
 
-  struct StreetOnlyPublicCardBuckets {
+  struct BoardTexturePublicCardBuckets {
     static constexpr bool kExactPublicState = false;
 
     template <typename State>
     PublicBucketId bucket(const State& state) const {
-      return static_cast<PublicBucketId>(state.street);
+      const int board_count = BoardCount(state);
+      if (board_count == 0) {
+        return 0;
+      }
+
+      int rank_counts[13] = {};
+      int suit_counts[4] = {};
+      uint16_t rank_mask = 0;
+      int max_rank_count = 0;
+      int max_suit_count = 0;
+      int max_rank = 0;
+      for (int i = 0; i < board_count; ++i) {
+        const CardId card = state.board_cards[static_cast<size_t>(i)];
+        const int rank = RankFromCardId(card);
+        const int rank_index = rank - 2;
+        const int suit_index = SuitIndex(SuitFromCardId(card));
+        ++rank_counts[rank_index];
+        ++suit_counts[suit_index];
+        if (rank_counts[rank_index] > max_rank_count) {
+          max_rank_count = rank_counts[rank_index];
+        }
+        if (suit_counts[suit_index] > max_suit_count) {
+          max_suit_count = suit_counts[suit_index];
+        }
+        if (rank > max_rank) {
+          max_rank = rank;
+        }
+        rank_mask |= static_cast<uint16_t>(1u << rank_index);
+      }
+
+      const int paired_bucket =
+          max_rank_count >= 3 ? 2 : (max_rank_count == 2 ? 1 : 0);
+      int suit_bucket = 0;
+      if (max_suit_count >= 4) {
+        suit_bucket = 3;
+      } else if (max_suit_count >= 3) {
+        suit_bucket = 2;
+      } else if (max_suit_count == 2) {
+        suit_bucket = 1;
+      }
+      const int straight_density = BestStraightWindowDensity(rank_mask);
+      const int straight_bucket =
+          straight_density >= 4 ? 2 : (straight_density >= 3 ? 1 : 0);
+      const int high_bucket = max_rank >= 14 ? 0 : (max_rank >= 11 ? 1 : 2);
+      const int texture =
+          (((paired_bucket * kSuitBuckets) + suit_bucket) *
+               kStraightBuckets +
+           straight_bucket) *
+              kHighBuckets +
+          high_bucket;
+      return 1 + static_cast<PublicBucketId>(state.street) *
+                     kTextureBucketsPerStreet +
+             static_cast<PublicBucketId>(texture);
+    }
+
+   private:
+    static constexpr int kSuitBuckets = 4;
+    static constexpr int kStraightBuckets = 3;
+    static constexpr int kHighBuckets = 3;
+    static constexpr int kTextureBucketsPerStreet =
+        3 * kSuitBuckets * kStraightBuckets * kHighBuckets;
+
+    static int BoardCount(const GameState& state) {
+      return static_cast<int>(state.board_cards.size());
+    }
+
+    static int BoardCount(const CompactPublicState& state) {
+      return state.board_count;
+    }
+
+    static int CountBits(uint16_t value) {
+      int count = 0;
+      while (value != 0) {
+        count += value & 1u;
+        value >>= 1;
+      }
+      return count;
+    }
+
+    static int BestStraightWindowDensity(uint16_t rank_mask) {
+      int best = 0;
+      for (int start = 0; start <= 8; ++start) {
+        const int count = CountBits(
+            static_cast<uint16_t>((rank_mask >> start) & 0x1F));
+        if (count > best) {
+          best = count;
+        }
+      }
+      const uint16_t wheel_mask =
+          static_cast<uint16_t>((1u << 12) | 0x0F);
+      const int wheel_count = CountBits(rank_mask & wheel_mask);
+      return wheel_count > best ? wheel_count : best;
     }
   };
 
-#if POKER_STREET_ONLY_PUBLIC_BUCKETS
-  using DefaultPublicCardBuckets = StreetOnlyPublicCardBuckets;
+#if POKER_COARSE_PUBLIC_BUCKETS
+  using DefaultPublicCardBuckets = BoardTexturePublicCardBuckets;
 #else
   using DefaultPublicCardBuckets = ExactPublicCardBuckets;
 #endif
@@ -328,6 +419,7 @@ private:
                                 const TrainingRange& player_b_training_range);
   double cfr_with_ranges(
       uint32_t public_state_id,
+      const CompactPublicState& state,
       const PrivateCards& player_a_cards,
       const PrivateCards& player_b_cards,
       std::array<double, 2>& reach_probabilities,
@@ -409,10 +501,21 @@ private:
       int action_index) const;
   std::optional<uint32_t> chance_child_public_state(
       uint32_t public_state_id,
+      const CompactPublicState& state,
       absl::Span<const CardId> cards) const;
+  std::optional<uint32_t> chance_child_public_state(
+      uint32_t public_state_id,
+      absl::Span<const CardId> cards) const;
+  int chance_child_lookup_key(const PublicStateRow& row,
+                              const CompactPublicState& child_state,
+                              absl::Span<const CardId> cards) const;
   std::optional<uint32_t> get_or_create_action_child_public_state(
       uint32_t public_state_id,
       int action_index);
+  std::optional<uint32_t> get_or_create_chance_child_public_state(
+      uint32_t public_state_id,
+      const CompactPublicState& state,
+      absl::Span<const CardId> cards);
   std::optional<uint32_t> get_or_create_chance_child_public_state(
       uint32_t public_state_id,
       absl::Span<const CardId> cards);
@@ -457,6 +560,7 @@ private:
                           const PrivateCards& player_a_cards,
                           const PrivateCards& player_b_cards);
   double evaluate_strategy_node(uint32_t public_state_id,
+                                const CompactPublicState& state,
                                 const PrivateCards& player_a_cards,
                                 const PrivateCards& player_b_cards);
   double evaluate_strategy_samples(
@@ -469,6 +573,7 @@ private:
                        double reach_prob);
   double chance_sampling_cfr(
       uint32_t public_state_id,
+      const CompactPublicState& state,
       const PrivateCards& player_a_cards,
       const PrivateCards& player_b_cards,
       std::array<double, 2>& reach_probabilities,
