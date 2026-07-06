@@ -310,6 +310,37 @@ class CFRSolverRegretTestPeer {
     return *child_id;
   }
 
+  static std::optional<uint32_t> CompactActionChildOptional(
+      CFRSolver& solver,
+      uint32_t public_state_id,
+      int action_index) {
+    return solver.get_or_create_action_child_public_state(public_state_id,
+                                                          action_index);
+  }
+
+  static uint32_t CompactActionChildRawId(const CFRSolver& solver,
+                                          uint32_t public_state_id,
+                                          int action_index) {
+    return solver.public_state_rows_[public_state_id]
+        .action_child_ids[static_cast<size_t>(action_index)];
+  }
+
+  static uint32_t CappedPublicStateId() {
+    return CFRSolver::kCappedPublicStateId;
+  }
+
+  static void ValidateCompactPublicStateRow(CFRSolver& solver,
+                                            uint32_t public_state_id) {
+    solver.validate_public_state_row_actions(public_state_id);
+  }
+
+  static void CorruptCompactPublicStateActionId(CFRSolver& solver,
+                                                uint32_t public_state_id,
+                                                int action_index) {
+    ++solver.public_state_rows_[public_state_id]
+          .action_ids[static_cast<size_t>(action_index)];
+  }
+
   static uint32_t CompactChanceChild(CFRSolver& solver,
                                      uint32_t public_state_id,
                                      absl::Span<const CardId> cards) {
@@ -496,13 +527,13 @@ class CFRSolverRegretTestPeer {
     GameState native_state = TestGameState(state);
     std::vector<GameAction> legal_actions =
         solver.game_tree_->get_legal_actions(native_state);
-    CFRSolver::ActionChoices choices;
-    choices.reserve(legal_actions.size());
+    int action_ids[GameTree::kMaxActionsPerNode] = {};
+    size_t action_count = 0;
     size_t selected_index = legal_actions.size();
     for (size_t i = 0; i < legal_actions.size(); ++i) {
       const GameAction& action = legal_actions[i];
       const int action_id = GameTree::action_key(action);
-      choices.push_back({action_id, 0.0, 0.0});
+      action_ids[action_count++] = action_id;
       if (action.kind == TestActionKind(action_type) &&
           action.amount == amount) {
         selected_index = i;
@@ -516,7 +547,8 @@ class CFRSolverRegretTestPeer {
     const uint32_t public_state_id =
         solver.get_or_create_public_state_id(native_state);
     solver.condition_ranges_for_actions(
-        range, native_state, public_state_id, player, choices,
+        range, native_state, public_state_id, player, action_ids,
+        action_count,
         conditioned_ranges);
     return std::move(conditioned_ranges[selected_index]);
   }
@@ -530,6 +562,16 @@ void Expect(bool condition, const char* message) {
   if (!condition) {
     throw std::runtime_error(message);
   }
+}
+
+template <typename Fn>
+void ExpectThrows(Fn fn, const char* message) {
+  try {
+    fn();
+  } catch (const std::exception&) {
+    return;
+  }
+  throw std::runtime_error(message);
 }
 
 class FixedContinuationValueProvider : public ContinuationValueProvider {
@@ -1058,6 +1100,56 @@ void CheckCompactPublicStateActionTransitionsAreCached() {
          "compact action transition should reuse the same public state id");
   Expect(solver.get_public_state_count() == 2,
          "compact action transition should create one child row");
+}
+
+void CheckCompactPublicStateActionCapStoresSentinel() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_public_states(1);
+  CFRSolver solver(TestSolverConfig(config));
+  const GameState root_state = TestGameState(InitialRootState(config));
+
+  const uint32_t root_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, root_state);
+  Expect(CFRSolverRegretTestPeer::CompactPublicStateActionCount(
+             solver, root_id) > 0,
+         "compact root row should store legal actions");
+
+  const std::optional<uint32_t> first_child =
+      CFRSolverRegretTestPeer::CompactActionChildOptional(solver, root_id, 0);
+  const uint32_t raw_child_id =
+      CFRSolverRegretTestPeer::CompactActionChildRawId(solver, root_id, 0);
+  const std::optional<uint32_t> repeated_child =
+      CFRSolverRegretTestPeer::CompactActionChildOptional(solver, root_id, 0);
+
+  Expect(!first_child.has_value(),
+         "capped action transition should not allocate a child row");
+  Expect(!repeated_child.has_value(),
+         "capped action transition should keep returning no child");
+  Expect(raw_child_id == CFRSolverRegretTestPeer::CappedPublicStateId(),
+         "capped action transition should store the capped sentinel");
+  Expect(solver.get_public_state_count() == 1,
+         "capped action transition should not grow public-state rows");
+}
+
+void CheckCompactPublicStateActionValidationCatchesMismatch() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  CFRSolver solver(TestSolverConfig(config));
+  const GameState root_state = TestGameState(InitialRootState(config));
+
+  const uint32_t root_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, root_state);
+  CFRSolverRegretTestPeer::ValidateCompactPublicStateRow(solver, root_id);
+  CFRSolverRegretTestPeer::CorruptCompactPublicStateActionId(solver, root_id,
+                                                             0);
+
+  ExpectThrows(
+      [&] {
+        CFRSolverRegretTestPeer::ValidateCompactPublicStateRow(solver,
+                                                               root_id);
+      },
+      "compact public-state validation should catch action id mismatches");
 }
 
 void CheckCompactPublicStateChanceTransitionsAreCached() {
@@ -2608,6 +2700,8 @@ int main() {
   CheckBettingHistoryIdsIgnorePublicCards();
   CheckBettingHistoryActionTransitionsAreCached();
   CheckCompactPublicStateActionTransitionsAreCached();
+  CheckCompactPublicStateActionCapStoresSentinel();
+  CheckCompactPublicStateActionValidationCatchesMismatch();
   CheckCompactPublicStateChanceTransitionsAreCached();
   CheckSparseSlabRowsUseExactCombos();
   CheckSparseSlabTracksInfoSets();

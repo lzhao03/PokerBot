@@ -160,12 +160,9 @@ private:
   using OptionalTrainingRange =
       std::optional<std::reference_wrapper<const TrainingRangeView>>;
 
-  struct ActionChoice {
-    int action_id = 0;
-    double probability = 0.0;
-    double value = 0.0;
-  };
-  using ActionChoices = absl::InlinedVector<ActionChoice, 8>;
+  static constexpr uint32_t kCappedPublicStateId =
+      GameTree::Node::kInvalidPublicStateId - 1;
+
   using ConditionedRanges = std::vector<TrainingRangeView>;
   using StrategyProbabilities = absl::InlinedVector<double, 8>;
 
@@ -416,8 +413,10 @@ private:
       const GameState& state,
       uint32_t public_state_id,
       int player,
-      const ActionChoices& action_choices,
+      const int* action_ids,
+      size_t action_count,
       ConditionedRanges& conditioned_ranges);
+  void validate_public_state_row_actions(uint32_t public_state_id) const;
   BettingHistoryKey make_betting_history_key(const GameState& state) const;
   BettingHistoryRow make_betting_history_row(const GameState& state) const;
   PublicStateKey make_public_state_key(uint32_t betting_history_id,
@@ -528,7 +527,8 @@ private:
       const WeightedHandRange& opponent_hands,
       int best_response_player);
   void update_strategy(const InfoSetRow& row,
-                       const ActionChoices& choices,
+                       const double* action_probabilities,
+                       size_t action_count,
                        double reach_prob);
   double chance_sampling_cfr(
       uint32_t public_state_id,

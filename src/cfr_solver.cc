@@ -752,9 +752,11 @@ uint32_t CFRSolver::get_or_create_public_state_id(
 
   node.public_state_id = static_cast<uint32_t>(public_state_ids_.size());
   public_state_ids_.emplace(std::move(key), node.public_state_id);
-  if (!frozen_ && (config_.max_public_states <= 0 ||
+  const bool can_store_row =
+      !frozen_ && (config_.max_public_states <= 0 ||
                    static_cast<int>(public_state_rows_.size()) <
-                       config_.max_public_states)) {
+                       config_.max_public_states);
+  if (can_store_row) {
     PublicStateRow row = make_public_state_row(betting_history_id, node.state);
     row.is_terminal = node.is_terminal;
     row.is_chance_node = node.is_chance_node;
@@ -802,6 +804,30 @@ void CFRSolver::cache_betting_history_actions(
   }
 }
 
+void CFRSolver::validate_public_state_row_actions(
+    uint32_t public_state_id) const {
+  const auto& public_rows = strategy_public_state_rows();
+  if (public_state_id >= public_rows.size()) {
+    throw std::logic_error("Public state row is missing");
+  }
+  const PublicStateRow& row = public_rows[public_state_id];
+  const auto& betting_history_rows = strategy_betting_history_rows();
+  if (row.betting_history_id >= betting_history_rows.size()) {
+    throw std::logic_error("Betting history row is missing");
+  }
+  const BettingHistoryRow& betting_history =
+      betting_history_rows[row.betting_history_id];
+  if (betting_history.action_count != row.action_count) {
+    throw std::logic_error("Betting history actions are not aligned");
+  }
+  for (int i = 0; i < row.action_count; ++i) {
+    if (betting_history.action_ids[static_cast<size_t>(i)] !=
+        row.action_ids[static_cast<size_t>(i)]) {
+      throw std::logic_error("Betting history action key mismatch");
+    }
+  }
+}
+
 std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
     uint32_t public_state_id,
     int action_index) {
@@ -820,6 +846,9 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
   if (existing_child_id != GameTree::Node::kInvalidPublicStateId) {
     POKER_RECORD_TRAVERSAL_STAT(
         ++traversal_stats_.betting_history_transition_hits);
+    if (existing_child_id == kCappedPublicStateId) {
+      return std::nullopt;
+    }
     return existing_child_id;
   }
   if (strategy_tables_view_ != nullptr) {
@@ -830,6 +859,8 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
   if (config_.max_public_states > 0 &&
       static_cast<int>(public_state_rows_.size()) >=
           config_.max_public_states) {
+    public_state_rows_[public_state_id].action_child_ids[action_slot] =
+        kCappedPublicStateId;
     POKER_RECORD_TRAVERSAL_STAT(
         ++traversal_stats_.betting_history_transition_misses);
     return std::nullopt;
@@ -845,6 +876,8 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
   std::optional<uint32_t> child_id =
       get_or_create_public_state_row(child_state);
   if (!child_id.has_value()) {
+    public_state_rows_[public_state_id].action_child_ids[action_slot] =
+        kCappedPublicStateId;
     POKER_RECORD_TRAVERSAL_STAT(
         ++traversal_stats_.betting_history_transition_misses);
     return std::nullopt;
@@ -1546,22 +1579,6 @@ double CFRSolver::cfr_with_ranges(
   const PrivateCards& player_cards =
       player == 0 ? player_a_cards : player_b_cards;
 
-  const auto& betting_history_rows = strategy_betting_history_rows();
-  if (row.betting_history_id >= betting_history_rows.size()) {
-    throw std::logic_error("Betting history row is missing");
-  }
-  const BettingHistoryRow& betting_history =
-      betting_history_rows[row.betting_history_id];
-  if (betting_history.action_count != row.action_count) {
-    throw std::logic_error("Betting history actions are not aligned");
-  }
-  for (int i = 0; i < row.action_count; ++i) {
-    if (betting_history.action_ids[static_cast<size_t>(i)] !=
-        row.action_ids[static_cast<size_t>(i)]) {
-      throw std::logic_error("Betting history action key mismatch");
-    }
-  }
-
   const InfoSetAddress info_set_address{
       public_state_id, player,
       card_abstraction_.private_bucket(player_cards.combo, row.state)};
@@ -1570,49 +1587,46 @@ double CFRSolver::cfr_with_ranges(
                                  row.action_ids.data(),
                                  row.action_count);
 
-  ActionChoices action_choices;
-  action_choices.reserve(row.action_count);
-  for (int i = 0; i < row.action_count; ++i) {
-    action_choices.push_back(
-        {row.action_ids[static_cast<size_t>(i)], 0.0, 0.0});
+  const size_t action_count = row.action_count;
+  double action_probabilities[GameTree::kMaxActionsPerNode];
+  double action_values[GameTree::kMaxActionsPerNode];
+  for (size_t action_index = 0; action_index < action_count; ++action_index) {
+    action_values[action_index] = 0.0;
   }
-
-  auto& regrets = mutable_strategy_cumulative_regrets();
-  if (info_set_row.has_value()) {
-    const size_t action_offset = info_set_row->action_offset;
+  const InfoSetRow* info_set_row_ptr =
+      info_set_row.has_value() ? &*info_set_row : nullptr;
+  if (info_set_row_ptr != nullptr) {
+    auto& regrets = mutable_strategy_cumulative_regrets();
+    const size_t action_offset = info_set_row_ptr->action_offset;
     double sum_positive_regrets = 0.0;
-    for (size_t action_index = 0; action_index < action_choices.size();
+    for (size_t action_index = 0; action_index < action_count;
          ++action_index) {
       POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
-      sum_positive_regrets +=
-          std::max(
-              0.0,
-              static_cast<double>(
-                  AtomicFloatLoad(&regrets[action_offset + action_index])));
+      const double positive_regret = std::max(
+          0.0,
+          static_cast<double>(
+              AtomicFloatLoad(&regrets[action_offset + action_index])));
+      action_probabilities[action_index] = positive_regret;
+      sum_positive_regrets += positive_regret;
     }
 
     if (sum_positive_regrets > 0.0) {
-      for (size_t action_index = 0; action_index < action_choices.size();
+      for (size_t action_index = 0; action_index < action_count;
            ++action_index) {
-        POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
-        ActionChoice& choice = action_choices[action_index];
-        choice.probability =
-            std::max(
-                0.0,
-                static_cast<double>(
-                    AtomicFloatLoad(&regrets[action_offset + action_index]))) /
-            sum_positive_regrets;
+        action_probabilities[action_index] /= sum_positive_regrets;
       }
-    } else if (!action_choices.empty()) {
-      const double uniform_prob = 1.0 / action_choices.size();
-      for (ActionChoice& choice : action_choices) {
-        choice.probability = uniform_prob;
+    } else {
+      const double uniform_prob = 1.0 / action_count;
+      for (size_t action_index = 0; action_index < action_count;
+           ++action_index) {
+        action_probabilities[action_index] = uniform_prob;
       }
     }
-  } else if (!action_choices.empty()) {
-    const double uniform_prob = 1.0 / action_choices.size();
-    for (ActionChoice& choice : action_choices) {
-      choice.probability = uniform_prob;
+  } else {
+    const double uniform_prob = 1.0 / action_count;
+    for (size_t action_index = 0; action_index < action_count;
+         ++action_index) {
+      action_probabilities[action_index] = uniform_prob;
     }
   }
 
@@ -1626,42 +1640,43 @@ double CFRSolver::cfr_with_ranges(
       player == 1 && player_b_range.has_value();
   if (condition_player_a_range) {
     condition_ranges_for_actions(player_a_range->get(), row.state,
-                                 public_state_id, player, action_choices,
+                                 public_state_id, player,
+                                 row.action_ids.data(), action_count,
                                  conditioned_player_ranges);
   } else if (condition_player_b_range) {
     condition_ranges_for_actions(player_b_range->get(), row.state,
-                                 public_state_id, player, action_choices,
+                                 public_state_id, player,
+                                 row.action_ids.data(), action_count,
                                  conditioned_player_ranges);
   }
 
-  for (size_t choice_index = 0; choice_index < action_choices.size();
-       ++choice_index) {
-    ActionChoice& choice = action_choices[choice_index];
+  for (size_t action_index = 0; action_index < action_count; ++action_index) {
     std::optional<uint32_t> child_public_state_id =
         get_or_create_action_child_public_state(
-            public_state_id, static_cast<int>(choice_index));
+            public_state_id, static_cast<int>(action_index));
     if (!child_public_state_id.has_value()) {
       continue;
     }
 
     const double previous_reach_probability = reach_probabilities[player];
     reach_probabilities[player] =
-        previous_reach_probability * choice.probability;
+        previous_reach_probability * action_probabilities[action_index];
 
     OptionalTrainingRange child_player_a_range = player_a_range;
     OptionalTrainingRange child_player_b_range = player_b_range;
     if (condition_player_a_range) {
-      child_player_a_range = std::cref(conditioned_player_ranges[choice_index]);
+      child_player_a_range = std::cref(conditioned_player_ranges[action_index]);
     } else if (condition_player_b_range) {
-      child_player_b_range = std::cref(conditioned_player_ranges[choice_index]);
+      child_player_b_range = std::cref(conditioned_player_ranges[action_index]);
     }
 
-    choice.value = cfr_with_ranges(
+    const double action_value = cfr_with_ranges(
         *child_public_state_id, player_a_cards, player_b_cards,
         reach_probabilities, iteration, depth + 1, max_depth, scratch,
         child_player_a_range, child_player_b_range);
+    action_values[action_index] = action_value;
     reach_probabilities[player] = previous_reach_probability;
-    node_value += choice.probability * choice.value;
+    node_value += action_probabilities[action_index] * action_value;
   }
 
   cfr_update_count_.fetch_add(1, std::memory_order_relaxed);
@@ -1687,12 +1702,12 @@ double CFRSolver::cfr_with_ranges(
   if (info_set_row.has_value()) {
     const double opponent_reach_prob = reach_probabilities[1 - player];
     const size_t action_offset = info_set_row->action_offset;
-    for (size_t action_index = 0; action_index < action_choices.size();
-         ++action_index) {
-      const ActionChoice& choice = action_choices[action_index];
+    auto& regrets = mutable_strategy_cumulative_regrets();
+    for (size_t action_index = 0; action_index < action_count; ++action_index) {
       const double utility_sign = player == 0 ? 1.0 : -1.0;
       const double regret =
-          opponent_reach_prob * utility_sign * (choice.value - node_value);
+          opponent_reach_prob * utility_sign *
+          (action_values[action_index] - node_value);
 
       POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.action_entry_touches += 2);
       AtomicCFRPlusRegretUpdate(
@@ -1701,7 +1716,7 @@ double CFRSolver::cfr_with_ranges(
     }
 
     if (!config_.regret_only_training) {
-      update_strategy(*info_set_row, action_choices,
+      update_strategy(*info_set_row, action_probabilities, action_count,
                       reach_probabilities[player] * (iteration + 1));
     }
   }
@@ -1990,9 +2005,9 @@ void CFRSolver::condition_ranges_for_actions(
     const GameState& state,
     uint32_t public_state_id,
     int player,
-    const ActionChoices& action_choices,
+    const int* conditioned_action_ids,
+    size_t action_count,
     ConditionedRanges& conditioned_ranges) {
-  const size_t action_count = action_choices.size();
   if (action_count == 0) {
     return;
   }
@@ -2016,7 +2031,7 @@ void CFRSolver::condition_ranges_for_actions(
       public_slab != nullptr ? &public_slab->players[player] : nullptr;
   const auto& action_ids = strategy_action_ids();
   const auto& regrets = strategy_cumulative_regrets();
-  absl::InlinedVector<double, 8> positive_regrets(action_count, 0.0);
+  double positive_regrets[GameTree::kMaxActionsPerNode] = {};
   for (size_t i = 0; i < range_size; ++i) {
     const float range_weight = range.weight(i);
     const ComboId combo_id = range.combo(i);
@@ -2034,7 +2049,7 @@ void CFRSolver::condition_ranges_for_actions(
 
     if (row != nullptr) {
       const size_t table_offset = row->action_offset;
-      std::fill(positive_regrets.begin(), positive_regrets.end(), 0.0);
+      std::fill(positive_regrets, positive_regrets + action_count, 0.0);
       const size_t info_set_action_count =
           std::min(action_count,
                    static_cast<size_t>(row->action_count));
@@ -2042,7 +2057,7 @@ void CFRSolver::condition_ranges_for_actions(
            ++action_index) {
         const size_t table_index = table_offset + action_index;
         if (action_ids[table_index] !=
-            action_choices[action_index].action_id) {
+            conditioned_action_ids[action_index]) {
           continue;
         }
 
@@ -2855,15 +2870,15 @@ double CFRSolver::uncached_utility(const GameState& state,
 }
 
 void CFRSolver::update_strategy(const InfoSetRow& row,
-                                const ActionChoices& choices,
+                                const double* action_probabilities,
+                                size_t action_count,
                                 double reach_prob) {
   auto& strategies = mutable_strategy_cumulative_strategies();
   const size_t action_offset = row.action_offset;
-  for (size_t action_index = 0; action_index < choices.size();
-       ++action_index) {
+  for (size_t action_index = 0; action_index < action_count; ++action_index) {
     POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.action_entry_touches += 2);
     const float delta = static_cast<float>(
-        reach_prob * choices[action_index].probability);
+        reach_prob * action_probabilities[action_index]);
     AtomicFloatAdd(&strategies[action_offset + action_index], delta);
   }
 }
