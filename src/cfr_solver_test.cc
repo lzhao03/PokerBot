@@ -529,6 +529,25 @@ class CFRSolverRegretTestPeer {
         &missing_action_transitions);
   }
 
+  static bool ValidatePrebuiltBettingHistoryTransitions(
+      const CFRSolver& solver,
+      uint32_t root_public_state_id,
+      int max_depth,
+      int64_t& betting_history_transitions,
+      int64_t& missing_betting_history_transitions) {
+    return solver.validate_prebuilt_betting_history_transitions(
+        root_public_state_id, max_depth, &betting_history_transitions,
+        &missing_betting_history_transitions);
+  }
+
+  static void ClearBettingHistoryActionTransition(CFRSolver& solver,
+                                                  uint32_t betting_history_id,
+                                                  int action_index) {
+    solver.mutable_tables_->betting_history_rows[betting_history_id]
+        .action_child_ids[static_cast<size_t>(action_index)] =
+        GameTree::Node::kInvalidBettingHistoryId;
+  }
+
   static bool PrebuildInfoSets(CFRSolver& solver,
                                const HandRange& player_a_range,
                                const HandRange& player_b_range) {
@@ -1727,6 +1746,44 @@ void CheckPrebuiltActionTransitionValidationCatchesMissingChild() {
          "validation should report the cleared action edge");
 }
 
+void CheckBettingHistoryActionTransitionValidationCatchesMissingChild() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+  CFRSolver solver(TestSolverConfig(config));
+  const GameState root_state = TestGameState(InitialRootState(config));
+
+  const uint32_t root_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, root_state);
+  Expect(CFRSolverRegretTestPeer::PrebuildPublicStates(solver, root_id, 1),
+         "shallow public-state prebuild should complete");
+
+  int64_t betting_history_transitions = 0;
+  int64_t missing_betting_history_transitions = 0;
+  Expect(CFRSolverRegretTestPeer::ValidatePrebuiltBettingHistoryTransitions(
+             solver, root_id, 1, betting_history_transitions,
+             missing_betting_history_transitions),
+         "complete prebuild should validate betting-history transitions");
+  Expect(betting_history_transitions > 0,
+         "betting-history validation should count transition edges");
+  Expect(missing_betting_history_transitions == 0,
+         "complete prebuild should not report missing betting-history edges");
+
+  const uint32_t root_betting_history_id =
+      CFRSolverRegretTestPeer::CompactPublicStateBettingHistoryId(solver,
+                                                                  root_id);
+  CFRSolverRegretTestPeer::ClearBettingHistoryActionTransition(
+      solver, root_betting_history_id, 0);
+  betting_history_transitions = 0;
+  missing_betting_history_transitions = 0;
+  Expect(!CFRSolverRegretTestPeer::ValidatePrebuiltBettingHistoryTransitions(
+             solver, root_id, 1, betting_history_transitions,
+             missing_betting_history_transitions),
+         "validation should fail after clearing a betting-history action edge");
+  Expect(missing_betting_history_transitions == 1,
+         "validation should report the cleared betting-history action edge");
+}
+
 void CheckCompactPublicStateChanceTransitionsAreCached() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -2142,6 +2199,8 @@ void CheckRangeRunTracksParallelTrainingStats() {
       solver.get_last_training_run_stats();
   Expect(stats.public_state_prebuild_complete,
          "parallel run should prebuild a complete public-state graph");
+  Expect(stats.betting_history_transition_prebuild_complete,
+         "parallel run should validate complete betting-history transitions");
   Expect(stats.chance_transition_prebuild_complete,
          "parallel run should validate complete chance transitions");
   Expect(stats.action_transition_prebuild_complete,
@@ -2150,6 +2209,10 @@ void CheckRangeRunTracksParallelTrainingStats() {
          "parallel run should prebuild a complete infoset table");
   Expect(stats.missing_chance_transitions == 0,
          "complete public-state prebuild should not miss chance transitions");
+  Expect(stats.prebuild_betting_history_transitions > 0,
+         "public-state prebuild should create betting-history transitions");
+  Expect(stats.missing_betting_history_transitions == 0,
+         "complete public-state prebuild should not miss betting-history transitions");
   Expect(stats.prebuild_action_transitions > 0,
          "public-state prebuild should create action transitions");
   Expect(stats.missing_action_transitions == 0,
@@ -2195,6 +2258,8 @@ void CheckAutoWarmupDoesNotFreezeAfterPublicStateCap() {
          "auto warmup should grow public states until the cap");
   Expect(!stats.public_state_prebuild_complete,
          "capped public-state prebuild should report incomplete graph");
+  Expect(!stats.betting_history_transition_prebuild_complete,
+         "incomplete public-state prebuild should not validate betting-history transitions");
   Expect(!stats.chance_transition_prebuild_complete,
          "incomplete public-state prebuild should not validate chance transitions");
   Expect(!stats.action_transition_prebuild_complete,
@@ -2228,6 +2293,8 @@ void CheckInfosetPrebuildCapPreventsFreeze() {
       solver.get_last_training_run_stats();
   Expect(stats.public_state_prebuild_complete,
          "fixture should complete public-state prebuild");
+  Expect(stats.betting_history_transition_prebuild_complete,
+         "fixture should validate betting-history transitions before infosets");
   Expect(stats.chance_transition_prebuild_complete,
          "fixture should validate chance transitions before infosets");
   Expect(stats.action_transition_prebuild_complete,
@@ -3560,6 +3627,7 @@ int main() {
   CheckCompactPublicStateActionCapStoresSentinel();
   CheckCompactPublicStateActionValidationCatchesMismatch();
   CheckPrebuiltActionTransitionValidationCatchesMissingChild();
+  CheckBettingHistoryActionTransitionValidationCatchesMissingChild();
   CheckCompactPublicStateChanceTransitionsAreCached();
   CheckCompactChanceMatchesGameTreeApplyChance();
   CheckSparseSlabRowsUseExactCombos();

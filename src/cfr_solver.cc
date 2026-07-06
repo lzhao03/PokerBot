@@ -1456,6 +1456,142 @@ void CFRSolver::rebuild_chance_child_entries() {
   }
 }
 
+bool CFRSolver::validate_prebuilt_betting_history_transitions(
+    uint32_t root_public_state_id,
+    int max_depth,
+    int64_t* betting_history_transitions,
+    int64_t* missing_betting_history_transitions) const {
+  *betting_history_transitions = 0;
+  *missing_betting_history_transitions = 0;
+  const auto& rows = frozen_tables_->public_state_rows;
+  const auto& history_rows = frozen_tables_->betting_history_rows;
+  if (root_public_state_id >= rows.size()) {
+    return false;
+  }
+
+  struct QueueEntry {
+    uint32_t public_state_id = 0;
+    int depth = 0;
+  };
+
+  std::vector<QueueEntry> queue;
+  std::vector<char> queued(rows.size(), 0);
+  queue.reserve(1024);
+  queue.push_back({root_public_state_id, 0});
+  queued[root_public_state_id] = 1;
+
+  auto enqueue = [&](uint32_t public_state_id, int depth) {
+    if (public_state_id >= rows.size()) {
+      return false;
+    }
+    if (!queued[public_state_id]) {
+      queued[public_state_id] = 1;
+      queue.push_back({public_state_id, depth});
+    }
+    return true;
+  };
+
+  bool complete = true;
+  for (size_t cursor = 0; cursor < queue.size(); ++cursor) {
+    const QueueEntry entry = queue[cursor];
+    if (entry.public_state_id >= rows.size()) {
+      return false;
+    }
+    const PublicStateRow& row = rows[entry.public_state_id];
+    if (row.is_terminal) {
+      continue;
+    }
+
+    if (row.betting_history_id >= history_rows.size()) {
+      ++*missing_betting_history_transitions;
+      complete = false;
+      continue;
+    }
+    const BettingHistoryRow& history_row =
+        history_rows[row.betting_history_id];
+
+    if (row.is_chance_node) {
+      const size_t offset = row.chance_child_offset;
+      const size_t count = row.chance_child_count;
+      const auto& chance_entries = frozen_tables_->chance_child_entries;
+      if (offset > chance_entries.size() ||
+          count > chance_entries.size() - offset) {
+        ++*missing_betting_history_transitions;
+        complete = false;
+        continue;
+      }
+      if (count == 0) {
+        ++*missing_betting_history_transitions;
+        complete = false;
+        continue;
+      }
+      for (size_t i = 0; i < count; ++i) {
+        ++*betting_history_transitions;
+        const uint32_t child_public_state_id =
+            chance_entries[offset + i].public_state_id;
+        if (history_row.chance_child_id ==
+                GameTree::Node::kInvalidBettingHistoryId ||
+            history_row.chance_child_id >= history_rows.size() ||
+            child_public_state_id == GameTree::Node::kInvalidPublicStateId ||
+            child_public_state_id >= rows.size()) {
+          ++*missing_betting_history_transitions;
+          complete = false;
+          continue;
+        }
+        if (rows[child_public_state_id].betting_history_id !=
+            history_row.chance_child_id) {
+          ++*missing_betting_history_transitions;
+          complete = false;
+        }
+        if (!enqueue(child_public_state_id, entry.depth)) {
+          ++*missing_betting_history_transitions;
+          complete = false;
+        }
+      }
+      continue;
+    }
+
+    if (max_depth > 0 && entry.depth >= max_depth) {
+      continue;
+    }
+
+    if (history_row.action_count != row.action_count) {
+      ++*missing_betting_history_transitions;
+      complete = false;
+    }
+    for (int action_index = 0; action_index < row.action_count;
+         ++action_index) {
+      ++*betting_history_transitions;
+      const size_t action_slot = static_cast<size_t>(action_index);
+      const uint32_t child_betting_history_id =
+          history_row.action_child_ids[action_slot];
+      const uint32_t child_public_state_id = row.action_child_ids[action_slot];
+      if (history_row.action_ids[action_slot] != row.action_ids[action_slot] ||
+          child_betting_history_id ==
+              GameTree::Node::kInvalidBettingHistoryId ||
+          child_betting_history_id >= history_rows.size() ||
+          child_public_state_id == GameTree::Node::kInvalidPublicStateId ||
+          child_public_state_id == kCappedPublicStateId ||
+          child_public_state_id >= rows.size()) {
+        ++*missing_betting_history_transitions;
+        complete = false;
+        continue;
+      }
+      if (rows[child_public_state_id].betting_history_id !=
+          child_betting_history_id) {
+        ++*missing_betting_history_transitions;
+        complete = false;
+      }
+      if (!enqueue(child_public_state_id, entry.depth + 1)) {
+        ++*missing_betting_history_transitions;
+        complete = false;
+      }
+    }
+  }
+
+  return complete && *missing_betting_history_transitions == 0;
+}
+
 bool CFRSolver::validate_prebuilt_action_transitions(
     uint32_t root_public_state_id,
     int max_depth,
@@ -2088,8 +2224,24 @@ void CFRSolver::run_iterations(int iterations,
       should_prebuild_public_states
           ? static_cast<int64_t>(frozen_tables_->betting_history_rows.size())
           : 0;
-  bool chance_transition_prebuild_complete = false;
+  bool betting_history_transition_prebuild_complete = false;
   if (should_prebuild_public_states && public_state_prebuild_complete) {
+    betting_history_transition_prebuild_complete =
+        validate_prebuilt_betting_history_transitions(
+            *root_public_state_id, max_depth,
+            &last_training_run_stats_.prebuild_betting_history_transitions,
+            &last_training_run_stats_.missing_betting_history_transitions);
+    if (!betting_history_transition_prebuild_complete) {
+      LOG(INFO) << "Betting-history transition prebuild validation failed; "
+                << "continuing without a parallel frozen phase";
+    }
+  }
+  last_training_run_stats_.betting_history_transition_prebuild_complete =
+      should_prebuild_public_states && public_state_prebuild_complete &&
+      betting_history_transition_prebuild_complete;
+  bool chance_transition_prebuild_complete = false;
+  if (should_prebuild_public_states && public_state_prebuild_complete &&
+      betting_history_transition_prebuild_complete) {
     chance_transition_prebuild_complete =
         validate_prebuilt_chance_transitions(
             *root_public_state_id, max_depth,
@@ -2102,9 +2254,11 @@ void CFRSolver::run_iterations(int iterations,
   }
   last_training_run_stats_.chance_transition_prebuild_complete =
       should_prebuild_public_states && public_state_prebuild_complete &&
+      betting_history_transition_prebuild_complete &&
       chance_transition_prebuild_complete;
   bool action_transition_prebuild_complete = false;
   if (should_prebuild_public_states && public_state_prebuild_complete &&
+      betting_history_transition_prebuild_complete &&
       chance_transition_prebuild_complete) {
     action_transition_prebuild_complete =
         validate_prebuilt_action_transitions(
@@ -2118,9 +2272,11 @@ void CFRSolver::run_iterations(int iterations,
   }
   last_training_run_stats_.action_transition_prebuild_complete =
       should_prebuild_public_states && public_state_prebuild_complete &&
+      betting_history_transition_prebuild_complete &&
       chance_transition_prebuild_complete && action_transition_prebuild_complete;
   bool info_set_prebuild_complete = false;
   if (should_prebuild_public_states && public_state_prebuild_complete &&
+      betting_history_transition_prebuild_complete &&
       chance_transition_prebuild_complete &&
       action_transition_prebuild_complete) {
     VLOG(1) << "Prebuilding infoset rows...";
@@ -2139,10 +2295,12 @@ void CFRSolver::run_iterations(int iterations,
   }
   last_training_run_stats_.info_set_prebuild_complete =
       should_prebuild_public_states && public_state_prebuild_complete &&
+      betting_history_transition_prebuild_complete &&
       chance_transition_prebuild_complete &&
       action_transition_prebuild_complete && info_set_prebuild_complete;
   const bool prebuild_tables_are_action_complete =
       should_prebuild_public_states && public_state_prebuild_complete &&
+      betting_history_transition_prebuild_complete &&
       chance_transition_prebuild_complete && action_transition_prebuild_complete;
   last_training_run_stats_.prebuild_info_sets =
       prebuild_tables_are_action_complete
@@ -2154,6 +2312,7 @@ void CFRSolver::run_iterations(int iterations,
           : 0;
   const bool can_run_frozen_parallel =
       last_training_run_stats_.public_state_prebuild_complete &&
+      last_training_run_stats_.betting_history_transition_prebuild_complete &&
       last_training_run_stats_.chance_transition_prebuild_complete &&
       last_training_run_stats_.action_transition_prebuild_complete &&
       last_training_run_stats_.info_set_prebuild_complete;

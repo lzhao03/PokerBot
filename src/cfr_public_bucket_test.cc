@@ -164,6 +164,23 @@ class CFRSolverRegretTestPeer {
         &missing_chance_transitions);
   }
 
+  static bool ValidatePrebuiltBettingHistoryTransitions(
+      const CFRSolver& solver,
+      uint32_t root_public_state_id,
+      int max_depth,
+      int64_t& betting_history_transitions,
+      int64_t& missing_betting_history_transitions) {
+    return solver.validate_prebuilt_betting_history_transitions(
+        root_public_state_id, max_depth, &betting_history_transitions,
+        &missing_betting_history_transitions);
+  }
+
+  static void ClearBettingHistoryChanceTransition(CFRSolver& solver,
+                                                  uint32_t betting_history_id) {
+    solver.mutable_tables_->betting_history_rows[betting_history_id]
+        .chance_child_id = GameTree::Node::kInvalidBettingHistoryId;
+  }
+
   static void FreezeTables(CFRSolver& solver) {
     solver.frozen_tables_ = solver.mutable_tables_;
     solver.mutable_tables_.reset();
@@ -601,6 +618,40 @@ void CheckChanceTransitionValidationCatchesMissingRowEntry() {
          "validation should report missing row-local chance entries");
 }
 
+void CheckBettingHistoryChanceTransitionValidationCatchesMissingChild() {
+  SolverConfig config;
+  CFRSolver solver(config);
+  const uint32_t public_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, ChanceState());
+
+  Expect(CFRSolverRegretTestPeer::PrebuildPublicStates(solver, public_id, 0),
+         "texture prebuild should complete from a chance node");
+  int64_t betting_history_transitions = 0;
+  int64_t missing_betting_history_transitions = 0;
+  Expect(CFRSolverRegretTestPeer::ValidatePrebuiltBettingHistoryTransitions(
+             solver, public_id, 0, betting_history_transitions,
+             missing_betting_history_transitions),
+         "complete prebuild should validate betting-history transitions");
+  Expect(betting_history_transitions > 0,
+         "betting-history validation should count chance edges");
+  Expect(missing_betting_history_transitions == 0,
+         "complete prebuild should not miss betting-history chance edges");
+
+  const uint32_t betting_history_id =
+      CFRSolverRegretTestPeer::CompactPublicStateBettingHistoryId(solver,
+                                                                  public_id);
+  CFRSolverRegretTestPeer::ClearBettingHistoryChanceTransition(
+      solver, betting_history_id);
+  betting_history_transitions = 0;
+  missing_betting_history_transitions = 0;
+  Expect(!CFRSolverRegretTestPeer::ValidatePrebuiltBettingHistoryTransitions(
+             solver, public_id, 0, betting_history_transitions,
+             missing_betting_history_transitions),
+         "validation should fail after clearing betting-history chance edge");
+  Expect(missing_betting_history_transitions > 0,
+         "validation should report the cleared betting-history chance edge");
+}
+
 void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
   SolverConfig config;
   config.starting_stack_size = 20;
@@ -628,6 +679,12 @@ void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
          "texture prebuild should create action transitions");
   Expect(stats.missing_action_transitions == 0,
          "texture prebuild should not miss action transitions");
+  Expect(stats.betting_history_transition_prebuild_complete,
+         "texture public buckets should validate betting-history transitions");
+  Expect(stats.prebuild_betting_history_transitions > 0,
+         "texture prebuild should create betting-history transitions");
+  Expect(stats.missing_betting_history_transitions == 0,
+         "texture prebuild should not miss betting-history transitions");
   Expect(stats.chance_transition_prebuild_complete,
          "texture public buckets should validate chance transitions");
   Expect(stats.missing_chance_transitions == 0,
@@ -655,6 +712,7 @@ int main() {
   poker::CheckCoarseChanceChildUsesBettingHistoryTransition();
   poker::CheckFrozenChanceLookupCoversTextureBuckets();
   poker::CheckChanceTransitionValidationCatchesMissingRowEntry();
+  poker::CheckBettingHistoryChanceTransitionValidationCatchesMissingChild();
   poker::CheckTexturePublicBucketsEnterFrozenParallelPhase();
   return 0;
 }
