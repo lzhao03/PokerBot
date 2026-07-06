@@ -1377,6 +1377,92 @@ bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
   return true;
 }
 
+bool CFRSolver::validate_prebuilt_action_transitions(
+    uint32_t root_public_state_id,
+    int max_depth,
+    int64_t* action_transitions,
+    int64_t* missing_action_transitions) const {
+  *action_transitions = 0;
+  *missing_action_transitions = 0;
+  const auto& rows = frozen_tables_->public_state_rows;
+  if (root_public_state_id >= rows.size()) {
+    return false;
+  }
+
+  struct QueueEntry {
+    uint32_t public_state_id = 0;
+    int depth = 0;
+  };
+
+  std::vector<QueueEntry> queue;
+  std::vector<char> queued(rows.size(), 0);
+  queue.reserve(1024);
+  queue.push_back({root_public_state_id, 0});
+  queued[root_public_state_id] = 1;
+
+  auto enqueue = [&](uint32_t public_state_id, int depth) {
+    if (public_state_id >= rows.size()) {
+      return false;
+    }
+    if (!queued[public_state_id]) {
+      queued[public_state_id] = 1;
+      queue.push_back({public_state_id, depth});
+    }
+    return true;
+  };
+
+  bool complete = true;
+  for (size_t cursor = 0; cursor < queue.size(); ++cursor) {
+    const QueueEntry entry = queue[cursor];
+    if (entry.public_state_id >= rows.size()) {
+      return false;
+    }
+    const PublicStateRow& row = rows[entry.public_state_id];
+    if (row.is_terminal) {
+      continue;
+    }
+
+    if (row.is_chance_node) {
+      const bool chance_complete = ForEachNextStreetDeal(
+          row.state, [&](absl::Span<const CardId> cards) {
+            const std::optional<uint32_t> child_public_state_id =
+                chance_child_public_state(entry.public_state_id, cards);
+            if (!child_public_state_id.has_value()) {
+              return false;
+            }
+            return enqueue(*child_public_state_id, entry.depth);
+          });
+      if (!chance_complete) {
+        complete = false;
+      }
+      continue;
+    }
+
+    if (max_depth > 0 && entry.depth >= max_depth) {
+      continue;
+    }
+
+    for (int action_index = 0; action_index < row.action_count;
+         ++action_index) {
+      ++*action_transitions;
+      const uint32_t child_id =
+          row.action_child_ids[static_cast<size_t>(action_index)];
+      if (child_id == GameTree::Node::kInvalidPublicStateId ||
+          child_id == kCappedPublicStateId || child_id >= rows.size()) {
+        ++*missing_action_transitions;
+        complete = false;
+        continue;
+      }
+      if (!enqueue(child_id, entry.depth + 1)) {
+        ++*missing_action_transitions;
+        complete = false;
+      }
+    }
+  }
+
+  return complete && *missing_action_transitions == 0;
+}
+
 bool CFRSolver::prebuild_info_set_rows(
     const TrainingRangeView& player_a_range,
     const TrainingRangeView& player_b_range) {
@@ -1837,8 +1923,24 @@ void CFRSolver::run_iterations(int iterations,
       should_prebuild_public_states
           ? static_cast<int64_t>(frozen_tables_->betting_history_rows.size())
           : 0;
-  bool info_set_prebuild_complete = false;
+  bool action_transition_prebuild_complete = false;
   if (should_prebuild_public_states && public_state_prebuild_complete) {
+    action_transition_prebuild_complete =
+        validate_prebuilt_action_transitions(
+            *root_public_state_id, max_depth,
+            &last_training_run_stats_.prebuild_action_transitions,
+            &last_training_run_stats_.missing_action_transitions);
+    if (!action_transition_prebuild_complete) {
+      LOG(INFO) << "Action-transition prebuild validation failed; "
+                << "continuing without a parallel frozen phase";
+    }
+  }
+  last_training_run_stats_.action_transition_prebuild_complete =
+      should_prebuild_public_states && public_state_prebuild_complete &&
+      action_transition_prebuild_complete;
+  bool info_set_prebuild_complete = false;
+  if (should_prebuild_public_states && public_state_prebuild_complete &&
+      action_transition_prebuild_complete) {
     VLOG(1) << "Prebuilding infoset rows...";
     const auto info_set_prebuild_start = std::chrono::steady_clock::now();
     info_set_prebuild_complete =
@@ -1855,17 +1957,21 @@ void CFRSolver::run_iterations(int iterations,
   }
   last_training_run_stats_.info_set_prebuild_complete =
       should_prebuild_public_states && public_state_prebuild_complete &&
-      info_set_prebuild_complete;
+      action_transition_prebuild_complete && info_set_prebuild_complete;
+  const bool prebuild_tables_are_action_complete =
+      should_prebuild_public_states && public_state_prebuild_complete &&
+      action_transition_prebuild_complete;
   last_training_run_stats_.prebuild_info_sets =
-      should_prebuild_public_states && public_state_prebuild_complete
+      prebuild_tables_are_action_complete
           ? static_cast<int64_t>(get_info_set_count())
           : 0;
   last_training_run_stats_.prebuild_action_entries =
-      should_prebuild_public_states && public_state_prebuild_complete
+      prebuild_tables_are_action_complete
           ? static_cast<int64_t>(cumulative_->cumulative_regrets.size())
           : 0;
   const bool can_run_frozen_parallel =
       last_training_run_stats_.public_state_prebuild_complete &&
+      last_training_run_stats_.action_transition_prebuild_complete &&
       last_training_run_stats_.info_set_prebuild_complete;
 
   const bool auto_warmup =

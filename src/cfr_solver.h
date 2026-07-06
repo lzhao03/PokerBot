@@ -55,9 +55,12 @@ public:
 
   struct TrainingRunStats {
     bool public_state_prebuild_complete = false;
+    bool action_transition_prebuild_complete = false;
     bool info_set_prebuild_complete = false;
     int64_t prebuild_public_states = 0;
     int64_t prebuild_betting_histories = 0;
+    int64_t prebuild_action_transitions = 0;
+    int64_t missing_action_transitions = 0;
     int64_t prebuild_info_sets = 0;
     int64_t prebuild_action_entries = 0;
     double prebuild_seconds = 0.0;
@@ -376,6 +379,11 @@ private:
       absl::Span<const CardId> cards);
   bool prebuild_public_state_rows(uint32_t root_public_state_id,
                                   int max_depth);
+  bool validate_prebuilt_action_transitions(
+      uint32_t root_public_state_id,
+      int max_depth,
+      int64_t* action_transitions,
+      int64_t* missing_action_transitions) const;
   bool prebuild_info_set_rows(const TrainingRangeView& player_a_range,
                               const TrainingRangeView& player_b_range);
   const InfoSetRow* get_or_create_info_set_row(

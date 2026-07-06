@@ -556,6 +556,12 @@ void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
       solver.get_last_training_run_stats();
   Expect(stats.public_state_prebuild_complete,
          "texture public buckets should complete shallow prebuild");
+  Expect(stats.action_transition_prebuild_complete,
+         "texture public buckets should validate action transitions");
+  Expect(stats.prebuild_action_transitions > 0,
+         "texture prebuild should create action transitions");
+  Expect(stats.missing_action_transitions == 0,
+         "texture prebuild should not miss action transitions");
   Expect(stats.info_set_prebuild_complete,
          "texture/private buckets should prebuild full-range infosets before freezing");
   Expect(stats.prebuild_info_sets > 0,

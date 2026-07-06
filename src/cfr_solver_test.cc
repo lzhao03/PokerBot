@@ -445,6 +445,14 @@ class CFRSolverRegretTestPeer {
         .action_child_ids[static_cast<size_t>(action_index)];
   }
 
+  static void ClearCompactActionChild(CFRSolver& solver,
+                                      uint32_t public_state_id,
+                                      int action_index) {
+    solver.mutable_tables_->public_state_rows[public_state_id]
+        .action_child_ids[static_cast<size_t>(action_index)] =
+        GameTree::Node::kInvalidPublicStateId;
+  }
+
   static uint32_t CappedPublicStateId() {
     return CFRSolver::kCappedPublicStateId;
   }
@@ -502,6 +510,23 @@ class CFRSolverRegretTestPeer {
       return 0;
     }
     return slab->players[player].rows.size();
+  }
+
+  static bool PrebuildPublicStates(CFRSolver& solver,
+                                   uint32_t root_public_state_id,
+                                   int max_depth) {
+    return solver.prebuild_public_state_rows(root_public_state_id, max_depth);
+  }
+
+  static bool ValidatePrebuiltActionTransitions(
+      const CFRSolver& solver,
+      uint32_t root_public_state_id,
+      int max_depth,
+      int64_t& action_transitions,
+      int64_t& missing_action_transitions) {
+    return solver.validate_prebuilt_action_transitions(
+        root_public_state_id, max_depth, &action_transitions,
+        &missing_action_transitions);
   }
 
   static bool PrebuildInfoSets(CFRSolver& solver,
@@ -1668,6 +1693,40 @@ void CheckCompactPublicStateActionValidationCatchesMismatch() {
       "compact public-state validation should catch action id mismatches");
 }
 
+void CheckPrebuiltActionTransitionValidationCatchesMissingChild() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+  CFRSolver solver(TestSolverConfig(config));
+  const GameState root_state = TestGameState(InitialRootState(config));
+
+  const uint32_t root_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, root_state);
+  Expect(CFRSolverRegretTestPeer::PrebuildPublicStates(solver, root_id, 1),
+         "shallow public-state prebuild should complete");
+
+  int64_t action_transitions = 0;
+  int64_t missing_action_transitions = 0;
+  Expect(CFRSolverRegretTestPeer::ValidatePrebuiltActionTransitions(
+             solver, root_id, 1, action_transitions,
+             missing_action_transitions),
+         "complete prebuild should validate action transitions");
+  Expect(action_transitions > 0,
+         "action-transition validation should count action edges");
+  Expect(missing_action_transitions == 0,
+         "complete prebuild should not report missing action edges");
+
+  CFRSolverRegretTestPeer::ClearCompactActionChild(solver, root_id, 0);
+  action_transitions = 0;
+  missing_action_transitions = 0;
+  Expect(!CFRSolverRegretTestPeer::ValidatePrebuiltActionTransitions(
+             solver, root_id, 1, action_transitions,
+             missing_action_transitions),
+         "validation should fail after clearing a prebuilt action edge");
+  Expect(missing_action_transitions == 1,
+         "validation should report the cleared action edge");
+}
+
 void CheckCompactPublicStateChanceTransitionsAreCached() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -2083,8 +2142,14 @@ void CheckRangeRunTracksParallelTrainingStats() {
       solver.get_last_training_run_stats();
   Expect(stats.public_state_prebuild_complete,
          "parallel run should prebuild a complete public-state graph");
+  Expect(stats.action_transition_prebuild_complete,
+         "parallel run should validate complete action transitions");
   Expect(stats.info_set_prebuild_complete,
          "parallel run should prebuild a complete infoset table");
+  Expect(stats.prebuild_action_transitions > 0,
+         "public-state prebuild should create action transitions");
+  Expect(stats.missing_action_transitions == 0,
+         "complete public-state prebuild should not miss action transitions");
   Expect(stats.prebuild_info_sets > 0,
          "infoset prebuild should create rows before warmup");
   Expect(stats.prebuild_action_entries > 0,
@@ -2126,6 +2191,8 @@ void CheckAutoWarmupDoesNotFreezeAfterPublicStateCap() {
          "auto warmup should grow public states until the cap");
   Expect(!stats.public_state_prebuild_complete,
          "capped public-state prebuild should report incomplete graph");
+  Expect(!stats.action_transition_prebuild_complete,
+         "incomplete public-state prebuild should not validate action transitions");
   Expect(stats.warmup_iterations == 20,
          "auto warmup should consume the run after hitting a cap");
   Expect(stats.parallel_iterations == 0,
@@ -2155,6 +2222,8 @@ void CheckInfosetPrebuildCapPreventsFreeze() {
       solver.get_last_training_run_stats();
   Expect(stats.public_state_prebuild_complete,
          "fixture should complete public-state prebuild");
+  Expect(stats.action_transition_prebuild_complete,
+         "fixture should validate action transitions before infosets");
   Expect(!stats.info_set_prebuild_complete,
          "infoset cap should report incomplete prebuild");
   Expect(stats.prebuild_info_sets == 1,
@@ -3482,6 +3551,7 @@ int main() {
   CheckBettingHistoryActionTransitionReusedAcrossPublicStates();
   CheckCompactPublicStateActionCapStoresSentinel();
   CheckCompactPublicStateActionValidationCatchesMismatch();
+  CheckPrebuiltActionTransitionValidationCatchesMissingChild();
   CheckCompactPublicStateChanceTransitionsAreCached();
   CheckCompactChanceMatchesGameTreeApplyChance();
   CheckSparseSlabRowsUseExactCombos();
