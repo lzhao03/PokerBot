@@ -26,6 +26,7 @@ class TerminalUtilityCache {
 
  private:
   struct Key {
+    size_t hash = 0;
     int street = 0;
     int pot = 0;
     int player_a_contribution = 0;
@@ -58,7 +59,7 @@ class TerminalUtilityCache {
                         ComboId player_b_hand,
                         Compute compute) {
     Key key = key_for(state, player_a_hand, player_b_hand);
-    Shard& shard = shards_[KeyHash{}(key) & (kShardCount - 1)];
+    Shard& shard = shards_[key.hash & (kShardCount - 1)];
 
     {
       std::lock_guard<std::mutex> lock(shard.mutex);
@@ -92,6 +93,7 @@ class TerminalUtilityCache {
   static Key key_for(const CompactPublicState& state,
                      ComboId player_a_hand,
                      ComboId player_b_hand);
+  static size_t compute_hash(const Key& key);
 
   mutable std::array<Shard, kShardCount> shards_;
 };

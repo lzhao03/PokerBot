@@ -75,6 +75,10 @@ bool TerminalUtilityCache::Key::operator==(const Key& other) const {
 }
 
 size_t TerminalUtilityCache::KeyHash::operator()(const Key& key) const {
+  return key.hash;
+}
+
+size_t TerminalUtilityCache::compute_hash(const Key& key) {
   size_t seed = 0;
   HashCombine(seed, key.street);
   HashCombine(seed, key.pot);
@@ -100,6 +104,7 @@ TerminalUtilityCache::Key TerminalUtilityCache::key_for(
   key.player_a_cards = EncodedComboCards(player_a_hand);
   key.player_b_cards = EncodedComboCards(player_b_hand);
   key.board_cards = EncodedBoardCards(state);
+  key.hash = compute_hash(key);
   return key;
 }
 
@@ -116,6 +121,7 @@ TerminalUtilityCache::Key TerminalUtilityCache::key_for(
   key.player_a_cards = EncodedComboCards(player_a_hand);
   key.player_b_cards = EncodedComboCards(player_b_hand);
   key.board_cards = EncodedBoardCards(state);
+  key.hash = compute_hash(key);
   return key;
 }
 
