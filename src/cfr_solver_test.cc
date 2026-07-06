@@ -295,6 +295,26 @@ class CFRSolverRegretTestPeer {
     return solver.frozen_tables_->betting_history_rows[betting_history_id].pot;
   }
 
+  static int BettingHistoryStack(const CFRSolver& solver,
+                                 uint32_t betting_history_id,
+                                 int player) {
+    if (betting_history_id >= solver.frozen_tables_->betting_history_rows.size()) {
+      return -1;
+    }
+    return solver.frozen_tables_->betting_history_rows[betting_history_id]
+        .stack[static_cast<size_t>(player)];
+  }
+
+  static int BettingHistoryContribution(const CFRSolver& solver,
+                                        uint32_t betting_history_id,
+                                        int player) {
+    if (betting_history_id >= solver.frozen_tables_->betting_history_rows.size()) {
+      return -1;
+    }
+    return solver.frozen_tables_->betting_history_rows[betting_history_id]
+        .player_contributions[static_cast<size_t>(player)];
+  }
+
   static int BettingHistoryHistorySize(const CFRSolver& solver,
                                        uint32_t betting_history_id) {
     if (betting_history_id >= solver.frozen_tables_->betting_history_rows.size()) {
@@ -1169,10 +1189,23 @@ void CheckExactBettingHistoryIdsUseChipState() {
   GameState first = TestGameState(InitialRootState(config));
   GameState second = first;
   ++second.pot;
+  const uint32_t first_id =
+      CFRSolverRegretTestPeer::BettingHistoryId(solver, first);
+  const uint32_t second_id =
+      CFRSolverRegretTestPeer::BettingHistoryId(solver, second);
 
-  Expect(CFRSolverRegretTestPeer::BettingHistoryId(solver, first) !=
-             CFRSolverRegretTestPeer::BettingHistoryId(solver, second),
+  Expect(first_id != second_id,
          "exact betting history ids should distinguish exact chip state");
+  Expect(CFRSolverRegretTestPeer::BettingHistoryPot(solver, first_id) ==
+             first.pot,
+         "exact betting history row should store exact pot");
+  Expect(CFRSolverRegretTestPeer::BettingHistoryStack(solver, first_id, 0) ==
+             first.stack[0],
+         "exact betting history row should store exact stack");
+  Expect(CFRSolverRegretTestPeer::BettingHistoryContribution(solver, first_id,
+                                                             0) ==
+             first.player_contribution[0],
+         "exact betting history row should store exact contribution");
 }
 
 void CheckBettingHistoryActionTransitionsAreCached() {

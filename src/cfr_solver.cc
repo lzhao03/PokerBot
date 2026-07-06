@@ -243,6 +243,16 @@ int RoundedContribution(const GameState& state, int player) {
 }
 
 #if POKER_STREET_ONLY_PUBLIC_BUCKETS
+struct AbstractBettingState {
+  int street = 0;
+  int pot_bucket = 0;
+  int effective_stack_bucket = 0;
+  int to_call_bucket = 0;
+  int all_in = 0;
+  int folded_player = -1;
+  int player_to_act = 0;
+};
+
 int BucketChipsForBettingHistory(int chips) {
   if (chips <= 0) {
     return 0;
@@ -255,20 +265,47 @@ int BucketChipsForBettingHistory(int chips) {
   return bucket;
 }
 
-void ApplyCoarseBettingStateKey(
-    const CompactPublicState& state,
-    FrozenStrategyTables::BettingHistoryKey& key) {
+AbstractBettingState MakeAbstractBettingState(
+    const CompactPublicState& state) {
   const int contribution_gap =
       state.player_contribution[0] > state.player_contribution[1]
           ? state.player_contribution[0] - state.player_contribution[1]
           : state.player_contribution[1] - state.player_contribution[0];
-  key.pot = BucketChipsForBettingHistory(state.pot);
-  key.stack_a = BucketChipsForBettingHistory(
-      std::min(state.stack[0], state.stack[1]));
+  return {
+      static_cast<int>(state.street),
+      BucketChipsForBettingHistory(state.pot),
+      BucketChipsForBettingHistory(std::min(state.stack[0], state.stack[1])),
+      BucketChipsForBettingHistory(contribution_gap),
+      state.all_in ? 1 : 0,
+      state.folded_player,
+      state.player_to_act,
+  };
+}
+
+void ApplyAbstractBettingState(
+    const AbstractBettingState& abstract_state,
+    FrozenStrategyTables::BettingHistoryKey& key) {
+  key.street = abstract_state.street;
+  key.pot = abstract_state.pot_bucket;
+  key.stack_a = abstract_state.effective_stack_bucket;
   key.stack_b = 0;
+  key.all_in = abstract_state.all_in;
+  key.folded_player = abstract_state.folded_player;
+  key.player_to_act = abstract_state.player_to_act;
   key.player_contribution_size = 1;
-  key.player_contributions = {BucketChipsForBettingHistory(contribution_gap),
-                              0};
+  key.player_contributions = {abstract_state.to_call_bucket, 0};
+}
+
+void ApplyAbstractBettingState(
+    const AbstractBettingState& abstract_state,
+    FrozenStrategyTables::BettingHistoryRow& row) {
+  row.street = abstract_state.street;
+  row.pot = abstract_state.pot_bucket;
+  row.stack = {abstract_state.effective_stack_bucket, 0};
+  row.all_in = abstract_state.all_in;
+  row.folded_player = abstract_state.folded_player;
+  row.player_to_act = abstract_state.player_to_act;
+  row.player_contributions = {abstract_state.to_call_bucket, 0};
 }
 #endif
 
@@ -583,7 +620,7 @@ CFRSolver::BettingHistoryKey CFRSolver::make_betting_history_key(
   key.player_contribution_size = 2;
   key.player_contributions = state.player_contribution;
 #if POKER_STREET_ONLY_PUBLIC_BUCKETS
-  ApplyCoarseBettingStateKey(state, key);
+  ApplyAbstractBettingState(MakeAbstractBettingState(state), key);
 #endif
 
   const int history_value_count = state.history_size * 3;
@@ -627,6 +664,9 @@ CFRSolver::BettingHistoryRow CFRSolver::make_betting_history_row(
   row.folded_player = state.folded_player;
   row.player_to_act = state.player_to_act;
   row.player_contributions = state.player_contribution;
+#if POKER_STREET_ONLY_PUBLIC_BUCKETS
+  ApplyAbstractBettingState(MakeAbstractBettingState(state), row);
+#endif
   return row;
 }
 

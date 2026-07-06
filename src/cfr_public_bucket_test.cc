@@ -87,6 +87,25 @@ class CFRSolverRegretTestPeer {
     return solver.frozen_tables_->public_state_rows[public_state_id]
         .betting_history_id;
   }
+
+  static int BettingHistoryPot(const CFRSolver& solver,
+                               uint32_t betting_history_id) {
+    return solver.frozen_tables_->betting_history_rows[betting_history_id].pot;
+  }
+
+  static int BettingHistoryStack(const CFRSolver& solver,
+                                 uint32_t betting_history_id,
+                                 int player) {
+    return solver.frozen_tables_->betting_history_rows[betting_history_id]
+        .stack[static_cast<size_t>(player)];
+  }
+
+  static int BettingHistoryContribution(const CFRSolver& solver,
+                                        uint32_t betting_history_id,
+                                        int player) {
+    return solver.frozen_tables_->betting_history_rows[betting_history_id]
+        .player_contributions[static_cast<size_t>(player)];
+  }
 };
 
 GameState PublicState(StreetKind street,
@@ -175,11 +194,27 @@ void CheckCoarseBettingHistoryBucketsChipState() {
   const GameState same_bucket = BettingState(15, 19, 22, 6, 6);
   const GameState different_pot_bucket = BettingState(16, 18, 23, 4, 4);
   const GameState different_call_bucket = BettingState(8, 18, 23, 4, 8);
+  const uint32_t first_id =
+      CFRSolverRegretTestPeer::CompactBettingHistoryId(solver, first);
+  const uint32_t same_bucket_id =
+      CFRSolverRegretTestPeer::CompactBettingHistoryId(solver, same_bucket);
 
-  Expect(CFRSolverRegretTestPeer::CompactBettingHistoryId(solver, first) ==
-             CFRSolverRegretTestPeer::CompactBettingHistoryId(solver,
-                                                              same_bucket),
+  Expect(first_id == same_bucket_id,
          "coarse betting key should merge chip states in the same buckets");
+  Expect(CFRSolverRegretTestPeer::BettingHistoryPot(solver, first_id) == 4,
+         "coarse betting row should store pot bucket");
+  Expect(CFRSolverRegretTestPeer::BettingHistoryStack(solver, first_id, 0) ==
+             5,
+         "coarse betting row should store effective stack bucket");
+  Expect(CFRSolverRegretTestPeer::BettingHistoryStack(solver, first_id, 1) ==
+             0,
+         "coarse betting row should clear unused stack slot");
+  Expect(CFRSolverRegretTestPeer::BettingHistoryContribution(solver, first_id,
+                                                             0) == 0,
+         "coarse betting row should store to-call bucket");
+  Expect(CFRSolverRegretTestPeer::BettingHistoryContribution(solver, first_id,
+                                                             1) == 0,
+         "coarse betting row should clear unused contribution slot");
   Expect(CFRSolverRegretTestPeer::CompactBettingHistoryId(solver, first) !=
              CFRSolverRegretTestPeer::CompactBettingHistoryId(
                  solver, different_pot_bucket),
