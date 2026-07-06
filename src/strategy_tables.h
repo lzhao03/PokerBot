@@ -72,7 +72,7 @@ class FrozenStrategyTables {
     std::array<int, 2> player_contributions = {0, 0};
     int history_size = 0;
     // Only entries [0, history_size) are read by hash/equality.
-    std::array<int, kInlineHistoryValues> history_values;
+    std::array<int, kInlineHistoryValues> history_values = {};
     std::vector<int> history_overflow;
 
     bool operator==(const BettingHistoryKey& other) const;
@@ -106,6 +106,10 @@ class FrozenStrategyTables {
     int folded_player = 0;
     int player_to_act = 0;
     std::array<int, 2> player_contributions = {0, 0};
+    int history_size = 0;
+    // Only entries [0, history_size) are read when extending abstract history.
+    std::array<int, BettingHistoryKey::kInlineHistoryValues> history_values = {};
+    std::vector<int> history_overflow;
     uint8_t action_count = 0;
     std::array<int, GameTree::kMaxActionsPerNode> action_ids;
     std::array<uint32_t, GameTree::kMaxActionsPerNode> action_child_ids;

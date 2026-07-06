@@ -363,6 +363,8 @@ private:
   BettingHistoryRow make_betting_history_row(const GameState& state) const;
   BettingHistoryRow make_betting_history_row(
       const CompactPublicState& state) const;
+  uint32_t get_or_create_betting_history_id(BettingHistoryKey key,
+                                            BettingHistoryRow row);
   PublicStateKey make_public_state_key(uint32_t betting_history_id,
                                        const GameState& state) const;
   PublicStateKey make_public_state_key(uint32_t betting_history_id,

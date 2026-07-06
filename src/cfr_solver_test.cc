@@ -290,6 +290,29 @@ class CFRSolverRegretTestPeer {
     return solver.frozen_tables_->betting_history_rows[betting_history_id].pot;
   }
 
+  static int BettingHistoryHistorySize(const CFRSolver& solver,
+                                       uint32_t betting_history_id) {
+    if (betting_history_id >= solver.frozen_tables_->betting_history_rows.size()) {
+      return -1;
+    }
+    return solver.frozen_tables_->betting_history_rows[betting_history_id]
+        .history_size;
+  }
+
+  static int BettingHistoryHistoryValue(const CFRSolver& solver,
+                                        uint32_t betting_history_id,
+                                        int index) {
+    const auto& row =
+        solver.frozen_tables_->betting_history_rows[betting_history_id];
+    if (index < FrozenStrategyTables::BettingHistoryKey::kInlineHistoryValues) {
+      return row.history_values[static_cast<size_t>(index)];
+    }
+    return row.history_overflow[
+        static_cast<size_t>(
+            index -
+            FrozenStrategyTables::BettingHistoryKey::kInlineHistoryValues)];
+  }
+
   static std::pair<uint32_t, CFRSolver::TraversalStats>
   SharedViewActionTransitionChildId(CFRSolver& source,
                                     const GameTree::Node& parent,
@@ -354,6 +377,14 @@ class CFRSolverRegretTestPeer {
                                         int action_index) {
     return solver.frozen_tables_->public_state_rows[public_state_id]
         .action_ids[static_cast<size_t>(action_index)];
+  }
+
+  static int CompactPublicStateActionAmount(const CFRSolver& solver,
+                                            uint32_t public_state_id,
+                                            int action_index) {
+    return solver.frozen_tables_->public_state_rows[public_state_id]
+        .actions[static_cast<size_t>(action_index)]
+        .amount;
   }
 
   static uint32_t CompactActionChild(CFRSolver& solver,
@@ -1221,6 +1252,49 @@ void CheckCompactPublicStateActionTransitionsAreCached() {
          "compact action transition should preserve applied action history");
   Expect(solver.get_public_state_count() == 2,
          "compact action transition should create one child row");
+}
+
+void CheckCompactBettingHistoryUsesAbstractActionSlots() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  CFRSolver solver(TestSolverConfig(config));
+  const GameState root_state = TestGameState(InitialRootState(config));
+
+  const uint32_t root_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, root_state);
+  const uint8_t action_count =
+      CFRSolverRegretTestPeer::CompactPublicStateActionCount(solver, root_id);
+  int action_index = -1;
+  for (int i = 0; i < action_count; ++i) {
+    const int amount =
+        CFRSolverRegretTestPeer::CompactPublicStateActionAmount(solver,
+                                                                root_id, i);
+    if (amount != i) {
+      action_index = i;
+      break;
+    }
+  }
+  Expect(action_index >= 0,
+         "fixture should contain an action whose amount differs from slot");
+
+  const uint32_t child_id =
+      CFRSolverRegretTestPeer::CompactActionChild(solver, root_id,
+                                                  action_index);
+  const uint32_t child_betting_history_id =
+      CFRSolverRegretTestPeer::CompactPublicStateBettingHistoryId(solver,
+                                                                  child_id);
+
+  Expect(CFRSolverRegretTestPeer::BettingHistoryHistorySize(
+             solver, child_betting_history_id) == 3,
+         "first abstract action history should store one action descriptor");
+  Expect(CFRSolverRegretTestPeer::BettingHistoryHistoryValue(
+             solver, child_betting_history_id, 2) == action_index,
+         "betting history should store action slot instead of exact amount");
+  Expect(CFRSolverRegretTestPeer::BettingHistoryHistoryValue(
+             solver, child_betting_history_id, 2) !=
+             CFRSolverRegretTestPeer::CompactPublicStateActionAmount(
+                 solver, root_id, action_index),
+         "chosen action should prove slot and exact amount differ");
 }
 
 GameState TestFlopDecisionState(CardId first, CardId second, CardId third) {
@@ -3206,6 +3280,7 @@ int main() {
   CheckBettingHistoryIdsIgnorePublicCards();
   CheckBettingHistoryActionTransitionsAreCached();
   CheckCompactPublicStateActionTransitionsAreCached();
+  CheckCompactBettingHistoryUsesAbstractActionSlots();
   CheckCompactActionMatchesGameTreeApplyAction();
   CheckCompactLegalActionsMatchGameTree();
   CheckCompactPublicStateRowMetadataMatchesGameTree();

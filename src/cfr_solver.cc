@@ -238,6 +238,53 @@ int RoundedContribution(const GameState& state, int player) {
   return state.player_contribution[player];
 }
 
+void AddBettingHistoryValue(FrozenStrategyTables::BettingHistoryKey& key,
+                            int value) {
+  if (key.history_size <
+      FrozenStrategyTables::BettingHistoryKey::kInlineHistoryValues) {
+    key.history_values[static_cast<size_t>(key.history_size)] = value;
+  } else {
+    key.history_overflow.push_back(value);
+  }
+  ++key.history_size;
+}
+
+int BettingHistoryRowValue(
+    const FrozenStrategyTables::BettingHistoryRow& row,
+    int index) {
+  if (index <
+      FrozenStrategyTables::BettingHistoryKey::kInlineHistoryValues) {
+    return row.history_values[static_cast<size_t>(index)];
+  }
+  return row.history_overflow[
+      static_cast<size_t>(
+          index - FrozenStrategyTables::BettingHistoryKey::kInlineHistoryValues)];
+}
+
+void CopyBettingHistoryValues(
+    const FrozenStrategyTables::BettingHistoryKey& key,
+    FrozenStrategyTables::BettingHistoryRow& row) {
+  row.history_size = key.history_size;
+  row.history_values = key.history_values;
+  row.history_overflow = key.history_overflow;
+}
+
+void ReplaceWithAbstractActionHistory(
+    const FrozenStrategyTables::BettingHistoryRow& parent_row,
+    int action_index,
+    const CompactPublicState& child_state,
+    FrozenStrategyTables::BettingHistoryKey& key) {
+  key.history_size = 0;
+  key.history_overflow.clear();
+  for (int i = 0; i < parent_row.history_size; ++i) {
+    AddBettingHistoryValue(key, BettingHistoryRowValue(parent_row, i));
+  }
+  const CompactAction action = child_state.last_action;
+  AddBettingHistoryValue(key, action.player);
+  AddBettingHistoryValue(key, static_cast<int>(action.kind));
+  AddBettingHistoryValue(key, action_index);
+}
+
 int ChanceSamples(const SolverConfig& config) {
   return std::max(1, config.chance_samples);
 }
@@ -480,18 +527,10 @@ CFRSolver::BettingHistoryKey CFRSolver::make_betting_history_key(
     key.history_overflow.reserve(history_value_count -
                                  BettingHistoryKey::kInlineHistoryValues);
   }
-  auto add_history_value = [&key](int value) {
-    if (key.history_size < BettingHistoryKey::kInlineHistoryValues) {
-      key.history_values[key.history_size] = value;
-    } else {
-      key.history_overflow.push_back(value);
-    }
-    ++key.history_size;
-  };
   for (const GameAction& action : state.history) {
-    add_history_value(action.player);
-    add_history_value(static_cast<int>(action.kind));
-    add_history_value(action.amount);
+    AddBettingHistoryValue(key, action.player);
+    AddBettingHistoryValue(key, static_cast<int>(action.kind));
+    AddBettingHistoryValue(key, action.amount);
   }
 
   return key;
@@ -515,19 +554,11 @@ CFRSolver::BettingHistoryKey CFRSolver::make_betting_history_key(
     key.history_overflow.reserve(history_value_count -
                                  BettingHistoryKey::kInlineHistoryValues);
   }
-  auto add_history_value = [&key](int value) {
-    if (key.history_size < BettingHistoryKey::kInlineHistoryValues) {
-      key.history_values[key.history_size] = value;
-    } else {
-      key.history_overflow.push_back(value);
-    }
-    ++key.history_size;
-  };
   for (uint16_t i = 0; i < state.history_size; ++i) {
     const CompactAction action = CompactHistoryAction(state, i);
-    add_history_value(action.player);
-    add_history_value(static_cast<int>(action.kind));
-    add_history_value(action.amount);
+    AddBettingHistoryValue(key, action.player);
+    AddBettingHistoryValue(key, static_cast<int>(action.kind));
+    AddBettingHistoryValue(key, action.amount);
   }
 
   return key;
@@ -795,24 +826,20 @@ std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
 
 uint32_t CFRSolver::get_or_create_betting_history_id(const GameState& state) {
   BettingHistoryKey key = make_betting_history_key(state);
-  FrozenStrategyTables& tables = mutable_tables();
-  const auto [history_iter, inserted] = tables.betting_history_ids.try_emplace(
-      std::move(key), static_cast<uint32_t>(tables.betting_history_ids.size()));
-  const uint32_t betting_history_id = history_iter->second;
-  if (!inserted) {
-    if (tables.betting_history_rows.size() <= betting_history_id) {
-      tables.betting_history_rows.resize(
-          static_cast<size_t>(betting_history_id) + 1);
-    }
-    return betting_history_id;
-  }
-  tables.betting_history_rows.push_back(make_betting_history_row(state));
-  return betting_history_id;
+  BettingHistoryRow row = make_betting_history_row(state);
+  return get_or_create_betting_history_id(std::move(key), std::move(row));
 }
 
 uint32_t CFRSolver::get_or_create_betting_history_id(
     const CompactPublicState& state) {
   BettingHistoryKey key = make_betting_history_key(state);
+  BettingHistoryRow row = make_betting_history_row(state);
+  return get_or_create_betting_history_id(std::move(key), std::move(row));
+}
+
+uint32_t CFRSolver::get_or_create_betting_history_id(BettingHistoryKey key,
+                                                     BettingHistoryRow row) {
+  CopyBettingHistoryValues(key, row);
   FrozenStrategyTables& tables = mutable_tables();
   const auto [history_iter, inserted] = tables.betting_history_ids.try_emplace(
       std::move(key), static_cast<uint32_t>(tables.betting_history_ids.size()));
@@ -824,7 +851,7 @@ uint32_t CFRSolver::get_or_create_betting_history_id(
     }
     return betting_history_id;
   }
-  tables.betting_history_rows.push_back(make_betting_history_row(state));
+  tables.betting_history_rows.push_back(std::move(row));
   return betting_history_id;
 }
 
@@ -855,7 +882,18 @@ uint32_t CFRSolver::get_or_create_action_child_betting_history_id(
     }
   }
 
-  const uint32_t child_id = get_or_create_betting_history_id(child_state);
+  BettingHistoryKey child_key = make_betting_history_key(child_state);
+  BettingHistoryRow child_row = make_betting_history_row(child_state);
+  if (parent_betting_history_id < tables.betting_history_rows.size()) {
+    const BettingHistoryRow& parent_row =
+        tables.betting_history_rows[parent_betting_history_id];
+    if (action_index >= 0 && action_index < parent_row.action_count) {
+      ReplaceWithAbstractActionHistory(parent_row, action_index, child_state,
+                                       child_key);
+    }
+  }
+  const uint32_t child_id = get_or_create_betting_history_id(
+      std::move(child_key), std::move(child_row));
   if (parent_betting_history_id < tables.betting_history_rows.size()) {
     BettingHistoryRow& parent_row =
         tables.betting_history_rows[parent_betting_history_id];
