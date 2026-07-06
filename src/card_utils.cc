@@ -1,6 +1,7 @@
 #include "src/card_utils.h"
 
 #include <algorithm>
+#include <array>
 #include <random>
 #include <stdexcept>
 
@@ -30,16 +31,6 @@ int CardsForNextStreet(StreetKind street) {
 
 namespace {
 
-int AvailableCards(CardMask known_mask) {
-  int count = 0;
-  for (int card_id = 0; card_id < kDeckCardCount; ++card_id) {
-    if ((known_mask & CardBit(static_cast<CardId>(card_id))) == 0) {
-      ++count;
-    }
-  }
-  return count;
-}
-
 absl::InlinedVector<CardId, 5> SampleStreetCardsForState(
     StreetKind street,
     int board_count,
@@ -54,22 +45,29 @@ absl::InlinedVector<CardId, 5> SampleStreetCardsForState(
     return {};
   }
 
-  CardMask blocked_mask = known_private_cards | board_mask;
-  if (AvailableCards(blocked_mask) < count) {
+  const CardMask blocked_mask = known_private_cards | board_mask;
+  std::array<CardId, kDeckCardCount> candidates = {};
+  int candidate_count = 0;
+  for (int card_id = 0; card_id < kDeckCardCount; ++card_id) {
+    const CardId candidate = static_cast<CardId>(card_id);
+    if ((blocked_mask & CardBit(candidate)) == 0) {
+      candidates[candidate_count] = candidate;
+      ++candidate_count;
+    }
+  }
+
+  if (candidate_count < count) {
     throw std::runtime_error("Not enough cards to sample next street");
   }
 
-  std::uniform_int_distribution<int> card_distribution(0, kDeckCardCount - 1);
   absl::InlinedVector<CardId, 5> sampled;
   sampled.reserve(count);
-  while (static_cast<int>(sampled.size()) < count) {
-    const CardId card_id = static_cast<CardId>(card_distribution(rng));
-    const CardMask card_bit = CardBit(card_id);
-    if ((blocked_mask & card_bit) != 0) {
-      continue;
-    }
-    blocked_mask |= card_bit;
-    sampled.push_back(card_id);
+  for (int i = 0; i < count; ++i) {
+    std::uniform_int_distribution<int> card_distribution(
+        i, candidate_count - 1);
+    const int chosen = card_distribution(rng);
+    std::swap(candidates[i], candidates[chosen]);
+    sampled.push_back(candidates[i]);
   }
   return sampled;
 }
