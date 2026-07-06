@@ -46,6 +46,7 @@ struct BenchmarkResult {
   double result = 0.0;
   int64_t hands = 0;
   int64_t cfr_node_updates = 0;
+  poker::CFRSolver::TrainingRunStats training_stats;
   poker::CFRSolver::TraversalStats traversal_stats;
   poker::CFRSolver::UtilityCacheStats utility_cache_stats;
   int64_t info_sets = 0;
@@ -135,8 +136,30 @@ double RatePerSecond(int64_t count, double seconds) {
   return count / seconds;
 }
 
+double RatePerHand(int64_t count, int64_t hands) {
+  if (count <= 0 || hands <= 0) {
+    return 0.0;
+  }
+  return static_cast<double>(count) / hands;
+}
+
 bool CapHit(int64_t count, int cap) {
   return cap > 0 && count >= cap;
+}
+
+BenchmarkResult MakeBenchmarkResult(
+    double result,
+    int64_t hands,
+    int64_t cfr_node_updates,
+    poker::CFRSolver::TraversalStats traversal_stats = {},
+    poker::CFRSolver::UtilityCacheStats utility_cache_stats = {}) {
+  BenchmarkResult benchmark_result;
+  benchmark_result.result = result;
+  benchmark_result.hands = hands;
+  benchmark_result.cfr_node_updates = cfr_node_updates;
+  benchmark_result.traversal_stats = traversal_stats;
+  benchmark_result.utility_cache_stats = utility_cache_stats;
+  return benchmark_result;
 }
 
 BenchmarkResult WithSolverState(BenchmarkResult result,
@@ -188,11 +211,27 @@ void RunBenchmark(const std::string& name,
   BenchmarkResult result = benchmark();
   auto end = std::chrono::steady_clock::now();
   std::chrono::duration<double> elapsed = end - start;
+  const auto& training = result.training_stats;
   std::cout << name << "\t" << elapsed.count() << "\t" << result.result << "\t"
-            << result.hands << "\t"
-            << RatePerSecond(result.hands, elapsed.count()) << "\t"
             << result.cfr_node_updates << "\t"
             << RatePerSecond(result.cfr_node_updates, elapsed.count()) << "\t"
+            << RatePerHand(result.cfr_node_updates, result.hands) << "\t"
+            << training.warmup_seconds << "\t"
+            << training.warmup_iterations << "\t"
+            << training.warmup_cfr_updates << "\t"
+            << RatePerSecond(training.warmup_cfr_updates,
+                             training.warmup_seconds) << "\t"
+            << RatePerHand(training.warmup_cfr_updates,
+                           training.warmup_iterations) << "\t"
+            << training.parallel_seconds << "\t"
+            << training.parallel_iterations << "\t"
+            << training.parallel_cfr_updates << "\t"
+            << RatePerSecond(training.parallel_cfr_updates,
+                             training.parallel_seconds) << "\t"
+            << RatePerHand(training.parallel_cfr_updates,
+                           training.parallel_iterations) << "\t"
+            << result.hands << "\t"
+            << RatePerSecond(result.hands, elapsed.count()) << "\t"
             << result.info_sets << "\t"
             << result.public_states << "\t"
             << result.max_info_sets << "\t"
@@ -305,8 +344,18 @@ int main(int argc, char** argv) {
     poker::HandRange player_a_range = BenchmarkRange(options);
     poker::HandRange player_b_range = BenchmarkRange(options);
 
-    std::cout << "case\tseconds\tresult\thands\thands_per_second"
+    std::cout << "case\tseconds\tresult"
               << "\tcfr_node_updates\tcfr_node_updates_per_second"
+              << "\tcfr_node_updates_per_hand"
+              << "\twarmup_seconds\twarmup_iterations"
+              << "\twarmup_cfr_node_updates"
+              << "\twarmup_cfr_node_updates_per_second"
+              << "\twarmup_cfr_node_updates_per_hand"
+              << "\tparallel_seconds\tparallel_iterations"
+              << "\tparallel_cfr_node_updates"
+              << "\tparallel_cfr_node_updates_per_second"
+              << "\tparallel_cfr_node_updates_per_hand"
+              << "\thands\thands_per_second"
               << "\tinfo_sets\tpublic_states"
               << "\tmax_info_sets\tmax_public_states"
               << "\tinfo_set_cap_hit\tpublic_state_cap_hit"
@@ -325,7 +374,7 @@ int main(int argc, char** argv) {
         combos += static_cast<int64_t>(
             player_a_range.get_all_weighted_combos().size());
       }
-      return BenchmarkResult{static_cast<double>(combos), combos, 0};
+      return MakeBenchmarkResult(static_cast<double>(combos), combos, 0);
     });
 
     RunBenchmark("train_range", [&] {
@@ -333,10 +382,12 @@ int main(int argc, char** argv) {
       int64_t start_updates = solver.get_cfr_update_count();
       solver.run(options.iterations, player_a_range, player_b_range);
       int64_t updates = solver.get_cfr_update_count() - start_updates;
-      return WithSolverState(BenchmarkResult{
+      BenchmarkResult result = WithSolverState(MakeBenchmarkResult(
           static_cast<double>(solver.get_info_set_count()),
           options.iterations, updates, solver.get_traversal_stats(),
-          solver.get_utility_cache_stats()}, config, solver);
+          solver.get_utility_cache_stats()), config, solver);
+      result.training_stats = solver.get_last_training_run_stats();
+      return result;
     });
 
     poker::CFRSolver evaluate_solver(config);
@@ -348,11 +399,11 @@ int main(int argc, char** argv) {
           evaluate_solver.get_traversal_stats();
       double value = evaluate_solver.evaluate_strategy(
           options.eval_samples, player_a_range, player_b_range);
-      return WithSolverState(BenchmarkResult{
+      return WithSolverState(MakeBenchmarkResult(
           value, options.eval_samples, 0,
           TraversalDelta(evaluate_solver.get_traversal_stats(),
                          traversal_before),
-          CacheDelta(evaluate_solver.get_utility_cache_stats(), before)},
+          CacheDelta(evaluate_solver.get_utility_cache_stats(), before)),
           config, evaluate_solver);
     });
 
@@ -367,11 +418,11 @@ int main(int argc, char** argv) {
             exploitability_solver.get_traversal_stats();
         double value = exploitability_solver.calculate_player_a_best_response_value(
             options.exploitability_samples, player_a_range, player_b_range);
-        return WithSolverState(BenchmarkResult{
+        return WithSolverState(MakeBenchmarkResult(
             value, options.exploitability_samples, 0,
             TraversalDelta(exploitability_solver.get_traversal_stats(),
                            traversal_before),
-            CacheDelta(exploitability_solver.get_utility_cache_stats(), before)},
+            CacheDelta(exploitability_solver.get_utility_cache_stats(), before)),
             config, exploitability_solver);
       });
       RunBenchmark("best_response_player_b", [&] {
@@ -381,11 +432,11 @@ int main(int argc, char** argv) {
             exploitability_solver.get_traversal_stats();
         double value = exploitability_solver.calculate_player_b_best_response_value(
             options.exploitability_samples, player_a_range, player_b_range);
-        return WithSolverState(BenchmarkResult{
+        return WithSolverState(MakeBenchmarkResult(
             value, options.exploitability_samples, 0,
             TraversalDelta(exploitability_solver.get_traversal_stats(),
                            traversal_before),
-            CacheDelta(exploitability_solver.get_utility_cache_stats(), before)},
+            CacheDelta(exploitability_solver.get_utility_cache_stats(), before)),
             config, exploitability_solver);
       });
       RunBenchmark("exploitability_total", [&] {
@@ -395,11 +446,11 @@ int main(int argc, char** argv) {
             exploitability_solver.get_traversal_stats();
         double value = exploitability_solver.calculate_exploitability(
             options.exploitability_samples, player_a_range, player_b_range);
-        return WithSolverState(BenchmarkResult{
+        return WithSolverState(MakeBenchmarkResult(
             value, options.exploitability_samples * 3, 0,
             TraversalDelta(exploitability_solver.get_traversal_stats(),
                            traversal_before),
-            CacheDelta(exploitability_solver.get_utility_cache_stats(), before)},
+            CacheDelta(exploitability_solver.get_utility_cache_stats(), before)),
             config, exploitability_solver);
       });
     }

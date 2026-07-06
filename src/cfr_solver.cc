@@ -7,6 +7,7 @@
 #include "src/terminal_utility_cache.h"
 #include "src/thread_pool.h"
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <random>
@@ -1255,6 +1256,7 @@ void CFRSolver::add_traversal_stats(const TraversalStats& stats) {
 
 void CFRSolver::run(int iterations, ComboId player_a_hand,
                     ComboId player_b_hand) {
+  last_training_run_stats_ = {};
   if (iterations <= 0) {
     return;
   }
@@ -1269,6 +1271,8 @@ void CFRSolver::run(int iterations, ComboId player_a_hand,
   scratch.reserve_depth(ScratchDepthReserve(config_, max_depth));
   const PrivateCards player_a_cards = PrivateCards::FromCombo(player_a_hand);
   const PrivateCards player_b_cards = PrivateCards::FromCombo(player_b_hand);
+  const int64_t start_updates = cfr_update_count_;
+  const auto start = std::chrono::steady_clock::now();
   for (int i = 0; i < iterations; ++i) {
     std::array<double, 2> reach_probabilities = {1.0, 1.0};
     cumulative_root_utility_ += cfr_with_ranges(
@@ -1277,6 +1281,12 @@ void CFRSolver::run(int iterations, ComboId player_a_hand,
         std::nullopt, std::nullopt);
     ++iterations_run_;
   }
+  const auto end = std::chrono::steady_clock::now();
+  last_training_run_stats_.warmup_iterations = iterations;
+  last_training_run_stats_.warmup_seconds =
+      std::chrono::duration<double>(end - start).count();
+  last_training_run_stats_.warmup_cfr_updates =
+      cfr_update_count_ - start_updates;
 }
 
 void CFRSolver::run(int iterations, const HandRange& player_a_range,
@@ -1287,6 +1297,7 @@ void CFRSolver::run(int iterations, const HandRange& player_a_range,
 void CFRSolver::run_iterations(int iterations,
                                const HandRange& player_a_range,
                                const HandRange& player_b_range) {
+  last_training_run_stats_ = {};
   if (iterations <= 0) {
     return;
   }
@@ -1341,6 +1352,8 @@ void CFRSolver::run_iterations(int iterations,
   const int max_depth = config_.max_depth;
   TraversalScratch scratch;
   scratch.reserve_depth(ScratchDepthReserve(config_, max_depth));
+  const int64_t warmup_start_updates = cfr_update_count_;
+  const auto warmup_start = std::chrono::steady_clock::now();
   for (int i = 0; i < warmup_count; ++i) {
     const RangeDeal deal = range_sampler.sample(rng_);
     PrivateCards player_a_cards = PrivateCards::FromCombo(deal.player_a_combo);
@@ -1364,6 +1377,12 @@ void CFRSolver::run_iterations(int iterations,
     cumulative_root_utility_ += dealt_value;
     ++iterations_run_;
   }
+  const auto warmup_end = std::chrono::steady_clock::now();
+  last_training_run_stats_.warmup_iterations = warmup_count;
+  last_training_run_stats_.warmup_seconds =
+      std::chrono::duration<double>(warmup_end - warmup_start).count();
+  last_training_run_stats_.warmup_cfr_updates =
+      cfr_update_count_ - warmup_start_updates;
 
   const int remaining = iterations - warmup_count;
   if (remaining > 0) {
@@ -1375,9 +1394,17 @@ void CFRSolver::run_iterations(int iterations,
               << " info sets, " << iterations_run_
               << " warmup iterations. Starting parallel phase ("
               << remaining << " iterations, " << num_threads << " threads)...";
+    const int64_t parallel_start_updates = cfr_update_count_;
+    const auto parallel_start = std::chrono::steady_clock::now();
     run_iterations_parallel(remaining, num_threads, *root_public_state_id,
                             range_sampler,
                             player_a_training_range, player_b_training_range);
+    const auto parallel_end = std::chrono::steady_clock::now();
+    last_training_run_stats_.parallel_iterations = remaining;
+    last_training_run_stats_.parallel_seconds =
+        std::chrono::duration<double>(parallel_end - parallel_start).count();
+    last_training_run_stats_.parallel_cfr_updates =
+        cfr_update_count_ - parallel_start_updates;
   }
 
   LOG(INFO) << "CFR iterations completed";

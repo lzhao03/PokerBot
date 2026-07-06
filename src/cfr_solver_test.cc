@@ -1890,6 +1890,14 @@ void CheckRunUpdatesExpectedValue() {
   Expect(solver.get_iterations_run() == 1, "run should record completed iterations");
   Expect(solver.get_cfr_update_count() == 1,
          "range run should update one sampled private-card deal");
+  CFRSolver::TrainingRunStats run_stats =
+      solver.get_last_training_run_stats();
+  Expect(run_stats.warmup_iterations == 1,
+         "single-thread run should report warmup iterations");
+  Expect(run_stats.parallel_iterations == 0,
+         "single-thread run should not report a parallel phase");
+  Expect(run_stats.warmup_cfr_updates == 1,
+         "single-thread run should report warmup CFR updates");
 
   double player_a_ev = solver.get_expected_value(0);
   double player_b_ev = solver.get_expected_value(1);
@@ -1906,6 +1914,38 @@ void CheckRunUpdatesExpectedValue() {
   player_b_ev = solver.get_expected_value(1);
   Expect(std::abs(player_a_ev + player_b_ev) < 0.000001,
          "continued EV should stay zero-sum");
+}
+
+void CheckRangeRunTracksParallelTrainingStats() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.set_max_depth(1);
+  config.set_num_training_threads(2);
+  config.set_warmup_iterations(1);
+
+  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
+  Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
+  HandRange player_a_range;
+  AddHand(player_a_range, player_a_hand, 1.0);
+  HandRange player_b_range;
+  AddHand(player_b_range, player_b_hand, 1.0);
+
+  CFRSolver solver(TestSolverConfig(config));
+  solver.run(3, player_a_range, player_b_range);
+
+  const CFRSolver::TrainingRunStats stats =
+      solver.get_last_training_run_stats();
+  Expect(stats.warmup_iterations == 1,
+         "parallel run should report configured warmup iterations");
+  Expect(stats.parallel_iterations == 2,
+         "parallel run should report remaining parallel iterations");
+  Expect(stats.warmup_cfr_updates > 0,
+         "parallel run should report warmup CFR updates");
+  Expect(stats.parallel_cfr_updates > 0,
+         "parallel run should report parallel CFR updates");
+  Expect(stats.warmup_cfr_updates + stats.parallel_cfr_updates ==
+             solver.get_cfr_update_count(),
+         "phase CFR updates should add up to total CFR updates");
 }
 
 void CheckRunUsesProvidedPrivateRanges() {
@@ -3145,6 +3185,7 @@ int main() {
   CheckParallelEvaluationUsesWorkerLocalUtilityCaches();
   CheckRunUsesConfiguredBlinds();
   CheckRunUpdatesExpectedValue();
+  CheckRangeRunTracksParallelTrainingStats();
   CheckRunUsesProvidedPrivateRanges();
   CheckRunFixedHandsUsesCustomInitialState();
   CheckRunWithoutDepthCutoffTerminates();

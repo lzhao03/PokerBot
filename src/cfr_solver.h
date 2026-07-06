@@ -52,6 +52,15 @@ public:
     int64_t entries = 0;
   };
 
+  struct TrainingRunStats {
+    int warmup_iterations = 0;
+    int parallel_iterations = 0;
+    double warmup_seconds = 0.0;
+    double parallel_seconds = 0.0;
+    int64_t warmup_cfr_updates = 0;
+    int64_t parallel_cfr_updates = 0;
+  };
+
   using PrivateBucketId = FrozenStrategyTables::PrivateBucketId;
 
   struct StrategyInfoSetKey {
@@ -120,6 +129,9 @@ public:
     return frozen_tables_->public_state_rows.size();
   }
   TraversalStats get_traversal_stats() const { return traversal_stats_; }
+  TrainingRunStats get_last_training_run_stats() const {
+    return last_training_run_stats_;
+  }
   void add_traversal_stats(const TraversalStats& stats);
   UtilityCacheStats get_utility_cache_stats() const;
   void set_continuation_value_provider(
@@ -246,6 +258,7 @@ private:
   int iterations_run_ = 0;
   int64_t cfr_update_count_ = 0;
   TraversalStats traversal_stats_;
+  TrainingRunStats last_training_run_stats_;
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
   IdentityCardAbstraction card_abstraction_;
