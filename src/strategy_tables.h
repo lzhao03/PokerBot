@@ -71,7 +71,8 @@ class FrozenStrategyTables {
     int player_contribution_size = 0;
     std::array<int, 2> player_contributions = {0, 0};
     int history_size = 0;
-    std::array<int, kInlineHistoryValues> history_values = {};
+    // Only entries [0, history_size) are read by hash/equality.
+    std::array<int, kInlineHistoryValues> history_values;
     std::vector<int> history_overflow;
 
     bool operator==(const BettingHistoryKey& other) const;

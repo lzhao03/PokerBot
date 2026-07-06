@@ -237,8 +237,14 @@ CFRSolver::CFRSolver(
     cumulative_->cumulative_strategies.reserve(action_cap);
   }
   if (config_.max_public_states > 0) {
-    mutable_tables_->public_state_rows.reserve(
-        static_cast<size_t>(config_.max_public_states));
+    const size_t public_state_cap =
+        static_cast<size_t>(config_.max_public_states);
+    mutable_tables_->public_state_ids.reserve(public_state_cap);
+    mutable_tables_->public_state_rows.reserve(public_state_cap);
+    mutable_tables_->public_chance_child_ids.reserve(public_state_cap);
+    mutable_tables_->public_info_set_slabs.reserve(public_state_cap);
+    mutable_tables_->betting_history_ids.reserve(public_state_cap);
+    mutable_tables_->betting_history_rows.reserve(public_state_cap);
   }
 }
 

@@ -1,5 +1,6 @@
 #include "src/strategy_tables.h"
 
+#include <algorithm>
 #include <functional>
 
 namespace poker {
@@ -25,6 +26,8 @@ void HashArray(size_t& seed, const std::array<int, N>& values) {
 
 bool FrozenStrategyTables::BettingHistoryKey::operator==(
     const BettingHistoryKey& other) const {
+  const int inline_history_size =
+      std::min(history_size, kInlineHistoryValues);
   return street == other.street && pot == other.pot &&
          stack_a == other.stack_a && stack_b == other.stack_b &&
          all_in == other.all_in && folded_player == other.folded_player &&
@@ -32,7 +35,9 @@ bool FrozenStrategyTables::BettingHistoryKey::operator==(
          player_contribution_size == other.player_contribution_size &&
          player_contributions == other.player_contributions &&
          history_size == other.history_size &&
-         history_values == other.history_values &&
+         std::equal(history_values.begin(),
+                    history_values.begin() + inline_history_size,
+                    other.history_values.begin()) &&
          history_overflow == other.history_overflow;
 }
 
@@ -49,7 +54,11 @@ size_t FrozenStrategyTables::BettingHistoryKeyHash::operator()(
   HashCombine(seed, key.player_contribution_size);
   HashArray(seed, key.player_contributions);
   HashCombine(seed, key.history_size);
-  HashArray(seed, key.history_values);
+  const int inline_history_size =
+      std::min(key.history_size, BettingHistoryKey::kInlineHistoryValues);
+  for (int i = 0; i < inline_history_size; ++i) {
+    HashCombine(seed, key.history_values[i]);
+  }
   for (int value : key.history_overflow) {
     HashCombine(seed, value);
   }
