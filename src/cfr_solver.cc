@@ -75,6 +75,10 @@ inline float AtomicFloatLoad(const float* src) {
 #define POKER_ENABLE_TRAVERSAL_STATS 1
 #endif
 
+#ifndef POKER_STREET_ONLY_PUBLIC_BUCKETS
+#define POKER_STREET_ONLY_PUBLIC_BUCKETS 0
+#endif
+
 #if POKER_ENABLE_TRAVERSAL_STATS
 #define POKER_RECORD_TRAVERSAL_STAT(statement) \
   do {                                         \
@@ -237,6 +241,36 @@ bool ForEachNextStreetDeal(const CompactPublicState& state,
 int RoundedContribution(const GameState& state, int player) {
   return state.player_contribution[player];
 }
+
+#if POKER_STREET_ONLY_PUBLIC_BUCKETS
+int BucketChipsForBettingHistory(int chips) {
+  if (chips <= 0) {
+    return 0;
+  }
+  int bucket = 1;
+  while (chips > 1) {
+    chips >>= 1;
+    ++bucket;
+  }
+  return bucket;
+}
+
+void ApplyCoarseBettingStateKey(
+    const CompactPublicState& state,
+    FrozenStrategyTables::BettingHistoryKey& key) {
+  const int contribution_gap =
+      state.player_contribution[0] > state.player_contribution[1]
+          ? state.player_contribution[0] - state.player_contribution[1]
+          : state.player_contribution[1] - state.player_contribution[0];
+  key.pot = BucketChipsForBettingHistory(state.pot);
+  key.stack_a = BucketChipsForBettingHistory(
+      std::min(state.stack[0], state.stack[1]));
+  key.stack_b = 0;
+  key.player_contribution_size = 1;
+  key.player_contributions = {BucketChipsForBettingHistory(contribution_gap),
+                              0};
+}
+#endif
 
 void AddBettingHistoryValue(FrozenStrategyTables::BettingHistoryKey& key,
                             int value) {
@@ -548,6 +582,9 @@ CFRSolver::BettingHistoryKey CFRSolver::make_betting_history_key(
   key.player_to_act = state.player_to_act;
   key.player_contribution_size = 2;
   key.player_contributions = state.player_contribution;
+#if POKER_STREET_ONLY_PUBLIC_BUCKETS
+  ApplyCoarseBettingStateKey(state, key);
+#endif
 
   const int history_value_count = state.history_size * 3;
   if (history_value_count > BettingHistoryKey::kInlineHistoryValues) {

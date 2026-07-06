@@ -144,6 +144,11 @@ class CFRSolverRegretTestPeer {
     return solver.get_or_create_betting_history_id(TestGameState(state));
   }
 
+  static uint32_t BettingHistoryId(CFRSolver& solver,
+                                   const GameState& state) {
+    return solver.get_or_create_betting_history_id(state);
+  }
+
   static GameState ApplyCompactAction(CFRSolver& solver,
                                       const GameState& state,
                                       const GameAction& action) {
@@ -1156,6 +1161,18 @@ void CheckBettingHistoryIdsIgnorePublicCards() {
          "betting history ids should ignore public card identity");
   Expect(first_public_id != second_public_id,
          "public state ids should still distinguish public card ids");
+}
+
+void CheckExactBettingHistoryIdsUseChipState() {
+  PokerConfig config;
+  CFRSolver solver(TestSolverConfig(config));
+  GameState first = TestGameState(InitialRootState(config));
+  GameState second = first;
+  ++second.pot;
+
+  Expect(CFRSolverRegretTestPeer::BettingHistoryId(solver, first) !=
+             CFRSolverRegretTestPeer::BettingHistoryId(solver, second),
+         "exact betting history ids should distinguish exact chip state");
 }
 
 void CheckBettingHistoryActionTransitionsAreCached() {
@@ -3278,6 +3295,7 @@ int main() {
   CheckExactPrivateBucketsUseExactCombo();
   CheckPublicStateIdsAreDenseAndKeyedByState();
   CheckBettingHistoryIdsIgnorePublicCards();
+  CheckExactBettingHistoryIdsUseChipState();
   CheckBettingHistoryActionTransitionsAreCached();
   CheckCompactPublicStateActionTransitionsAreCached();
   CheckCompactBettingHistoryUsesAbstractActionSlots();

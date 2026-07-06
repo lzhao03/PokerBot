@@ -40,6 +40,53 @@ class CFRSolverRegretTestPeer {
     return solver.frozen_tables_->public_state_rows[public_state_id]
         .public_state_is_exact;
   }
+
+  static uint32_t CompactBettingHistoryId(CFRSolver& solver,
+                                          const GameState& state) {
+    CompactPublicState compact =
+        solver.compact_public_state_from_game_state(state);
+    return solver.get_or_create_betting_history_id(compact);
+  }
+
+  static uint32_t CompactPublicStateId(CFRSolver& solver,
+                                       const GameState& state) {
+    CompactPublicState compact =
+        solver.compact_public_state_from_game_state(state);
+    const uint32_t betting_history_id =
+        solver.get_or_create_betting_history_id(compact);
+    std::optional<uint32_t> public_state_id =
+        solver.get_or_create_public_state_row(betting_history_id,
+                                              std::move(compact));
+    if (!public_state_id.has_value()) {
+      throw std::runtime_error("public state was not created");
+    }
+    return *public_state_id;
+  }
+
+  static int CompactPublicStateActionCount(const CFRSolver& solver,
+                                           uint32_t public_state_id) {
+    return solver.frozen_tables_->public_state_rows[public_state_id]
+        .action_count;
+  }
+
+  static uint32_t CompactActionChild(CFRSolver& solver,
+                                     uint32_t public_state_id,
+                                     int action_index) {
+    std::optional<uint32_t> child_id =
+        solver.get_or_create_action_child_public_state(public_state_id,
+                                                       action_index);
+    if (!child_id.has_value()) {
+      throw std::runtime_error("action child was not created");
+    }
+    return *child_id;
+  }
+
+  static uint32_t CompactPublicStateBettingHistoryId(
+      const CFRSolver& solver,
+      uint32_t public_state_id) {
+    return solver.frozen_tables_->public_state_rows[public_state_id]
+        .betting_history_id;
+  }
 };
 
 GameState PublicState(StreetKind street,
@@ -65,6 +112,23 @@ GameState PublicState(StreetKind street,
   if (street == StreetKind::kRiver) {
     AddBoardCard(state, fifth);
   }
+  return state;
+}
+
+GameState BettingState(int pot,
+                       int stack_a,
+                       int stack_b,
+                       int contribution_a,
+                       int contribution_b) {
+  GameState state;
+  state.stack[0] = stack_a;
+  state.stack[1] = stack_b;
+  state.pot = pot;
+  state.street = StreetKind::kPreflop;
+  state.player_to_act = 0;
+  state.player_contribution = {contribution_a, contribution_b};
+  state.player_contribution_count = 2;
+  state.folded_player = -1;
   return state;
 }
 
@@ -103,6 +167,50 @@ void CheckStreetOnlyPublicBucketsMergeBoardsByStreet() {
          "street-only public bucket rows should be representative");
 }
 
+void CheckCoarseBettingHistoryBucketsChipState() {
+  SolverConfig config;
+  CFRSolver solver(config);
+
+  const GameState first = BettingState(8, 18, 23, 4, 4);
+  const GameState same_bucket = BettingState(15, 19, 22, 6, 6);
+  const GameState different_pot_bucket = BettingState(16, 18, 23, 4, 4);
+  const GameState different_call_bucket = BettingState(8, 18, 23, 4, 8);
+
+  Expect(CFRSolverRegretTestPeer::CompactBettingHistoryId(solver, first) ==
+             CFRSolverRegretTestPeer::CompactBettingHistoryId(solver,
+                                                              same_bucket),
+         "coarse betting key should merge chip states in the same buckets");
+  Expect(CFRSolverRegretTestPeer::CompactBettingHistoryId(solver, first) !=
+             CFRSolverRegretTestPeer::CompactBettingHistoryId(
+                 solver, different_pot_bucket),
+         "coarse betting key should split pot bucket boundaries");
+  Expect(CFRSolverRegretTestPeer::CompactBettingHistoryId(solver, first) !=
+             CFRSolverRegretTestPeer::CompactBettingHistoryId(
+                 solver, different_call_bucket),
+         "coarse betting key should split outstanding-call buckets");
+}
+
+void CheckCoarseBettingHistoryKeepsActionSlotsDistinct() {
+  SolverConfig config;
+  CFRSolver solver(config);
+  const uint32_t root_id = CFRSolverRegretTestPeer::CompactPublicStateId(
+      solver, BettingState(3, 99, 98, 1, 2));
+
+  Expect(CFRSolverRegretTestPeer::CompactPublicStateActionCount(solver,
+                                                                root_id) >= 2,
+         "root should have at least two legal actions");
+
+  const uint32_t first_child =
+      CFRSolverRegretTestPeer::CompactActionChild(solver, root_id, 0);
+  const uint32_t second_child =
+      CFRSolverRegretTestPeer::CompactActionChild(solver, root_id, 1);
+  Expect(CFRSolverRegretTestPeer::CompactPublicStateBettingHistoryId(
+             solver, first_child) !=
+             CFRSolverRegretTestPeer::CompactPublicStateBettingHistoryId(
+                 solver, second_child),
+         "coarse betting key should keep action slots distinct");
+}
+
 void CheckStreetOnlyPublicBucketsEnterFrozenParallelPhase() {
   SolverConfig config;
   config.starting_stack_size = 20;
@@ -134,6 +242,8 @@ void CheckStreetOnlyPublicBucketsEnterFrozenParallelPhase() {
 
 int main() {
   poker::CheckStreetOnlyPublicBucketsMergeBoardsByStreet();
+  poker::CheckCoarseBettingHistoryBucketsChipState();
+  poker::CheckCoarseBettingHistoryKeepsActionSlotsDistinct();
   poker::CheckStreetOnlyPublicBucketsEnterFrozenParallelPhase();
   return 0;
 }
