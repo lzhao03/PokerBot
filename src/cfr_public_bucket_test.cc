@@ -69,6 +69,29 @@ class CFRSolverRegretTestPeer {
         .action_count;
   }
 
+  static ActionKind CompactPublicStateActionKind(const CFRSolver& solver,
+                                                 uint32_t public_state_id,
+                                                 int action_index) {
+    return solver.frozen_tables_->public_state_rows[public_state_id]
+        .actions[static_cast<size_t>(action_index)]
+        .kind;
+  }
+
+  static int CompactPublicStateActionAmount(const CFRSolver& solver,
+                                            uint32_t public_state_id,
+                                            int action_index) {
+    return solver.frozen_tables_->public_state_rows[public_state_id]
+        .actions[static_cast<size_t>(action_index)]
+        .amount;
+  }
+
+  static int CompactPublicStateActionId(const CFRSolver& solver,
+                                        uint32_t public_state_id,
+                                        int action_index) {
+    return solver.frozen_tables_->public_state_rows[public_state_id]
+        .action_ids[static_cast<size_t>(action_index)];
+  }
+
   static uint32_t CompactActionChild(CFRSolver& solver,
                                      uint32_t public_state_id,
                                      int action_index) {
@@ -246,6 +269,58 @@ void CheckCoarseBettingHistoryKeepsActionSlotsDistinct() {
          "coarse betting key should keep action slots distinct");
 }
 
+void CheckCoarseLegalActionsUseAbstractBettingState() {
+  SolverConfig config;
+  CFRSolver solver(config);
+  const GameState first = BettingState(8, 18, 23, 4, 4);
+  const GameState same_bucket = BettingState(15, 19, 22, 6, 6);
+  const uint32_t first_public_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, first);
+  const uint32_t same_bucket_public_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, same_bucket);
+
+  Expect(first_public_id == same_bucket_public_id,
+         "same coarse betting state should reuse the public row");
+
+  int all_in_index = -1;
+  const int action_count =
+      CFRSolverRegretTestPeer::CompactPublicStateActionCount(
+          solver, first_public_id);
+  for (int i = 0; i < action_count; ++i) {
+    if (CFRSolverRegretTestPeer::CompactPublicStateActionKind(
+            solver, first_public_id, i) == ActionKind::kAllIn) {
+      all_in_index = i;
+      break;
+    }
+  }
+
+  Expect(all_in_index >= 0, "coarse action row should include all-in");
+  Expect(CFRSolverRegretTestPeer::CompactPublicStateActionAmount(
+             solver, first_public_id, all_in_index) == 5,
+         "coarse action row should use effective-stack bucket as all-in size");
+  Expect(CFRSolverRegretTestPeer::CompactPublicStateActionAmount(
+             solver, first_public_id, all_in_index) != first.stack[0],
+         "coarse action row should not use first representative stack");
+  Expect(CFRSolverRegretTestPeer::CompactPublicStateActionAmount(
+             solver, first_public_id, all_in_index) != same_bucket.stack[0],
+         "coarse action row should not use later equivalent stack");
+
+  const uint32_t first_child =
+      CFRSolverRegretTestPeer::CompactActionChild(solver, first_public_id,
+                                                  all_in_index);
+  const uint32_t second_child =
+      CFRSolverRegretTestPeer::CompactActionChild(solver,
+                                                  same_bucket_public_id,
+                                                  all_in_index);
+  Expect(first_child == second_child,
+         "same coarse action slot should reuse the action child row");
+  Expect(CFRSolverRegretTestPeer::CompactPublicStateActionId(
+             solver, first_public_id, all_in_index) ==
+             CFRSolverRegretTestPeer::CompactPublicStateActionId(
+                 solver, same_bucket_public_id, all_in_index),
+         "same coarse action slot should reuse action id");
+}
+
 void CheckStreetOnlyPublicBucketsEnterFrozenParallelPhase() {
   SolverConfig config;
   config.starting_stack_size = 20;
@@ -279,6 +354,7 @@ int main() {
   poker::CheckStreetOnlyPublicBucketsMergeBoardsByStreet();
   poker::CheckCoarseBettingHistoryBucketsChipState();
   poker::CheckCoarseBettingHistoryKeepsActionSlotsDistinct();
+  poker::CheckCoarseLegalActionsUseAbstractBettingState();
   poker::CheckStreetOnlyPublicBucketsEnterFrozenParallelPhase();
   return 0;
 }

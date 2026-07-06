@@ -307,6 +307,23 @@ void ApplyAbstractBettingState(
   row.player_to_act = abstract_state.player_to_act;
   row.player_contributions = {abstract_state.to_call_bucket, 0};
 }
+
+void ApplyAbstractBettingState(const AbstractBettingState& abstract_state,
+                               CompactPublicState& state) {
+  state.street = static_cast<StreetKind>(abstract_state.street);
+  state.pot = abstract_state.pot_bucket;
+  state.stack = {abstract_state.effective_stack_bucket,
+                 abstract_state.effective_stack_bucket};
+  state.all_in = abstract_state.all_in != 0;
+  state.folded_player = abstract_state.folded_player;
+  state.player_to_act = abstract_state.player_to_act;
+  state.player_contribution = {0, 0};
+  if (IsPlayer(abstract_state.player_to_act)) {
+    state.player_contribution[Opponent(abstract_state.player_to_act)] =
+        abstract_state.to_call_bucket;
+  }
+  state.player_contribution_count = 2;
+}
 #endif
 
 void AddBettingHistoryValue(FrozenStrategyTables::BettingHistoryKey& key,
@@ -753,6 +770,9 @@ CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
 CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
     uint32_t betting_history_id,
     CompactPublicState state) {
+#if POKER_STREET_ONLY_PUBLIC_BUCKETS
+  ApplyAbstractBettingState(MakeAbstractBettingState(state), state);
+#endif
   PublicStateRow row;
   row.betting_history_id = betting_history_id;
   row.public_bucket = card_abstraction_.public_bucket(state);
