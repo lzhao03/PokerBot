@@ -1492,7 +1492,7 @@ void CFRSolver::run_iterations(int iterations,
       config_.num_training_threads <= 1 ? 1 : config_.num_training_threads;
   const int max_depth = config_.max_depth;
 
-  bool public_state_prebuild_complete = true;
+  bool public_state_prebuild_complete = false;
   const bool should_prebuild_public_states =
       num_threads > 1 && !frozen_ &&
       (config_.max_public_states > 0 || max_depth > 0);
@@ -1510,11 +1510,15 @@ void CFRSolver::run_iterations(int iterations,
     }
   }
   last_training_run_stats_.public_state_prebuild_complete =
-      public_state_prebuild_complete;
+      should_prebuild_public_states && public_state_prebuild_complete;
   last_training_run_stats_.prebuild_public_states =
-      static_cast<int64_t>(get_public_state_count());
+      should_prebuild_public_states
+          ? static_cast<int64_t>(get_public_state_count())
+          : 0;
   last_training_run_stats_.prebuild_betting_histories =
-      static_cast<int64_t>(frozen_tables_->betting_history_rows.size());
+      should_prebuild_public_states
+          ? static_cast<int64_t>(frozen_tables_->betting_history_rows.size())
+          : 0;
 
   const bool auto_warmup =
       num_threads > 1 && !frozen_ && config_.warmup_iterations <= 0;
