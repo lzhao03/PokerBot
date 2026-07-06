@@ -220,7 +220,9 @@ CFRSolver::CFRSolver(
     cumulative_root_utility_(0.0),
     utility_cache_(std::move(utility_cache)),
     continuation_value_provider_(std::move(continuation_value_provider)),
-    tables_(std::make_shared<StrategyTables>()) {
+    mutable_tables_(std::make_shared<FrozenStrategyTables>()),
+    frozen_tables_(mutable_tables_),
+    cumulative_(std::make_shared<MutableCumulativeArrays>()) {
   // Pre-allocate strategy table storage when limits are known upfront.
   // This gives fully deterministic peak memory: no reallocation after init.
   if (config_.max_info_sets > 0) {
@@ -228,13 +230,21 @@ CFRSolver::CFRSolver(
     constexpr int kAvgActionsPerInfoSet = 4;
     const size_t info_set_cap = static_cast<size_t>(config_.max_info_sets);
     const size_t action_cap = info_set_cap * kAvgActionsPerInfoSet;
-    tables_->action_ids.reserve(action_cap);
-    tables_->cumulative_regrets.reserve(action_cap);
-    tables_->cumulative_strategies.reserve(action_cap);
+    mutable_tables_->action_ids.reserve(action_cap);
+    cumulative_->cumulative_regrets.reserve(action_cap);
+    cumulative_->cumulative_strategies.reserve(action_cap);
   }
   if (config_.max_public_states > 0) {
-    tables_->public_state_rows.reserve(static_cast<size_t>(config_.max_public_states));
+    mutable_tables_->public_state_rows.reserve(
+        static_cast<size_t>(config_.max_public_states));
   }
+}
+
+FrozenStrategyTables& CFRSolver::mutable_tables() {
+  if (frozen_ || mutable_tables_ == nullptr) {
+    throw std::logic_error("Strategy tables are frozen");
+  }
+  return *mutable_tables_;
 }
 
 void CFRSolver::set_continuation_value_provider(
@@ -561,25 +571,26 @@ CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
 }
 
 CFRSolver::InfoSetRow CFRSolver::append_info_set_actions(
-    const int* action_ids,
-    int num_actions) {
+    absl::Span<const int> action_ids) {
+  FrozenStrategyTables& tables = mutable_tables();
   InfoSetRow row;
-  row.action_offset = static_cast<uint32_t>(tables_->action_ids.size());
-  row.action_count = static_cast<uint16_t>(num_actions);
-  const size_t required_action_capacity = tables_->action_ids.size() + num_actions;
-  if (required_action_capacity > tables_->action_ids.capacity()) {
+  row.action_offset = static_cast<uint32_t>(tables.action_ids.size());
+  row.action_count = static_cast<uint16_t>(action_ids.size());
+  const size_t required_action_capacity =
+      tables.action_ids.size() + action_ids.size();
+  if (required_action_capacity > tables.action_ids.capacity()) {
     const size_t new_capacity =
         std::max(required_action_capacity,
-                 tables_->action_ids.empty() ? size_t{4096}
-                                     : tables_->action_ids.capacity() * 2);
-    tables_->action_ids.reserve(new_capacity);
-    tables_->cumulative_regrets.reserve(new_capacity);
-    tables_->cumulative_strategies.reserve(new_capacity);
+                 tables.action_ids.empty() ? size_t{4096}
+                                           : tables.action_ids.capacity() * 2);
+    tables.action_ids.reserve(new_capacity);
+    cumulative_->cumulative_regrets.reserve(new_capacity);
+    cumulative_->cumulative_strategies.reserve(new_capacity);
   }
-  for (int i = 0; i < num_actions; ++i) {
-    tables_->action_ids.push_back(action_ids[i]);
-    tables_->cumulative_regrets.push_back(0.0f);
-    tables_->cumulative_strategies.push_back(0.0f);
+  for (int action_id : action_ids) {
+    tables.action_ids.push_back(action_id);
+    cumulative_->cumulative_regrets.push_back(0.0f);
+    cumulative_->cumulative_strategies.push_back(0.0f);
     POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
   }
   return row;
@@ -589,33 +600,34 @@ std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
     uint32_t betting_history_id,
     const GameState& state) {
   if (frozen_) {
-    auto existing = tables_->public_state_ids.find(
+    auto existing = frozen_tables_->public_state_ids.find(
         make_public_state_key(betting_history_id, state));
-    if (existing == tables_->public_state_ids.end()) {
+    if (existing == frozen_tables_->public_state_ids.end()) {
       return std::nullopt;
     }
     return existing->second;
   }
 
   PublicStateKey key = make_public_state_key(betting_history_id, state);
-  auto existing = tables_->public_state_ids.find(key);
-  if (existing != tables_->public_state_ids.end()) {
+  auto existing = frozen_tables_->public_state_ids.find(key);
+  if (existing != frozen_tables_->public_state_ids.end()) {
     return existing->second;
   }
 
+  FrozenStrategyTables& tables = mutable_tables();
   if (config_.max_public_states > 0 &&
-      static_cast<int>(tables_->public_state_rows.size()) >=
+      static_cast<int>(tables.public_state_rows.size()) >=
           config_.max_public_states) {
     return std::nullopt;
   }
 
   const uint32_t public_state_id =
-      static_cast<uint32_t>(tables_->public_state_ids.size());
-  tables_->public_state_ids.emplace(std::move(key), public_state_id);
-  tables_->public_state_rows.push_back(
+      static_cast<uint32_t>(tables.public_state_ids.size());
+  tables.public_state_ids.emplace(std::move(key), public_state_id);
+  tables.public_state_rows.push_back(
       make_public_state_row(betting_history_id, state));
   cache_betting_history_actions(betting_history_id,
-                                tables_->public_state_rows.back());
+                                tables.public_state_rows.back());
   return public_state_id;
 }
 
@@ -623,33 +635,34 @@ std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
     uint32_t betting_history_id,
     CompactPublicState state) {
   if (frozen_) {
-    auto existing = tables_->public_state_ids.find(
+    auto existing = frozen_tables_->public_state_ids.find(
         make_public_state_key(betting_history_id, state));
-    if (existing == tables_->public_state_ids.end()) {
+    if (existing == frozen_tables_->public_state_ids.end()) {
       return std::nullopt;
     }
     return existing->second;
   }
 
   PublicStateKey key = make_public_state_key(betting_history_id, state);
-  auto existing = tables_->public_state_ids.find(key);
-  if (existing != tables_->public_state_ids.end()) {
+  auto existing = frozen_tables_->public_state_ids.find(key);
+  if (existing != frozen_tables_->public_state_ids.end()) {
     return existing->second;
   }
 
+  FrozenStrategyTables& tables = mutable_tables();
   if (config_.max_public_states > 0 &&
-      static_cast<int>(tables_->public_state_rows.size()) >=
+      static_cast<int>(tables.public_state_rows.size()) >=
           config_.max_public_states) {
     return std::nullopt;
   }
 
   const uint32_t public_state_id =
-      static_cast<uint32_t>(tables_->public_state_ids.size());
-  tables_->public_state_ids.emplace(std::move(key), public_state_id);
-  tables_->public_state_rows.push_back(
+      static_cast<uint32_t>(tables.public_state_ids.size());
+  tables.public_state_ids.emplace(std::move(key), public_state_id);
+  tables.public_state_rows.push_back(
       make_public_state_row(betting_history_id, std::move(state)));
   cache_betting_history_actions(betting_history_id,
-                                tables_->public_state_rows.back());
+                                tables.public_state_rows.back());
   return public_state_id;
 }
 
@@ -670,34 +683,38 @@ std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
 
 uint32_t CFRSolver::get_or_create_betting_history_id(const GameState& state) {
   BettingHistoryKey key = make_betting_history_key(state);
-  auto existing = tables_->betting_history_ids.find(key);
-  if (existing != tables_->betting_history_ids.end()) {
-    if (tables_->betting_history_rows.size() <= existing->second) {
-      tables_->betting_history_rows.resize(static_cast<size_t>(existing->second) + 1);
+  auto existing = frozen_tables_->betting_history_ids.find(key);
+  if (existing != frozen_tables_->betting_history_ids.end()) {
+    FrozenStrategyTables& tables = mutable_tables();
+    if (tables.betting_history_rows.size() <= existing->second) {
+      tables.betting_history_rows.resize(static_cast<size_t>(existing->second) + 1);
     }
     return existing->second;
   }
+  FrozenStrategyTables& tables = mutable_tables();
   const uint32_t betting_history_id =
-      static_cast<uint32_t>(tables_->betting_history_ids.size());
-  tables_->betting_history_ids.emplace(std::move(key), betting_history_id);
-  tables_->betting_history_rows.push_back(make_betting_history_row(state));
+      static_cast<uint32_t>(tables.betting_history_ids.size());
+  tables.betting_history_ids.emplace(std::move(key), betting_history_id);
+  tables.betting_history_rows.push_back(make_betting_history_row(state));
   return betting_history_id;
 }
 
 uint32_t CFRSolver::get_or_create_betting_history_id(
     const CompactPublicState& state) {
   BettingHistoryKey key = make_betting_history_key(state);
-  auto existing = tables_->betting_history_ids.find(key);
-  if (existing != tables_->betting_history_ids.end()) {
-    if (tables_->betting_history_rows.size() <= existing->second) {
-      tables_->betting_history_rows.resize(static_cast<size_t>(existing->second) + 1);
+  auto existing = frozen_tables_->betting_history_ids.find(key);
+  if (existing != frozen_tables_->betting_history_ids.end()) {
+    FrozenStrategyTables& tables = mutable_tables();
+    if (tables.betting_history_rows.size() <= existing->second) {
+      tables.betting_history_rows.resize(static_cast<size_t>(existing->second) + 1);
     }
     return existing->second;
   }
+  FrozenStrategyTables& tables = mutable_tables();
   const uint32_t betting_history_id =
-      static_cast<uint32_t>(tables_->betting_history_ids.size());
-  tables_->betting_history_ids.emplace(std::move(key), betting_history_id);
-  tables_->betting_history_rows.push_back(make_betting_history_row(state));
+      static_cast<uint32_t>(tables.betting_history_ids.size());
+  tables.betting_history_ids.emplace(std::move(key), betting_history_id);
+  tables.betting_history_rows.push_back(make_betting_history_row(state));
   return betting_history_id;
 }
 
@@ -715,9 +732,10 @@ uint32_t CFRSolver::get_or_create_action_child_betting_history_id(
     uint32_t parent_betting_history_id,
     int action_index,
     const CompactPublicState& child_state) {
-  if (parent_betting_history_id < tables_->betting_history_rows.size()) {
+  FrozenStrategyTables& tables = mutable_tables();
+  if (parent_betting_history_id < tables.betting_history_rows.size()) {
     BettingHistoryRow& parent_row =
-        tables_->betting_history_rows[parent_betting_history_id];
+        tables.betting_history_rows[parent_betting_history_id];
     if (action_index >= 0 && action_index < parent_row.action_count) {
       const uint32_t child_id =
           parent_row.action_child_ids[static_cast<size_t>(action_index)];
@@ -728,9 +746,9 @@ uint32_t CFRSolver::get_or_create_action_child_betting_history_id(
   }
 
   const uint32_t child_id = get_or_create_betting_history_id(child_state);
-  if (parent_betting_history_id < tables_->betting_history_rows.size()) {
+  if (parent_betting_history_id < tables.betting_history_rows.size()) {
     BettingHistoryRow& parent_row =
-        tables_->betting_history_rows[parent_betting_history_id];
+        tables.betting_history_rows[parent_betting_history_id];
     if (action_index >= 0 && action_index < parent_row.action_count) {
       parent_row.action_child_ids[static_cast<size_t>(action_index)] =
           child_id;
@@ -742,9 +760,10 @@ uint32_t CFRSolver::get_or_create_action_child_betting_history_id(
 uint32_t CFRSolver::get_or_create_chance_child_betting_history_id(
     uint32_t parent_betting_history_id,
     const CompactPublicState& child_state) {
-  if (parent_betting_history_id < tables_->betting_history_rows.size()) {
+  FrozenStrategyTables& tables = mutable_tables();
+  if (parent_betting_history_id < tables.betting_history_rows.size()) {
     BettingHistoryRow& parent_row =
-        tables_->betting_history_rows[parent_betting_history_id];
+        tables.betting_history_rows[parent_betting_history_id];
     if (parent_row.chance_child_id !=
         GameTree::Node::kInvalidBettingHistoryId) {
       return parent_row.chance_child_id;
@@ -752,8 +771,8 @@ uint32_t CFRSolver::get_or_create_chance_child_betting_history_id(
   }
 
   const uint32_t child_id = get_or_create_betting_history_id(child_state);
-  if (parent_betting_history_id < tables_->betting_history_rows.size()) {
-    tables_->betting_history_rows[parent_betting_history_id].chance_child_id =
+  if (parent_betting_history_id < tables.betting_history_rows.size()) {
+    tables.betting_history_rows[parent_betting_history_id].chance_child_id =
         child_id;
   }
   return child_id;
@@ -762,13 +781,14 @@ uint32_t CFRSolver::get_or_create_chance_child_betting_history_id(
 void CFRSolver::cache_betting_history_actions(
     uint32_t betting_history_id,
     const GameTree::Node& node) {
+  FrozenStrategyTables& tables = mutable_tables();
   if (node.action_count == 0 ||
-      betting_history_id >= tables_->betting_history_rows.size()) {
+      betting_history_id >= tables.betting_history_rows.size()) {
     return;
   }
 
   BettingHistoryRow& row =
-      tables_->betting_history_rows[static_cast<size_t>(betting_history_id)];
+      tables.betting_history_rows[static_cast<size_t>(betting_history_id)];
   row.action_count = node.action_count;
   for (int i = 0; i < node.action_count; ++i) {
     row.action_ids[static_cast<size_t>(i)] = node.actions[i].key;
@@ -778,13 +798,14 @@ void CFRSolver::cache_betting_history_actions(
 void CFRSolver::cache_betting_history_actions(
     uint32_t betting_history_id,
     const PublicStateRow& row) {
+  FrozenStrategyTables& tables = mutable_tables();
   if (row.action_count == 0 ||
-      betting_history_id >= tables_->betting_history_rows.size()) {
+      betting_history_id >= tables.betting_history_rows.size()) {
     return;
   }
 
   BettingHistoryRow& betting_history =
-      tables_->betting_history_rows[static_cast<size_t>(betting_history_id)];
+      tables.betting_history_rows[static_cast<size_t>(betting_history_id)];
   betting_history.action_count = row.action_count;
   for (int i = 0; i < row.action_count; ++i) {
     betting_history.action_ids[static_cast<size_t>(i)] =
@@ -794,12 +815,12 @@ void CFRSolver::cache_betting_history_actions(
 
 void CFRSolver::validate_public_state_row_actions(
     uint32_t public_state_id) const {
-  const auto& public_rows = tables_->public_state_rows;
+  const auto& public_rows = frozen_tables_->public_state_rows;
   if (public_state_id >= public_rows.size()) {
     throw std::logic_error("Public state row is missing");
   }
   const PublicStateRow& row = public_rows[public_state_id];
-  const auto& betting_history_rows = tables_->betting_history_rows;
+  const auto& betting_history_rows = frozen_tables_->betting_history_rows;
   if (row.betting_history_id >= betting_history_rows.size()) {
     throw std::logic_error("Betting history row is missing");
   }
@@ -819,7 +840,7 @@ void CFRSolver::validate_public_state_row_actions(
 std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
     uint32_t public_state_id,
     int action_index) {
-  const auto& rows = tables_->public_state_rows;
+  const auto& rows = frozen_tables_->public_state_rows;
   if (public_state_id >= rows.size()) {
     return std::nullopt;
   }
@@ -845,21 +866,22 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
     return std::nullopt;
   }
   if (config_.max_public_states > 0 &&
-      static_cast<int>(tables_->public_state_rows.size()) >=
+      static_cast<int>(frozen_tables_->public_state_rows.size()) >=
           config_.max_public_states) {
-    tables_->public_state_rows[public_state_id].action_child_ids[action_slot] =
-        kCappedPublicStateId;
+    mutable_tables()
+        .public_state_rows[public_state_id]
+        .action_child_ids[action_slot] = kCappedPublicStateId;
     POKER_RECORD_TRAVERSAL_STAT(
         ++traversal_stats_.betting_history_transition_misses);
     return std::nullopt;
   }
 
   const GameAction action =
-      tables_->public_state_rows[public_state_id].actions[action_slot];
+      frozen_tables_->public_state_rows[public_state_id].actions[action_slot];
   const uint32_t parent_betting_history_id =
-      tables_->public_state_rows[public_state_id].betting_history_id;
+      frozen_tables_->public_state_rows[public_state_id].betting_history_id;
   CompactPublicState child_state = game_tree_->apply_action(
-      tables_->public_state_rows[public_state_id].state, action);
+      frozen_tables_->public_state_rows[public_state_id].state, action);
   const uint32_t child_betting_history_id =
       get_or_create_action_child_betting_history_id(
           parent_betting_history_id, action_index, child_state);
@@ -867,14 +889,17 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
       get_or_create_public_state_row(child_betting_history_id,
                                      std::move(child_state));
   if (!child_id.has_value()) {
-    tables_->public_state_rows[public_state_id].action_child_ids[action_slot] =
-        kCappedPublicStateId;
+    mutable_tables()
+        .public_state_rows[public_state_id]
+        .action_child_ids[action_slot] = kCappedPublicStateId;
     POKER_RECORD_TRAVERSAL_STAT(
         ++traversal_stats_.betting_history_transition_misses);
     return std::nullopt;
   }
 
-  tables_->public_state_rows[public_state_id].action_child_ids[action_slot] = *child_id;
+  mutable_tables()
+      .public_state_rows[public_state_id]
+      .action_child_ids[action_slot] = *child_id;
   POKER_RECORD_TRAVERSAL_STAT(
       ++traversal_stats_.betting_history_transition_misses);
   POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.child_nodes_created);
@@ -884,13 +909,13 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
 std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
     uint32_t public_state_id,
     absl::Span<const CardId> cards) {
-  const auto& rows = tables_->public_state_rows;
+  const auto& rows = frozen_tables_->public_state_rows;
   if (public_state_id >= rows.size()) {
     return std::nullopt;
   }
   const int child_key = ChanceCardsKey(cards);
   const uint64_t map_key = PublicChanceChildKey(public_state_id, child_key);
-  const auto& chance_children = tables_->public_chance_child_ids;
+  const auto& chance_children = frozen_tables_->public_chance_child_ids;
   auto existing = chance_children.find(map_key);
   if (existing != chance_children.end()) {
     POKER_RECORD_TRAVERSAL_STAT(
@@ -903,7 +928,7 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
     return std::nullopt;
   }
   if (config_.max_public_states > 0 &&
-      static_cast<int>(tables_->public_state_rows.size()) >=
+      static_cast<int>(frozen_tables_->public_state_rows.size()) >=
           config_.max_public_states) {
     POKER_RECORD_TRAVERSAL_STAT(
         ++traversal_stats_.betting_history_transition_misses);
@@ -911,9 +936,9 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
   }
 
   const uint32_t parent_betting_history_id =
-      tables_->public_state_rows[public_state_id].betting_history_id;
+      frozen_tables_->public_state_rows[public_state_id].betting_history_id;
   CompactPublicState child_state = game_tree_->apply_chance(
-      tables_->public_state_rows[public_state_id].state, cards);
+      frozen_tables_->public_state_rows[public_state_id].state, cards);
   const uint32_t child_betting_history_id =
       get_or_create_chance_child_betting_history_id(
           parent_betting_history_id, child_state);
@@ -926,7 +951,7 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
     return std::nullopt;
   }
 
-  tables_->public_chance_child_ids.emplace(map_key, *child_id);
+  mutable_tables().public_chance_child_ids.emplace(map_key, *child_id);
   POKER_RECORD_TRAVERSAL_STAT(
       ++traversal_stats_.betting_history_transition_misses);
   POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.child_nodes_created);
@@ -944,18 +969,19 @@ void CFRSolver::cache_action_betting_history_transition(
 
   if (!frozen_) {
     const uint32_t parent_id = get_or_create_betting_history_id(node);
-    if (tables_->betting_history_rows.size() <= parent_id) {
-      tables_->betting_history_rows.resize(static_cast<size_t>(parent_id) + 1);
+    FrozenStrategyTables& tables = mutable_tables();
+    if (tables.betting_history_rows.size() <= parent_id) {
+      tables.betting_history_rows.resize(static_cast<size_t>(parent_id) + 1);
     }
     const size_t parent_index = static_cast<size_t>(parent_id);
     const size_t action_slot = static_cast<size_t>(action_index);
     uint32_t child_id =
-        tables_->betting_history_rows[parent_index].action_child_ids[action_slot];
+        tables.betting_history_rows[parent_index].action_child_ids[action_slot];
     if (child_id == GameTree::Node::kInvalidBettingHistoryId) {
       POKER_RECORD_TRAVERSAL_STAT(
           ++traversal_stats_.betting_history_transition_misses);
       child_id = get_or_create_betting_history_id(child_node);
-      tables_->betting_history_rows[parent_index].action_child_ids[action_slot] =
+      tables.betting_history_rows[parent_index].action_child_ids[action_slot] =
           child_id;
     } else {
       POKER_RECORD_TRAVERSAL_STAT(
@@ -975,7 +1001,7 @@ void CFRSolver::cache_action_betting_history_transition(
 
   const uint32_t parent_id = *parent_lookup;
   node.betting_history_id = parent_id;
-  const auto& rows = tables_->betting_history_rows;
+  const auto& rows = frozen_tables_->betting_history_rows;
   if (parent_id < rows.size()) {
     const uint32_t child_id =
         rows[parent_id].action_child_ids[static_cast<size_t>(action_index)];
@@ -1001,16 +1027,17 @@ void CFRSolver::cache_chance_betting_history_transition(
     GameTree::Node& child_node) {
   if (!frozen_) {
     const uint32_t parent_id = get_or_create_betting_history_id(node);
-    if (tables_->betting_history_rows.size() <= parent_id) {
-      tables_->betting_history_rows.resize(static_cast<size_t>(parent_id) + 1);
+    FrozenStrategyTables& tables = mutable_tables();
+    if (tables.betting_history_rows.size() <= parent_id) {
+      tables.betting_history_rows.resize(static_cast<size_t>(parent_id) + 1);
     }
     const size_t parent_index = static_cast<size_t>(parent_id);
-    uint32_t child_id = tables_->betting_history_rows[parent_index].chance_child_id;
+    uint32_t child_id = tables.betting_history_rows[parent_index].chance_child_id;
     if (child_id == GameTree::Node::kInvalidBettingHistoryId) {
       POKER_RECORD_TRAVERSAL_STAT(
           ++traversal_stats_.betting_history_transition_misses);
       child_id = get_or_create_betting_history_id(child_node);
-      tables_->betting_history_rows[parent_index].chance_child_id = child_id;
+      tables.betting_history_rows[parent_index].chance_child_id = child_id;
     } else {
       POKER_RECORD_TRAVERSAL_STAT(
           ++traversal_stats_.betting_history_transition_hits);
@@ -1029,7 +1056,7 @@ void CFRSolver::cache_chance_betting_history_transition(
 
   const uint32_t parent_id = *parent_lookup;
   node.betting_history_id = parent_id;
-  const auto& rows = tables_->betting_history_rows;
+  const auto& rows = frozen_tables_->betting_history_rows;
   if (parent_id < rows.size()) {
     const uint32_t child_id = rows[parent_id].chance_child_id;
     if (child_id != GameTree::Node::kInvalidBettingHistoryId) {
@@ -1051,11 +1078,12 @@ void CFRSolver::cache_chance_betting_history_transition(
 
 CFRSolver::PublicInfoSetSlab& CFRSolver::get_or_create_public_info_set_slab(
     uint32_t public_state_id) {
-  if (tables_->public_info_set_slabs.size() <= public_state_id) {
-    tables_->public_info_set_slabs.resize(static_cast<size_t>(public_state_id) + 1);
+  FrozenStrategyTables& tables = mutable_tables();
+  if (tables.public_info_set_slabs.size() <= public_state_id) {
+    tables.public_info_set_slabs.resize(static_cast<size_t>(public_state_id) + 1);
   }
   std::unique_ptr<PublicInfoSetSlab>& slab =
-      tables_->public_info_set_slabs[public_state_id];
+      tables.public_info_set_slabs[public_state_id];
   if (slab == nullptr) {
     slab = std::make_unique<PublicInfoSetSlab>();
   }
@@ -1064,7 +1092,7 @@ CFRSolver::PublicInfoSetSlab& CFRSolver::get_or_create_public_info_set_slab(
 
 const CFRSolver::PublicInfoSetSlab* CFRSolver::public_info_set_slab(
     uint32_t public_state_id) const {
-  const auto& slabs = tables_->public_info_set_slabs;
+  const auto& slabs = frozen_tables_->public_info_set_slabs;
   if (public_state_id >= slabs.size()) {
     return nullptr;
   }
@@ -1121,8 +1149,7 @@ int32_t& CFRSolver::get_or_create_private_row_slot(
 
 std::optional<CFRSolver::InfoSetRow> CFRSolver::get_or_create_info_set_row(
     InfoSetAddress address,
-    const int* action_ids,
-    int num_actions) {
+    absl::Span<const int> action_ids) {
   if (address.player < 0 || address.player >= kPlayerCount ||
       address.private_bucket >= kComboCount) {
     return std::nullopt;
@@ -1133,11 +1160,11 @@ std::optional<CFRSolver::InfoSetRow> CFRSolver::get_or_create_info_set_row(
   }
 
   if (frozen_ || (config_.max_info_sets > 0 &&
-                  static_cast<int>(tables_->info_set_count) >= config_.max_info_sets)) {
+                  static_cast<int>(frozen_tables_->info_set_count) >= config_.max_info_sets)) {
     return std::nullopt;
   }
 
-  InfoSetRow row = append_info_set_actions(action_ids, num_actions);
+  InfoSetRow row = append_info_set_actions(action_ids);
   PublicInfoSetSlab& slab =
       get_or_create_public_info_set_slab(address.public_state_id);
   PublicInfoSetSlabPlayer& player_slab = slab.players[address.player];
@@ -1145,7 +1172,7 @@ std::optional<CFRSolver::InfoSetRow> CFRSolver::get_or_create_info_set_row(
       get_or_create_private_row_slot(player_slab, address.private_bucket);
   row_id = static_cast<int32_t>(player_slab.rows.size());
   player_slab.rows.push_back(row);
-  ++tables_->info_set_count;
+  ++mutable_tables().info_set_count;
   return row;
 }
 
@@ -1161,9 +1188,9 @@ std::optional<uint32_t> CFRSolver::strategy_public_state_id(
     return std::nullopt;
   }
   auto public_state =
-      tables_->public_state_ids.find(
+      frozen_tables_->public_state_ids.find(
           make_public_state_key(*betting_history_id, node.state));
-  if (public_state == tables_->public_state_ids.end()) {
+  if (public_state == frozen_tables_->public_state_ids.end()) {
     return std::nullopt;
   }
 
@@ -1173,7 +1200,7 @@ std::optional<uint32_t> CFRSolver::strategy_public_state_id(
 
 std::optional<uint32_t> CFRSolver::strategy_betting_history_id(
     const GameState& state) const {
-  const auto& betting_history_ids = tables_->betting_history_ids;
+  const auto& betting_history_ids = frozen_tables_->betting_history_ids;
   auto betting_history =
       betting_history_ids.find(make_betting_history_key(state));
   if (betting_history == betting_history_ids.end()) {
@@ -1271,7 +1298,7 @@ void CFRSolver::run_iterations(int iterations,
   }
   VLOG(1) << "Compact root row has "
           << static_cast<int>(
-                 tables_->public_state_rows[*root_public_state_id].action_count)
+                 frozen_tables_->public_state_rows[*root_public_state_id].action_count)
           << " legal actions";
 
   const int num_threads =
@@ -1330,6 +1357,8 @@ void CFRSolver::run_iterations(int iterations,
   const int remaining = iterations - warmup_count;
   if (remaining > 0) {
     // Phase 2: freeze the tables and run remaining iterations in parallel.
+    frozen_tables_ = mutable_tables_;
+    mutable_tables_.reset();
     frozen_ = true;
     LOG(INFO) << "Frozen after warmup: " << get_info_set_count()
               << " info sets, " << iterations_run_.load(std::memory_order_relaxed)
@@ -1357,7 +1386,8 @@ void CFRSolver::run_iterations_parallel(
   // Each worker shares the frozen strategy tables and writes to the same
   // regret/strategy arrays.
   // Workers use their own RNG and TraversalScratch; no locks needed.
-  std::shared_ptr<StrategyTables> tables = tables_;
+  std::shared_ptr<const FrozenStrategyTables> frozen_tables = frozen_tables_;
+  std::shared_ptr<MutableCumulativeArrays> cumulative = cumulative_;
 
   ThreadPoolExecutor executor(num_threads);
   std::uniform_int_distribution<unsigned int> seed_dist;
@@ -1374,12 +1404,15 @@ void CFRSolver::run_iterations_parallel(
 
     const unsigned int seed = seed_dist(rng_);
     futures.push_back(executor.submit(
-        [this, shard, seed, root_public_state_id, &range_sampler, tables,
+        [this, shard, seed, root_public_state_id, &range_sampler,
+         frozen_tables, cumulative,
          &player_a_training_range, &player_b_training_range]() mutable {
           // Build a lightweight worker that shares frozen tables.
           CFRSolver worker(config_, utility_cache_,
                            continuation_value_provider_);
-          worker.tables_ = tables;
+          worker.mutable_tables_.reset();
+          worker.frozen_tables_ = frozen_tables;
+          worker.cumulative_ = cumulative;
           worker.frozen_ = true;
           worker.rng_.seed(seed);
           // Per-worker range views (read-only, built from shared training data).
@@ -1438,7 +1471,7 @@ double CFRSolver::cfr_with_ranges(
     TraversalScratch& scratch,
     OptionalTrainingRange player_a_range,
     OptionalTrainingRange player_b_range) {
-  const auto& public_state_rows = tables_->public_state_rows;
+  const auto& public_state_rows = frozen_tables_->public_state_rows;
   if (public_state_id >= public_state_rows.size()) {
     return 0.0;
   }
@@ -1487,8 +1520,8 @@ double CFRSolver::cfr_with_ranges(
       card_abstraction_.private_bucket(player_cards.combo, row.state)};
   const std::optional<InfoSetRow> info_set_row =
       get_or_create_info_set_row(info_set_address,
-                                 row.action_ids.data(),
-                                 row.action_count);
+                                 absl::Span<const int>(row.action_ids.data(),
+                                                       row.action_count));
 
   const size_t action_count = row.action_count;
   double action_probabilities[GameTree::kMaxActionsPerNode];
@@ -1499,7 +1532,7 @@ double CFRSolver::cfr_with_ranges(
   const InfoSetRow* info_set_row_ptr =
       info_set_row.has_value() ? &*info_set_row : nullptr;
   if (info_set_row_ptr != nullptr) {
-    auto& regrets = tables_->cumulative_regrets;
+    auto& regrets = cumulative_->cumulative_regrets;
     const size_t action_offset = info_set_row_ptr->action_offset;
     double sum_positive_regrets = 0.0;
     for (size_t action_index = 0; action_index < action_count;
@@ -1605,7 +1638,7 @@ double CFRSolver::cfr_with_ranges(
   if (info_set_row.has_value()) {
     const double opponent_reach_prob = reach_probabilities[1 - player];
     const size_t action_offset = info_set_row->action_offset;
-    auto& regrets = tables_->cumulative_regrets;
+    auto& regrets = cumulative_->cumulative_regrets;
     for (size_t action_index = 0; action_index < action_count; ++action_index) {
       const double utility_sign = player == 0 ? 1.0 : -1.0;
       const double regret =
@@ -1638,11 +1671,11 @@ double CFRSolver::chance_sampling_cfr(
     TraversalScratch& scratch,
     OptionalTrainingRange player_a_range,
     OptionalTrainingRange player_b_range) {
-  const auto& rows = tables_->public_state_rows;
+  const auto& rows = frozen_tables_->public_state_rows;
   if (public_state_id >= rows.size()) {
     return 0.0;
   }
-  // Child creation may grow tables_->public_state_rows, so keep a local copy instead
+  // Child creation may grow public_state_rows, so keep a local copy instead
   // of holding a reference into the vector across samples.
   const CompactPublicState state = rows[public_state_id].state;
 
@@ -1666,7 +1699,7 @@ double CFRSolver::chance_sampling_cfr(
     }
 
     const PublicStateRow& child_row =
-        tables_->public_state_rows[*child_public_state_id];
+        frozen_tables_->public_state_rows[*child_public_state_id];
     OptionalTrainingRange child_player_a_range = player_a_range;
     OptionalTrainingRange child_player_b_range = player_b_range;
     if (player_a_range.has_value()) {
@@ -1728,11 +1761,11 @@ void CFRSolver::average_strategy_probabilities(
   probabilities.resize(num_actions, 0.0);
   double probability_sum = 0.0;
   const size_t action_offset = info_set_row.action_offset;
-  const std::vector<int>& action_ids = tables_->action_ids;
+  const std::vector<int>& action_ids = frozen_tables_->action_ids;
   const std::vector<float>& cumulative_regrets =
-      tables_->cumulative_regrets;
+      cumulative_->cumulative_regrets;
   const std::vector<float>& cumulative_strategies =
-      tables_->cumulative_strategies;
+      cumulative_->cumulative_strategies;
 
   const bool aligned_action_ids =
       num_actions == info_set_row.action_count &&
@@ -1822,8 +1855,8 @@ void CFRSolver::condition_ranges_for_actions(
       public_info_set_slab(public_state_id);
   const PublicInfoSetSlabPlayer* player_slab =
       public_slab != nullptr ? &public_slab->players[player] : nullptr;
-  const auto& action_ids = tables_->action_ids;
-  const auto& regrets = tables_->cumulative_regrets;
+  const auto& action_ids = frozen_tables_->action_ids;
+  const auto& regrets = cumulative_->cumulative_regrets;
   double positive_regrets[GameTree::kMaxActionsPerNode] = {};
   for (size_t i = 0; i < range_size; ++i) {
     const float range_weight = range.weight(i);
@@ -1914,10 +1947,10 @@ double StrategyWeight(const SolverConfig& config,
 }  // namespace
 
 CFRSolver::StrategyProfile CFRSolver::get_strategy_profile() const {
-  const auto& slabs = tables_->public_info_set_slabs;
-  const auto& action_ids = tables_->action_ids;
-  const auto& regrets = tables_->cumulative_regrets;
-  const auto& strategies = tables_->cumulative_strategies;
+  const auto& slabs = frozen_tables_->public_info_set_slabs;
+  const auto& action_ids = frozen_tables_->action_ids;
+  const auto& regrets = cumulative_->cumulative_regrets;
+  const auto& strategies = cumulative_->cumulative_strategies;
 
   StrategyProfile profile;
   profile.info_sets.reserve(get_info_set_count());
@@ -2050,7 +2083,8 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   SolverConfig config = config_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider =
       continuation_value_provider_;
-  std::shared_ptr<StrategyTables> strategy_tables = tables_;
+  std::shared_ptr<const FrozenStrategyTables> frozen_tables = frozen_tables_;
+  std::shared_ptr<MutableCumulativeArrays> cumulative = cumulative_;
   std::vector<std::future<std::pair<double, int64_t>>> futures;
   futures.reserve(worker_count);
   int samples_remaining = samples;
@@ -2061,12 +2095,14 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
     futures.push_back(executor.submit([config, range_sampler,
                                        root_public_state_id =
                                            *root_public_state_id,
-                                       strategy_tables,
+                                       frozen_tables, cumulative,
                                        continuation_value_provider,
                                        shard_samples, seed]() mutable {
       CFRSolver worker(config, std::make_shared<TerminalUtilityCache>(),
                        continuation_value_provider);
-      worker.tables_ = strategy_tables;
+      worker.mutable_tables_.reset();
+      worker.frozen_tables_ = frozen_tables;
+      worker.cumulative_ = cumulative;
       worker.frozen_ = true;
       worker.rng_.seed(seed);
       const double value = worker.evaluate_strategy_samples(
@@ -2109,7 +2145,7 @@ double CFRSolver::evaluate_strategy_node(
     uint32_t public_state_id,
     const PrivateCards& player_a_cards,
     const PrivateCards& player_b_cards) {
-  const auto& rows = tables_->public_state_rows;
+  const auto& rows = frozen_tables_->public_state_rows;
   if (public_state_id >= rows.size()) {
     return 0.0;
   }
@@ -2312,7 +2348,7 @@ void CFRSolver::update_strategy(const InfoSetRow& row,
                                 const double* action_probabilities,
                                 size_t action_count,
                                 double reach_prob) {
-  auto& strategies = tables_->cumulative_strategies;
+  auto& strategies = cumulative_->cumulative_strategies;
   const size_t action_offset = row.action_offset;
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.action_entry_touches += 2);

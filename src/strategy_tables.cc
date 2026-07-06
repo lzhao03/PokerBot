@@ -23,7 +23,7 @@ void HashArray(size_t& seed, const std::array<int, N>& values) {
 
 }  // namespace
 
-bool StrategyTables::BettingHistoryKey::operator==(
+bool FrozenStrategyTables::BettingHistoryKey::operator==(
     const BettingHistoryKey& other) const {
   return street == other.street && pot == other.pot &&
          stack_a == other.stack_a && stack_b == other.stack_b &&
@@ -36,7 +36,7 @@ bool StrategyTables::BettingHistoryKey::operator==(
          history_overflow == other.history_overflow;
 }
 
-size_t StrategyTables::BettingHistoryKeyHash::operator()(
+size_t FrozenStrategyTables::BettingHistoryKeyHash::operator()(
     const BettingHistoryKey& key) const {
   size_t seed = 0;
   HashCombine(seed, key.street);
@@ -56,13 +56,13 @@ size_t StrategyTables::BettingHistoryKeyHash::operator()(
   return seed;
 }
 
-bool StrategyTables::PublicStateKey::operator==(
+bool FrozenStrategyTables::PublicStateKey::operator==(
     const PublicStateKey& other) const {
   return betting_history_id == other.betting_history_id &&
          public_bucket == other.public_bucket;
 }
 
-size_t StrategyTables::PublicStateKeyHash::operator()(
+size_t FrozenStrategyTables::PublicStateKeyHash::operator()(
     const PublicStateKey& key) const {
   size_t seed = 0;
   HashCombine(seed, static_cast<uint64_t>(key.betting_history_id));

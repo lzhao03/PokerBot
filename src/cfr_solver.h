@@ -53,7 +53,7 @@ public:
     int64_t entries = 0;
   };
 
-  using PrivateBucketId = StrategyTables::PrivateBucketId;
+  using PrivateBucketId = FrozenStrategyTables::PrivateBucketId;
 
   struct StrategyInfoSetKey {
     uint32_t public_state_id = 0;
@@ -114,9 +114,9 @@ public:
   double get_expected_value(int player_id) const;
   int get_iterations_run() const { return iterations_run_.load(std::memory_order_relaxed); }
   int64_t get_cfr_update_count() const { return cfr_update_count_.load(std::memory_order_relaxed); }
-  size_t get_info_set_count() const { return tables_->info_set_count; }
+  size_t get_info_set_count() const { return frozen_tables_->info_set_count; }
   size_t get_public_state_count() const {
-    return tables_->public_state_rows.size();
+    return frozen_tables_->public_state_rows.size();
   }
   TraversalStats get_traversal_stats() const { return traversal_stats_; }
   void add_traversal_stats(const TraversalStats& stats);
@@ -194,12 +194,12 @@ private:
     std::vector<RangeScratchFrame> frames;
   };
 
-  using BettingHistoryKey = StrategyTables::BettingHistoryKey;
-  using BettingHistoryKeyHash = StrategyTables::BettingHistoryKeyHash;
-  using PublicBucketId = StrategyTables::PublicBucketId;
-  using PublicStateKey = StrategyTables::PublicStateKey;
-  using PublicStateKeyHash = StrategyTables::PublicStateKeyHash;
-  using BettingHistoryRow = StrategyTables::BettingHistoryRow;
+  using BettingHistoryKey = FrozenStrategyTables::BettingHistoryKey;
+  using BettingHistoryKeyHash = FrozenStrategyTables::BettingHistoryKeyHash;
+  using PublicBucketId = FrozenStrategyTables::PublicBucketId;
+  using PublicStateKey = FrozenStrategyTables::PublicStateKey;
+  using PublicStateKeyHash = FrozenStrategyTables::PublicStateKeyHash;
+  using BettingHistoryRow = FrozenStrategyTables::BettingHistoryRow;
 
   struct IdentityCardAbstraction {
     template <typename State>
@@ -218,14 +218,14 @@ private:
     }
   };
 
-  using InfoSetRow = StrategyTables::InfoSetRow;
-  using InfoSetAddress = StrategyTables::InfoSetAddress;
-  using PublicStateRow = StrategyTables::PublicStateRow;
-  using PrivateRowChunk = StrategyTables::PrivateRowChunk;
-  using PublicInfoSetSlabPlayer = StrategyTables::PublicInfoSetSlabPlayer;
-  using PublicInfoSetSlab = StrategyTables::PublicInfoSetSlab;
+  using InfoSetRow = FrozenStrategyTables::InfoSetRow;
+  using InfoSetAddress = FrozenStrategyTables::InfoSetAddress;
+  using PublicStateRow = FrozenStrategyTables::PublicStateRow;
+  using PrivateRowChunk = FrozenStrategyTables::PrivateRowChunk;
+  using PublicInfoSetSlabPlayer = FrozenStrategyTables::PublicInfoSetSlabPlayer;
+  using PublicInfoSetSlab = FrozenStrategyTables::PublicInfoSetSlab;
   static constexpr int kPrivateBucketChunkSize =
-      StrategyTables::kPrivateBucketChunkSize;
+      FrozenStrategyTables::kPrivateBucketChunkSize;
 
   CFRSolver(const SolverConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache);
@@ -248,10 +248,11 @@ private:
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
   IdentityCardAbstraction card_abstraction_;
-  // Set to true after warmup; blocks info-set allocation so the parallel
-  // training phase only writes to the shared regret/strategy arrays.
+  // Set to true after warmup; workers may only write cumulative arrays.
   bool frozen_ = false;
-  std::shared_ptr<StrategyTables> tables_;
+  std::shared_ptr<FrozenStrategyTables> mutable_tables_;
+  std::shared_ptr<const FrozenStrategyTables> frozen_tables_;
+  std::shared_ptr<MutableCumulativeArrays> cumulative_;
   
   // Helper methods
   GameTree::Node& get_or_build_root();
@@ -348,13 +349,13 @@ private:
       absl::Span<const CardId> cards);
   std::optional<InfoSetRow> get_or_create_info_set_row(
       InfoSetAddress address,
-      const int* action_ids,
-      int num_actions);
+      absl::Span<const int> action_ids);
   std::optional<uint32_t> strategy_betting_history_id(
       const GameState& state) const;
   std::optional<uint32_t> strategy_betting_history_id(GameTree::Node& node);
   std::optional<uint32_t> strategy_public_state_id(GameTree::Node& node);
-  InfoSetRow append_info_set_actions(const int* action_ids, int num_actions);
+  FrozenStrategyTables& mutable_tables();
+  InfoSetRow append_info_set_actions(absl::Span<const int> action_ids);
   PublicInfoSetSlab& get_or_create_public_info_set_slab(
       uint32_t public_state_id);
   const PublicInfoSetSlab* public_info_set_slab(

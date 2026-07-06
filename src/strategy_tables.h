@@ -13,7 +13,7 @@
 
 namespace poker {
 
-class StrategyTables {
+class FrozenStrategyTables {
  public:
   using PrivateBucketId = uint16_t;
   using PublicBucketId = uint64_t;
@@ -129,9 +129,12 @@ class StrategyTables {
   std::vector<BettingHistoryRow> betting_history_rows;
   size_t info_set_count = 0;
   std::vector<int> action_ids;
+  std::vector<std::unique_ptr<PublicInfoSetSlab>> public_info_set_slabs;
+};
+
+struct MutableCumulativeArrays {
   std::vector<float> cumulative_regrets;
   std::vector<float> cumulative_strategies;
-  std::vector<std::unique_ptr<PublicInfoSetSlab>> public_info_set_slabs;
 };
 
 }  // namespace poker

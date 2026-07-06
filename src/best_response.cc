@@ -196,7 +196,7 @@ void BestResponseEvaluator::average_strategy_probabilities(
   const auto private_bucket =
       solver_.card_abstraction_.private_bucket(private_combo, node.state);
   auto try_public_state = [&](uint32_t public_state_id) {
-    const StrategyTables::InfoSetRow* row =
+    const FrozenStrategyTables::InfoSetRow* row =
         solver_.find_info_set_row({public_state_id, player, private_bucket});
     if (row == nullptr) {
       return false;
@@ -227,7 +227,7 @@ void BestResponseEvaluator::average_strategy_probabilities(
 }
 
 void BestResponseEvaluator::average_strategy_probabilities(
-    const StrategyTables::InfoSetRow& row,
+    const FrozenStrategyTables::InfoSetRow& row,
     const GameTree::Node& node,
     double fallback_probability,
     StrategyProbabilities& probabilities) {
@@ -236,11 +236,11 @@ void BestResponseEvaluator::average_strategy_probabilities(
   probabilities.resize(num_actions, 0.0);
   double probability_sum = 0.0;
   const size_t action_offset = row.action_offset;
-  const std::vector<int>& action_ids = solver_.tables_->action_ids;
+  const std::vector<int>& action_ids = solver_.frozen_tables_->action_ids;
   const std::vector<float>& cumulative_regrets =
-      solver_.tables_->cumulative_regrets;
+      solver_.cumulative_->cumulative_regrets;
   const std::vector<float>& cumulative_strategies =
-      solver_.tables_->cumulative_strategies;
+      solver_.cumulative_->cumulative_strategies;
 
   const bool aligned_action_ids =
       num_actions == row.action_count &&
@@ -477,10 +477,10 @@ double BestResponseEvaluator::best_response_value_against_range(
     child_opponent.reserve(opponent_hands.size());
   }
 
-  const StrategyTables::PublicInfoSetSlab* public_slab =
+  const FrozenStrategyTables::PublicInfoSetSlab* public_slab =
       public_state_id.has_value() ? solver_.public_info_set_slab(*public_state_id)
                                   : nullptr;
-  const StrategyTables::PublicInfoSetSlabPlayer* player_slab =
+  const FrozenStrategyTables::PublicInfoSetSlabPlayer* player_slab =
       public_slab != nullptr ? &public_slab->players[player] : nullptr;
   StrategyProbabilities probabilities;
   probabilities.reserve(node.action_count);
@@ -492,7 +492,7 @@ double BestResponseEvaluator::best_response_value_against_range(
       const ComboId opponent_combo = opponent_hands.combo(i);
       const auto private_bucket =
           solver_.card_abstraction_.private_bucket(opponent_combo, node.state);
-      if (const StrategyTables::InfoSetRow* row =
+      if (const FrozenStrategyTables::InfoSetRow* row =
               solver_.find_info_set_row(*player_slab, private_bucket)) {
         average_strategy_probabilities(*row, node, fallback_probability,
                                        probabilities);
@@ -574,7 +574,9 @@ double BestResponseEvaluator::sampled_range_best_response_value(
   SolverConfig config = solver_.config_;
   std::shared_ptr<ContinuationValueProvider> continuation_value_provider =
       solver_.continuation_value_provider_;
-  std::shared_ptr<StrategyTables> strategy_tables = solver_.tables_;
+  std::shared_ptr<const FrozenStrategyTables> frozen_tables =
+      solver_.frozen_tables_;
+  std::shared_ptr<MutableCumulativeArrays> cumulative = solver_.cumulative_;
   std::vector<std::future<std::pair<double, int64_t>>> futures;
   futures.reserve(worker_count);
   int samples_remaining = samples;
@@ -583,12 +585,15 @@ double BestResponseEvaluator::sampled_range_best_response_value(
     samples_remaining -= shard_samples;
     unsigned int seed = worker_seeds[i];
     futures.push_back(executor.submit([config, &best_response_hands,
-                                       &opponent_hands, strategy_tables,
+                                       &opponent_hands, frozen_tables,
+                                       cumulative,
                                        continuation_value_provider,
                                        shard_samples, seed, best_response_player]() {
       CFRSolver worker(config, std::make_shared<TerminalUtilityCache>(),
                        continuation_value_provider);
-      worker.tables_ = strategy_tables;
+      worker.mutable_tables_.reset();
+      worker.frozen_tables_ = frozen_tables;
+      worker.cumulative_ = cumulative;
       worker.frozen_ = true;
       worker.rng_.seed(seed);
       BestResponseEvaluator evaluator(worker);

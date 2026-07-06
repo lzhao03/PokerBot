@@ -58,7 +58,7 @@ class BestResponseEvaluator {
       ComboId private_combo,
       StrategyProbabilities& probabilities);
   void average_strategy_probabilities(
-      const StrategyTables::InfoSetRow& row,
+      const FrozenStrategyTables::InfoSetRow& row,
       const GameTree::Node& node,
       double fallback_probability,
       StrategyProbabilities& probabilities);
