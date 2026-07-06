@@ -54,8 +54,14 @@ void HashArray(size_t& seed, const std::array<int, N>& values) {
 }  // namespace
 
 TerminalUtilityCache::Stats TerminalUtilityCache::stats() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return {hits_, misses_, static_cast<int64_t>(values_.size())};
+  Stats stats;
+  for (const Shard& shard : shards_) {
+    std::lock_guard<std::mutex> lock(shard.mutex);
+    stats.hits += shard.hits;
+    stats.misses += shard.misses;
+    stats.entries += static_cast<int64_t>(shard.values.size());
+  }
+  return stats;
 }
 
 bool TerminalUtilityCache::Key::operator==(const Key& other) const {

@@ -1,8 +1,9 @@
 #pragma once
 
-#include <array>
-#include <vector>
 #include <algorithm>
+#include <array>
+#include <cstddef>
+#include <vector>
 
 #include "src/combo.h"
 #include "src/poker_types.h"
@@ -23,8 +24,9 @@ enum class HandRank {
 };
 
 struct HandEvaluation {
-  HandRank rank;
-  std::vector<int> kickers;  
+  HandRank rank = HandRank::HIGH_CARD;
+  std::array<int, 5> kickers = {};
+  size_t kicker_count = 0;
   
   // Comparison operators
   bool operator<(const HandEvaluation& other) const {
@@ -32,13 +34,13 @@ struct HandEvaluation {
       return static_cast<int>(rank) < static_cast<int>(other.rank);
     }
     
-    for (size_t i = 0; i < std::min(kickers.size(), other.kickers.size()); ++i) {
+    for (size_t i = 0; i < std::min(kicker_count, other.kicker_count); ++i) {
       if (kickers[i] != other.kickers[i]) {
         return kickers[i] < other.kickers[i];
       }
     }
     
-    return kickers.size() < other.kickers.size();
+    return kicker_count < other.kicker_count;
   }
   
   bool operator>(const HandEvaluation& other) const {
@@ -46,7 +48,15 @@ struct HandEvaluation {
   }
   
   bool operator==(const HandEvaluation& other) const {
-    return rank == other.rank && kickers == other.kickers;
+    if (rank != other.rank || kicker_count != other.kicker_count) {
+      return false;
+    }
+    for (size_t i = 0; i < kicker_count; ++i) {
+      if (kickers[i] != other.kickers[i]) {
+        return false;
+      }
+    }
+    return true;
   }
 
   // Helper methods for evaluating hand types
@@ -89,7 +99,7 @@ public:
 
 private:
   // Find the best 5-card hand from a set of cards
-  HandEvaluation find_best_hand(const std::vector<CardId>& cards) const;
+  HandEvaluation find_best_hand(const CardId* cards, size_t card_count) const;
 };
 
 } // namespace poker

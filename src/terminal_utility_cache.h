@@ -21,38 +21,6 @@ class TerminalUtilityCache {
     int64_t entries = 0;
   };
 
-  template <typename State, typename Compute>
-  double get_or_compute(const State& state,
-                        ComboId player_a_hand,
-                        ComboId player_b_hand,
-                        Compute compute) {
-    Key key = key_for(state, player_a_hand, player_b_hand);
-
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      auto it = values_.find(key);
-      if (it != values_.end()) {
-        ++hits_;
-        return it->second;
-      }
-    }
-
-    double value = compute();
-
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      auto inserted = values_.emplace(std::move(key), value);
-      if (inserted.second) {
-        ++misses_;
-        return value;
-      }
-      ++hits_;
-      return inserted.first->second;
-    }
-  }
-
-  Stats stats() const;
-
  private:
   struct Key {
     int street = 0;
@@ -71,6 +39,50 @@ class TerminalUtilityCache {
     size_t operator()(const Key& key) const;
   };
 
+  struct Shard {
+    mutable std::mutex mutex;
+    std::unordered_map<Key, double, KeyHash> values;
+    int64_t hits = 0;
+    int64_t misses = 0;
+  };
+
+  static constexpr size_t kShardCount = 64;
+
+ public:
+  template <typename State, typename Compute>
+  double get_or_compute(const State& state,
+                        ComboId player_a_hand,
+                        ComboId player_b_hand,
+                        Compute compute) {
+    Key key = key_for(state, player_a_hand, player_b_hand);
+    Shard& shard = shards_[KeyHash{}(key) & (kShardCount - 1)];
+
+    {
+      std::lock_guard<std::mutex> lock(shard.mutex);
+      auto it = shard.values.find(key);
+      if (it != shard.values.end()) {
+        ++shard.hits;
+        return it->second;
+      }
+    }
+
+    double value = compute();
+
+    {
+      std::lock_guard<std::mutex> lock(shard.mutex);
+      auto inserted = shard.values.emplace(std::move(key), value);
+      if (inserted.second) {
+        ++shard.misses;
+        return value;
+      }
+      ++shard.hits;
+      return inserted.first->second;
+    }
+  }
+
+  Stats stats() const;
+
+ private:
   static Key key_for(const GameState& state,
                      ComboId player_a_hand,
                      ComboId player_b_hand);
@@ -78,10 +90,7 @@ class TerminalUtilityCache {
                      ComboId player_a_hand,
                      ComboId player_b_hand);
 
-  mutable std::mutex mutex_;
-  std::unordered_map<Key, double, KeyHash> values_;
-  int64_t hits_ = 0;
-  int64_t misses_ = 0;
+  mutable std::array<Shard, kShardCount> shards_;
 };
 
 }  // namespace poker

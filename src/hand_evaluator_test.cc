@@ -50,9 +50,31 @@ void CheckSevenCardBestHand() {
   HandEvaluation evaluation = evaluator.evaluate_hand(hand, board);
   Expect(evaluation.rank == HandRank::FULL_HOUSE,
          "seven-card evaluation should choose full house");
-  Expect(evaluation.kickers.size() == 2, "full house should have two kickers");
+  Expect(evaluation.kicker_count == 2, "full house should have two kickers");
   Expect(evaluation.kickers[0] == 14 && evaluation.kickers[1] == 13,
          "full house should be aces full of kings");
+}
+
+void CheckCompactAndGameStateComparisonMatch() {
+  ComboId aces = TestCombo(14, SuitKind::kHearts, 14, SuitKind::kSpades);
+  ComboId kings = TestCombo(13, SuitKind::kHearts, 13, SuitKind::kSpades);
+
+  GameState game_state;
+  AddBoardCard(game_state, TestCard(2, SuitKind::kDiamonds));
+  AddBoardCard(game_state, TestCard(7, SuitKind::kClubs));
+  AddBoardCard(game_state, TestCard(9, SuitKind::kHearts));
+  AddBoardCard(game_state, TestCard(11, SuitKind::kSpades));
+  AddBoardCard(game_state, TestCard(12, SuitKind::kClubs));
+
+  CompactPublicState compact_state;
+  for (CardId card : game_state.board_cards) {
+    AddBoardCard(compact_state, card);
+  }
+
+  HandEvaluator evaluator;
+  Expect(evaluator.compare_hands(aces, kings, game_state) ==
+             evaluator.compare_hands(aces, kings, compact_state),
+         "compact and GameState showdown comparison should match");
 }
 
 }  // namespace
@@ -61,5 +83,6 @@ void CheckSevenCardBestHand() {
 int main() {
   poker::CheckFiveCardEvaluation();
   poker::CheckSevenCardBestHand();
+  poker::CheckCompactAndGameStateComparisonMatch();
   return 0;
 }
