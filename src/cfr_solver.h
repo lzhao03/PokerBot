@@ -452,15 +452,23 @@ private:
       ConditionedRanges& conditioned_ranges);
   void validate_public_state_row_actions(uint32_t public_state_id) const;
   BettingHistoryKey make_betting_history_key(const GameState& state) const;
+  BettingHistoryKey make_betting_history_key(
+      const CompactPublicState& state) const;
   BettingHistoryRow make_betting_history_row(const GameState& state) const;
+  BettingHistoryRow make_betting_history_row(
+      const CompactPublicState& state) const;
   PublicStateKey make_public_state_key(uint32_t betting_history_id,
                                        const GameState& state) const;
+  PublicStateKey make_public_state_key(uint32_t betting_history_id,
+                                       const CompactPublicState& state) const;
   uint32_t get_or_create_betting_history_id(const GameState& state);
+  uint32_t get_or_create_betting_history_id(
+      const CompactPublicState& state);
   uint32_t get_or_create_betting_history_id(GameTree::Node& node);
   uint32_t get_or_create_action_child_betting_history_id(
       uint32_t parent_betting_history_id,
       int action_index,
-      const GameState& child_state);
+      const CompactPublicState& child_state);
   uint32_t get_or_create_chance_child_betting_history_id(
       uint32_t parent_betting_history_id,
       const GameState& child_state);
@@ -483,11 +491,27 @@ private:
       uint32_t betting_history_id,
       const GameState& state);
   GameState materialize_game_state(const CompactPublicState& state) const;
+  CompactAction compact_history_action(const CompactPublicState& state,
+                                       uint16_t action_index) const;
+  int compact_outstanding_to_call(const CompactPublicState& state,
+                                  int player) const;
+  int compact_commit_chips(CompactPublicState& state,
+                           int player,
+                           int requested);
+  void append_compact_history_action(CompactPublicState& state,
+                                     const GameAction& action);
+  CompactPublicState apply_compact_action(
+      const CompactPublicState& parent,
+      const GameAction& action,
+      uint32_t child_betting_history_id);
   PublicStateRow make_public_state_row(uint32_t betting_history_id,
                                        const GameState& state);
+  PublicStateRow make_public_state_row(CompactPublicState state);
   std::optional<uint32_t> get_or_create_public_state_row(
       uint32_t betting_history_id,
       const GameState& state);
+  std::optional<uint32_t> get_or_create_public_state_row(
+      CompactPublicState state);
   std::optional<uint32_t> get_or_create_public_state_row(
       const GameState& state);
   std::optional<uint32_t> get_or_create_action_child_public_state(

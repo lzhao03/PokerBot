@@ -569,6 +569,42 @@ CFRSolver::BettingHistoryKey CFRSolver::make_betting_history_key(
   return key;
 }
 
+CFRSolver::BettingHistoryKey CFRSolver::make_betting_history_key(
+    const CompactPublicState& state) const {
+  BettingHistoryKey key;
+  key.street = static_cast<int>(state.street);
+  key.pot = state.pot;
+  key.stack_a = state.stack[0];
+  key.stack_b = state.stack[1];
+  key.all_in = state.all_in ? 1 : 0;
+  key.folded_player = state.folded_player;
+  key.player_to_act = state.player_to_act;
+  key.player_contribution_size = 2;
+  key.player_contributions = state.player_contribution;
+
+  const int history_value_count = state.history_size * 3;
+  if (history_value_count > BettingHistoryKey::kInlineHistoryValues) {
+    key.history_overflow.reserve(history_value_count -
+                                 BettingHistoryKey::kInlineHistoryValues);
+  }
+  auto add_history_value = [&key](int value) {
+    if (key.history_size < BettingHistoryKey::kInlineHistoryValues) {
+      key.history_values[key.history_size] = value;
+    } else {
+      key.history_overflow.push_back(value);
+    }
+    ++key.history_size;
+  };
+  for (uint16_t i = 0; i < state.history_size; ++i) {
+    const CompactAction action = compact_history_action(state, i);
+    add_history_value(action.player);
+    add_history_value(static_cast<int>(action.kind));
+    add_history_value(action.amount);
+  }
+
+  return key;
+}
+
 CFRSolver::BettingHistoryRow CFRSolver::make_betting_history_row(
     const GameState& state) const {
   BettingHistoryRow row;
@@ -585,9 +621,28 @@ CFRSolver::BettingHistoryRow CFRSolver::make_betting_history_row(
   return row;
 }
 
+CFRSolver::BettingHistoryRow CFRSolver::make_betting_history_row(
+    const CompactPublicState& state) const {
+  BettingHistoryRow row;
+  row.street = static_cast<int>(state.street);
+  row.pot = state.pot;
+  row.stack = state.stack;
+  row.all_in = state.all_in ? 1 : 0;
+  row.folded_player = state.folded_player;
+  row.player_to_act = state.player_to_act;
+  row.player_contributions = state.player_contribution;
+  return row;
+}
+
 CFRSolver::PublicStateKey CFRSolver::make_public_state_key(
     uint32_t betting_history_id,
     const GameState& state) const {
+  return {betting_history_id, card_abstraction_.public_bucket(state)};
+}
+
+CFRSolver::PublicStateKey CFRSolver::make_public_state_key(
+    uint32_t betting_history_id,
+    const CompactPublicState& state) const {
   return {betting_history_id, card_abstraction_.public_bucket(state)};
 }
 
@@ -700,19 +755,198 @@ GameState CFRSolver::materialize_game_state(
   return state;
 }
 
+// Read an action from the compact inline history or the solver-owned overflow
+// table. Overflow is rare, but keeping it out of PublicStateRow keeps normal
+// rows pointer-free.
+CFRSolver::CompactAction CFRSolver::compact_history_action(
+    const CompactPublicState& state,
+    uint16_t action_index) const {
+  if (action_index >= state.history_size) {
+    throw std::logic_error("Compact history action index out of range");
+  }
+  if (action_index < CompactPublicState::kMaxHistoryActions) {
+    const size_t index = static_cast<size_t>(action_index);
+    return {state.history_amounts[index],
+            state.history_players[index],
+            state.history_kinds[index]};
+  }
+
+  const size_t overflow_index =
+      static_cast<size_t>(action_index - CompactPublicState::kMaxHistoryActions);
+  if (overflow_index >= state.history_overflow_size) {
+    throw std::logic_error("Compact history overflow index out of range");
+  }
+  const std::vector<CompactAction>& overflow =
+      strategy_public_state_history_overflow();
+  const size_t offset = state.history_overflow_offset + overflow_index;
+  if (offset >= overflow.size()) {
+    throw std::logic_error("Compact history overflow missing");
+  }
+  return overflow[offset];
+}
+
+int CFRSolver::compact_outstanding_to_call(
+    const CompactPublicState& state,
+    int player) const {
+  return std::max(
+      0, state.player_contribution[Opponent(player)] -
+             state.player_contribution[player]);
+}
+
+int CFRSolver::compact_commit_chips(CompactPublicState& state,
+                                    int player,
+                                    int requested) {
+  if (requested <= 0) {
+    throw std::invalid_argument("Action amount must be positive");
+  }
+
+  const int committed = std::min(requested, state.stack[player]);
+  state.player_contribution[player] += committed;
+  state.stack[player] -= committed;
+  state.pot += committed;
+  if (state.stack[player] == 0) {
+    state.all_in = true;
+  }
+  return committed;
+}
+
+void CFRSolver::append_compact_history_action(
+    CompactPublicState& state,
+    const GameAction& action) {
+  if (state.history_size == std::numeric_limits<uint16_t>::max()) {
+    throw std::logic_error("Compact public state history is full");
+  }
+
+  const size_t history_index = state.history_size;
+  if (history_index < CompactPublicState::kMaxHistoryActions) {
+    state.history_amounts[history_index] = action.amount;
+    state.history_players[history_index] = static_cast<int8_t>(action.player);
+    state.history_kinds[history_index] = action.kind;
+  } else {
+    if (state.history_overflow_size == 0) {
+      state.history_overflow_offset =
+          static_cast<uint32_t>(public_state_history_overflow_.size());
+    } else if (state.history_overflow_offset +
+                   state.history_overflow_size !=
+               public_state_history_overflow_.size()) {
+      const uint32_t old_offset = state.history_overflow_offset;
+      const uint16_t old_size = state.history_overflow_size;
+      state.history_overflow_offset =
+          static_cast<uint32_t>(public_state_history_overflow_.size());
+      for (uint16_t i = 0; i < old_size; ++i) {
+        public_state_history_overflow_.push_back(
+            strategy_public_state_history_overflow()[old_offset + i]);
+      }
+    }
+    state.history_overflow_size += 1;
+    public_state_history_overflow_.push_back(
+        {action.amount, static_cast<int8_t>(action.player), action.kind});
+  }
+  state.history_size += 1;
+}
+
+CFRSolver::CompactPublicState CFRSolver::apply_compact_action(
+    const CompactPublicState& parent,
+    const GameAction& action,
+    uint32_t child_betting_history_id) {
+  CompactPublicState child = parent;
+  child.betting_history_id = child_betting_history_id;
+
+  int player = child.player_to_act;
+  if (!IsPlayer(player)) {
+    throw std::invalid_argument("No player can act in this state");
+  }
+  if (child.folded_player >= 0) {
+    throw std::invalid_argument("Cannot act after a player has folded");
+  }
+  if (child.stack[player] <= 0) {
+    throw std::invalid_argument("Player has no chips to act");
+  }
+
+  const int opponent = Opponent(player);
+  const int to_call = compact_outstanding_to_call(child, player);
+  GameAction applied = action;
+  applied.player = player;
+
+  switch (action.kind) {
+    case ActionKind::kFold:
+      applied.amount = 0;
+      child.folded_player = player;
+      child.player_to_act = -1;
+      break;
+    case ActionKind::kCheck:
+      if (to_call != 0) {
+        throw std::invalid_argument("Cannot check facing a bet");
+      }
+      applied.amount = 0;
+      child.player_to_act = opponent;
+      break;
+    case ActionKind::kCall: {
+      if (to_call == 0) {
+        throw std::invalid_argument("Cannot call without a bet");
+      }
+      applied.amount = compact_commit_chips(child, player, to_call);
+      child.player_to_act = opponent;
+      break;
+    }
+    case ActionKind::kBet: {
+      if (to_call != 0) {
+        throw std::invalid_argument("Cannot bet facing a bet");
+      }
+      if (action.amount >= child.stack[player]) {
+        throw std::invalid_argument("Use all-in for full-stack bets");
+      }
+      applied.amount = compact_commit_chips(child, player, action.amount);
+      child.player_to_act = opponent;
+      break;
+    }
+    case ActionKind::kRaise: {
+      if (to_call == 0) {
+        throw std::invalid_argument("Cannot raise without a bet");
+      }
+      if (action.amount <= to_call || child.stack[player] <= to_call) {
+        throw std::invalid_argument("Raise must exceed the call amount");
+      }
+      if (action.amount >= child.stack[player]) {
+        throw std::invalid_argument("Use all-in for full-stack raises");
+      }
+      applied.amount = compact_commit_chips(child, player, action.amount);
+      child.player_to_act = opponent;
+      break;
+    }
+    case ActionKind::kAllIn:
+      applied.amount =
+          compact_commit_chips(child, player, child.stack[player]);
+      child.player_to_act = opponent;
+      break;
+    case ActionKind::kNoAction:
+      throw std::invalid_argument("Unknown action type");
+  }
+
+  append_compact_history_action(child, applied);
+  return child;
+}
+
 CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
     uint32_t betting_history_id,
     const GameState& state) {
+  return make_public_state_row(
+      compact_public_state_from_game_state(betting_history_id, state));
+}
+
+CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
+    CompactPublicState state) {
+  const GameState materialized_state = materialize_game_state(state);
   PublicStateRow row;
-  row.state = compact_public_state_from_game_state(betting_history_id, state);
   row.public_bucket = card_abstraction_.public_bucket(state);
-  row.is_terminal = game_tree_->is_terminal(state);
-  row.player_to_act = game_tree_->get_player_to_act(state);
+  row.state = std::move(state);
+  row.is_terminal = game_tree_->is_terminal(materialized_state);
+  row.player_to_act = game_tree_->get_player_to_act(materialized_state);
   row.is_chance_node = !row.is_terminal && row.player_to_act == -1;
 
   if (!row.is_terminal && !row.is_chance_node && IsPlayer(row.player_to_act)) {
     const std::vector<GameAction> legal_actions =
-        game_tree_->get_legal_actions(state);
+        game_tree_->get_legal_actions(materialized_state);
     if (legal_actions.size() > GameTree::kMaxActionsPerNode) {
       throw std::logic_error("PublicStateRow exceeded kMaxActionsPerNode");
     }
@@ -799,6 +1033,40 @@ std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
 }
 
 std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
+    CompactPublicState state) {
+  if (strategy_tables_view_ != nullptr) {
+    const auto& public_state_ids = strategy_public_state_ids();
+    auto existing = public_state_ids.find(
+        make_public_state_key(state.betting_history_id, state));
+    if (existing == public_state_ids.end()) {
+      return std::nullopt;
+    }
+    return existing->second;
+  }
+
+  const uint32_t betting_history_id = state.betting_history_id;
+  PublicStateKey key = make_public_state_key(betting_history_id, state);
+  auto existing = public_state_ids_.find(key);
+  if (existing != public_state_ids_.end()) {
+    return existing->second;
+  }
+
+  if (config_.max_public_states > 0 &&
+      static_cast<int>(public_state_rows_.size()) >=
+          config_.max_public_states) {
+    return std::nullopt;
+  }
+
+  const uint32_t public_state_id =
+      static_cast<uint32_t>(public_state_ids_.size());
+  public_state_ids_.emplace(std::move(key), public_state_id);
+  public_state_rows_.push_back(make_public_state_row(std::move(state)));
+  cache_betting_history_actions(betting_history_id,
+                                public_state_rows_.back());
+  return public_state_id;
+}
+
+std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
     const GameState& state) {
   if (strategy_tables_view_ != nullptr) {
     const std::optional<uint32_t> betting_history_id =
@@ -834,6 +1102,23 @@ uint32_t CFRSolver::get_or_create_betting_history_id(const GameState& state) {
   return betting_history_id;
 }
 
+uint32_t CFRSolver::get_or_create_betting_history_id(
+    const CompactPublicState& state) {
+  BettingHistoryKey key = make_betting_history_key(state);
+  auto existing = betting_history_ids_.find(key);
+  if (existing != betting_history_ids_.end()) {
+    if (betting_history_rows_.size() <= existing->second) {
+      betting_history_rows_.resize(static_cast<size_t>(existing->second) + 1);
+    }
+    return existing->second;
+  }
+  const uint32_t betting_history_id =
+      static_cast<uint32_t>(betting_history_ids_.size());
+  betting_history_ids_.emplace(std::move(key), betting_history_id);
+  betting_history_rows_.push_back(make_betting_history_row(state));
+  return betting_history_id;
+}
+
 uint32_t CFRSolver::get_or_create_betting_history_id(GameTree::Node& node) {
   uint32_t betting_history_id = node.betting_history_id;
   if (betting_history_id == GameTree::Node::kInvalidBettingHistoryId) {
@@ -847,7 +1132,7 @@ uint32_t CFRSolver::get_or_create_betting_history_id(GameTree::Node& node) {
 uint32_t CFRSolver::get_or_create_action_child_betting_history_id(
     uint32_t parent_betting_history_id,
     int action_index,
-    const GameState& child_state) {
+    const CompactPublicState& child_state) {
   if (parent_betting_history_id < betting_history_rows_.size()) {
     BettingHistoryRow& parent_row =
         betting_history_rows_[parent_betting_history_id];
@@ -1027,19 +1312,19 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
     return std::nullopt;
   }
 
-  const GameState parent_state =
-      materialize_game_state(public_state_rows_[public_state_id].state);
   const GameAction action =
       public_state_rows_[public_state_id].actions[action_slot];
   const uint32_t parent_betting_history_id =
       public_state_rows_[public_state_id].state.betting_history_id;
-  const GameState child_state =
-      game_tree_->apply_action(parent_state, action);
+  CompactPublicState child_state = apply_compact_action(
+      public_state_rows_[public_state_id].state, action,
+      GameTree::Node::kInvalidBettingHistoryId);
   const uint32_t child_betting_history_id =
       get_or_create_action_child_betting_history_id(
           parent_betting_history_id, action_index, child_state);
+  child_state.betting_history_id = child_betting_history_id;
   std::optional<uint32_t> child_id =
-      get_or_create_public_state_row(child_betting_history_id, child_state);
+      get_or_create_public_state_row(std::move(child_state));
   if (!child_id.has_value()) {
     public_state_rows_[public_state_id].action_child_ids[action_slot] =
         kCappedPublicStateId;

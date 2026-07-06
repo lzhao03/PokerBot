@@ -136,6 +136,21 @@ class CFRSolverRegretTestPeer {
     return solver.get_or_create_betting_history_id(TestGameState(state));
   }
 
+  static GameState ApplyCompactAction(CFRSolver& solver,
+                                      const GameState& state,
+                                      const GameAction& action) {
+    const uint32_t parent_betting_history_id =
+        solver.get_or_create_betting_history_id(state);
+    CFRSolver::CompactPublicState parent =
+        solver.compact_public_state_from_game_state(
+            parent_betting_history_id, state);
+    CFRSolver::CompactPublicState child =
+        solver.apply_compact_action(
+            parent, action, GameTree::Node::kInvalidBettingHistoryId);
+    child.betting_history_id = solver.get_or_create_betting_history_id(child);
+    return solver.materialize_game_state(child);
+  }
+
   static int InfoSetOffset(CFRSolver& solver,
                            const BoardState& state,
                            int player,
@@ -684,6 +699,36 @@ GameAction MakeGameAction(ActionType type, int amount = 0) {
   return {TestActionKind(type), amount, -1};
 }
 
+bool SameGameAction(const GameAction& left, const GameAction& right) {
+  return left.kind == right.kind && left.amount == right.amount &&
+         left.player == right.player;
+}
+
+bool SameGameState(const GameState& left, const GameState& right) {
+  if (left.stack[0] != right.stack[0] || left.stack[1] != right.stack[1] ||
+      left.pot != right.pot || left.board_mask != right.board_mask ||
+      left.board_cards.size() != right.board_cards.size() ||
+      left.history.size() != right.history.size() ||
+      left.street != right.street || left.all_in != right.all_in ||
+      left.folded_player != right.folded_player ||
+      left.player_to_act != right.player_to_act ||
+      left.player_contribution != right.player_contribution ||
+      left.player_contribution_count != right.player_contribution_count) {
+    return false;
+  }
+  for (size_t i = 0; i < left.board_cards.size(); ++i) {
+    if (left.board_cards[i] != right.board_cards[i]) {
+      return false;
+    }
+  }
+  for (size_t i = 0; i < left.history.size(); ++i) {
+    if (!SameGameAction(left.history[i], right.history[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 int TestActionKey(ActionType type, int amount = 0) {
   return static_cast<int>(type) * 1000000 + amount;
 }
@@ -1124,6 +1169,49 @@ GameState TestFlopDecisionState(CardId first, CardId second, CardId third) {
   AddBoardCard(state, second);
   AddBoardCard(state, third);
   return state;
+}
+
+void ExpectCompactActionMatchesGameTree(CFRSolver& solver,
+                                        GameTree& game_tree,
+                                        const GameState& state,
+                                        const GameAction& action,
+                                        const char* message) {
+  const GameState compact_child =
+      CFRSolverRegretTestPeer::ApplyCompactAction(solver, state, action);
+  const GameState engine_child = game_tree.apply_action(state, action);
+  Expect(SameGameState(compact_child, engine_child), message);
+}
+
+void CheckCompactActionMatchesGameTreeApplyAction() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  CFRSolver solver(TestSolverConfig(config));
+  GameTree game_tree(TestSolverConfig(config));
+
+  const GameState facing_call = TestGameState(InitialRootState(config));
+  ExpectCompactActionMatchesGameTree(
+      solver, game_tree, facing_call, MakeGameAction(ActionType::FOLD),
+      "compact fold should match GameTree::apply_action");
+  ExpectCompactActionMatchesGameTree(
+      solver, game_tree, facing_call, MakeGameAction(ActionType::CALL, 1),
+      "compact call should match GameTree::apply_action");
+  ExpectCompactActionMatchesGameTree(
+      solver, game_tree, facing_call, MakeGameAction(ActionType::RAISE, 3),
+      "compact raise should match GameTree::apply_action");
+
+  const GameState open_action = TestFlopDecisionState(
+      MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(7, SuitKind::kDiamonds),
+      MakeCardId(11, SuitKind::kClubs));
+  ExpectCompactActionMatchesGameTree(
+      solver, game_tree, open_action, MakeGameAction(ActionType::CHECK),
+      "compact check should match GameTree::apply_action");
+  ExpectCompactActionMatchesGameTree(
+      solver, game_tree, open_action, MakeGameAction(ActionType::BET, 2),
+      "compact bet should match GameTree::apply_action");
+  ExpectCompactActionMatchesGameTree(
+      solver, game_tree, open_action, MakeGameAction(ActionType::ALL_IN, 20),
+      "compact all-in should match GameTree::apply_action");
 }
 
 void CheckBettingHistoryActionTransitionReusedAcrossPublicStates() {
@@ -2773,6 +2861,7 @@ int main() {
   CheckBettingHistoryIdsIgnorePublicCards();
   CheckBettingHistoryActionTransitionsAreCached();
   CheckCompactPublicStateActionTransitionsAreCached();
+  CheckCompactActionMatchesGameTreeApplyAction();
   CheckBettingHistoryActionTransitionReusedAcrossPublicStates();
   CheckCompactPublicStateActionCapStoresSentinel();
   CheckCompactPublicStateActionValidationCatchesMismatch();
