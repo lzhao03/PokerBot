@@ -1,6 +1,8 @@
 #include "src/hand_evaluator.h"
 
+#include <algorithm>
 #include <array>
+#include <random>
 #include <stdexcept>
 
 namespace poker {
@@ -20,6 +22,43 @@ ComboId TestCombo(int first_rank, SuitKind first_suit, int second_rank,
                   SuitKind second_suit) {
   return CardsToComboId(TestCard(first_rank, first_suit),
                         TestCard(second_rank, second_suit));
+}
+
+ComboId TestCombo(CardId first, CardId second) {
+  return CardsToComboId(first, second);
+}
+
+GameState TestBoard(std::initializer_list<CardId> cards) {
+  GameState board;
+  for (CardId card : cards) {
+    AddBoardCard(board, card);
+  }
+  return board;
+}
+
+int ReferenceCompare(const HandEvaluator& evaluator,
+                     ComboId first,
+                     ComboId second,
+                     const GameState& board) {
+  const HandEvaluation first_eval = evaluator.evaluate_hand(first, board);
+  const HandEvaluation second_eval = evaluator.evaluate_hand(second, board);
+  if (first_eval > second_eval) {
+    return 1;
+  }
+  if (first_eval < second_eval) {
+    return -1;
+  }
+  return 0;
+}
+
+void CheckCompareMatchesReference(ComboId first,
+                                  ComboId second,
+                                  const GameState& board,
+                                  const char* message) {
+  HandEvaluator evaluator;
+  Expect(evaluator.compare_hands(first, second, board) ==
+             ReferenceCompare(evaluator, first, second, board),
+         message);
 }
 
 void CheckFiveCardEvaluation() {
@@ -77,6 +116,117 @@ void CheckCompactAndGameStateComparisonMatch() {
          "compact and GameState showdown comparison should match");
 }
 
+void CheckCactusCompareRepresentativeParity() {
+  CheckCompareMatchesReference(
+      TestCombo(14, SuitKind::kHearts, 13, SuitKind::kHearts),
+      TestCombo(9, SuitKind::kHearts, 8, SuitKind::kHearts),
+      TestBoard({TestCard(10, SuitKind::kHearts),
+                 TestCard(11, SuitKind::kHearts),
+                 TestCard(12, SuitKind::kHearts),
+                 TestCard(2, SuitKind::kClubs),
+                 TestCard(3, SuitKind::kDiamonds)}),
+      "royal and straight flush comparison should match reference");
+
+  CheckCompareMatchesReference(
+      TestCombo(14, SuitKind::kSpades, 13, SuitKind::kSpades),
+      TestCombo(13, SuitKind::kHearts, 13, SuitKind::kDiamonds),
+      TestBoard({TestCard(14, SuitKind::kHearts),
+                 TestCard(14, SuitKind::kDiamonds),
+                 TestCard(14, SuitKind::kClubs),
+                 TestCard(2, SuitKind::kClubs),
+                 TestCard(7, SuitKind::kDiamonds)}),
+      "quads comparison should match reference");
+
+  CheckCompareMatchesReference(
+      TestCombo(14, SuitKind::kClubs, 13, SuitKind::kDiamonds),
+      TestCombo(13, SuitKind::kHearts, 13, SuitKind::kSpades),
+      TestBoard({TestCard(14, SuitKind::kHearts),
+                 TestCard(14, SuitKind::kDiamonds),
+                 TestCard(13, SuitKind::kClubs),
+                 TestCard(2, SuitKind::kSpades),
+                 TestCard(7, SuitKind::kHearts)}),
+      "full house comparison should match reference");
+
+  CheckCompareMatchesReference(
+      TestCombo(13, SuitKind::kHearts, 9, SuitKind::kHearts),
+      TestCombo(11, SuitKind::kHearts, 10, SuitKind::kHearts),
+      TestBoard({TestCard(14, SuitKind::kHearts),
+                 TestCard(2, SuitKind::kHearts),
+                 TestCard(7, SuitKind::kHearts),
+                 TestCard(12, SuitKind::kDiamonds),
+                 TestCard(3, SuitKind::kClubs)}),
+      "flush comparison should match reference");
+
+  CheckCompareMatchesReference(
+      TestCombo(14, SuitKind::kHearts, 5, SuitKind::kDiamonds),
+      TestCombo(5, SuitKind::kSpades, 6, SuitKind::kDiamonds),
+      TestBoard({TestCard(2, SuitKind::kClubs),
+                 TestCard(3, SuitKind::kDiamonds),
+                 TestCard(4, SuitKind::kHearts),
+                 TestCard(9, SuitKind::kSpades),
+                 TestCard(13, SuitKind::kClubs)}),
+      "wheel straight comparison should match reference");
+
+  CheckCompareMatchesReference(
+      TestCombo(9, SuitKind::kSpades, 14, SuitKind::kHearts),
+      TestCombo(9, SuitKind::kClubs, 12, SuitKind::kHearts),
+      TestBoard({TestCard(9, SuitKind::kHearts),
+                 TestCard(9, SuitKind::kDiamonds),
+                 TestCard(2, SuitKind::kClubs),
+                 TestCard(5, SuitKind::kSpades),
+                 TestCard(13, SuitKind::kClubs)}),
+      "trips kicker comparison should match reference");
+
+  CheckCompareMatchesReference(
+      TestCombo(13, SuitKind::kClubs, 12, SuitKind::kHearts),
+      TestCombo(13, SuitKind::kDiamonds, 11, SuitKind::kHearts),
+      TestBoard({TestCard(14, SuitKind::kHearts),
+                 TestCard(14, SuitKind::kDiamonds),
+                 TestCard(13, SuitKind::kSpades),
+                 TestCard(2, SuitKind::kClubs),
+                 TestCard(7, SuitKind::kDiamonds)}),
+      "two pair kicker comparison should match reference");
+
+  CheckCompareMatchesReference(
+      TestCombo(14, SuitKind::kClubs, 12, SuitKind::kHearts),
+      TestCombo(14, SuitKind::kSpades, 11, SuitKind::kHearts),
+      TestBoard({TestCard(14, SuitKind::kHearts),
+                 TestCard(13, SuitKind::kDiamonds),
+                 TestCard(7, SuitKind::kSpades),
+                 TestCard(4, SuitKind::kClubs),
+                 TestCard(2, SuitKind::kDiamonds)}),
+      "pair kicker comparison should match reference");
+
+  CheckCompareMatchesReference(
+      TestCombo(12, SuitKind::kClubs, 9, SuitKind::kHearts),
+      TestCombo(11, SuitKind::kClubs, 10, SuitKind::kHearts),
+      TestBoard({TestCard(14, SuitKind::kHearts),
+                 TestCard(13, SuitKind::kDiamonds),
+                 TestCard(7, SuitKind::kSpades),
+                 TestCard(4, SuitKind::kClubs),
+                 TestCard(2, SuitKind::kDiamonds)}),
+      "high card comparison should match reference");
+}
+
+void CheckCactusCompareRandomParity() {
+  std::array<CardId, kDeckCardCount> deck = {};
+  for (int i = 0; i < kDeckCardCount; ++i) {
+    deck[static_cast<size_t>(i)] = static_cast<CardId>(i);
+  }
+
+  std::mt19937 rng(12345);
+  for (int i = 0; i < 1000; ++i) {
+    std::shuffle(deck.begin(), deck.end(), rng);
+    const ComboId first = TestCombo(deck[0], deck[1]);
+    const ComboId second = TestCombo(deck[2], deck[3]);
+    const GameState board =
+        TestBoard({deck[4], deck[5], deck[6], deck[7], deck[8]});
+    CheckCompareMatchesReference(
+        first, second, board,
+        "random Cactus-Kev comparison should match reference");
+  }
+}
+
 }  // namespace
 }  // namespace poker
 
@@ -84,5 +234,7 @@ int main() {
   poker::CheckFiveCardEvaluation();
   poker::CheckSevenCardBestHand();
   poker::CheckCompactAndGameStateComparisonMatch();
+  poker::CheckCactusCompareRepresentativeParity();
+  poker::CheckCactusCompareRandomParity();
   return 0;
 }

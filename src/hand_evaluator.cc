@@ -1,7 +1,12 @@
 #include "src/hand_evaluator.h"
+#include <algorithm>
+#include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <set>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace poker {
 namespace {
@@ -209,6 +214,248 @@ EvaluationScore EvaluateFiveCardScore(const std::array<CardId, 5>& cards) {
                    {ranks[0], ranks[1], ranks[2], ranks[3], ranks[4]});
 }
 
+int CompareScores(const EvaluationScore& first, const EvaluationScore& second) {
+  if (second < first) {
+    return 1;
+  }
+  if (first < second) {
+    return -1;
+  }
+  return 0;
+}
+
+int CountBits(int value) {
+  int count = 0;
+  while (value != 0) {
+    value &= value - 1;
+    ++count;
+  }
+  return count;
+}
+
+int CactusCard(CardId card) {
+  static constexpr std::array<int, 13> kRankPrimes = {
+      2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41};
+  static constexpr std::array<int, 4> kSuitBits = {
+      0x8000, 0x4000, 0x2000, 0x1000};
+  const int rank_index = RankFromCardId(card) - 2;
+  const int suit_index = SuitIndex(SuitFromCardId(card));
+  return kRankPrimes[rank_index] | (rank_index << 8) |
+         kSuitBits[suit_index] | (1 << (16 + rank_index));
+}
+
+EvaluationScore ScoreForDistinctRanks(int rank_mask, bool flush) {
+  static constexpr std::array<SuitKind, 5> kNonFlushSuits = {
+      SuitKind::kHearts, SuitKind::kDiamonds, SuitKind::kClubs,
+      SuitKind::kSpades, SuitKind::kHearts};
+  std::array<CardId, 5> cards = {};
+  size_t index = 0;
+  for (int rank_index = 0; rank_index < 13; ++rank_index) {
+    if ((rank_mask & (1 << rank_index)) == 0) {
+      continue;
+    }
+    const SuitKind suit = flush ? SuitKind::kHearts : kNonFlushSuits[index];
+    cards[index] = MakeCardId(rank_index + 2, suit);
+    ++index;
+  }
+  return EvaluateFiveCardScore(cards);
+}
+
+EvaluationScore ScoreForRankMultiset(
+    const std::array<int, 5>& rank_indices) {
+  static constexpr std::array<SuitKind, 4> kSuits = {
+      SuitKind::kHearts, SuitKind::kDiamonds,
+      SuitKind::kClubs, SuitKind::kSpades};
+  std::array<CardId, 5> cards = {};
+  std::array<int, 13> rank_counts = {};
+  for (size_t i = 0; i < rank_indices.size(); ++i) {
+    const int rank_index = rank_indices[i];
+    const int suit_index = rank_counts[rank_index];
+    cards[i] = MakeCardId(rank_index + 2, kSuits[suit_index]);
+    ++rank_counts[rank_index];
+  }
+  return EvaluateFiveCardScore(cards);
+}
+
+int PrimeProductForRanks(const std::array<int, 5>& rank_indices) {
+  static constexpr std::array<int, 13> kRankPrimes = {
+      2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41};
+  int product = 1;
+  for (int rank_index : rank_indices) {
+    product *= kRankPrimes[rank_index];
+  }
+  return product;
+}
+
+struct CactusLookupRecord {
+  enum class Kind { kFlush, kUnique, kProduct };
+
+  EvaluationScore score;
+  Kind kind = Kind::kUnique;
+  int key = 0;
+};
+
+struct CactusTables {
+  CactusTables() {
+    std::vector<CactusLookupRecord> records;
+    records.reserve(7462);
+
+    for (int rank_mask = 0; rank_mask < 8192; ++rank_mask) {
+      if (CountBits(rank_mask) != 5) {
+        continue;
+      }
+      records.push_back(
+          {ScoreForDistinctRanks(rank_mask, true),
+           CactusLookupRecord::Kind::kFlush, rank_mask});
+      records.push_back(
+          {ScoreForDistinctRanks(rank_mask, false),
+           CactusLookupRecord::Kind::kUnique, rank_mask});
+    }
+
+    for (int a = 0; a < 13; ++a) {
+      for (int b = a; b < 13; ++b) {
+        for (int c = b; c < 13; ++c) {
+          for (int d = c; d < 13; ++d) {
+            for (int e = d; e < 13; ++e) {
+              const std::array<int, 5> ranks = {a, b, c, d, e};
+              std::array<int, 13> counts = {};
+              int distinct_count = 0;
+              bool too_many = false;
+              for (int rank_index : ranks) {
+                if (counts[rank_index] == 0) {
+                  ++distinct_count;
+                }
+                ++counts[rank_index];
+                if (counts[rank_index] > 4) {
+                  too_many = true;
+                  break;
+                }
+              }
+              if (too_many || distinct_count == 5) {
+                continue;
+              }
+              records.push_back(
+                  {ScoreForRankMultiset(ranks),
+                   CactusLookupRecord::Kind::kProduct,
+                   PrimeProductForRanks(ranks)});
+            }
+          }
+        }
+      }
+    }
+
+    std::sort(records.begin(), records.end(),
+              [](const CactusLookupRecord& first,
+                 const CactusLookupRecord& second) {
+                return CompareScores(first.score, second.score) > 0;
+              });
+
+    products.reserve(records.size());
+    for (size_t i = 0; i < records.size(); ++i) {
+      const uint16_t value = static_cast<uint16_t>(i + 1);
+      const CactusLookupRecord& record = records[i];
+      switch (record.kind) {
+        case CactusLookupRecord::Kind::kFlush:
+          flushes[record.key] = value;
+          break;
+        case CactusLookupRecord::Kind::kUnique:
+          unique5[record.key] = value;
+          break;
+        case CactusLookupRecord::Kind::kProduct:
+          products.push_back({record.key, value});
+          break;
+      }
+    }
+    std::sort(products.begin(), products.end());
+  }
+
+  std::array<uint16_t, 8192> flushes = {};
+  std::array<uint16_t, 8192> unique5 = {};
+  std::vector<std::pair<int, uint16_t>> products;
+};
+
+const CactusTables& GetCactusTables() {
+  static const CactusTables tables;
+  return tables;
+}
+
+uint16_t ProductRank(const CactusTables& tables, int product) {
+  const auto it = std::lower_bound(
+      tables.products.begin(), tables.products.end(), product,
+      [](const std::pair<int, uint16_t>& entry, int value) {
+        return entry.first < value;
+      });
+  if (it == tables.products.end() || it->first != product) {
+    throw std::logic_error("Missing Cactus-Kev product lookup");
+  }
+  return it->second;
+}
+
+uint16_t EvalFiveCactus(const std::array<int, 5>& cards) {
+  const CactusTables& tables = GetCactusTables();
+  const int rank_mask =
+      (cards[0] | cards[1] | cards[2] | cards[3] | cards[4]) >> 16;
+  if ((cards[0] & cards[1] & cards[2] & cards[3] & cards[4] & 0xF000) != 0) {
+    return tables.flushes[rank_mask];
+  }
+  if (CountBits(rank_mask) == 5) {
+    return tables.unique5[rank_mask];
+  }
+  const int product = (cards[0] & 0xFF) * (cards[1] & 0xFF) *
+                      (cards[2] & 0xFF) * (cards[3] & 0xFF) *
+                      (cards[4] & 0xFF);
+  return ProductRank(tables, product);
+}
+
+uint16_t EvalBestCactus(const CardId* cards, size_t card_count) {
+  if (card_count < 5) {
+    throw std::invalid_argument("Need at least 5 cards to find best hand");
+  }
+  if (card_count > 7) {
+    throw std::invalid_argument("Cannot evaluate more than seven cards");
+  }
+
+  std::array<int, 7> cactus_cards = {};
+  for (size_t i = 0; i < card_count; ++i) {
+    cactus_cards[i] = CactusCard(cards[i]);
+  }
+
+  uint16_t best = std::numeric_limits<uint16_t>::max();
+  std::array<int, 5> combo;
+  for (size_t a = 0; a + 4 < card_count; ++a) {
+    combo[0] = cactus_cards[a];
+    for (size_t b = a + 1; b + 3 < card_count; ++b) {
+      combo[1] = cactus_cards[b];
+      for (size_t c = b + 1; c + 2 < card_count; ++c) {
+        combo[2] = cactus_cards[c];
+        for (size_t d = c + 1; d + 1 < card_count; ++d) {
+          combo[3] = cactus_cards[d];
+          for (size_t e = d + 1; e < card_count; ++e) {
+            combo[4] = cactus_cards[e];
+            best = std::min(best, EvalFiveCactus(combo));
+          }
+        }
+      }
+    }
+  }
+  return best;
+}
+
+int CompareCactusHands(const CardId* first_cards,
+                       size_t first_count,
+                       const CardId* second_cards,
+                       size_t second_count) {
+  const uint16_t first = EvalBestCactus(first_cards, first_count);
+  const uint16_t second = EvalBestCactus(second_cards, second_count);
+  if (first < second) {
+    return 1;
+  }
+  if (first > second) {
+    return -1;
+  }
+  return 0;
+}
+
 EvaluationScore FindBestHandScore(const CardId* cards, size_t card_count) {
   if (card_count < 5) {
     throw std::invalid_argument("Need at least 5 cards to find best hand");
@@ -237,16 +484,6 @@ EvaluationScore FindBestHandScore(const CardId* cards, size_t card_count) {
   }
 
   return bestEval;
-}
-
-int CompareScores(const EvaluationScore& first, const EvaluationScore& second) {
-  if (second < first) {
-    return 1;
-  }
-  if (first < second) {
-    return -1;
-  }
-  return 0;
 }
 
 }  // namespace
@@ -348,8 +585,8 @@ int HandEvaluator::compare_hands(
   std::array<CardId, 7> second_cards;
   const size_t first_count = FillAllCards(hand1, board_state, first_cards);
   const size_t second_count = FillAllCards(hand2, board_state, second_cards);
-  return CompareScores(FindBestHandScore(first_cards.data(), first_count),
-                       FindBestHandScore(second_cards.data(), second_count));
+  return CompareCactusHands(first_cards.data(), first_count,
+                            second_cards.data(), second_count);
 }
 
 int HandEvaluator::compare_hands(
@@ -360,8 +597,8 @@ int HandEvaluator::compare_hands(
   std::array<CardId, 7> second_cards;
   const size_t first_count = FillAllCards(hand1, board_state, first_cards);
   const size_t second_count = FillAllCards(hand2, board_state, second_cards);
-  return CompareScores(FindBestHandScore(first_cards.data(), first_count),
-                       FindBestHandScore(second_cards.data(), second_count));
+  return CompareCactusHands(first_cards.data(), first_count,
+                            second_cards.data(), second_count);
 }
 
 int HandEvaluator::find_winner(
