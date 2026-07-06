@@ -21,6 +21,9 @@ class TerminalUtilityCache {
     int64_t entries = 0;
   };
 
+  // ponytail: revisit this cache once terminal evaluation is cheap; cap or
+  // bypass low-reuse results instead of spending memory on one-off showdowns.
+
  private:
   struct Key {
     int street = 0;
