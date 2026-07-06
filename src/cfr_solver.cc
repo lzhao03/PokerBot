@@ -627,22 +627,25 @@ std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
     return existing->second;
   }
 
-  PublicStateKey key = make_public_state_key(betting_history_id, state);
-  auto existing = frozen_tables_->public_state_ids.find(key);
-  if (existing != frozen_tables_->public_state_ids.end()) {
-    return existing->second;
-  }
-
   FrozenStrategyTables& tables = mutable_tables();
   if (config_.max_public_states > 0 &&
       static_cast<int>(tables.public_state_rows.size()) >=
           config_.max_public_states) {
+    auto existing = tables.public_state_ids.find(
+        make_public_state_key(betting_history_id, state));
+    if (existing != tables.public_state_ids.end()) {
+      return existing->second;
+    }
     return std::nullopt;
   }
 
-  const uint32_t public_state_id =
-      static_cast<uint32_t>(tables.public_state_ids.size());
-  tables.public_state_ids.emplace(std::move(key), public_state_id);
+  PublicStateKey key = make_public_state_key(betting_history_id, state);
+  const auto [state_iter, inserted] = tables.public_state_ids.try_emplace(
+      std::move(key), static_cast<uint32_t>(tables.public_state_ids.size()));
+  if (!inserted) {
+    return state_iter->second;
+  }
+  const uint32_t public_state_id = state_iter->second;
   tables.public_state_rows.push_back(
       make_public_state_row(betting_history_id, state));
   cache_betting_history_actions(betting_history_id,
@@ -662,22 +665,25 @@ std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
     return existing->second;
   }
 
-  PublicStateKey key = make_public_state_key(betting_history_id, state);
-  auto existing = frozen_tables_->public_state_ids.find(key);
-  if (existing != frozen_tables_->public_state_ids.end()) {
-    return existing->second;
-  }
-
   FrozenStrategyTables& tables = mutable_tables();
   if (config_.max_public_states > 0 &&
       static_cast<int>(tables.public_state_rows.size()) >=
           config_.max_public_states) {
+    auto existing = tables.public_state_ids.find(
+        make_public_state_key(betting_history_id, state));
+    if (existing != tables.public_state_ids.end()) {
+      return existing->second;
+    }
     return std::nullopt;
   }
 
-  const uint32_t public_state_id =
-      static_cast<uint32_t>(tables.public_state_ids.size());
-  tables.public_state_ids.emplace(std::move(key), public_state_id);
+  PublicStateKey key = make_public_state_key(betting_history_id, state);
+  const auto [state_iter, inserted] = tables.public_state_ids.try_emplace(
+      std::move(key), static_cast<uint32_t>(tables.public_state_ids.size()));
+  if (!inserted) {
+    return state_iter->second;
+  }
+  const uint32_t public_state_id = state_iter->second;
   tables.public_state_rows.push_back(
       make_public_state_row(betting_history_id, std::move(state)));
   cache_betting_history_actions(betting_history_id,
@@ -702,18 +708,17 @@ std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
 
 uint32_t CFRSolver::get_or_create_betting_history_id(const GameState& state) {
   BettingHistoryKey key = make_betting_history_key(state);
-  auto existing = frozen_tables_->betting_history_ids.find(key);
-  if (existing != frozen_tables_->betting_history_ids.end()) {
-    FrozenStrategyTables& tables = mutable_tables();
-    if (tables.betting_history_rows.size() <= existing->second) {
-      tables.betting_history_rows.resize(static_cast<size_t>(existing->second) + 1);
-    }
-    return existing->second;
-  }
   FrozenStrategyTables& tables = mutable_tables();
-  const uint32_t betting_history_id =
-      static_cast<uint32_t>(tables.betting_history_ids.size());
-  tables.betting_history_ids.emplace(std::move(key), betting_history_id);
+  const auto [history_iter, inserted] = tables.betting_history_ids.try_emplace(
+      std::move(key), static_cast<uint32_t>(tables.betting_history_ids.size()));
+  const uint32_t betting_history_id = history_iter->second;
+  if (!inserted) {
+    if (tables.betting_history_rows.size() <= betting_history_id) {
+      tables.betting_history_rows.resize(
+          static_cast<size_t>(betting_history_id) + 1);
+    }
+    return betting_history_id;
+  }
   tables.betting_history_rows.push_back(make_betting_history_row(state));
   return betting_history_id;
 }
@@ -721,18 +726,17 @@ uint32_t CFRSolver::get_or_create_betting_history_id(const GameState& state) {
 uint32_t CFRSolver::get_or_create_betting_history_id(
     const CompactPublicState& state) {
   BettingHistoryKey key = make_betting_history_key(state);
-  auto existing = frozen_tables_->betting_history_ids.find(key);
-  if (existing != frozen_tables_->betting_history_ids.end()) {
-    FrozenStrategyTables& tables = mutable_tables();
-    if (tables.betting_history_rows.size() <= existing->second) {
-      tables.betting_history_rows.resize(static_cast<size_t>(existing->second) + 1);
-    }
-    return existing->second;
-  }
   FrozenStrategyTables& tables = mutable_tables();
-  const uint32_t betting_history_id =
-      static_cast<uint32_t>(tables.betting_history_ids.size());
-  tables.betting_history_ids.emplace(std::move(key), betting_history_id);
+  const auto [history_iter, inserted] = tables.betting_history_ids.try_emplace(
+      std::move(key), static_cast<uint32_t>(tables.betting_history_ids.size()));
+  const uint32_t betting_history_id = history_iter->second;
+  if (!inserted) {
+    if (tables.betting_history_rows.size() <= betting_history_id) {
+      tables.betting_history_rows.resize(
+          static_cast<size_t>(betting_history_id) + 1);
+    }
+    return betting_history_id;
+  }
   tables.betting_history_rows.push_back(make_betting_history_row(state));
   return betting_history_id;
 }
