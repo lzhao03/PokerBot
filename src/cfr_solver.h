@@ -381,6 +381,12 @@ private:
       CompactPublicState state);
   std::optional<uint32_t> get_or_create_public_state_row(
       const GameState& state);
+  std::optional<uint32_t> action_child_public_state(
+      uint32_t public_state_id,
+      int action_index) const;
+  std::optional<uint32_t> chance_child_public_state(
+      uint32_t public_state_id,
+      absl::Span<const CardId> cards) const;
   std::optional<uint32_t> get_or_create_action_child_public_state(
       uint32_t public_state_id,
       int action_index);

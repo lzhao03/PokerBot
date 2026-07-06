@@ -902,6 +902,39 @@ void CFRSolver::validate_public_state_row_actions(
   }
 }
 
+std::optional<uint32_t> CFRSolver::action_child_public_state(
+    uint32_t public_state_id,
+    int action_index) const {
+  const auto& rows = frozen_tables_->public_state_rows;
+  if (public_state_id >= rows.size()) {
+    return std::nullopt;
+  }
+  const PublicStateRow& row = rows[public_state_id];
+  if (action_index < 0 || action_index >= row.action_count) {
+    throw std::logic_error("action child index out of range");
+  }
+  const uint32_t child_id =
+      row.action_child_ids[static_cast<size_t>(action_index)];
+  if (child_id == GameTree::Node::kInvalidPublicStateId ||
+      child_id == kCappedPublicStateId) {
+    return std::nullopt;
+  }
+  return child_id;
+}
+
+std::optional<uint32_t> CFRSolver::chance_child_public_state(
+    uint32_t public_state_id,
+    absl::Span<const CardId> cards) const {
+  const int child_key = ChanceCardsKey(cards);
+  const uint64_t map_key = PublicChanceChildKey(public_state_id, child_key);
+  const auto& chance_children = frozen_tables_->public_chance_child_ids;
+  auto existing = chance_children.find(map_key);
+  if (existing == chance_children.end()) {
+    return std::nullopt;
+  }
+  return existing->second;
+}
+
 std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
     uint32_t public_state_id,
     int action_index) {
@@ -1823,8 +1856,10 @@ double CFRSolver::cfr_with_ranges(
 
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     std::optional<uint32_t> child_public_state_id =
-        get_or_create_action_child_public_state(
-            public_state_id, static_cast<int>(action_index));
+        frozen_ ? action_child_public_state(public_state_id,
+                                            static_cast<int>(action_index))
+                : get_or_create_action_child_public_state(
+                      public_state_id, static_cast<int>(action_index));
     if (!child_public_state_id.has_value()) {
       continue;
     }
@@ -1928,7 +1963,9 @@ double CFRSolver::chance_sampling_cfr(
     const auto cards = SampleStreetCards(
         state, player_a_cards.mask() | player_b_cards.mask(), rng_);
     std::optional<uint32_t> child_public_state_id =
-        get_or_create_chance_child_public_state(public_state_id, cards);
+        frozen_ ? chance_child_public_state(public_state_id, cards)
+                : get_or_create_chance_child_public_state(public_state_id,
+                                                          cards);
     if (!child_public_state_id.has_value()) {
       continue;
     }
@@ -2397,7 +2434,9 @@ double CFRSolver::evaluate_strategy_node(
       const auto cards = SampleStreetCards(
           state, player_a_cards.mask() | player_b_cards.mask(), rng_);
       std::optional<uint32_t> child_public_state_id =
-          get_or_create_chance_child_public_state(public_state_id, cards);
+          frozen_ ? chance_child_public_state(public_state_id, cards)
+                  : get_or_create_chance_child_public_state(public_state_id,
+                                                            cards);
       if (!child_public_state_id.has_value()) {
         continue;
       }
@@ -2426,7 +2465,9 @@ double CFRSolver::evaluate_strategy_node(
   const int action_count = row.action_count;
   for (int action_index = 0; action_index < action_count; ++action_index) {
     std::optional<uint32_t> child_public_state_id =
-        get_or_create_action_child_public_state(public_state_id, action_index);
+        frozen_ ? action_child_public_state(public_state_id, action_index)
+                : get_or_create_action_child_public_state(public_state_id,
+                                                          action_index);
     if (!child_public_state_id.has_value()) {
       continue;
     }
