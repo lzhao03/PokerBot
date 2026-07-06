@@ -1,6 +1,9 @@
 #include "src/cfr_solver.h"
+#include "src/combo.h"
 #include "src/hand_range.h"
 
+#include <array>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <optional>
@@ -143,6 +146,43 @@ class CFRSolverRegretTestPeer {
     solver.mutable_tables_->public_chance_child_ids.clear();
   }
 
+  static bool PrebuildPublicStates(CFRSolver& solver,
+                                   uint32_t root_public_state_id,
+                                   int max_depth) {
+    return solver.prebuild_public_state_rows(root_public_state_id, max_depth);
+  }
+
+  static void FreezeTables(CFRSolver& solver) {
+    solver.frozen_tables_ = solver.mutable_tables_;
+    solver.mutable_tables_.reset();
+    solver.frozen_ = true;
+  }
+
+  static std::optional<uint32_t> FrozenChanceChildOptional(
+      CFRSolver& solver,
+      uint32_t public_state_id,
+      const GameState& state,
+      absl::Span<const CardId> cards) {
+    return solver.chance_child_public_state(
+        public_state_id, solver.compact_public_state_from_game_state(state),
+        cards);
+  }
+
+  static double EvaluateExactBoard(CFRSolver& solver,
+                                   const GameState& state,
+                                   ComboId player_a_combo,
+                                   ComboId player_b_combo) {
+    const std::optional<uint32_t> public_state_id =
+        solver.get_or_create_public_state_row(state);
+    if (!public_state_id.has_value()) {
+      throw std::runtime_error("public state was not created");
+    }
+    return solver.evaluate_strategy_node(
+        *public_state_id, solver.compact_public_state_from_game_state(state),
+        CFRSolver::PrivateCards::FromCombo(player_a_combo),
+        CFRSolver::PrivateCards::FromCombo(player_b_combo));
+  }
+
   static uint32_t CompactPublicStateBettingHistoryId(
       const CFRSolver& solver,
       uint32_t public_state_id) {
@@ -220,6 +260,32 @@ GameState ChanceState() {
   return state;
 }
 
+ComboId ExactCombo(int first_rank,
+                   SuitKind first_suit,
+                   int second_rank,
+                   SuitKind second_suit) {
+  return CardsToComboId(MakeCardId(first_rank, first_suit),
+                        MakeCardId(second_rank, second_suit));
+}
+
+GameState TerminalRiverState(CardId first,
+                             CardId second,
+                             CardId third,
+                             CardId fourth,
+                             CardId fifth) {
+  GameState state = PublicState(StreetKind::kRiver, first, second, third,
+                                fourth, fifth);
+  state.stack[0] = 0;
+  state.stack[1] = 0;
+  state.pot = 20;
+  state.all_in = true;
+  state.folded_player = -1;
+  state.player_to_act = 0;
+  state.player_contribution = {10, 10};
+  state.player_contribution_count = 2;
+  return state;
+}
+
 void CheckTexturePublicBucketsMergeBoardsByTexture() {
   SolverConfig config;
   CFRSolver solver(config);
@@ -281,6 +347,46 @@ void CheckTexturePublicBucketsMergeBoardsByTexture() {
          "same-texture public states should reuse the representative row");
   Expect(!CFRSolverRegretTestPeer::PublicStateIsExact(solver, first_id),
          "coarse public bucket rows should be representative");
+}
+
+void CheckTextureBucketTerminalUtilityUsesExactBoard() {
+  SolverConfig config;
+  CFRSolver solver(config);
+
+  const ComboId aces = ExactCombo(14, SuitKind::kHearts,
+                                  14, SuitKind::kSpades);
+  const ComboId kings = ExactCombo(13, SuitKind::kClubs,
+                                   13, SuitKind::kDiamonds);
+  const GameState aces_win =
+      TerminalRiverState(MakeCardId(2, SuitKind::kHearts),
+                         MakeCardId(7, SuitKind::kDiamonds),
+                         MakeCardId(9, SuitKind::kClubs),
+                         MakeCardId(11, SuitKind::kSpades),
+                         MakeCardId(12, SuitKind::kDiamonds));
+  const GameState kings_win =
+      TerminalRiverState(MakeCardId(3, SuitKind::kHearts),
+                         MakeCardId(8, SuitKind::kDiamonds),
+                         MakeCardId(10, SuitKind::kClubs),
+                         MakeCardId(12, SuitKind::kSpades),
+                         MakeCardId(13, SuitKind::kHearts));
+
+  Expect(CFRSolverRegretTestPeer::PublicBucket(solver, aces_win) ==
+             CFRSolverRegretTestPeer::PublicBucket(solver, kings_win),
+         "fixture boards should share one texture bucket");
+  Expect(CFRSolverRegretTestPeer::PublicStateId(solver, aces_win) ==
+             CFRSolverRegretTestPeer::PublicStateId(solver, kings_win),
+         "same texture bucket should reuse one public row");
+
+  const double first_value =
+      CFRSolverRegretTestPeer::EvaluateExactBoard(solver, aces_win, aces,
+                                                  kings);
+  const double second_value =
+      CFRSolverRegretTestPeer::EvaluateExactBoard(solver, kings_win, aces,
+                                                  kings);
+  Expect(std::abs(first_value - 10.0) < 0.000001,
+         "first exact board should value aces as winning");
+  Expect(std::abs(second_value + 10.0) < 0.000001,
+         "second exact board should value kings as winning");
 }
 
 void CheckCoarseBettingHistoryBucketsChipState() {
@@ -456,6 +562,46 @@ void CheckCoarseChanceChildUsesBettingHistoryTransition() {
          "cached betting-history chance transition should return existing public child");
 }
 
+void CheckFrozenChanceLookupCoversTextureBuckets() {
+  SolverConfig config;
+  CFRSolver solver(config);
+  const GameState state = ChanceState();
+  const uint32_t public_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, state);
+  Expect(CFRSolverRegretTestPeer::PrebuildPublicStates(solver, public_id, 0),
+         "texture prebuild should complete from a chance node");
+  CFRSolverRegretTestPeer::FreezeTables(solver);
+
+  const std::array<CardId, 3> rainbow = {
+      MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(7, SuitKind::kDiamonds),
+      MakeCardId(11, SuitKind::kClubs),
+  };
+  const std::array<CardId, 3> paired = {
+      MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(2, SuitKind::kDiamonds),
+      MakeCardId(11, SuitKind::kClubs),
+  };
+  const std::array<CardId, 3> monotone = {
+      MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(7, SuitKind::kHearts),
+      MakeCardId(11, SuitKind::kHearts),
+  };
+
+  Expect(CFRSolverRegretTestPeer::FrozenChanceChildOptional(
+             solver, public_id, state, rainbow)
+             .has_value(),
+         "frozen lookup should contain rainbow flop texture");
+  Expect(CFRSolverRegretTestPeer::FrozenChanceChildOptional(
+             solver, public_id, state, paired)
+             .has_value(),
+         "frozen lookup should contain paired flop texture");
+  Expect(CFRSolverRegretTestPeer::FrozenChanceChildOptional(
+             solver, public_id, state, monotone)
+             .has_value(),
+         "frozen lookup should contain monotone flop texture");
+}
+
 void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
   SolverConfig config;
   config.starting_stack_size = 20;
@@ -487,11 +633,13 @@ void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
 
 int main() {
   poker::CheckTexturePublicBucketsMergeBoardsByTexture();
+  poker::CheckTextureBucketTerminalUtilityUsesExactBoard();
   poker::CheckCoarseBettingHistoryBucketsChipState();
   poker::CheckCoarseBettingHistoryKeepsActionSlotsDistinct();
   poker::CheckCoarseLegalActionsUseAbstractBettingState();
   poker::CheckCoarseActionChildUsesBettingHistoryTransition();
   poker::CheckCoarseChanceChildUsesBettingHistoryTransition();
+  poker::CheckFrozenChanceLookupCoversTextureBuckets();
   poker::CheckTexturePublicBucketsEnterFrozenParallelPhase();
   return 0;
 }
