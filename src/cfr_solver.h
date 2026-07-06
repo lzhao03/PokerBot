@@ -511,6 +511,19 @@ private:
       const CompactPublicState& parent,
       absl::Span<const CardId> cards,
       uint32_t child_betting_history_id);
+  int compact_street_bet_size_count(StreetKind street) const;
+  double compact_bet_size_for_street(StreetKind street, int index) const;
+  int compact_bet_size_count(StreetKind street) const;
+  int compact_concrete_bet_amount(const CompactPublicState& state,
+                                  double size) const;
+  bool append_compact_action_if_missing(
+      std::array<GameAction, GameTree::kMaxActionsPerNode>& actions,
+      uint8_t& action_count,
+      ActionKind kind,
+      int amount) const;
+  uint8_t compact_legal_actions(
+      const CompactPublicState& state,
+      std::array<GameAction, GameTree::kMaxActionsPerNode>& actions) const;
   PublicStateRow make_public_state_row(uint32_t betting_history_id,
                                        const GameState& state);
   PublicStateRow make_public_state_row(CompactPublicState state);

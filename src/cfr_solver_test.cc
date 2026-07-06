@@ -166,6 +166,23 @@ class CFRSolverRegretTestPeer {
     return solver.materialize_game_state(child);
   }
 
+  static std::vector<GameAction> CompactLegalActions(CFRSolver& solver,
+                                                     const GameState& state) {
+    const uint32_t betting_history_id =
+        solver.get_or_create_betting_history_id(state);
+    CFRSolver::CompactPublicState compact =
+        solver.compact_public_state_from_game_state(
+            betting_history_id, state);
+    std::array<GameAction, GameTree::kMaxActionsPerNode> actions = {};
+    const uint8_t action_count = solver.compact_legal_actions(compact, actions);
+    std::vector<GameAction> result;
+    result.reserve(action_count);
+    for (uint8_t i = 0; i < action_count; ++i) {
+      result.push_back(actions[static_cast<size_t>(i)]);
+    }
+    return result;
+  }
+
   static int InfoSetOffset(CFRSolver& solver,
                            const BoardState& state,
                            int player,
@@ -744,6 +761,19 @@ bool SameGameState(const GameState& left, const GameState& right) {
   return true;
 }
 
+bool SameActions(const std::vector<GameAction>& left,
+                 const std::vector<GameAction>& right) {
+  if (left.size() != right.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < left.size(); ++i) {
+    if (!SameGameAction(left[i], right[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 int TestActionKey(ActionType type, int amount = 0) {
   return static_cast<int>(type) * 1000000 + amount;
 }
@@ -1227,6 +1257,44 @@ void CheckCompactActionMatchesGameTreeApplyAction() {
   ExpectCompactActionMatchesGameTree(
       solver, game_tree, open_action, MakeGameAction(ActionType::ALL_IN, 20),
       "compact all-in should match GameTree::apply_action");
+}
+
+void ExpectCompactLegalActionsMatchGameTree(CFRSolver& solver,
+                                            GameTree& game_tree,
+                                            const GameState& state,
+                                            const char* message) {
+  const std::vector<GameAction> compact_actions =
+      CFRSolverRegretTestPeer::CompactLegalActions(solver, state);
+  const std::vector<GameAction> engine_actions =
+      game_tree.get_legal_actions(state);
+  Expect(SameActions(compact_actions, engine_actions), message);
+}
+
+void CheckCompactLegalActionsMatchGameTree() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  config.add_bet_sizes(0.5);
+  config.add_bet_sizes(1.0);
+  config.add_flop_bet_sizes(0.25);
+  CFRSolver solver(TestSolverConfig(config));
+  GameTree game_tree(TestSolverConfig(config));
+
+  ExpectCompactLegalActionsMatchGameTree(
+      solver, game_tree, TestGameState(InitialRootState(config)),
+      "compact legal actions should match GameTree facing a blind");
+
+  ExpectCompactLegalActionsMatchGameTree(
+      solver, game_tree,
+      TestFlopDecisionState(MakeCardId(2, SuitKind::kHearts),
+                            MakeCardId(7, SuitKind::kDiamonds),
+                            MakeCardId(11, SuitKind::kClubs)),
+      "compact legal actions should match GameTree for open flop action");
+
+  GameState all_in_state = TestGameState(InitialRootState(config));
+  all_in_state.stack[0] = 1;
+  ExpectCompactLegalActionsMatchGameTree(
+      solver, game_tree, all_in_state,
+      "compact legal actions should match GameTree when call is all-in");
 }
 
 void CheckBettingHistoryActionTransitionReusedAcrossPublicStates() {
@@ -2907,6 +2975,7 @@ int main() {
   CheckBettingHistoryActionTransitionsAreCached();
   CheckCompactPublicStateActionTransitionsAreCached();
   CheckCompactActionMatchesGameTreeApplyAction();
+  CheckCompactLegalActionsMatchGameTree();
   CheckBettingHistoryActionTransitionReusedAcrossPublicStates();
   CheckCompactPublicStateActionCapStoresSentinel();
   CheckCompactPublicStateActionValidationCatchesMismatch();

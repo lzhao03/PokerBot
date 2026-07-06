@@ -981,6 +981,128 @@ CFRSolver::CompactPublicState CFRSolver::apply_compact_chance(
   return child;
 }
 
+int CFRSolver::compact_street_bet_size_count(StreetKind street) const {
+  switch (street) {
+    case StreetKind::kPreflop:
+      return config_.preflop_bet_sizes.size();
+    case StreetKind::kFlop:
+      return config_.flop_bet_sizes.size();
+    case StreetKind::kTurn:
+      return config_.turn_bet_sizes.size();
+    case StreetKind::kRiver:
+      return config_.river_bet_sizes.size();
+  }
+  return 0;
+}
+
+double CFRSolver::compact_bet_size_for_street(StreetKind street,
+                                              int index) const {
+  if (compact_street_bet_size_count(street) == 0) {
+    return config_.bet_sizes[static_cast<size_t>(index)];
+  }
+
+  switch (street) {
+    case StreetKind::kPreflop:
+      return config_.preflop_bet_sizes[static_cast<size_t>(index)];
+    case StreetKind::kFlop:
+      return config_.flop_bet_sizes[static_cast<size_t>(index)];
+    case StreetKind::kTurn:
+      return config_.turn_bet_sizes[static_cast<size_t>(index)];
+    case StreetKind::kRiver:
+      return config_.river_bet_sizes[static_cast<size_t>(index)];
+  }
+  return config_.bet_sizes[static_cast<size_t>(index)];
+}
+
+int CFRSolver::compact_bet_size_count(StreetKind street) const {
+  const int street_count = compact_street_bet_size_count(street);
+  return street_count > 0 ? street_count
+                          : static_cast<int>(config_.bet_sizes.size());
+}
+
+int CFRSolver::compact_concrete_bet_amount(
+    const CompactPublicState& state,
+    double size) const {
+  if (size <= 0.0) {
+    return 0;
+  }
+  return std::max(1, static_cast<int>(std::max(1, state.pot) * size));
+}
+
+bool CFRSolver::append_compact_action_if_missing(
+    std::array<GameAction, GameTree::kMaxActionsPerNode>& actions,
+    uint8_t& action_count,
+    ActionKind kind,
+    int amount) const {
+  for (uint8_t i = 0; i < action_count; ++i) {
+    const GameAction& action = actions[static_cast<size_t>(i)];
+    if (action.kind == kind && action.amount == amount) {
+      return false;
+    }
+  }
+  if (action_count >= GameTree::kMaxActionsPerNode) {
+    throw std::logic_error("PublicStateRow exceeded kMaxActionsPerNode");
+  }
+  actions[static_cast<size_t>(action_count)] = {kind, amount, -1};
+  ++action_count;
+  return true;
+}
+
+uint8_t CFRSolver::compact_legal_actions(
+    const CompactPublicState& state,
+    std::array<GameAction, GameTree::kMaxActionsPerNode>& actions) const {
+  uint8_t action_count = 0;
+  if (state.folded_player >= 0 || !IsPlayer(state.player_to_act)) {
+    return action_count;
+  }
+
+  const int player = state.player_to_act;
+  const int stack = state.stack[player];
+  if (stack <= 0) {
+    return action_count;
+  }
+
+  const int to_call = compact_outstanding_to_call(state, player);
+  if (to_call > 0) {
+    append_compact_action_if_missing(actions, action_count,
+                                     ActionKind::kFold, 0);
+    append_compact_action_if_missing(actions, action_count,
+                                     ActionKind::kCall,
+                                     std::min(to_call, stack));
+
+    for (int i = 0; i < compact_bet_size_count(state.street); ++i) {
+      const int raise_amount =
+          to_call +
+          compact_concrete_bet_amount(
+              state, compact_bet_size_for_street(state.street, i));
+      if (raise_amount < stack) {
+        append_compact_action_if_missing(actions, action_count,
+                                         ActionKind::kRaise, raise_amount);
+      }
+    }
+    if (stack > to_call) {
+      append_compact_action_if_missing(actions, action_count,
+                                       ActionKind::kAllIn, stack);
+    }
+    return action_count;
+  }
+
+  append_compact_action_if_missing(actions, action_count,
+                                   ActionKind::kCheck, 0);
+  for (int i = 0; i < compact_bet_size_count(state.street); ++i) {
+    const int bet_amount =
+        compact_concrete_bet_amount(
+            state, compact_bet_size_for_street(state.street, i));
+    if (bet_amount < stack) {
+      append_compact_action_if_missing(actions, action_count,
+                                       ActionKind::kBet, bet_amount);
+    }
+  }
+  append_compact_action_if_missing(actions, action_count,
+                                   ActionKind::kAllIn, stack);
+  return action_count;
+}
+
 CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
     uint32_t betting_history_id,
     const GameState& state) {
@@ -999,14 +1121,8 @@ CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
   row.is_chance_node = !row.is_terminal && row.player_to_act == -1;
 
   if (!row.is_terminal && !row.is_chance_node && IsPlayer(row.player_to_act)) {
-    const std::vector<GameAction> legal_actions =
-        game_tree_->get_legal_actions(materialized_state);
-    if (legal_actions.size() > GameTree::kMaxActionsPerNode) {
-      throw std::logic_error("PublicStateRow exceeded kMaxActionsPerNode");
-    }
-    row.action_count = static_cast<uint8_t>(legal_actions.size());
+    row.action_count = compact_legal_actions(row.state, row.actions);
     for (int i = 0; i < row.action_count; ++i) {
-      row.actions[static_cast<size_t>(i)] = legal_actions[static_cast<size_t>(i)];
       row.action_ids[static_cast<size_t>(i)] =
           GameTree::action_key(row.actions[static_cast<size_t>(i)]);
     }
