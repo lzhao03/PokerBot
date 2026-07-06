@@ -380,3 +380,20 @@ cc_binary(
         "@abseil-cpp//absl/log:initialize",
     ],
 )
+
+cc_binary(
+    name = "cfr_coarse_full_depth_benchmark",
+    srcs = ["cfr_benchmark.cc"],
+    copts = [
+        "-DPOKER_BENCHMARK_PROD_DEFAULTS=1",
+        "-DPOKER_STREET_ONLY_PUBLIC_BUCKETS=1",
+        "-DPOKER_BENCHMARK_MAX_DEPTH=0",
+    ],
+    deps = [
+        ":cfr_solver_street_buckets_no_stats",
+        ":cfr_solver_proto_adapter",
+        ":hand_range",
+        ":poker_config",
+        "@abseil-cpp//absl/log:initialize",
+    ],
+)
