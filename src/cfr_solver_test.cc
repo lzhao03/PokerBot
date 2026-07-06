@@ -141,10 +141,10 @@ class CFRSolverRegretTestPeer {
                                       const GameAction& action) {
     const uint32_t parent_betting_history_id =
         solver.get_or_create_betting_history_id(state);
-    CFRSolver::CompactPublicState parent =
+    CompactPublicState parent =
         solver.compact_public_state_from_game_state(
             parent_betting_history_id, state);
-    CFRSolver::CompactPublicState child =
+    CompactPublicState child =
         solver.apply_compact_action(
             parent, action, GameTree::Node::kInvalidBettingHistoryId);
     child.betting_history_id = solver.get_or_create_betting_history_id(child);
@@ -156,10 +156,10 @@ class CFRSolverRegretTestPeer {
                                       absl::Span<const CardId> cards) {
     const uint32_t parent_betting_history_id =
         solver.get_or_create_betting_history_id(state);
-    CFRSolver::CompactPublicState parent =
+    CompactPublicState parent =
         solver.compact_public_state_from_game_state(
             parent_betting_history_id, state);
-    CFRSolver::CompactPublicState child =
+    CompactPublicState child =
         solver.apply_compact_chance(
             parent, cards, GameTree::Node::kInvalidBettingHistoryId);
     child.betting_history_id = solver.get_or_create_betting_history_id(child);
@@ -170,17 +170,19 @@ class CFRSolverRegretTestPeer {
                                                      const GameState& state) {
     const uint32_t betting_history_id =
         solver.get_or_create_betting_history_id(state);
-    CFRSolver::CompactPublicState compact =
+    CompactPublicState compact =
         solver.compact_public_state_from_game_state(
             betting_history_id, state);
-    std::array<GameAction, GameTree::kMaxActionsPerNode> actions = {};
-    const uint8_t action_count = solver.compact_legal_actions(compact, actions);
-    std::vector<GameAction> result;
-    result.reserve(action_count);
-    for (uint8_t i = 0; i < action_count; ++i) {
-      result.push_back(actions[static_cast<size_t>(i)]);
-    }
-    return result;
+    GameTree game_tree(solver.config_);
+    return game_tree.get_legal_actions(compact);
+  }
+
+  static CompactPublicState CompactState(CFRSolver& solver,
+                                         const GameState& state) {
+    const uint32_t betting_history_id =
+        solver.get_or_create_betting_history_id(state);
+    return solver.compact_public_state_from_game_state(
+        betting_history_id, state);
   }
 
   static int InfoSetOffset(CFRSolver& solver,
@@ -340,7 +342,7 @@ class CFRSolverRegretTestPeer {
                                             int& action_count) {
     const uint32_t betting_history_id =
         solver.get_or_create_betting_history_id(state);
-    CFRSolver::CompactPublicState compact =
+    CompactPublicState compact =
         solver.compact_public_state_from_game_state(
             betting_history_id, state);
     const CFRSolver::PublicStateRow row =
@@ -1380,6 +1382,54 @@ void CheckCompactPublicStateRowMetadataMatchesGameTree() {
   ExpectCompactPublicStateRowMetadataMatchesGameTree(
       solver, game_tree, river,
       "compact river terminal row metadata should match GameTree");
+}
+
+void ExpectCompactUtilityMatchesGameState(CFRSolver& solver,
+                                          GameTree& game_tree,
+                                          const GameState& state,
+                                          ComboId player_a_combo,
+                                          ComboId player_b_combo,
+                                          const char* message) {
+  const CompactPublicState compact =
+      CFRSolverRegretTestPeer::CompactState(solver, state);
+  const double game_state_value =
+      game_tree.get_utility(state, player_a_combo, player_b_combo);
+  const double compact_value =
+      game_tree.get_utility(compact, player_a_combo, player_b_combo);
+  Expect(std::abs(game_state_value - compact_value) < 0.000001, message);
+}
+
+void CheckCompactUtilityMatchesGameState() {
+  PokerConfig config;
+  config.set_starting_stack_size(20);
+  CFRSolver solver(TestSolverConfig(config));
+  GameTree game_tree(TestSolverConfig(config));
+
+  const Hand aces = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
+  const Hand kings = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
+  const ComboId aces_combo = TestComboId(aces);
+  const ComboId kings_combo = TestComboId(kings);
+
+  const GameState folded =
+      game_tree.apply_action(TestGameState(InitialRootState(config)),
+                             MakeGameAction(ActionType::FOLD));
+  ExpectCompactUtilityMatchesGameState(
+      solver, game_tree, folded, aces_combo, kings_combo,
+      "compact folded utility should match GameState utility");
+
+  GameState showdown;
+  showdown.pot = 20;
+  showdown.street = StreetKind::kRiver;
+  showdown.folded_player = -1;
+  showdown.player_contribution = {10, 10};
+  AddBoardCard(showdown, MakeCardId(2, SuitKind::kHearts));
+  AddBoardCard(showdown, MakeCardId(7, SuitKind::kDiamonds));
+  AddBoardCard(showdown, MakeCardId(9, SuitKind::kClubs));
+  AddBoardCard(showdown, MakeCardId(11, SuitKind::kSpades));
+  AddBoardCard(showdown, MakeCardId(12, SuitKind::kDiamonds));
+  ExpectCompactUtilityMatchesGameState(
+      solver, game_tree, showdown, aces_combo, kings_combo,
+      "compact showdown utility should match GameState utility");
 }
 
 void CheckBettingHistoryActionTransitionReusedAcrossPublicStates() {
@@ -3062,6 +3112,7 @@ int main() {
   CheckCompactActionMatchesGameTreeApplyAction();
   CheckCompactLegalActionsMatchGameTree();
   CheckCompactPublicStateRowMetadataMatchesGameTree();
+  CheckCompactUtilityMatchesGameState();
   CheckBettingHistoryActionTransitionReusedAcrossPublicStates();
   CheckCompactPublicStateActionCapStoresSentinel();
   CheckCompactPublicStateActionValidationCatchesMismatch();

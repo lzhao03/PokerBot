@@ -67,15 +67,21 @@ public:
   // Evaluate the best possible hand given hole cards and a board state
   HandEvaluation evaluate_hand(ComboId hole_cards,
                                const GameState& board_state) const;
+  HandEvaluation evaluate_hand(ComboId hole_cards,
+                               const CompactPublicState& board_state) const;
   
   // Compare two hands and return positive if hand1 wins, negative if hand2 wins, 0 if tie
   int compare_hands(ComboId hand1, ComboId hand2,
                     const GameState& board_state) const;
+  int compare_hands(ComboId hand1, ComboId hand2,
+                    const CompactPublicState& board_state) const;
   
   // Find the winner between two hole cards given a board state
   // Returns 1 if hand1 wins, -1 if hand2 wins, 0 if tie
   int find_winner(ComboId hand1, ComboId hand2,
                   const GameState& board_state) const;
+  int find_winner(ComboId hand1, ComboId hand2,
+                  const CompactPublicState& board_state) const;
   
   // Calculate equity (winning probability) for a hand against a range of hands
   double calculate_equity(ComboId hand, const std::vector<ComboId>& opponent_range,

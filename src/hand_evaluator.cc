@@ -269,6 +269,20 @@ HandEvaluation HandEvaluator::evaluate_hand(
   return find_best_hand(all_cards);
 }
 
+HandEvaluation HandEvaluator::evaluate_hand(
+    ComboId hole_cards,
+    const CompactPublicState& board_state) const {
+  const ComboInfo& combo = GetComboInfo(hole_cards);
+  std::vector<CardId> all_cards;
+  all_cards.reserve(2 + board_state.board_count);
+  all_cards.push_back(combo.card0);
+  all_cards.push_back(combo.card1);
+  for (uint8_t i = 0; i < board_state.board_count; ++i) {
+    all_cards.push_back(board_state.board_cards[static_cast<size_t>(i)]);
+  }
+  return find_best_hand(all_cards);
+}
+
 int HandEvaluator::compare_hands(
     ComboId hand1,
     ComboId hand2,
@@ -285,10 +299,33 @@ int HandEvaluator::compare_hands(
   }
 }
 
+int HandEvaluator::compare_hands(
+    ComboId hand1,
+    ComboId hand2,
+    const CompactPublicState& board_state) const {
+  HandEvaluation eval1 = evaluate_hand(hand1, board_state);
+  HandEvaluation eval2 = evaluate_hand(hand2, board_state);
+
+  if (eval1 > eval2) {
+    return 1;
+  } else if (eval1 < eval2) {
+    return -1;
+  } else {
+    return 0;
+  }
+}
+
 int HandEvaluator::find_winner(
     ComboId hand1,
     ComboId hand2,
     const GameState& board_state) const {
+  return compare_hands(hand1, hand2, board_state);
+}
+
+int HandEvaluator::find_winner(
+    ComboId hand1,
+    ComboId hand2,
+    const CompactPublicState& board_state) const {
   return compare_hands(hand1, hand2, board_state);
 }
 

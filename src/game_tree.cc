@@ -56,21 +56,61 @@ namespace {
 
 constexpr int kActionKeyMultiplier = 1000000;
 
-int OutstandingToCall(const GameState& state, int player) {
-  return std::max(
-      0, Contribution(state, Opponent(player)) - Contribution(state, player));
+template <typename State>
+int StackForState(const State& state, int player) {
+  return state.stack[player];
 }
 
-int FirstPlayerForStreet(const GameState& state) {
+template <typename State>
+int ContributionForState(const State& state, int player) {
+  return state.player_contribution[player];
+}
+
+int BoardCardCount(const GameState& state) {
+  return static_cast<int>(state.board_cards.size());
+}
+
+int BoardCardCount(const CompactPublicState& state) {
+  return state.board_count;
+}
+
+int HistorySize(const GameState& state) {
+  return static_cast<int>(state.history.size());
+}
+
+int HistorySize(const CompactPublicState& state) {
+  return state.history_size;
+}
+
+GameAction LastAction(const GameState& state) {
+  return state.history.back();
+}
+
+GameAction LastAction(const CompactPublicState& state) {
+  return {state.last_action.kind, state.last_action.amount,
+          state.last_action.player};
+}
+
+template <typename State>
+int OutstandingToCall(const State& state, int player) {
+  return std::max(
+      0, ContributionForState(state, Opponent(player)) -
+             ContributionForState(state, player));
+}
+
+template <typename State>
+int FirstPlayerForStreet(const State& state) {
   return state.street == StreetKind::kPreflop ? 0 : 1;
 }
 
-bool BoardComplete(const GameState& state) {
+template <typename State>
+bool BoardComplete(const State& state) {
   return state.street == StreetKind::kRiver &&
-         state.board_cards.size() >= kMaxBoardCards;
+         BoardCardCount(state) >= kMaxBoardCards;
 }
 
-int ConcreteBetAmount(const GameState& state, double size) {
+template <typename State>
+int ConcreteBetAmount(const State& state, double size) {
   if (size <= 0.0) {
     return 0;
   }
@@ -117,16 +157,147 @@ int BetSizesSize(const SolverConfig& config, StreetKind street) {
                           : static_cast<int>(config.bet_sizes.size());
 }
 
-void AddActionIfMissing(std::vector<GameAction>& actions,
-                        ActionKind kind,
-                        int amount) {
-  const bool exists =
-      std::any_of(actions.begin(), actions.end(), [&](const GameAction& action) {
-        return action.kind == kind && action.amount == amount;
-      });
-  if (!exists) {
-    actions.push_back({kind, amount, -1});
+void AddAction(std::array<GameAction, GameTree::kMaxActionsPerNode>& actions,
+               uint8_t& action_count,
+               ActionKind kind,
+               int amount) {
+  if (action_count >= GameTree::kMaxActionsPerNode) {
+    throw std::logic_error("Legal action table exceeded kMaxActionsPerNode");
   }
+  actions[static_cast<size_t>(action_count)] = {kind, amount, -1};
+  ++action_count;
+}
+
+void AddActionIfMissing(
+    std::array<GameAction, GameTree::kMaxActionsPerNode>& actions,
+    uint8_t& action_count,
+    ActionKind kind,
+    int amount) {
+  for (uint8_t i = 0; i < action_count; ++i) {
+    const GameAction& action = actions[static_cast<size_t>(i)];
+    if (action.kind == kind && action.amount == amount) {
+      return;
+    }
+  }
+  AddAction(actions, action_count, kind, amount);
+}
+
+template <typename State>
+bool IsBettingRoundOver(const State& state) {
+  if (state.folded_player >= 0) {
+    return true;
+  }
+  const bool calls_matched =
+      OutstandingToCall(state, 0) == 0 && OutstandingToCall(state, 1) == 0;
+  if (state.all_in) {
+    const int player = state.player_to_act;
+    return calls_matched || !IsPlayer(player) ||
+           StackForState(state, player) == 0 ||
+           OutstandingToCall(state, player) == 0;
+  }
+  if (HistorySize(state) == 0 || !calls_matched) {
+    return false;
+  }
+
+  const GameAction last = LastAction(state);
+  if (last.kind == ActionKind::kCall) {
+    return HistorySize(state) > 1;
+  }
+  return last.kind == ActionKind::kCheck &&
+         state.player_to_act == FirstPlayerForStreet(state);
+}
+
+template <typename State>
+bool IsHandOver(const State& state) {
+  return BoardComplete(state) && IsBettingRoundOver(state);
+}
+
+template <typename State>
+bool IsTerminal(const State& state) {
+  return state.folded_player >= 0 || IsHandOver(state);
+}
+
+template <typename State>
+int PlayerToAct(const State& state) {
+  if (IsTerminal(state)) {
+    return -1;
+  }
+  if (IsBettingRoundOver(state)) {
+    return -1;
+  }
+  if (IsPlayer(state.player_to_act)) {
+    return state.player_to_act;
+  }
+  return FirstPlayerForStreet(state);
+}
+
+template <typename State>
+uint8_t LegalActionsForState(
+    const SolverConfig& config,
+    const State& state,
+    std::array<GameAction, GameTree::kMaxActionsPerNode>& actions) {
+  uint8_t action_count = 0;
+  if (IsTerminal(state)) {
+    return action_count;
+  }
+
+  const int player = PlayerToAct(state);
+  if (!IsPlayer(player)) {
+    return action_count;
+  }
+
+  const int stack = StackForState(state, player);
+  if (stack <= 0) {
+    return action_count;
+  }
+
+  const int to_call = OutstandingToCall(state, player);
+  if (to_call > 0) {
+    AddAction(actions, action_count, ActionKind::kFold, 0);
+    AddAction(actions, action_count, ActionKind::kCall,
+              std::min(to_call, stack));
+
+    for (int i = 0; i < BetSizesSize(config, state.street); ++i) {
+      const int raise_amount =
+          to_call + ConcreteBetAmount(
+                        state, BetSizeForStreet(config, state.street, i));
+      if (raise_amount < stack) {
+        AddActionIfMissing(actions, action_count, ActionKind::kRaise,
+                           raise_amount);
+      }
+    }
+    if (stack > to_call) {
+      AddAction(actions, action_count, ActionKind::kAllIn, stack);
+    }
+  } else {
+    AddAction(actions, action_count, ActionKind::kCheck, 0);
+
+    for (int i = 0; i < BetSizesSize(config, state.street); ++i) {
+      const int bet_amount =
+          ConcreteBetAmount(state, BetSizeForStreet(config, state.street, i));
+      if (bet_amount < stack) {
+        AddActionIfMissing(actions, action_count, ActionKind::kBet,
+                           bet_amount);
+      }
+    }
+    AddAction(actions, action_count, ActionKind::kAllIn, stack);
+  }
+
+  return action_count;
+}
+
+template <typename State>
+std::vector<GameAction> LegalActionsForState(const SolverConfig& config,
+                                             const State& state) {
+  std::array<GameAction, GameTree::kMaxActionsPerNode> action_table = {};
+  const uint8_t action_count =
+      LegalActionsForState(config, state, action_table);
+  std::vector<GameAction> actions;
+  actions.reserve(action_count);
+  for (uint8_t i = 0; i < action_count; ++i) {
+    actions.push_back(action_table[static_cast<size_t>(i)]);
+  }
+  return actions;
 }
 
 void SetLegalActions(GameTree::Node& node, std::vector<GameAction> actions) {
@@ -230,51 +401,18 @@ GameTree::Node& GameTree::build_tree(const GameState& initial_state) {
 
 std::vector<GameAction> GameTree::get_legal_actions(
     const GameState& state) const {
-  std::vector<GameAction> actions;
-  if (is_terminal(state)) {
-    return actions;
-  }
+  return LegalActionsForState(config_, state);
+}
 
-  const int player = get_player_to_act(state);
-  if (!IsPlayer(player)) {
-    return actions;
-  }
+std::vector<GameAction> GameTree::get_legal_actions(
+    const CompactPublicState& state) const {
+  return LegalActionsForState(config_, state);
+}
 
-  const int stack = Stack(state, player);
-  if (stack <= 0) {
-    return actions;
-  }
-
-  const int to_call = OutstandingToCall(state, player);
-  if (to_call > 0) {
-    actions.push_back({ActionKind::kFold, 0, -1});
-    actions.push_back({ActionKind::kCall, std::min(to_call, stack), -1});
-
-    for (int i = 0; i < BetSizesSize(config_, state.street); ++i) {
-      const int raise_amount =
-          to_call + ConcreteBetAmount(
-                        state, BetSizeForStreet(config_, state.street, i));
-      if (raise_amount < stack) {
-        AddActionIfMissing(actions, ActionKind::kRaise, raise_amount);
-      }
-    }
-    if (stack > to_call) {
-      AddActionIfMissing(actions, ActionKind::kAllIn, stack);
-    }
-  } else {
-    actions.push_back({ActionKind::kCheck, 0, -1});
-
-    for (int i = 0; i < BetSizesSize(config_, state.street); ++i) {
-      const int bet_amount =
-          ConcreteBetAmount(state, BetSizeForStreet(config_, state.street, i));
-      if (bet_amount < stack) {
-        AddActionIfMissing(actions, ActionKind::kBet, bet_amount);
-      }
-    }
-    AddActionIfMissing(actions, ActionKind::kAllIn, stack);
-  }
-
-  return actions;
+uint8_t GameTree::get_legal_actions(
+    const CompactPublicState& state,
+    std::array<GameAction, kMaxActionsPerNode>& actions) const {
+  return LegalActionsForState(config_, state, actions);
 }
 
 GameState GameTree::apply_action(const GameState& state,
@@ -378,7 +516,7 @@ GameState GameTree::apply_chance(const GameState& state,
 double GameTree::get_utility(const GameState& state,
                              ComboId player_a_hand,
                              ComboId player_b_hand) const {
-  const double player_a_contribution = Contribution(state, 0);
+  const double player_a_contribution = ContributionForState(state, 0);
 
   if (state.folded_player >= 0) {
     if (state.folded_player == 0) {
@@ -387,7 +525,34 @@ double GameTree::get_utility(const GameState& state,
     return state.pot - player_a_contribution;
   }
 
-  if (state.board_cards.size() + 2 < 5) {
+  if (BoardCardCount(state) + 2 < 5) {
+    return 0.0;
+  }
+
+  const int comparison =
+      hand_evaluator_.compare_hands(player_a_hand, player_b_hand, state);
+  if (comparison > 0) {
+    return state.pot - player_a_contribution;
+  }
+  if (comparison < 0) {
+    return -player_a_contribution;
+  }
+  return (state.pot / 2.0) - player_a_contribution;
+}
+
+double GameTree::get_utility(const CompactPublicState& state,
+                             ComboId player_a_hand,
+                             ComboId player_b_hand) const {
+  const double player_a_contribution = ContributionForState(state, 0);
+
+  if (state.folded_player >= 0) {
+    if (state.folded_player == 0) {
+      return -player_a_contribution;
+    }
+    return state.pot - player_a_contribution;
+  }
+
+  if (BoardCardCount(state) + 2 < 5) {
     return 0.0;
   }
 
@@ -403,20 +568,19 @@ double GameTree::get_utility(const GameState& state,
 }
 
 bool GameTree::is_terminal(const GameState& state) const {
-  return state.folded_player >= 0 || is_hand_over(state);
+  return IsTerminal(state);
+}
+
+bool GameTree::is_terminal(const CompactPublicState& state) const {
+  return IsTerminal(state);
 }
 
 int GameTree::get_player_to_act(const GameState& state) const {
-  if (is_terminal(state)) {
-    return -1;
-  }
-  if (is_betting_round_over(state)) {
-    return -1;
-  }
-  if (IsPlayer(state.player_to_act)) {
-    return state.player_to_act;
-  }
-  return FirstPlayerForStreet(state);
+  return PlayerToAct(state);
+}
+
+int GameTree::get_player_to_act(const CompactPublicState& state) const {
+  return PlayerToAct(state);
 }
 
 GameTree::Node& GameTree::create_child_node(Node& parent,
@@ -562,30 +726,20 @@ GameTree::Node& GameTree::add_node(Node node) {
 }
 
 bool GameTree::is_betting_round_over(const GameState& state) const {
-  if (state.folded_player >= 0) {
-    return true;
-  }
-  const bool calls_matched =
-      OutstandingToCall(state, 0) == 0 && OutstandingToCall(state, 1) == 0;
-  if (state.all_in) {
-    const int player = state.player_to_act;
-    return calls_matched || !IsPlayer(player) || Stack(state, player) == 0 ||
-           OutstandingToCall(state, player) == 0;
-  }
-  if (state.history.empty() || !calls_matched) {
-    return false;
-  }
+  return IsBettingRoundOver(state);
+}
 
-  const GameAction& last = state.history.back();
-  if (last.kind == ActionKind::kCall) {
-    return state.history.size() > 1;
-  }
-  return last.kind == ActionKind::kCheck &&
-         state.player_to_act == FirstPlayerForStreet(state);
+bool GameTree::is_betting_round_over(
+    const CompactPublicState& state) const {
+  return IsBettingRoundOver(state);
 }
 
 bool GameTree::is_hand_over(const GameState& state) const {
-  return BoardComplete(state) && is_betting_round_over(state);
+  return IsHandOver(state);
+}
+
+bool GameTree::is_hand_over(const CompactPublicState& state) const {
+  return IsHandOver(state);
 }
 
 }  // namespace poker

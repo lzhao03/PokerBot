@@ -109,6 +109,11 @@ public:
   
   // Get legal actions at a given state
   std::vector<GameAction> get_legal_actions(const GameState& state) const;
+  std::vector<GameAction> get_legal_actions(
+      const CompactPublicState& state) const;
+  uint8_t get_legal_actions(
+      const CompactPublicState& state,
+      std::array<GameAction, kMaxActionsPerNode>& actions) const;
   
   // Apply an action to a state to get the next state
   GameState apply_action(const GameState& state,
@@ -121,18 +126,24 @@ public:
   // Get the utility at a terminal state
   double get_utility(const GameState& state, ComboId player_a_hand,
                      ComboId player_b_hand) const;
+  double get_utility(const CompactPublicState& state, ComboId player_a_hand,
+                     ComboId player_b_hand) const;
   
   // Check if a state is terminal
   bool is_terminal(const GameState& state) const;
+  bool is_terminal(const CompactPublicState& state) const;
   
   // Get the player to act at a given state
   int get_player_to_act(const GameState& state) const;
+  int get_player_to_act(const CompactPublicState& state) const;
   
   // Check if a betting round is over
   bool is_betting_round_over(const GameState& state) const;
+  bool is_betting_round_over(const CompactPublicState& state) const;
   
   // Check if the hand is over
   bool is_hand_over(const GameState& state) const;
+  bool is_hand_over(const CompactPublicState& state) const;
 
   // Total number of nodes currently allocated in the tree arena.
   size_t node_count() const { return node_count_; }

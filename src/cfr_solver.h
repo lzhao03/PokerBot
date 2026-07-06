@@ -272,35 +272,6 @@ private:
     PrivateBucketId private_bucket = 0;
   };
 
-  struct CompactAction {
-    int amount = 0;
-    int8_t player = -1;
-    ActionKind kind = ActionKind::kNoAction;
-  };
-
-  struct CompactPublicState {
-    static constexpr int kMaxHistoryActions = 32;
-
-    std::array<int, kPlayerCount> stack = {0, 0};
-    int pot = 0;
-    std::array<CardId, kMaxBoardCards> board_cards = {};
-    uint8_t board_count = 0;
-    CardMask board_mask = 0;
-    std::array<int, kMaxHistoryActions> history_amounts = {};
-    std::array<int8_t, kMaxHistoryActions> history_players = {};
-    std::array<ActionKind, kMaxHistoryActions> history_kinds = {};
-    uint16_t history_size = 0;
-    uint32_t history_overflow_offset = std::numeric_limits<uint32_t>::max();
-    uint16_t history_overflow_size = 0;
-    StreetKind street = StreetKind::kPreflop;
-    bool all_in = false;
-    int folded_player = -1;
-    int player_to_act = 0;
-    std::array<int, kPlayerCount> player_contribution = {0, 0};
-    int player_contribution_count = 0;
-    uint32_t betting_history_id = GameTree::Node::kInvalidBettingHistoryId;
-  };
-
   struct PublicStateRow {
     PublicStateRow() {
       action_ids.fill(0);
@@ -506,37 +477,11 @@ private:
       uint32_t child_betting_history_id);
   void reset_compact_history(CompactPublicState& state);
   int compact_first_player_for_street(const CompactPublicState& state) const;
-  bool compact_board_complete(const CompactPublicState& state) const;
-  bool compact_is_betting_round_over(const CompactPublicState& state) const;
-  bool compact_is_hand_over(const CompactPublicState& state) const;
-  bool compact_is_terminal(const CompactPublicState& state) const;
-  int compact_player_to_act(const CompactPublicState& state) const;
   void add_compact_board_card(CompactPublicState& state, CardId card);
   CompactPublicState apply_compact_chance(
       const CompactPublicState& parent,
       absl::Span<const CardId> cards,
       uint32_t child_betting_history_id);
-  const std::vector<double>& compact_bet_sizes_for_street(
-      StreetKind street) const;
-  int compact_concrete_bet_amount(const CompactPublicState& state,
-                                  double size) const;
-  void append_compact_action(
-      std::array<GameAction, GameTree::kMaxActionsPerNode>& actions,
-      uint8_t& action_count,
-      ActionKind kind,
-      int amount) const;
-  bool append_compact_action_if_missing(
-      std::array<GameAction, GameTree::kMaxActionsPerNode>& actions,
-      uint8_t& action_count,
-      ActionKind kind,
-      int amount) const;
-  uint8_t compact_legal_actions(
-      const CompactPublicState& state,
-      int player,
-      std::array<GameAction, GameTree::kMaxActionsPerNode>& actions) const;
-  uint8_t compact_legal_actions(
-      const CompactPublicState& state,
-      std::array<GameAction, GameTree::kMaxActionsPerNode>& actions) const;
   PublicStateRow make_public_state_row(uint32_t betting_history_id,
                                        const GameState& state);
   PublicStateRow make_public_state_row(CompactPublicState state);
@@ -601,7 +546,13 @@ private:
   double utility(const GameState& state,
                  const PrivateCards& player_a_cards,
                  const PrivateCards& player_b_cards);
+  double utility(const CompactPublicState& state,
+                 const PrivateCards& player_a_cards,
+                 const PrivateCards& player_b_cards);
   double uncached_utility(const GameState& state,
+                          const PrivateCards& player_a_cards,
+                          const PrivateCards& player_b_cards);
+  double uncached_utility(const CompactPublicState& state,
                           const PrivateCards& player_a_cards,
                           const PrivateCards& player_b_cards);
   double evaluate_strategy_node(uint32_t public_state_id,

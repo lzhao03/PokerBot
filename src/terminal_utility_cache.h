@@ -21,8 +21,8 @@ class TerminalUtilityCache {
     int64_t entries = 0;
   };
 
-  template <typename Compute>
-  double get_or_compute(const GameState& state,
+  template <typename State, typename Compute>
+  double get_or_compute(const State& state,
                         ComboId player_a_hand,
                         ComboId player_b_hand,
                         Compute compute) {
@@ -72,6 +72,9 @@ class TerminalUtilityCache {
   };
 
   static Key key_for(const GameState& state,
+                     ComboId player_a_hand,
+                     ComboId player_b_hand);
+  static Key key_for(const CompactPublicState& state,
                      ComboId player_a_hand,
                      ComboId player_b_hand);
 

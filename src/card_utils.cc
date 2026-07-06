@@ -1,5 +1,6 @@
 #include "src/card_utils.h"
 
+#include <algorithm>
 #include <random>
 #include <stdexcept>
 
@@ -39,17 +40,21 @@ int AvailableCards(CardMask known_mask) {
   return count;
 }
 
-}  // namespace
-
-absl::InlinedVector<CardId, 5> SampleStreetCards(const GameState& state,
-                                                CardMask known_private_cards,
-                                                std::mt19937& rng) {
-  const int count = CardsForNextStreet(state.street);
+absl::InlinedVector<CardId, 5> SampleStreetCardsForState(
+    StreetKind street,
+    int board_count,
+    CardMask board_mask,
+    CardMask known_private_cards,
+    std::mt19937& rng) {
+  const int remaining_board_slots =
+      std::max(0, kMaxBoardCards - board_count);
+  const int count = std::min(CardsForNextStreet(street),
+                             remaining_board_slots);
   if (count <= 0) {
     return {};
   }
 
-  CardMask blocked_mask = known_private_cards | state.board_mask;
+  CardMask blocked_mask = known_private_cards | board_mask;
   if (AvailableCards(blocked_mask) < count) {
     throw std::runtime_error("Not enough cards to sample next street");
   }
@@ -67,6 +72,25 @@ absl::InlinedVector<CardId, 5> SampleStreetCards(const GameState& state,
     sampled.push_back(card_id);
   }
   return sampled;
+}
+
+}  // namespace
+
+absl::InlinedVector<CardId, 5> SampleStreetCards(const GameState& state,
+                                                CardMask known_private_cards,
+                                                std::mt19937& rng) {
+  return SampleStreetCardsForState(
+      state.street, static_cast<int>(state.board_cards.size()),
+      state.board_mask, known_private_cards, rng);
+}
+
+absl::InlinedVector<CardId, 5> SampleStreetCards(
+    const CompactPublicState& state,
+    CardMask known_private_cards,
+    std::mt19937& rng) {
+  return SampleStreetCardsForState(
+      state.street, state.board_count, state.board_mask,
+      known_private_cards, rng);
 }
 
 }  // namespace poker

@@ -32,6 +32,14 @@ std::array<int, 5> EncodedBoardCards(const GameState& state) {
   return EncodedSortedCards(cards, state.board_cards.size());
 }
 
+std::array<int, 5> EncodedBoardCards(const CompactPublicState& state) {
+  std::array<CardId, 5> cards = {};
+  for (size_t i = 0; i < state.board_count && i < cards.size(); ++i) {
+    cards[i] = state.board_cards[i];
+  }
+  return EncodedSortedCards(cards, state.board_count);
+}
+
 void HashCombine(size_t& seed, int value) {
   seed ^= std::hash<int>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 }
@@ -83,6 +91,22 @@ TerminalUtilityCache::Key TerminalUtilityCache::key_for(
   key.player_a_contribution = state.player_contribution[0];
   key.player_b_contribution = state.player_contribution[1];
   key.board_size = static_cast<int>(state.board_cards.size());
+  key.player_a_cards = EncodedComboCards(player_a_hand);
+  key.player_b_cards = EncodedComboCards(player_b_hand);
+  key.board_cards = EncodedBoardCards(state);
+  return key;
+}
+
+TerminalUtilityCache::Key TerminalUtilityCache::key_for(
+    const CompactPublicState& state,
+    ComboId player_a_hand,
+    ComboId player_b_hand) {
+  Key key;
+  key.street = static_cast<int>(state.street);
+  key.pot = state.pot;
+  key.player_a_contribution = state.player_contribution[0];
+  key.player_b_contribution = state.player_contribution[1];
+  key.board_size = state.board_count;
   key.player_a_cards = EncodedComboCards(player_a_hand);
   key.player_b_cards = EncodedComboCards(player_b_hand);
   key.board_cards = EncodedBoardCards(state);

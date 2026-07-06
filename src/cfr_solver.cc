@@ -646,7 +646,7 @@ CFRSolver::PublicStateKey CFRSolver::make_public_state_key(
   return {betting_history_id, card_abstraction_.public_bucket(state)};
 }
 
-CFRSolver::CompactPublicState
+CompactPublicState
 CFRSolver::compact_public_state_from_game_state(
     uint32_t betting_history_id,
     const GameState& state) {
@@ -688,6 +688,12 @@ CFRSolver::compact_public_state_from_game_state(
     compact_action.player = static_cast<int8_t>(action.player);
     compact_action.kind = action.kind;
     public_state_history_overflow_.push_back(compact_action);
+    compact.last_action = compact_action;
+  }
+  if (!state.history.empty()) {
+    const GameAction& action = state.history.back();
+    compact.last_action = {action.amount, static_cast<int8_t>(action.player),
+                           action.kind};
   }
   compact.street = state.street;
   compact.all_in = state.all_in;
@@ -758,7 +764,7 @@ GameState CFRSolver::materialize_game_state(
 // Read an action from the compact inline history or the solver-owned overflow
 // table. Overflow is rare, but keeping it out of PublicStateRow keeps normal
 // rows pointer-free.
-CFRSolver::CompactAction CFRSolver::compact_history_action(
+CompactAction CFRSolver::compact_history_action(
     const CompactPublicState& state,
     uint16_t action_index) const {
   if (action_index >= state.history_size) {
@@ -842,10 +848,12 @@ void CFRSolver::append_compact_history_action(
     public_state_history_overflow_.push_back(
         {action.amount, static_cast<int8_t>(action.player), action.kind});
   }
+  state.last_action = {action.amount, static_cast<int8_t>(action.player),
+                       action.kind};
   state.history_size += 1;
 }
 
-CFRSolver::CompactPublicState CFRSolver::apply_compact_action(
+CompactPublicState CFRSolver::apply_compact_action(
     const CompactPublicState& parent,
     const GameAction& action,
     uint32_t child_betting_history_id) {
@@ -929,6 +937,7 @@ CFRSolver::CompactPublicState CFRSolver::apply_compact_action(
 
 void CFRSolver::reset_compact_history(CompactPublicState& state) {
   state.history_size = 0;
+  state.last_action = CompactAction{};
   state.history_overflow_offset = std::numeric_limits<uint32_t>::max();
   state.history_overflow_size = 0;
 }
@@ -938,66 +947,16 @@ int CFRSolver::compact_first_player_for_street(
   return state.street == StreetKind::kPreflop ? 0 : 1;
 }
 
-bool CFRSolver::compact_board_complete(
-    const CompactPublicState& state) const {
-  return state.street == StreetKind::kRiver &&
-         state.board_count >= kMaxBoardCards;
-}
-
-bool CFRSolver::compact_is_betting_round_over(
-    const CompactPublicState& state) const {
-  if (state.folded_player >= 0) {
-    return true;
-  }
-  const bool calls_matched =
-      compact_outstanding_to_call(state, 0) == 0 &&
-      compact_outstanding_to_call(state, 1) == 0;
-  if (state.all_in) {
-    const int player = state.player_to_act;
-    return calls_matched || !IsPlayer(player) || state.stack[player] == 0 ||
-           compact_outstanding_to_call(state, player) == 0;
-  }
-  if (state.history_size == 0 || !calls_matched) {
-    return false;
-  }
-
-  const CompactAction last =
-      compact_history_action(state, state.history_size - 1);
-  if (last.kind == ActionKind::kCall) {
-    return state.history_size > 1;
-  }
-  return last.kind == ActionKind::kCheck &&
-         state.player_to_act == compact_first_player_for_street(state);
-}
-
-bool CFRSolver::compact_is_hand_over(
-    const CompactPublicState& state) const {
-  return compact_board_complete(state) && compact_is_betting_round_over(state);
-}
-
-bool CFRSolver::compact_is_terminal(
-    const CompactPublicState& state) const {
-  return state.folded_player >= 0 || compact_is_hand_over(state);
-}
-
-int CFRSolver::compact_player_to_act(
-    const CompactPublicState& state) const {
-  if (compact_is_terminal(state)) {
-    return -1;
-  }
-  if (compact_is_betting_round_over(state)) {
-    return -1;
-  }
-  if (IsPlayer(state.player_to_act)) {
-    return state.player_to_act;
-  }
-  return compact_first_player_for_street(state);
-}
-
 void CFRSolver::add_compact_board_card(CompactPublicState& state,
                                        CardId card) {
   if (state.board_count >= state.board_cards.size()) {
-    throw std::invalid_argument("Board already has five cards");
+    throw std::invalid_argument(
+        "Compact board already has five cards on street " +
+        std::to_string(static_cast<int>(state.street)) +
+        " history=" + std::to_string(state.history_size) +
+        " all_in=" + std::to_string(state.all_in ? 1 : 0) +
+        " player_to_act=" + std::to_string(state.player_to_act) +
+        " betting_history_id=" + std::to_string(state.betting_history_id));
   }
   const CardMask card_bit = CardBit(card);
   if ((state.board_mask & card_bit) != 0) {
@@ -1008,7 +967,7 @@ void CFRSolver::add_compact_board_card(CompactPublicState& state,
   state.board_mask |= card_bit;
 }
 
-CFRSolver::CompactPublicState CFRSolver::apply_compact_chance(
+CompactPublicState CFRSolver::apply_compact_chance(
     const CompactPublicState& parent,
     absl::Span<const CardId> cards,
     uint32_t child_betting_history_id) {
@@ -1037,115 +996,6 @@ CFRSolver::CompactPublicState CFRSolver::apply_compact_chance(
   return child;
 }
 
-const std::vector<double>& CFRSolver::compact_bet_sizes_for_street(
-    StreetKind street) const {
-  switch (street) {
-    case StreetKind::kPreflop:
-      return config_.preflop_bet_sizes.empty() ? config_.bet_sizes
-                                               : config_.preflop_bet_sizes;
-    case StreetKind::kFlop:
-      return config_.flop_bet_sizes.empty() ? config_.bet_sizes
-                                            : config_.flop_bet_sizes;
-    case StreetKind::kTurn:
-      return config_.turn_bet_sizes.empty() ? config_.bet_sizes
-                                            : config_.turn_bet_sizes;
-    case StreetKind::kRiver:
-      return config_.river_bet_sizes.empty() ? config_.bet_sizes
-                                             : config_.river_bet_sizes;
-  }
-  return config_.bet_sizes;
-}
-
-int CFRSolver::compact_concrete_bet_amount(
-    const CompactPublicState& state,
-    double size) const {
-  if (size <= 0.0) {
-    return 0;
-  }
-  return std::max(1, static_cast<int>(std::max(1, state.pot) * size));
-}
-
-void CFRSolver::append_compact_action(
-    std::array<GameAction, GameTree::kMaxActionsPerNode>& actions,
-    uint8_t& action_count,
-    ActionKind kind,
-    int amount) const {
-  if (action_count >= GameTree::kMaxActionsPerNode) {
-    throw std::logic_error("PublicStateRow exceeded kMaxActionsPerNode");
-  }
-  actions[static_cast<size_t>(action_count)] = {kind, amount, -1};
-  ++action_count;
-}
-
-bool CFRSolver::append_compact_action_if_missing(
-    std::array<GameAction, GameTree::kMaxActionsPerNode>& actions,
-    uint8_t& action_count,
-    ActionKind kind,
-    int amount) const {
-  for (uint8_t i = 0; i < action_count; ++i) {
-    const GameAction& action = actions[static_cast<size_t>(i)];
-    if (action.kind == kind && action.amount == amount) {
-      return false;
-    }
-  }
-  append_compact_action(actions, action_count, kind, amount);
-  return true;
-}
-
-uint8_t CFRSolver::compact_legal_actions(
-    const CompactPublicState& state,
-    int player,
-    std::array<GameAction, GameTree::kMaxActionsPerNode>& actions) const {
-  uint8_t action_count = 0;
-  if (!IsPlayer(player)) {
-    return action_count;
-  }
-
-  const int stack = state.stack[player];
-  if (stack <= 0) {
-    return action_count;
-  }
-
-  const int to_call = compact_outstanding_to_call(state, player);
-  const std::vector<double>& bet_sizes =
-      compact_bet_sizes_for_street(state.street);
-  if (to_call > 0) {
-    append_compact_action(actions, action_count, ActionKind::kFold, 0);
-    append_compact_action(actions, action_count, ActionKind::kCall,
-                          std::min(to_call, stack));
-
-    for (double size : bet_sizes) {
-      const int raise_amount =
-          to_call + compact_concrete_bet_amount(state, size);
-      if (raise_amount < stack) {
-        append_compact_action_if_missing(actions, action_count,
-                                         ActionKind::kRaise, raise_amount);
-      }
-    }
-    if (stack > to_call) {
-      append_compact_action(actions, action_count, ActionKind::kAllIn, stack);
-    }
-    return action_count;
-  }
-
-  append_compact_action(actions, action_count, ActionKind::kCheck, 0);
-  for (double size : bet_sizes) {
-    const int bet_amount = compact_concrete_bet_amount(state, size);
-    if (bet_amount < stack) {
-      append_compact_action_if_missing(actions, action_count,
-                                       ActionKind::kBet, bet_amount);
-    }
-  }
-  append_compact_action(actions, action_count, ActionKind::kAllIn, stack);
-  return action_count;
-}
-
-uint8_t CFRSolver::compact_legal_actions(
-    const CompactPublicState& state,
-    std::array<GameAction, GameTree::kMaxActionsPerNode>& actions) const {
-  return compact_legal_actions(state, compact_player_to_act(state), actions);
-}
-
 CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
     uint32_t betting_history_id,
     const GameState& state) {
@@ -1157,20 +1007,13 @@ CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
     CompactPublicState state) {
   PublicStateRow row;
   row.public_bucket = card_abstraction_.public_bucket(state);
-  row.is_terminal = compact_is_terminal(state);
-  if (row.is_terminal || compact_is_betting_round_over(state)) {
-    row.player_to_act = -1;
-  } else if (IsPlayer(state.player_to_act)) {
-    row.player_to_act = state.player_to_act;
-  } else {
-    row.player_to_act = compact_first_player_for_street(state);
-  }
+  row.is_terminal = game_tree_->is_terminal(state);
+  row.player_to_act = game_tree_->get_player_to_act(state);
   row.state = std::move(state);
   row.is_chance_node = !row.is_terminal && row.player_to_act == -1;
 
   if (!row.is_terminal && !row.is_chance_node && IsPlayer(row.player_to_act)) {
-    row.action_count =
-        compact_legal_actions(row.state, row.player_to_act, row.actions);
+    row.action_count = game_tree_->get_legal_actions(row.state, row.actions);
     for (int i = 0; i < row.action_count; ++i) {
       row.action_ids[static_cast<size_t>(i)] =
           GameTree::action_key(row.actions[static_cast<size_t>(i)]);
@@ -1912,7 +1755,7 @@ CFRSolver::strategy_public_chance_child_ids() const {
              : public_chance_child_ids_;
 }
 
-const std::vector<CFRSolver::CompactAction>&
+const std::vector<CompactAction>&
 CFRSolver::strategy_public_state_history_overflow() const {
   return strategy_tables_view_ != nullptr
              ? *strategy_tables_view_->public_state_history_overflow
@@ -2224,11 +2067,10 @@ double CFRSolver::cfr_with_ranges(
     } else {
       POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.showdown_utility_calls);
     }
-    const GameState state = materialize_game_state(row.state);
     if (max_depth > 0) {
-      return uncached_utility(state, player_a_cards, player_b_cards);
+      return uncached_utility(row.state, player_a_cards, player_b_cards);
     }
-    return utility(state, player_a_cards, player_b_cards);
+    return utility(row.state, player_a_cards, player_b_cards);
   }
 
   if (row.is_chance_node) {
@@ -2239,6 +2081,8 @@ double CFRSolver::cfr_with_ranges(
   }
 
   if (max_depth > 0 && depth >= max_depth) {
+    // Continuation providers still consume GameState. This cutoff path is
+    // intentionally left materialized until continuation contexts move compact.
     const GameState state = materialize_game_state(row.state);
     ContinuationContext context = build_continuation_context(
         state, player_a_cards.combo, player_b_cards.combo, player_a_range,
@@ -2414,7 +2258,9 @@ double CFRSolver::chance_sampling_cfr(
   if (public_state_id >= rows.size()) {
     return 0.0;
   }
-  const GameState state = materialize_game_state(rows[public_state_id].state);
+  // Child creation may grow public_state_rows_, so keep a local copy instead
+  // of holding a reference into the vector across samples.
+  const CompactPublicState state = rows[public_state_id].state;
 
   const int samples = ChanceSamples(config_);
   POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.chance_samples += samples);
@@ -2999,11 +2845,10 @@ double CFRSolver::evaluate_strategy_node(
   const PublicStateRow& row = rows[public_state_id];
 
   if (row.is_terminal) {
-    return utility(materialize_game_state(row.state), player_a_cards,
-                   player_b_cards);
+    return utility(row.state, player_a_cards, player_b_cards);
   }
   if (row.is_chance_node) {
-    const GameState state = materialize_game_state(row.state);
+    const CompactPublicState state = row.state;
     const int samples = ChanceSamples(config_);
     double value = 0.0;
     int evaluated = 0;
@@ -3528,6 +3373,28 @@ double CFRSolver::utility(const GameState& state,
       });
 }
 
+double CFRSolver::utility(const CompactPublicState& state,
+                          const PrivateCards& player_a_cards,
+                          const PrivateCards& player_b_cards) {
+  const double player_a_contribution = state.player_contribution[0];
+  if (state.folded_player == 0) {
+    return -player_a_contribution;
+  }
+  if (state.folded_player == 1) {
+    return state.pot - player_a_contribution;
+  }
+
+  if (state.board_count + 2 < 5) {
+    return 0.0;
+  }
+
+  return utility_cache_->get_or_compute(
+      state, player_a_cards.combo, player_b_cards.combo, [&]() {
+        return game_tree_->get_utility(
+            state, player_a_cards.combo, player_b_cards.combo);
+      });
+}
+
 double CFRSolver::uncached_utility(const GameState& state,
                                    const PrivateCards& player_a_cards,
                                    const PrivateCards& player_b_cards) {
@@ -3540,6 +3407,25 @@ double CFRSolver::uncached_utility(const GameState& state,
   }
 
   if (state.board_cards.size() + 2 < 5) {
+    return 0.0;
+  }
+
+  return game_tree_->get_utility(
+      state, player_a_cards.combo, player_b_cards.combo);
+}
+
+double CFRSolver::uncached_utility(const CompactPublicState& state,
+                                   const PrivateCards& player_a_cards,
+                                   const PrivateCards& player_b_cards) {
+  const double player_a_contribution = state.player_contribution[0];
+  if (state.folded_player == 0) {
+    return -player_a_contribution;
+  }
+  if (state.folded_player == 1) {
+    return state.pot - player_a_contribution;
+  }
+
+  if (state.board_count + 2 < 5) {
     return 0.0;
   }
 

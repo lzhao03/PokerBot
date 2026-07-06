@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -105,6 +106,38 @@ struct GameState {
       ++player_contribution_count;
     }
   }
+};
+
+struct CompactAction {
+  int amount = 0;
+  int8_t player = -1;
+  ActionKind kind = ActionKind::kNoAction;
+};
+
+struct CompactPublicState {
+  static constexpr int kMaxHistoryActions = 32;
+  static constexpr uint32_t kInvalidBettingHistoryId =
+      std::numeric_limits<uint32_t>::max();
+
+  std::array<int, kPlayerCount> stack = {0, 0};
+  int pot = 0;
+  std::array<CardId, kMaxBoardCards> board_cards = {};
+  uint8_t board_count = 0;
+  CardMask board_mask = 0;
+  std::array<int, kMaxHistoryActions> history_amounts = {};
+  std::array<int8_t, kMaxHistoryActions> history_players = {};
+  std::array<ActionKind, kMaxHistoryActions> history_kinds = {};
+  uint16_t history_size = 0;
+  CompactAction last_action;
+  uint32_t history_overflow_offset = std::numeric_limits<uint32_t>::max();
+  uint16_t history_overflow_size = 0;
+  StreetKind street = StreetKind::kPreflop;
+  bool all_in = false;
+  int folded_player = -1;
+  int player_to_act = 0;
+  std::array<int, kPlayerCount> player_contribution = {0, 0};
+  int player_contribution_count = 0;
+  uint32_t betting_history_id = kInvalidBettingHistoryId;
 };
 
 inline int SuitIndex(SuitKind suit) {
