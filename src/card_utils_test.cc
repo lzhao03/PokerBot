@@ -68,6 +68,47 @@ void CheckSampledStreetCardsAvoidKnownCards() {
          "sampled cards should avoid known cards");
 }
 
+void CheckCompactSampledStreetCardsAvoidKnownCards() {
+  CardMask known_private_cards = 0;
+  known_private_cards |= CardBit(MakeCardId(14, SuitKind::kSpades));
+  known_private_cards |= CardBit(MakeCardId(13, SuitKind::kSpades));
+
+  CompactPublicState state;
+  state.street = StreetKind::kTurn;
+  AddBoardCard(state, MakeCardId(2, SuitKind::kClubs));
+  AddBoardCard(state, MakeCardId(3, SuitKind::kDiamonds));
+  AddBoardCard(state, MakeCardId(4, SuitKind::kHearts));
+  AddBoardCard(state, MakeCardId(5, SuitKind::kSpades));
+
+  std::mt19937 rng(12345);
+  const auto sampled = SampleStreetCards(state, known_private_cards, rng);
+  Expect(sampled.size() == 1, "turn samples one river card");
+
+  const CardMask known_cards = known_private_cards | state.board_mask;
+  Expect((known_cards & CardBit(sampled[0])) == 0,
+         "compact sampled cards should avoid known cards");
+}
+
+void CheckOneCardSamplingReturnsOnlyUnblockedCard() {
+  std::vector<CardId> deck = BuildDeck();
+  const CardId legal_card = deck.back();
+  CardMask known_private_cards = 0;
+  for (CardId card : deck) {
+    if (card != legal_card) {
+      known_private_cards |= CardBit(card);
+    }
+  }
+
+  GameState state;
+  state.street = StreetKind::kFlop;
+
+  std::mt19937 rng(12345);
+  const auto sampled = SampleStreetCards(state, known_private_cards, rng);
+  Expect(sampled.size() == 1, "one-card sampling should return one card");
+  Expect(sampled[0] == legal_card,
+         "one-card sampling should return the only unblocked card");
+}
+
 void CheckSampledFlopCardsAreUniqueAndAvoidKnownCards() {
   CardMask known_private_cards = 0;
   known_private_cards |= CardBit(MakeCardId(14, SuitKind::kSpades));
@@ -116,6 +157,8 @@ int main() {
   poker::CheckBuildDeckHasUniqueCards();
   poker::CheckCardsForNextStreet();
   poker::CheckSampledStreetCardsAvoidKnownCards();
+  poker::CheckCompactSampledStreetCardsAvoidKnownCards();
+  poker::CheckOneCardSamplingReturnsOnlyUnblockedCard();
   poker::CheckSampledFlopCardsAreUniqueAndAvoidKnownCards();
   poker::CheckSamplingThrowsWhenDeckIsTooSmall();
   return 0;

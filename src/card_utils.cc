@@ -46,6 +46,18 @@ absl::InlinedVector<CardId, 5> SampleStreetCardsForState(
   }
 
   const CardMask blocked_mask = known_private_cards | board_mask;
+  if (count == 1) {
+    std::uniform_int_distribution<int> card_distribution(
+        0, kDeckCardCount - 1);
+    for (int attempt = 0; attempt < kDeckCardCount; ++attempt) {
+      const CardId candidate =
+          static_cast<CardId>(card_distribution(rng));
+      if ((blocked_mask & CardBit(candidate)) == 0) {
+        return {candidate};
+      }
+    }
+  }
+
   std::array<CardId, kDeckCardCount> candidates = {};
   int candidate_count = 0;
   for (int card_id = 0; card_id < kDeckCardCount; ++card_id) {
