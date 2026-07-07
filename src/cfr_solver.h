@@ -159,7 +159,9 @@ class CFRSolver {
   };
 
   struct TraversalScratch {
-    void reserve_depth(size_t depth_count) { frames.reserve(depth_count); }
+    explicit TraversalScratch(size_t depth_count) {
+      frames.reserve(depth_count);
+    }
 
     RangeScratchFrame& frame(size_t depth) {
       if (depth >= frames.capacity()) {

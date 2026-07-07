@@ -1749,8 +1749,7 @@ int CFRSolver::run_warmup_phase(
   VLOG(1) << "Warmup phase: "
           << (auto_warmup ? "adaptive" : std::to_string(warmup_count))
           << " single-threaded iterations";
-  TraversalScratch scratch;
-  scratch.reserve_depth(ScratchDepthReserve(config_, max_depth));
+  TraversalScratch scratch(ScratchDepthReserve(config_, max_depth));
   const int64_t warmup_start_updates = cfr_update_count_;
   const auto warmup_start = std::chrono::steady_clock::now();
   int completed_warmup = 0;
@@ -1909,12 +1908,14 @@ void CFRSolver::run_frozen_iterations(
           TrainingRangeView player_a_hands_view;
           TrainingRangeView player_b_hands_view;
           const int max_depth = config_.max_depth;
-          TraversalScratch scratch;
+          const size_t scratch_depth =
+              use_frozen_regret_only ? 0
+                                     : ScratchDepthReserve(config_, max_depth);
+          TraversalScratch scratch(scratch_depth);
           if (!use_frozen_regret_only) {
             // Per-worker range views (read-only, built from shared training data).
             player_a_hands_view.reset_to_all(player_a_training_range);
             player_b_hands_view.reset_to_all(player_b_training_range);
-            scratch.reserve_depth(ScratchDepthReserve(config_, max_depth));
           }
 
           double local_utility = 0.0;
