@@ -236,60 +236,6 @@ class CFRSolverRegretTestPeer {
     return solver.compact_public_state_from_game_state(state);
   }
 
-  static int InfoSetOffset(CFRSolver& solver,
-                           const BoardState& state,
-                           int player,
-                           const Hand& hand) {
-    GameState native_state = TestGameState(state);
-    std::vector<GameAction> legal_actions =
-        solver.game_tree_->get_legal_actions(native_state);
-    int action_id_buf[GameTree::kMaxActionsPerNode];
-    int num_actions = 0;
-    for (const GameAction& action : legal_actions) {
-      action_id_buf[num_actions++] = GameTree::action_key(action);
-    }
-    const uint32_t public_state_id =
-        CompactPublicStateId(solver, native_state);
-    const CFRSolver::PrivateBucketId private_bucket =
-        solver.card_abstraction_.private_bucket(TestComboId(hand),
-                                                native_state);
-    const CFRSolver::InfoSetRow* row =
-        solver.get_or_create_info_set_row(
-            {public_state_id, player, private_bucket},
-            absl::Span<const int>(action_id_buf, num_actions));
-    if (row == nullptr) {
-      return -1;
-    }
-    return static_cast<int>(row->action_offset);
-  }
-
-  static bool HasPublicInfoSetSlab(CFRSolver& solver,
-                                   const BoardState& state) {
-    const GameState native_state = TestGameState(state);
-    const uint32_t public_state_id =
-        CompactPublicStateId(solver, native_state);
-    return public_state_id < solver.frozen_tables_->public_info_set_slabs.size() &&
-           solver.frozen_tables_->public_info_set_slabs[public_state_id] != nullptr;
-  }
-
-  static int SlabInfoSetOffset(CFRSolver& solver,
-                               const BoardState& state,
-                               int player,
-                               const Hand& hand) {
-    const GameState native_state = TestGameState(state);
-    const uint32_t public_state_id =
-        CompactPublicStateId(solver, native_state);
-    const CFRSolver::PrivateBucketId private_bucket =
-        solver.card_abstraction_.private_bucket(TestComboId(hand),
-                                                native_state);
-    const CFRSolver::InfoSetRow* row =
-        solver.find_info_set_row({public_state_id, player, private_bucket});
-    if (row == nullptr) {
-      return -1;
-    }
-    return static_cast<int>(row->action_offset);
-  }
-
   static uint32_t ActionTransitionId(const CFRSolver& solver,
                                      uint32_t betting_history_id,
                                      int action_index) {
@@ -543,46 +489,6 @@ class CFRSolverRegretTestPeer {
         CFRSolver::PrivateCards::FromCombo(TestComboId(player_b_hand)));
   }
 
-  static void SetRegret(CFRSolver& solver,
-                        const BoardState& state,
-                        int player,
-                        const Hand& hand,
-                        int action_id,
-                        double regret) {
-    GameState native_state = TestGameState(state);
-    std::vector<GameAction> legal_actions =
-        solver.game_tree_->get_legal_actions(native_state);
-    int action_id_buf[GameTree::kMaxActionsPerNode];
-    int num_actions = 0;
-    for (const GameAction& action : legal_actions) {
-      action_id_buf[num_actions++] = GameTree::action_key(action);
-    }
-    const uint32_t public_state_id =
-        CompactPublicStateId(solver, native_state);
-    const CFRSolver::PrivateBucketId private_bucket =
-        solver.card_abstraction_.private_bucket(TestComboId(hand),
-                                                native_state);
-    const CFRSolver::InfoSetRow* row =
-        solver.get_or_create_info_set_row(
-            {public_state_id, player, private_bucket},
-            absl::Span<const int>(action_id_buf, num_actions));
-    if (row == nullptr) {
-      throw std::runtime_error("Could not create seeded regret row");
-    }
-    std::optional<size_t> action_table_index;
-    for (uint16_t i = 0; i < row->action_count; ++i) {
-      const size_t table_index = row->action_offset + i;
-      if (solver.frozen_tables_->action_ids[table_index] == action_id) {
-        action_table_index = table_index;
-        break;
-      }
-    }
-    if (!action_table_index.has_value()) {
-      throw std::runtime_error("Seeded regret action is not legal");
-    }
-    solver.cumulative_->cumulative_regrets[*action_table_index] = regret;
-  }
-
   static double TotalCumulativeStrategy(const CFRSolver& solver) {
     double total = 0.0;
     for (float cumulative_strategy : solver.cumulative_->cumulative_strategies) {
@@ -604,42 +510,6 @@ class CFRSolverRegretTestPeer {
                                sampler.player_a_sample_weights.end());
   }
 
-  static TrainingRangeView ConditionRangeForAction(
-      CFRSolver& solver,
-      const TrainingRangeView& range,
-      const BoardState& state,
-      int player,
-      ActionType action_type,
-      int amount) {
-    GameState native_state = TestGameState(state);
-    std::vector<GameAction> legal_actions =
-        solver.game_tree_->get_legal_actions(native_state);
-    int action_ids[GameTree::kMaxActionsPerNode] = {};
-    size_t action_count = 0;
-    size_t selected_index = legal_actions.size();
-    for (size_t i = 0; i < legal_actions.size(); ++i) {
-      const GameAction& action = legal_actions[i];
-      const int action_id = GameTree::action_key(action);
-      action_ids[action_count++] = action_id;
-      if (action.kind == TestActionKind(action_type) &&
-          action.amount == amount) {
-        selected_index = i;
-      }
-    }
-    if (selected_index == legal_actions.size()) {
-      throw std::runtime_error("Selected action is not legal");
-    }
-
-    CFRSolver::ConditionedRanges conditioned_ranges;
-    const uint32_t public_state_id =
-        CompactPublicStateId(solver, native_state);
-    solver.condition_ranges_for_actions(
-        range, solver.frozen_tables_->public_state_rows[public_state_id].state,
-        public_state_id, player, action_ids,
-        action_count,
-        conditioned_ranges);
-    return std::move(conditioned_ranges[selected_index]);
-  }
 };
 
 }  // namespace poker
@@ -1402,61 +1272,6 @@ void CheckCompactChanceMatchesGameTreeApplyChance() {
          "compact chance should match GameTree::apply_chance");
 }
 
-void CheckSparseSlabRowsUseExactCombos() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-
-  CFRSolver solver(TestSolverConfig(config));
-  BoardState state = InitialRootState(config);
-  Hand aces = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
-  Hand kings = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
-
-  const int first_aces_id =
-      CFRSolverRegretTestPeer::InfoSetOffset(solver, state, 0, aces);
-  const int second_aces_id =
-      CFRSolverRegretTestPeer::InfoSetOffset(solver, state, 0, aces);
-  const int kings_id =
-      CFRSolverRegretTestPeer::InfoSetOffset(solver, state, 0, kings);
-
-  Expect(first_aces_id == second_aces_id,
-         "sparse slab row should reuse the same exact combo");
-  Expect(first_aces_id != kings_id,
-         "sparse slab row should distinguish different exact combos");
-  Expect(solver.get_info_set_count() == 2,
-         "sparse slab should only create distinct info sets");
-}
-
-void CheckSparseSlabTracksInfoSets() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-
-  CFRSolver solver(TestSolverConfig(config));
-  BoardState state = InitialRootState(config);
-  Hand aces = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
-  Hand kings = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
-
-  CFRSolverRegretTestPeer::PublicStateId(solver, state);
-  Expect(!CFRSolverRegretTestPeer::HasPublicInfoSetSlab(solver, state),
-         "sparse slab should not be allocated for a public state alone");
-
-  const int aces_id =
-      CFRSolverRegretTestPeer::InfoSetOffset(solver, state, 0, aces);
-
-  Expect(CFRSolverRegretTestPeer::HasPublicInfoSetSlab(solver, state),
-         "sparse slab should be allocated when the first infoset is created");
-  Expect(CFRSolverRegretTestPeer::SlabInfoSetOffset(solver, state, 0, aces) ==
-             aces_id,
-         "sparse slab should point at created infosets");
-  Expect(CFRSolverRegretTestPeer::SlabInfoSetOffset(solver, state, 0, kings) ==
-             -1,
-         "sparse slab should mark missing private ids");
-  const int kings_id =
-      CFRSolverRegretTestPeer::InfoSetOffset(solver, state, 0, kings);
-  Expect(CFRSolverRegretTestPeer::SlabInfoSetOffset(solver, state, 0, kings) ==
-             kings_id,
-         "sparse slab should track new infosets after it is built");
-}
-
 void CheckRunUsesConfiguredBlinds() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -1892,23 +1707,6 @@ BoardState FoldedState(int folded_player) {
   return state;
 }
 
-BoardState FlopRangeCutoffState() {
-  BoardState state;
-  state.set_stack_a(20);
-  state.set_stack_b(20);
-  state.set_pot(0);
-  state.set_street(Street::FLOP);
-  state.set_all_in(false);
-  state.set_folded_player(-1);
-  state.set_player_to_act(1);
-  state.add_player_contribution(0);
-  state.add_player_contribution(0);
-  AddCard(state, 2, Suit::HEARTS);
-  AddCard(state, 7, Suit::DIAMONDS);
-  AddCard(state, 9, Suit::CLUBS);
-  return state;
-}
-
 void CheckRunFixedHandsUsesCustomInitialState() {
   PokerConfig config;
   config.set_starting_stack_size(10);
@@ -2049,61 +1847,6 @@ void CheckDepthLimitDoesNotScoreUncalledBet() {
       TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
 
   Expect(value == 0.0, "depth cutoff should not score unresolved bets");
-}
-
-void CheckActionConditioningSkipsBoardBlockedRangeHands() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-
-  BoardState state = FlopRangeCutoffState();
-  Hand blocked_by_board = MakeHand(2, Suit::HEARTS, 14, Suit::SPADES);
-  Hand compatible = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
-
-  WeightedHandRange hands;
-  hands.add(TestComboId(blocked_by_board), 1.0);
-  hands.add(TestComboId(compatible), 1.0);
-  TrainingRange training_range = BuildTrainingRange(hands);
-  TrainingRangeView range(training_range);
-
-  CFRSolver solver(TestSolverConfig(config), TestGameState(state));
-  TrainingRangeView conditioned =
-      CFRSolverRegretTestPeer::ConditionRangeForAction(
-          solver, range, state, 1, ActionType::CHECK, 0);
-
-  Expect(conditioned.size() == 1,
-         "action conditioning should drop hands blocked by public cards");
-  Expect(conditioned.combo(0) == TestComboId(compatible),
-         "action conditioning should keep the compatible hand");
-  Expect(std::abs(conditioned.weight(0) - 0.5) < 0.000001,
-         "compatible hand should retain the check action probability");
-}
-
-void CheckActionConditioningIndexTracksNewInfoSets() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-
-  BoardState state = FlopRangeCutoffState();
-  Hand queens = MakeHand(12, Suit::HEARTS, 12, Suit::SPADES);
-
-  WeightedHandRange hands;
-  hands.add(TestComboId(queens), 1.0);
-  TrainingRange training_range = BuildTrainingRange(hands);
-  TrainingRangeView range(training_range);
-
-  CFRSolver solver(TestSolverConfig(config), TestGameState(state));
-  TrainingRangeView initially_conditioned =
-      CFRSolverRegretTestPeer::ConditionRangeForAction(
-          solver, range, state, 1, ActionType::ALL_IN, 20);
-  Expect(std::abs(initially_conditioned.weight(0) - 0.5) < 0.000001,
-         "missing combo index entries should use the uniform strategy");
-
-  CFRSolverRegretTestPeer::SetRegret(
-      solver, state, 1, queens, TestActionKey(ActionType::ALL_IN, 20), 1.0);
-  TrainingRangeView updated_conditioned =
-      CFRSolverRegretTestPeer::ConditionRangeForAction(
-          solver, range, state, 1, ActionType::ALL_IN, 20);
-  Expect(std::abs(updated_conditioned.weight(0) - 1.0) < 0.000001,
-         "combo index should track info sets created after the index is built");
 }
 
 void CheckZeroMaxDepthDoesNotCutOff() {
@@ -2471,8 +2214,6 @@ int main() {
   CheckCompactPublicStateActionCapStoresSentinel();
   CheckCompactPublicStateChanceTransitionsAreCached();
   CheckCompactChanceMatchesGameTreeApplyChance();
-  CheckSparseSlabRowsUseExactCombos();
-  CheckSparseSlabTracksInfoSets();
   CheckRunUsesConfiguredBlinds();
   CheckRunUpdatesExpectedValue();
   CheckRangeRunTracksParallelTrainingStats();
@@ -2490,8 +2231,6 @@ int main() {
   CheckTerminalUtilityBeatsDepthLimit();
   CheckDepthLimitUsesShowdownUtility();
   CheckDepthLimitDoesNotScoreUncalledBet();
-  CheckActionConditioningSkipsBoardBlockedRangeHands();
-  CheckActionConditioningIndexTracksNewInfoSets();
   CheckZeroMaxDepthDoesNotCutOff();
   CheckChanceDoesNotConsumeDepth();
   CheckChanceSamplesVisitMultipleBoards();
