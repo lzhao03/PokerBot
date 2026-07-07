@@ -416,6 +416,14 @@ class CFRSolver {
       const PublicStateRow& row,
       const ExactBoardState& exact_board,
       CardMask known_private_cards);
+  void record_action_entry_touches(int64_t count = 1);
+  void record_cfr_update(StreetKind street, int depth);
+  void record_chance_samples(int64_t count);
+  void record_terminal_utility(bool showdown);
+  void record_child_node_created();
+  void record_betting_history_transition_hit();
+  void record_betting_history_transition_miss();
+  void record_atomic_regret_update_retries(int64_t count);
 
   SolverConfig config_;
   CompactPublicState initial_state_;

@@ -99,21 +99,10 @@ inline float AtomicFloatLoad(const float* src) {
 #define POKER_ENABLE_TRAVERSAL_STATS 1
 #endif
 
+constexpr bool kTraversalStatsEnabled = POKER_ENABLE_TRAVERSAL_STATS != 0;
+
 #ifndef POKER_COARSE_PUBLIC_BUCKETS
 #define POKER_COARSE_PUBLIC_BUCKETS 0
-#endif
-
-#if POKER_ENABLE_TRAVERSAL_STATS
-#define POKER_RECORD_TRAVERSAL_STAT(statement) \
-  do {                                         \
-    statement;                                 \
-  } while (false)
-#define POKER_TRAVERSAL_STAT_PTR(member) (&(member))
-#else
-#define POKER_RECORD_TRAVERSAL_STAT(statement) \
-  do {                                         \
-  } while (false)
-#define POKER_TRAVERSAL_STAT_PTR(member) nullptr
 #endif
 
 size_t ScratchDepthReserve(const SolverConfig& config, int max_depth) {
@@ -779,7 +768,7 @@ CFRSolver::InfoSetRow CFRSolver::append_info_set_actions(
     tables.action_ids.push_back(action_id);
     cumulative_->cumulative_regrets.push_back(0.0f);
     cumulative_->cumulative_strategies.push_back(0.0f);
-    POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
+    record_action_entry_touches();
   }
   return row;
 }
@@ -1053,8 +1042,7 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
   const size_t action_slot = static_cast<size_t>(action_index);
   const uint32_t existing_child_id = read_row.action_child_ids[action_slot];
   if (existing_child_id != GameTree::kInvalidPublicStateId) {
-    POKER_RECORD_TRAVERSAL_STAT(
-        ++traversal_stats_.betting_history_transition_hits);
+    record_betting_history_transition_hit();
     if (existing_child_id == kCappedPublicStateId) {
       return std::nullopt;
     }
@@ -1084,16 +1072,14 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
                 .public_state_rows[public_state_id]
                 .action_child_ids[action_slot] = existing_public_child->second;
           }
-          POKER_RECORD_TRAVERSAL_STAT(
-              ++traversal_stats_.betting_history_transition_hits);
+          record_betting_history_transition_hit();
           return existing_public_child->second;
         }
       }
     }
   }
   if (frozen_) {
-    POKER_RECORD_TRAVERSAL_STAT(
-        ++traversal_stats_.betting_history_transition_misses);
+    record_betting_history_transition_miss();
     return std::nullopt;
   }
   if (config_.max_public_states > 0 &&
@@ -1102,8 +1088,7 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
     mutable_tables()
         .public_state_rows[public_state_id]
         .action_child_ids[action_slot] = kCappedPublicStateId;
-    POKER_RECORD_TRAVERSAL_STAT(
-        ++traversal_stats_.betting_history_transition_misses);
+    record_betting_history_transition_miss();
     return std::nullopt;
   }
 
@@ -1121,17 +1106,15 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
     mutable_tables()
         .public_state_rows[public_state_id]
         .action_child_ids[action_slot] = kCappedPublicStateId;
-    POKER_RECORD_TRAVERSAL_STAT(
-        ++traversal_stats_.betting_history_transition_misses);
+    record_betting_history_transition_miss();
     return std::nullopt;
   }
 
   mutable_tables()
       .public_state_rows[public_state_id]
       .action_child_ids[action_slot] = *child_id;
-  POKER_RECORD_TRAVERSAL_STAT(
-      ++traversal_stats_.betting_history_transition_misses);
-  POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.child_nodes_created);
+  record_betting_history_transition_miss();
+  record_child_node_created();
   return child_id;
 }
 
@@ -1148,8 +1131,7 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
   const auto& chance_children = frozen_tables_->public_chance_child_ids;
   auto existing = chance_children.find(transition_key);
   if (existing != chance_children.end()) {
-    POKER_RECORD_TRAVERSAL_STAT(
-        ++traversal_stats_.betting_history_transition_hits);
+    record_betting_history_transition_hit();
     return existing->second;
   }
 #if POKER_COARSE_PUBLIC_BUCKETS
@@ -1171,23 +1153,20 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
           mutable_tables().public_chance_child_ids.emplace(
               transition_key, existing_public_child->second);
         }
-        POKER_RECORD_TRAVERSAL_STAT(
-            ++traversal_stats_.betting_history_transition_hits);
+        record_betting_history_transition_hit();
         return existing_public_child->second;
       }
     }
   }
 #endif
   if (frozen_) {
-    POKER_RECORD_TRAVERSAL_STAT(
-        ++traversal_stats_.betting_history_transition_misses);
+    record_betting_history_transition_miss();
     return std::nullopt;
   }
   if (config_.max_public_states > 0 &&
       static_cast<int>(frozen_tables_->public_state_rows.size()) >=
           config_.max_public_states) {
-    POKER_RECORD_TRAVERSAL_STAT(
-        ++traversal_stats_.betting_history_transition_misses);
+    record_betting_history_transition_miss();
     return std::nullopt;
   }
 
@@ -1201,15 +1180,13 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
       get_or_create_public_state_row(child_betting_history_id,
                                      std::move(stored_child_state));
   if (!child_id.has_value()) {
-    POKER_RECORD_TRAVERSAL_STAT(
-        ++traversal_stats_.betting_history_transition_misses);
+    record_betting_history_transition_miss();
     return std::nullopt;
   }
 
   mutable_tables().public_chance_child_ids.emplace(transition_key, *child_id);
-  POKER_RECORD_TRAVERSAL_STAT(
-      ++traversal_stats_.betting_history_transition_misses);
-  POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.child_nodes_created);
+  record_betting_history_transition_miss();
+  record_child_node_created();
   return child_id;
 }
 
@@ -1795,6 +1772,75 @@ void CFRSolver::add_traversal_stats(const TraversalStats& stats) {
       stats.betting_history_transition_misses;
 }
 
+inline void CFRSolver::record_action_entry_touches(int64_t count) {
+  if constexpr (kTraversalStatsEnabled) {
+    traversal_stats_.action_entry_touches += count;
+  }
+}
+
+inline void CFRSolver::record_cfr_update(StreetKind street, int depth) {
+  if constexpr (kTraversalStatsEnabled) {
+    ++traversal_stats_.cfr_updates;
+    traversal_stats_.max_decision_depth =
+        std::max(traversal_stats_.max_decision_depth, depth);
+    switch (street) {
+      case StreetKind::kPreflop:
+        ++traversal_stats_.preflop_updates;
+        break;
+      case StreetKind::kFlop:
+        ++traversal_stats_.flop_updates;
+        break;
+      case StreetKind::kTurn:
+        ++traversal_stats_.turn_updates;
+        break;
+      case StreetKind::kRiver:
+        ++traversal_stats_.river_updates;
+        break;
+    }
+  }
+}
+
+inline void CFRSolver::record_chance_samples(int64_t count) {
+  if constexpr (kTraversalStatsEnabled) {
+    traversal_stats_.chance_samples += count;
+  }
+}
+
+inline void CFRSolver::record_terminal_utility(bool showdown) {
+  if constexpr (kTraversalStatsEnabled) {
+    ++traversal_stats_.terminal_utility_calls;
+    if (showdown) {
+      ++traversal_stats_.showdown_utility_calls;
+    } else {
+      ++traversal_stats_.fold_utility_calls;
+    }
+  }
+}
+
+inline void CFRSolver::record_child_node_created() {
+  if constexpr (kTraversalStatsEnabled) {
+    ++traversal_stats_.child_nodes_created;
+  }
+}
+
+inline void CFRSolver::record_betting_history_transition_hit() {
+  if constexpr (kTraversalStatsEnabled) {
+    ++traversal_stats_.betting_history_transition_hits;
+  }
+}
+
+inline void CFRSolver::record_betting_history_transition_miss() {
+  if constexpr (kTraversalStatsEnabled) {
+    ++traversal_stats_.betting_history_transition_misses;
+  }
+}
+
+inline void CFRSolver::record_atomic_regret_update_retries(int64_t count) {
+  if constexpr (kTraversalStatsEnabled) {
+    traversal_stats_.atomic_regret_update_retries += count;
+  }
+}
+
 void CFRSolver::run(int iterations, const HandRange& player_a_range,
                     const HandRange& player_b_range) {
   run_iterations(iterations, player_a_range, player_b_range);
@@ -2266,12 +2312,7 @@ double CFRSolver::cfr_with_ranges(
   const PublicStateRow& row = public_state_rows[public_state_id];
 
   if (row.is_terminal) {
-    POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.terminal_utility_calls);
-    if (state.folded_player >= 0) {
-      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.fold_utility_calls);
-    } else {
-      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.showdown_utility_calls);
-    }
+    record_terminal_utility(state.folded_player < 0);
     if (max_depth > 0) {
       return uncached_utility(state, player_a_cards, player_b_cards);
     }
@@ -2333,7 +2374,7 @@ double CFRSolver::cfr_with_ranges(
     double sum_positive_regrets = 0.0;
     for (size_t action_index = 0; action_index < action_count;
          ++action_index) {
-      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
+      record_action_entry_touches();
       const double positive_regret = std::max(
           0.0,
           static_cast<double>(
@@ -2431,24 +2472,7 @@ double CFRSolver::cfr_with_ranges(
   }
 
   ++cfr_update_count_;
-  POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.cfr_updates);
-  POKER_RECORD_TRAVERSAL_STAT(
-      traversal_stats_.max_decision_depth =
-          std::max(traversal_stats_.max_decision_depth, depth));
-  switch (street) {
-    case StreetKind::kPreflop:
-      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.preflop_updates);
-      break;
-    case StreetKind::kFlop:
-      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.flop_updates);
-      break;
-    case StreetKind::kTurn:
-      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.turn_updates);
-      break;
-    case StreetKind::kRiver:
-      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.river_updates);
-      break;
-  }
+  record_cfr_update(street, depth);
 
   if (has_info_set_row && is_update_player) {
     const double opponent_reach_prob = reach_probabilities[1 - player];
@@ -2459,7 +2483,7 @@ double CFRSolver::cfr_with_ranges(
           opponent_reach_prob * utility_sign *
           (action_values[action_index] - node_value);
 
-      POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.action_entry_touches += 2);
+      record_action_entry_touches(2);
       AtomicCFRPlusRegretUpdate(
           &regrets[info_set_action_offset + action_index],
           static_cast<float>(regret));
@@ -2587,7 +2611,7 @@ double CFRSolver::chance_sampling_cfr(
   }
 
   const int samples = ChanceSamples(config_);
-  POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.chance_samples += samples);
+  record_chance_samples(samples);
   RangeScratchFrame& scratch_frame = scratch.frame(depth);
   TrainingRangeView& public_player_a_range =
       scratch_frame.public_player_a_range;
@@ -2649,12 +2673,7 @@ double CFRSolver::cfr_frozen_regret_only(
   const PublicStateRow& row = public_state_rows[public_state_id];
 
   if (row.is_terminal) {
-    POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.terminal_utility_calls);
-    if (row.state.folded_player >= 0) {
-      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.fold_utility_calls);
-    } else {
-      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.showdown_utility_calls);
-    }
+    record_terminal_utility(row.state.folded_player < 0);
     return frozen_utility(row, exact_board, player_a_cards, player_b_cards);
   }
 
@@ -2689,7 +2708,7 @@ double CFRSolver::cfr_frozen_regret_only(
     double sum_positive_regrets = 0.0;
     for (size_t action_index = 0; action_index < action_count;
          ++action_index) {
-      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
+      record_action_entry_touches();
       const float raw_regret =
           use_atomic_updates
               ? AtomicFloatLoad(&regrets[info_set_action_offset +
@@ -2739,24 +2758,7 @@ double CFRSolver::cfr_frozen_regret_only(
   }
 
   ++cfr_update_count_;
-  POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.cfr_updates);
-  POKER_RECORD_TRAVERSAL_STAT(
-      traversal_stats_.max_decision_depth =
-          std::max(traversal_stats_.max_decision_depth, depth));
-  switch (street) {
-    case StreetKind::kPreflop:
-      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.preflop_updates);
-      break;
-    case StreetKind::kFlop:
-      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.flop_updates);
-      break;
-    case StreetKind::kTurn:
-      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.turn_updates);
-      break;
-    case StreetKind::kRiver:
-      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.river_updates);
-      break;
-  }
+  record_cfr_update(street, depth);
 
   if (has_info_set_row && player == update_player) {
     const double opponent_reach_prob = reach_probabilities[1 - player];
@@ -2767,16 +2769,12 @@ double CFRSolver::cfr_frozen_regret_only(
           opponent_reach_prob * utility_sign *
           (action_values[action_index] - node_value);
 
-      POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.action_entry_touches += 2);
+      record_action_entry_touches(2);
       float* regret_entry = &regrets[info_set_action_offset + action_index];
       if (use_atomic_updates) {
-#if POKER_ENABLE_CAS_RETRY_STATS
-        traversal_stats_.atomic_regret_update_retries +=
-            AtomicCFRPlusRegretUpdate(regret_entry,
-                                      static_cast<float>(regret));
-#else
-        AtomicCFRPlusRegretUpdate(regret_entry, static_cast<float>(regret));
-#endif
+        const int64_t retries = AtomicCFRPlusRegretUpdate(
+            regret_entry, static_cast<float>(regret));
+        record_atomic_regret_update_retries(retries);
       } else {
         *regret_entry = std::max(0.0f,
                                  *regret_entry + static_cast<float>(regret));
@@ -2798,7 +2796,7 @@ double CFRSolver::chance_sampling_frozen_regret_only(
     bool use_atomic_updates) {
   const PublicStateRow& row = frozen_tables_->public_state_rows[public_state_id];
   const int samples = ChanceSamples(config_);
-  POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.chance_samples += samples);
+  record_chance_samples(samples);
 
   double value = 0.0;
   const CardMask known_private_cards =
@@ -2869,7 +2867,7 @@ void CFRSolver::average_strategy_probabilities(
       }();
   if (aligned_action_ids) {
     for (int i = 0; i < num_actions; ++i) {
-      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
+      record_action_entry_touches();
       const size_t table_index = action_offset + i;
       probabilities[i] =
           config_.regret_only_training
@@ -2887,7 +2885,7 @@ void CFRSolver::average_strategy_probabilities(
           public_state_row.action_ids[static_cast<size_t>(legal_action_index)];
       for (uint16_t action_index = 0;
            action_index < info_set_row.action_count; ++action_index) {
-        POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
+        record_action_entry_touches();
         const size_t table_index = action_offset + action_index;
         if (action_ids[table_index] == legal_action_id) {
           probabilities[legal_action_index] =
@@ -2976,7 +2974,7 @@ void CFRSolver::condition_ranges_for_actions(
           continue;
         }
 
-        POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
+        record_action_entry_touches();
         const double positive_regret =
             std::max(
                 0.0,
@@ -3086,8 +3084,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   for (std::future<std::pair<double, int64_t>>& future : futures) {
     const std::pair<double, int64_t> result = future.get();
     total += result.first;
-    POKER_RECORD_TRAVERSAL_STAT(
-        traversal_stats_.action_entry_touches += result.second);
+    record_action_entry_touches(result.second);
   }
   return total / samples;
 }
@@ -3302,7 +3299,7 @@ void CFRSolver::update_strategy(size_t action_offset,
                                 double reach_prob) {
   auto& strategies = cumulative_->cumulative_strategies;
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
-    POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.action_entry_touches += 2);
+    record_action_entry_touches(2);
     const float delta = static_cast<float>(
         reach_prob * action_probabilities[action_index]);
     AtomicFloatAdd(&strategies[action_offset + action_index], delta);
