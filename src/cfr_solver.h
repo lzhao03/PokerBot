@@ -228,7 +228,6 @@ private:
   std::shared_ptr<MutableCumulativeArrays> cumulative_;
   
   // Helper methods
-  GameTree::Node& get_or_build_root();
   void run_iterations(int iterations,
                       const HandRange& player_a_range,
                       const HandRange& player_b_range);
@@ -309,7 +308,6 @@ private:
   uint32_t get_or_create_betting_history_id(const GameState& state);
   uint32_t get_or_create_betting_history_id(
       const CompactPublicState& state);
-  uint32_t get_or_create_betting_history_id(GameTree::Node& node);
   uint32_t get_or_create_action_child_betting_history_id(
       uint32_t parent_betting_history_id,
       int action_index,
@@ -317,13 +315,6 @@ private:
   uint32_t get_or_create_chance_child_betting_history_id(
       uint32_t parent_betting_history_id,
       const CompactPublicState& child_state);
-  void cache_action_betting_history_transition(GameTree::Node& node,
-                                               int action_index,
-                                               GameTree::Node& child_node);
-  void cache_chance_betting_history_transition(GameTree::Node& node,
-                                               GameTree::Node& child_node);
-  void cache_betting_history_actions(uint32_t betting_history_id,
-                                     const GameTree::Node& node);
   void cache_betting_history_actions(uint32_t betting_history_id,
                                      const PublicStateRow& row);
   CompactPublicState compact_public_state_from_game_state(
@@ -412,8 +403,6 @@ private:
       absl::Span<const int> action_ids);
   std::optional<uint32_t> strategy_betting_history_id(
       const GameState& state) const;
-  std::optional<uint32_t> strategy_betting_history_id(GameTree::Node& node);
-  std::optional<uint32_t> strategy_public_state_id(GameTree::Node& node);
   FrozenStrategyTables& mutable_tables();
   InfoSetRow append_info_set_actions(absl::Span<const int> action_ids);
   PublicInfoSetSlab& get_or_create_public_info_set_slab(

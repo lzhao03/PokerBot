@@ -296,29 +296,6 @@ class CFRSolverRegretTestPeer {
     return static_cast<int>(row->action_offset);
   }
 
-  static const GameTree::Node& Root(CFRSolver& solver) {
-    return solver.get_or_build_root();
-  }
-
-  static GameTree::Node& MutableRoot(CFRSolver& solver) {
-    return solver.get_or_build_root();
-  }
-
-  static uint32_t NodeBettingHistoryId(CFRSolver& solver,
-                                       GameTree::Node& node) {
-    return solver.get_or_create_betting_history_id(node);
-  }
-
-  static GameTree::Node& ActionChild(CFRSolver& solver,
-                                     GameTree::Node& node,
-                                     int action_index) {
-    GameTree::Node& child =
-        solver.game_tree_->create_child_node(node, action_index);
-    solver.cache_action_betting_history_transition(
-        node, action_index, child);
-    return child;
-  }
-
   static uint32_t ActionTransitionId(const CFRSolver& solver,
                                      uint32_t betting_history_id,
                                      int action_index) {
@@ -396,26 +373,6 @@ class CFRSolverRegretTestPeer {
         static_cast<size_t>(
             index -
             FrozenStrategyTables::BettingHistoryKey::kInlineHistoryValues)];
-  }
-
-  static std::pair<uint32_t, CFRSolver::TraversalStats>
-  SharedViewActionTransitionChildId(CFRSolver& source,
-                                    const GameTree::Node& parent,
-                                    const GameTree::Node& child,
-                                    int action_index) {
-    CFRSolver worker(source.config_);
-    auto tables = std::make_shared<FrozenStrategyTables>();
-    tables->betting_history_rows = source.frozen_tables_->betting_history_rows;
-    worker.frozen_tables_ = tables;
-    worker.mutable_tables_.reset();
-    worker.cumulative_ = source.cumulative_;
-    worker.frozen_ = true;
-    GameTree::Node parent_copy = parent;
-    GameTree::Node child_copy = child;
-    child_copy.betting_history_id = GameTree::Node::kInvalidBettingHistoryId;
-    worker.cache_action_betting_history_transition(parent_copy, action_index,
-                                                   child_copy);
-    return {child_copy.betting_history_id, worker.get_traversal_stats()};
   }
 
   static uint32_t CompactPublicStateId(CFRSolver& solver,
@@ -549,23 +506,6 @@ class CFRSolverRegretTestPeer {
     return solver.frozen_tables_->public_state_rows[public_state_id].state.history_size;
   }
 
-  static size_t LegacyGameTreeNodeCount(const CFRSolver& solver) {
-    return solver.game_tree_->node_count();
-  }
-
-  static size_t PublicStateInfoSetListSize(CFRSolver& solver,
-                                           const GameTree::Node& node,
-                                           int player) {
-    const uint32_t public_state_id =
-        CompactPublicStateId(solver, node.state);
-    const CFRSolver::PublicInfoSetSlab* slab =
-        solver.public_info_set_slab(public_state_id);
-    if (slab == nullptr) {
-      return 0;
-    }
-    return slab->players[player].rows.size();
-  }
-
   static bool PrebuildPublicStates(CFRSolver& solver,
                                    uint32_t root_public_state_id,
                                    int max_depth) {
@@ -667,13 +607,6 @@ class CFRSolverRegretTestPeer {
         TestGameState(state),
         CFRSolver::PrivateCards::FromCombo(TestComboId(player_a_hand)),
         CFRSolver::PrivateCards::FromCombo(TestComboId(player_b_hand)));
-  }
-
-  static GameTree::Node& AddChild(CFRSolver& solver,
-                                  GameTree::Node& node,
-                                  int action_id,
-                                  GameTree::Node child) {
-    return solver.game_tree_->add_child(node, action_id, std::move(child));
   }
 
   static void SetRegret(CFRSolver& solver,
@@ -1153,64 +1086,6 @@ void CheckExactBettingHistoryIdsUseChipState() {
                                                              0) ==
              first.player_contribution[0],
          "exact betting history row should store exact contribution");
-}
-
-void CheckBettingHistoryActionTransitionsAreCached() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-  CFRSolver solver(TestSolverConfig(config));
-  GameTree::Node& root = CFRSolverRegretTestPeer::MutableRoot(solver);
-  Expect(root.action_count > 0, "root should have legal actions");
-
-  const uint32_t root_betting_id =
-      CFRSolverRegretTestPeer::NodeBettingHistoryId(solver, root);
-  Expect(CFRSolverRegretTestPeer::BettingHistoryPot(
-             solver, root_betting_id) == root.state.pot,
-         "betting history row should store pot metadata");
-  Expect(CFRSolverRegretTestPeer::BettingHistoryActionCount(
-             solver, root_betting_id) == root.action_count,
-         "betting history row should store legal action count");
-  Expect(CFRSolverRegretTestPeer::BettingHistoryActionId(
-             solver, root_betting_id, 0) == root.actions[0].key,
-         "betting history row should store legal action keys");
-  for (int i = 0; i < root.action_count; ++i) {
-    Expect(CFRSolverRegretTestPeer::BettingHistoryActionId(
-               solver, root_betting_id, i) == root.actions[i].key,
-           "betting history row should mirror every legal action key");
-  }
-  GameTree::Node& child =
-      CFRSolverRegretTestPeer::ActionChild(solver, root, 0);
-  const uint32_t child_betting_id = child.betting_history_id;
-
-  Expect(root_betting_id != GameTree::Node::kInvalidBettingHistoryId,
-         "root should cache its betting history id");
-  Expect(child_betting_id != GameTree::Node::kInvalidBettingHistoryId,
-         "action child should cache its betting history id");
-  Expect(CFRSolverRegretTestPeer::ActionTransitionId(
-             solver, root_betting_id, 0) == child_betting_id,
-         "parent betting history should cache action child history id");
-
-  GameTree::Node& repeated_child =
-      CFRSolverRegretTestPeer::ActionChild(solver, root, 0);
-  Expect(&repeated_child == &child,
-         "action child lookup should reuse the same game tree node");
-  Expect(CFRSolverRegretTestPeer::ActionTransitionId(
-             solver, root_betting_id, 0) == child_betting_id,
-         "reused action child should preserve cached history transition");
-  Expect(solver.get_traversal_stats().betting_history_transition_misses == 1,
-         "first local transition lookup should miss before caching child id");
-  Expect(solver.get_traversal_stats().betting_history_transition_hits == 1,
-         "second local transition lookup should hit cached child id");
-
-  const auto shared_result =
-      CFRSolverRegretTestPeer::SharedViewActionTransitionChildId(
-          solver, root, child, 0);
-  Expect(shared_result.first == child_betting_id,
-         "shared strategy view should assign child id from transition table");
-  Expect(shared_result.second.betting_history_transition_hits == 1,
-         "shared transition table lookup should record a hit");
-  Expect(shared_result.second.betting_history_transition_misses == 0,
-         "shared transition table lookup should not fall back to key lookup");
 }
 
 void CheckCompactPublicStateActionTransitionsAreCached() {
@@ -1761,15 +1636,11 @@ void CheckSparseSlabRowsUseExactCombos() {
       CFRSolverRegretTestPeer::InfoSetOffset(solver, state, 0, aces);
   const int kings_id =
       CFRSolverRegretTestPeer::InfoSetOffset(solver, state, 0, kings);
-  const GameTree::Node& root = CFRSolverRegretTestPeer::Root(solver);
 
   Expect(first_aces_id == second_aces_id,
          "sparse slab row should reuse the same exact combo");
   Expect(first_aces_id != kings_id,
          "sparse slab row should distinguish different exact combos");
-  Expect(CFRSolverRegretTestPeer::PublicStateInfoSetListSize(
-             solver, root, 0) == 2,
-         "public-state infoset list should track created infosets");
   Expect(solver.get_info_set_count() == 2,
          "sparse slab should only create distinct info sets");
 }
@@ -2950,8 +2821,6 @@ void CheckRangeTrainingUsesCompactPublicStates() {
 
   Expect(solver.get_public_state_count() > 0,
          "compact training should allocate public-state rows");
-  Expect(CFRSolverRegretTestPeer::LegacyGameTreeNodeCount(solver) == 0,
-         "compact training/evaluation should not allocate legacy game-tree nodes");
   Expect(std::isfinite(exact_value),
          "compact exact-hand evaluation should return a finite value");
   Expect(std::isfinite(range_value),
@@ -2988,7 +2857,6 @@ int main() {
   CheckPublicStateIdsAreDenseAndKeyedByState();
   CheckBettingHistoryIdsIgnorePublicCards();
   CheckExactBettingHistoryIdsUseChipState();
-  CheckBettingHistoryActionTransitionsAreCached();
   CheckCompactPublicStateActionTransitionsAreCached();
   CheckCompactBettingHistoryUsesAbstractActionSlots();
   CheckCompactActionMatchesGameTreeApplyAction();
