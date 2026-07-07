@@ -310,6 +310,10 @@ private:
     uint8_t count = 0;
     CardMask mask = 0;
   };
+  struct SampledFrozenChanceTransition {
+    uint32_t child_public_state_id = GameTree::Node::kInvalidPublicStateId;
+    ExactBoardState child_board;
+  };
   static ExactBoardState exact_board_from_state(
       const CompactPublicState& state);
   static CompactPublicState state_with_exact_board(
@@ -513,6 +517,10 @@ private:
   std::optional<SampledChanceTransition> sample_chance_transition(
       uint32_t public_state_id,
       const CompactPublicState& state,
+      CardMask known_private_cards);
+  SampledFrozenChanceTransition sample_frozen_chance_transition(
+      const PublicStateRow& row,
+      const CompactPublicState& exact_state,
       CardMask known_private_cards);
   double chance_sampling_cfr(
       uint32_t public_state_id,

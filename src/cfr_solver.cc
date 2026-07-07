@@ -3205,6 +3205,20 @@ CFRSolver::sample_chance_transition(uint32_t public_state_id,
   };
 }
 
+CFRSolver::SampledFrozenChanceTransition
+CFRSolver::sample_frozen_chance_transition(
+    const PublicStateRow& row,
+    const CompactPublicState& exact_state,
+    CardMask known_private_cards) {
+  const auto cards = SampleStreetCards(exact_state, known_private_cards, rng_);
+  CompactPublicState sampled_child_state =
+      game_tree_->apply_chance(exact_state, cards);
+  return SampledFrozenChanceTransition{
+      strict_chance_child_public_state(row, sampled_child_state, cards),
+      exact_board_from_state(sampled_child_state),
+  };
+}
+
 double CFRSolver::chance_sampling_cfr(
     uint32_t public_state_id,
     const CompactPublicState& state,
@@ -3419,32 +3433,24 @@ double CFRSolver::chance_sampling_frozen_regret_only(
     std::array<double, 2>& reach_probabilities,
     int update_player,
     int depth) {
+  const PublicStateRow& row = frozen_tables_->public_state_rows[public_state_id];
   const CompactPublicState exact_state = state_with_exact_board(
-      frozen_tables_->public_state_rows[public_state_id].state, exact_board);
+      row.state, exact_board);
   const int samples = ChanceSamples(config_);
   POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.chance_samples += samples);
 
   double value = 0.0;
-  int evaluated = 0;
   const CardMask known_private_cards =
       player_a_cards.mask() | player_b_cards.mask();
   for (int i = 0; i < samples; ++i) {
-    std::optional<SampledChanceTransition> sampled =
-        sample_chance_transition(public_state_id, exact_state,
-                                 known_private_cards);
-    if (!sampled.has_value()) {
-      continue;
-    }
-
-    const ExactBoardState child_board =
-        exact_board_from_state(sampled->exact_child_state);
+    const SampledFrozenChanceTransition sampled =
+        sample_frozen_chance_transition(row, exact_state, known_private_cards);
     value += cfr_frozen_regret_only(
-        sampled->child_public_state_id, child_board, player_a_cards,
+        sampled.child_public_state_id, sampled.child_board, player_a_cards,
         player_b_cards, reach_probabilities, update_player, depth);
-    ++evaluated;
   }
 
-  return evaluated > 0 ? value / evaluated : 0.0;
+  return samples > 0 ? value / samples : 0.0;
 }
 
 void CFRSolver::average_strategy_probabilities(
