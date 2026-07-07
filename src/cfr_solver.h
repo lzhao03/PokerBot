@@ -324,9 +324,9 @@ class CFRSolver {
       const PublicStateRow& row,
       const std::function<bool(const CompactPublicState&,
                                absl::Span<const CardId>)>& callback) const;
-  int chance_child_lookup_key(const PublicStateRow& row,
-                              const CompactPublicState& child_state,
-                              absl::Span<const CardId> cards) const;
+  int32_t chance_outcome_id(const PublicStateRow& row,
+                            const CompactPublicState& child_state,
+                            absl::Span<const CardId> cards) const;
   std::optional<uint32_t> get_or_create_action_child_public_state(
       uint32_t public_state_id,
       int action_index);

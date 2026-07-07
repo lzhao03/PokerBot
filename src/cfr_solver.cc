@@ -140,31 +140,38 @@ void PublicCompatibleRangeInto(const TrainingRangeView& hands,
   }
 }
 
-int ChanceCardsKey(absl::Span<const CardId> cards) {
+using ChanceOutcomeId = int32_t;
+
+ChanceOutcomeId ExactChanceOutcomeId(absl::Span<const CardId> cards) {
   int encoded[5];
   const int n = static_cast<int>(cards.size());
+  if (n != 0 && n != 1 && n != 3) {
+    throw std::logic_error(
+        "exact chance outcome id only supports next-street deal sizes");
+  }
   for (int i = 0; i < n; ++i) {
     encoded[i] = EncodedCard(cards[i]);
   }
   std::sort(encoded, encoded + n);
 
-  int key = n;
+  ChanceOutcomeId key = n;
   for (int i = 0; i < n; ++i) {
     key = key * 128 + encoded[i];
   }
   return -1 - key;
 }
 
-uint64_t PublicChanceChildKey(uint32_t parent_id, int child_key) {
+uint64_t PublicChanceTransitionKey(uint32_t parent_id,
+                                   ChanceOutcomeId outcome_id) {
   return (static_cast<uint64_t>(parent_id) << 32) |
-         static_cast<uint64_t>(static_cast<uint32_t>(child_key));
+         static_cast<uint64_t>(static_cast<uint32_t>(outcome_id));
 }
 
 uint32_t PublicChanceChildParentId(uint64_t map_key) {
   return static_cast<uint32_t>(map_key >> 32);
 }
 
-int PublicChanceChildLookupKey(uint64_t map_key) {
+ChanceOutcomeId PublicChanceTransitionOutcomeId(uint64_t map_key) {
   return static_cast<int>(static_cast<int32_t>(
       static_cast<uint32_t>(map_key & 0xffffffffu)));
 }
@@ -1007,18 +1014,18 @@ std::optional<uint32_t> CFRSolver::chance_child_public_state(
   if (begin > entries.size() || end > entries.size()) {
     return std::nullopt;
   }
-  const int child_key = chance_child_lookup_key(row, child_state, cards);
+  const ChanceOutcomeId outcome_id = chance_outcome_id(row, child_state, cards);
   size_t low = begin;
   size_t high = end;
   while (low < high) {
     const size_t mid = low + (high - low) / 2;
-    if (entries[mid].key < child_key) {
+    if (entries[mid].outcome_id < outcome_id) {
       low = mid + 1;
     } else {
       high = mid;
     }
   }
-  if (low == end || entries[low].key != child_key) {
+  if (low == end || entries[low].outcome_id != outcome_id) {
     return std::nullopt;
   }
   return entries[low].public_state_id;
@@ -1068,14 +1075,17 @@ bool CFRSolver::for_each_required_chance_transition(
   });
 }
 
-int CFRSolver::chance_child_lookup_key(
+int32_t CFRSolver::chance_outcome_id(
     const PublicStateRow& row,
     const CompactPublicState& child_state,
     absl::Span<const CardId> cards) const {
+  // Exact states key by dealt card set; abstract states key by child bucket.
+  // Negative exact ids cannot collide with non-negative public bucket ids.
   if (row.public_state_is_exact) {
-    return ChanceCardsKey(cards);
+    return ExactChanceOutcomeId(cards);
   }
-  return static_cast<int>(card_abstraction_.public_bucket(child_state));
+  return static_cast<ChanceOutcomeId>(
+      card_abstraction_.public_bucket(child_state));
 }
 
 std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
@@ -1185,8 +1195,9 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
     return std::nullopt;
   }
   const PublicStateRow& row = rows[public_state_id];
-  const int child_key = chance_child_lookup_key(row, child_state, cards);
-  const uint64_t map_key = PublicChanceChildKey(public_state_id, child_key);
+  const ChanceOutcomeId outcome_id = chance_outcome_id(row, child_state, cards);
+  const uint64_t map_key =
+      PublicChanceTransitionKey(public_state_id, outcome_id);
   const auto& chance_children = frozen_tables_->public_chance_child_ids;
   auto existing = chance_children.find(map_key);
   if (existing != chance_children.end()) {
@@ -1204,7 +1215,7 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
         GameTree::kInvalidBettingHistoryId) {
       const PublicStateKey child_public_key{
           child_betting_history_id,
-          static_cast<PublicBucketId>(child_key),
+          static_cast<PublicBucketId>(outcome_id),
       };
       auto existing_public_child =
           frozen_tables_->public_state_ids.find(child_public_key);
@@ -1353,7 +1364,7 @@ void CFRSolver::rebuild_chance_child_entries() {
   FrozenStrategyTables& tables = mutable_tables();
   struct PendingChanceChild {
     uint32_t parent_id = 0;
-    int key = 0;
+    ChanceOutcomeId outcome_id = 0;
     uint32_t public_state_id = GameTree::kInvalidPublicStateId;
   };
 
@@ -1366,7 +1377,7 @@ void CFRSolver::rebuild_chance_child_entries() {
     }
     pending.push_back({
         parent_id,
-        PublicChanceChildLookupKey(map_key),
+        PublicChanceTransitionOutcomeId(map_key),
         child_id,
     });
   }
@@ -1377,7 +1388,7 @@ void CFRSolver::rebuild_chance_child_entries() {
               if (left.parent_id != right.parent_id) {
                 return left.parent_id < right.parent_id;
               }
-              return left.key < right.key;
+              return left.outcome_id < right.outcome_id;
             });
 
   for (PublicStateRow& row : tables.public_state_rows) {
@@ -1397,7 +1408,7 @@ void CFRSolver::rebuild_chance_child_entries() {
           static_cast<uint32_t>(tables.chance_child_entries.size());
     }
     tables.chance_child_entries.push_back({
-        child.key,
+        child.outcome_id,
         child.public_state_id,
     });
     ++tables.public_state_rows[current_parent_id].chance_child_count;

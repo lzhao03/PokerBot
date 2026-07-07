@@ -124,7 +124,7 @@ class FrozenStrategyTables {
   };
 
   struct ChanceChildEntry {
-    int key = 0;
+    int outcome_id = 0;
     uint32_t public_state_id = GameTree::kInvalidPublicStateId;
   };
 
