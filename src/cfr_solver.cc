@@ -104,6 +104,8 @@ constexpr bool kTraversalStatsEnabled = POKER_ENABLE_TRAVERSAL_STATS != 0;
 #define POKER_COARSE_PUBLIC_BUCKETS 0
 #endif
 
+constexpr bool kCoarsePublicBuckets = POKER_COARSE_PUBLIC_BUCKETS != 0;
+
 size_t ScratchDepthReserve(const SolverConfig& config, int max_depth) {
   if (max_depth > 0) {
     return static_cast<size_t>(max_depth) + 2;
@@ -178,7 +180,6 @@ bool ForEachNextStreetDeal(const CompactPublicState& state,
   return choose(choose, 0, 0);
 }
 
-#if POKER_COARSE_PUBLIC_BUCKETS
 StreetKind StreetAfterChance(StreetKind street) {
   switch (street) {
     case StreetKind::kPreflop:
@@ -296,9 +297,7 @@ const CoarseChanceTransitionMap& CoarseChanceTransitions(StreetKind street) {
       return river;
   }
 }
-#endif
 
-#if POKER_COARSE_PUBLIC_BUCKETS
 struct AbstractBettingState {
   int street = 0;
   int pot_bucket = 0;
@@ -321,7 +320,7 @@ int BucketChipsForBettingHistory(int chips) {
   return bucket;
 }
 
-AbstractBettingState MakeAbstractBettingState(
+[[maybe_unused]] AbstractBettingState MakeAbstractBettingState(
     const CompactPublicState& state) {
   const int contribution_gap =
       state.player_contribution[0] > state.player_contribution[1]
@@ -338,7 +337,7 @@ AbstractBettingState MakeAbstractBettingState(
   };
 }
 
-void ApplyAbstractBettingState(
+[[maybe_unused]] void ApplyAbstractBettingState(
     const AbstractBettingState& abstract_state,
     FrozenStrategyTables::BettingHistoryKey& key) {
   key.street = abstract_state.street;
@@ -352,7 +351,7 @@ void ApplyAbstractBettingState(
   key.player_contributions = {abstract_state.to_call_bucket, 0};
 }
 
-void ApplyAbstractBettingState(
+[[maybe_unused]] void ApplyAbstractBettingState(
     const AbstractBettingState& abstract_state,
     FrozenStrategyTables::BettingHistoryRow& row) {
   row.street = abstract_state.street;
@@ -364,8 +363,9 @@ void ApplyAbstractBettingState(
   row.player_contributions = {abstract_state.to_call_bucket, 0};
 }
 
-void ApplyAbstractBettingState(const AbstractBettingState& abstract_state,
-                               CompactPublicState& state) {
+[[maybe_unused]] void ApplyAbstractBettingState(
+    const AbstractBettingState& abstract_state,
+    CompactPublicState& state) {
   state.street = static_cast<StreetKind>(abstract_state.street);
   state.pot = abstract_state.pot_bucket;
   state.stack = {abstract_state.effective_stack_bucket,
@@ -380,7 +380,6 @@ void ApplyAbstractBettingState(const AbstractBettingState& abstract_state,
   }
   state.player_contribution_count = 2;
 }
-#endif
 
 void AddBettingHistoryValue(FrozenStrategyTables::BettingHistoryKey& key,
                             int value) {
@@ -638,9 +637,9 @@ CFRSolver::BettingHistoryKey CFRSolver::make_betting_history_key(
   key.player_to_act = state.player_to_act;
   key.player_contribution_size = 2;
   key.player_contributions = state.player_contribution;
-#if POKER_COARSE_PUBLIC_BUCKETS
-  ApplyAbstractBettingState(MakeAbstractBettingState(state), key);
-#endif
+  if constexpr (kCoarsePublicBuckets) {
+    ApplyAbstractBettingState(MakeAbstractBettingState(state), key);
+  }
 
   const int history_value_count = state.history_size * 3;
   if (history_value_count > BettingHistoryKey::kInlineHistoryValues) {
@@ -667,9 +666,9 @@ CFRSolver::BettingHistoryRow CFRSolver::make_betting_history_row(
   row.folded_player = state.folded_player;
   row.player_to_act = state.player_to_act;
   row.player_contributions = state.player_contribution;
-#if POKER_COARSE_PUBLIC_BUCKETS
-  ApplyAbstractBettingState(MakeAbstractBettingState(state), row);
-#endif
+  if constexpr (kCoarsePublicBuckets) {
+    ApplyAbstractBettingState(MakeAbstractBettingState(state), row);
+  }
   return row;
 }
 
@@ -713,9 +712,9 @@ CompactPublicStateFromGameState(const GameState& state) {
 CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
     uint32_t betting_history_id,
     CompactPublicState state) {
-#if POKER_COARSE_PUBLIC_BUCKETS
-  ApplyAbstractBettingState(MakeAbstractBettingState(state), state);
-#endif
+  if constexpr (kCoarsePublicBuckets) {
+    ApplyAbstractBettingState(MakeAbstractBettingState(state), state);
+  }
   PublicStateRow row;
   row.betting_history_id = betting_history_id;
   row.public_bucket = card_abstraction_.public_bucket(state);
@@ -997,27 +996,27 @@ bool CFRSolver::for_each_required_chance_transition(
     const PublicStateRow& row,
     const std::function<bool(const CompactPublicState&,
                              absl::Span<const CardId>)>& callback) const {
-#if POKER_COARSE_PUBLIC_BUCKETS
-  const auto& transitions = CoarseChanceTransitions(row.state.street);
-  const auto existing = transitions.find(row.public_bucket);
-  if (existing == transitions.end()) {
-    return false;
-  }
-  for (const CoarseChanceTransitionTemplate& transition : existing->second) {
-    CompactPublicState parent_state =
-        StateWithBoardFrom(row.state, transition.parent_board_state);
-    const CompactPublicState child_state =
-        game_tree_->apply_chance(parent_state, transition.cards);
-    if (!callback(child_state, absl::Span<const CardId>(transition.cards))) {
+  if constexpr (kCoarsePublicBuckets) {
+    const auto& transitions = CoarseChanceTransitions(row.state.street);
+    const auto existing = transitions.find(row.public_bucket);
+    if (existing == transitions.end()) {
       return false;
     }
+    for (const CoarseChanceTransitionTemplate& transition : existing->second) {
+      CompactPublicState parent_state =
+          StateWithBoardFrom(row.state, transition.parent_board_state);
+      const CompactPublicState child_state =
+          game_tree_->apply_chance(parent_state, transition.cards);
+      if (!callback(child_state, absl::Span<const CardId>(transition.cards))) {
+        return false;
+      }
+    }
+    return true;
+  } else {
+    return ForEachNextStreetDeal(row.state, [&](absl::Span<const CardId> cards) {
+      return callback(game_tree_->apply_chance(row.state, cards), cards);
+    });
   }
-  return true;
-#else
-  return ForEachNextStreetDeal(row.state, [&](absl::Span<const CardId> cards) {
-    return callback(game_tree_->apply_chance(row.state, cards), cards);
-  });
-#endif
 }
 
 PublicBucketId CFRSolver::chance_outcome_id(
@@ -1133,31 +1132,30 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
     record_betting_history_transition_hit();
     return existing->second;
   }
-#if POKER_COARSE_PUBLIC_BUCKETS
-  const uint32_t cached_parent_betting_history_id = row.betting_history_id;
-  const auto& betting_history_rows = frozen_tables_->betting_history_rows;
-  if (cached_parent_betting_history_id < betting_history_rows.size()) {
-    const uint32_t child_betting_history_id =
-        betting_history_rows[cached_parent_betting_history_id].chance_child_id;
-    if (child_betting_history_id !=
-        GameTree::kInvalidBettingHistoryId) {
-      const PublicStateKey child_public_key{
-          child_betting_history_id,
-          outcome_id,
-      };
-      auto existing_public_child =
-          frozen_tables_->public_state_ids.find(child_public_key);
-      if (existing_public_child != frozen_tables_->public_state_ids.end()) {
-        if (!frozen_) {
-          mutable_tables().public_chance_child_ids.emplace(
-              transition_key, existing_public_child->second);
+  if constexpr (kCoarsePublicBuckets) {
+    const uint32_t cached_parent_betting_history_id = row.betting_history_id;
+    const auto& betting_history_rows = frozen_tables_->betting_history_rows;
+    if (cached_parent_betting_history_id < betting_history_rows.size()) {
+      const uint32_t child_betting_history_id =
+          betting_history_rows[cached_parent_betting_history_id].chance_child_id;
+      if (child_betting_history_id != GameTree::kInvalidBettingHistoryId) {
+        const PublicStateKey child_public_key{
+            child_betting_history_id,
+            outcome_id,
+        };
+        auto existing_public_child =
+            frozen_tables_->public_state_ids.find(child_public_key);
+        if (existing_public_child != frozen_tables_->public_state_ids.end()) {
+          if (!frozen_) {
+            mutable_tables().public_chance_child_ids.emplace(
+                transition_key, existing_public_child->second);
+          }
+          record_betting_history_transition_hit();
+          return existing_public_child->second;
         }
-        record_betting_history_transition_hit();
-        return existing_public_child->second;
       }
     }
   }
-#endif
   if (frozen_) {
     record_betting_history_transition_miss();
     return std::nullopt;
