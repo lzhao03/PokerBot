@@ -1992,7 +1992,7 @@ double CFRSolver::cfr_with_ranges(
 
   double node_value = 0.0;
   RangeScratchFrame& scratch_frame = scratch.frame(depth);
-  ConditionedRanges& conditioned_player_ranges =
+  std::vector<TrainingRangeView>& conditioned_player_ranges =
       scratch_frame.conditioned_ranges;
   const bool condition_player_a_range =
       player == 0 && player_a_range.has_value();
@@ -2473,7 +2473,7 @@ void CFRSolver::condition_ranges_for_actions(
     int player,
     const int* conditioned_action_ids,
     size_t action_count,
-    ConditionedRanges& conditioned_ranges) {
+    std::vector<TrainingRangeView>& conditioned_ranges) {
   if (action_count == 0) {
     return;
   }

@@ -146,14 +146,13 @@ class CFRSolver {
 
   using OptionalTrainingRange =
       std::optional<std::reference_wrapper<const TrainingRangeView>>;
-  using ConditionedRanges = std::vector<TrainingRangeView>;
   using StrategyProbabilities = absl::InlinedVector<double, 8>;
 
   static constexpr uint32_t kCappedPublicStateId =
       GameTree::kInvalidPublicStateId - 1;
 
   struct RangeScratchFrame {
-    ConditionedRanges conditioned_ranges;
+    std::vector<TrainingRangeView> conditioned_ranges;
     TrainingRangeView public_player_a_range;
     TrainingRangeView public_player_b_range;
   };
@@ -360,7 +359,7 @@ class CFRSolver {
       int player,
       const int* action_ids,
       size_t action_count,
-      ConditionedRanges& conditioned_ranges);
+      std::vector<TrainingRangeView>& conditioned_ranges);
   double utility(const CompactPublicState& state,
                  const PrivateCards& player_a_cards,
                  const PrivateCards& player_b_cards);
