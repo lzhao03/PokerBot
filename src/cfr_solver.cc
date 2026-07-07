@@ -1654,137 +1654,73 @@ bool CFRSolver::prepare_frozen_training(
     bool can_use_frozen_regret_only,
     const TrainingRangeView& player_a_hands_view,
     const TrainingRangeView& player_b_hands_view) {
-  bool public_state_prebuild_complete = false;
+  TrainingRunStats& stats = last_training_run_stats_;
   const bool should_prebuild_public_states =
       !frozen_ && (num_threads > 1 || can_use_frozen_regret_only) &&
       (config_.max_public_states > 0 || max_depth > 0);
-  if (should_prebuild_public_states) {
-    VLOG(1) << "Prebuilding compact public-state rows...";
-    const auto prebuild_start = std::chrono::steady_clock::now();
-    public_state_prebuild_complete =
-        prebuild_public_state_rows(root_public_state_id, max_depth);
-    const auto prebuild_end = std::chrono::steady_clock::now();
-    last_training_run_stats_.prebuild_seconds =
-        std::chrono::duration<double>(prebuild_end - prebuild_start).count();
-    if (!public_state_prebuild_complete) {
-      LOG(INFO) << "Public-state prebuild stopped before completion; "
-                << "continuing without a frozen phase";
-    }
-  }
-  last_training_run_stats_.public_state_prebuild_complete =
-      should_prebuild_public_states && public_state_prebuild_complete;
-  last_training_run_stats_.prebuild_public_states =
-      should_prebuild_public_states
-          ? static_cast<int64_t>(get_public_state_count())
-          : 0;
-  last_training_run_stats_.prebuild_betting_histories =
-      should_prebuild_public_states
-          ? static_cast<int64_t>(frozen_tables_->betting_history_rows.size())
-          : 0;
-
-  bool transition_prebuild_complete = false;
-  if (should_prebuild_public_states && public_state_prebuild_complete) {
-    transition_prebuild_complete = validate_prebuilt_transitions(
-        root_public_state_id, max_depth, last_training_run_stats_);
-    if (!last_training_run_stats_
-             .betting_history_transition_prebuild_complete) {
-      LOG(INFO) << "Betting-history transition prebuild validation failed; "
-                << "continuing without a frozen phase";
-    }
-    if (last_training_run_stats_
-            .betting_history_transition_prebuild_complete) {
-      if (!last_training_run_stats_.chance_transition_prebuild_complete) {
-        LOG(INFO) << "Chance-transition prebuild validation failed; "
-                  << "continuing without a frozen phase";
-      }
-    }
-    if (last_training_run_stats_
-            .betting_history_transition_prebuild_complete &&
-        last_training_run_stats_.chance_transition_prebuild_complete) {
-      if (!last_training_run_stats_.action_transition_prebuild_complete) {
-        LOG(INFO) << "Action-transition prebuild validation failed; "
-                  << "continuing without a frozen phase";
-      }
-    }
+  if (!should_prebuild_public_states) {
+    return false;
   }
 
-  bool info_set_prebuild_complete = false;
-  if (should_prebuild_public_states && public_state_prebuild_complete &&
-      transition_prebuild_complete) {
-    VLOG(1) << "Prebuilding infoset rows...";
-    const auto info_set_prebuild_start = std::chrono::steady_clock::now();
-    info_set_prebuild_complete =
-        prebuild_info_set_rows(player_a_hands_view, player_b_hands_view);
-    const auto info_set_prebuild_end = std::chrono::steady_clock::now();
-    last_training_run_stats_.info_set_prebuild_seconds =
-        std::chrono::duration<double>(info_set_prebuild_end -
-                                      info_set_prebuild_start)
-            .count();
-    if (!info_set_prebuild_complete) {
-      LOG(INFO) << "Infoset prebuild stopped before completion; "
-                << "continuing without a frozen phase";
-    }
+  auto record_public_counts = [&] {
+    stats.prebuild_public_states =
+        static_cast<int64_t>(get_public_state_count());
+    stats.prebuild_betting_histories =
+        static_cast<int64_t>(frozen_tables_->betting_history_rows.size());
+  };
+  auto record_action_counts = [&] {
+    stats.prebuild_info_sets = static_cast<int64_t>(get_info_set_count());
+    stats.prebuild_action_entries =
+        static_cast<int64_t>(cumulative_->cumulative_regrets.size());
+  };
+
+  VLOG(1) << "Prebuilding compact public-state rows...";
+  const auto prebuild_start = std::chrono::steady_clock::now();
+  stats.public_state_prebuild_complete =
+      prebuild_public_state_rows(root_public_state_id, max_depth);
+  const auto prebuild_end = std::chrono::steady_clock::now();
+  stats.prebuild_seconds =
+      std::chrono::duration<double>(prebuild_end - prebuild_start).count();
+  record_public_counts();
+  if (!stats.public_state_prebuild_complete) {
+    return false;
   }
-  last_training_run_stats_.info_set_prebuild_complete =
-      should_prebuild_public_states && public_state_prebuild_complete &&
-      transition_prebuild_complete && info_set_prebuild_complete;
 
-  bool private_bucket_prebuild_complete = false;
-  if (last_training_run_stats_.info_set_prebuild_complete) {
-    private_bucket_prebuild_complete = prebuild_private_bucket_rows();
-    if (!private_bucket_prebuild_complete) {
-      LOG(INFO) << "Private-bucket prebuild failed; "
-                << "continuing without a frozen phase";
-    }
+  if (!validate_prebuilt_transitions(root_public_state_id, max_depth, stats)) {
+    return false;
   }
-  last_training_run_stats_.private_bucket_prebuild_complete =
-      last_training_run_stats_.info_set_prebuild_complete &&
-      private_bucket_prebuild_complete;
+  record_action_counts();
 
-  bool frozen_info_set_lookup_prebuild_complete = false;
-  if (last_training_run_stats_.private_bucket_prebuild_complete) {
-    frozen_info_set_lookup_prebuild_complete =
-        prebuild_frozen_info_set_action_offsets();
-    if (!frozen_info_set_lookup_prebuild_complete) {
-      LOG(INFO) << "Frozen infoset lookup prebuild failed; "
-                << "continuing without a frozen phase";
-    }
+  VLOG(1) << "Prebuilding infoset rows...";
+  const auto info_set_prebuild_start = std::chrono::steady_clock::now();
+  stats.info_set_prebuild_complete =
+      prebuild_info_set_rows(player_a_hands_view, player_b_hands_view);
+  const auto info_set_prebuild_end = std::chrono::steady_clock::now();
+  stats.info_set_prebuild_seconds =
+      std::chrono::duration<double>(info_set_prebuild_end -
+                                    info_set_prebuild_start)
+          .count();
+  record_action_counts();
+  if (!stats.info_set_prebuild_complete) {
+    return false;
   }
-  last_training_run_stats_.frozen_info_set_lookup_prebuild_complete =
-      last_training_run_stats_.private_bucket_prebuild_complete &&
-      frozen_info_set_lookup_prebuild_complete;
 
-  const bool prebuild_tables_are_action_complete =
-      should_prebuild_public_states && public_state_prebuild_complete &&
-      transition_prebuild_complete;
-  last_training_run_stats_.prebuild_info_sets =
-      prebuild_tables_are_action_complete
-          ? static_cast<int64_t>(get_info_set_count())
-          : 0;
-  last_training_run_stats_.prebuild_action_entries =
-      prebuild_tables_are_action_complete
-          ? static_cast<int64_t>(cumulative_->cumulative_regrets.size())
-          : 0;
-  last_training_run_stats_.prebuild_private_bucket_rows =
-      last_training_run_stats_.private_bucket_prebuild_complete
-          ? static_cast<int64_t>(frozen_tables_->private_bucket_rows.size())
-          : 0;
-  last_training_run_stats_.prebuild_frozen_info_set_lookup_rows =
-      last_training_run_stats_.frozen_info_set_lookup_prebuild_complete
-          ? static_cast<int64_t>(
-                frozen_tables_->frozen_info_set_action_offsets.size())
-          : 0;
+  stats.private_bucket_prebuild_complete = prebuild_private_bucket_rows();
+  if (!stats.private_bucket_prebuild_complete) {
+    return false;
+  }
+  stats.prebuild_private_bucket_rows =
+      static_cast<int64_t>(frozen_tables_->private_bucket_rows.size());
 
-  const bool can_run_frozen_phase =
-      last_training_run_stats_.public_state_prebuild_complete &&
-      last_training_run_stats_.betting_history_transition_prebuild_complete &&
-      last_training_run_stats_.chance_transition_prebuild_complete &&
-      last_training_run_stats_.action_transition_prebuild_complete &&
-      last_training_run_stats_.info_set_prebuild_complete &&
-      last_training_run_stats_.private_bucket_prebuild_complete &&
-      last_training_run_stats_.frozen_info_set_lookup_prebuild_complete;
-  return can_run_frozen_phase &&
-         (num_threads > 1 || can_use_frozen_regret_only);
+  stats.frozen_info_set_lookup_prebuild_complete =
+      prebuild_frozen_info_set_action_offsets();
+  if (!stats.frozen_info_set_lookup_prebuild_complete) {
+    return false;
+  }
+  stats.prebuild_frozen_info_set_lookup_rows =
+      static_cast<int64_t>(
+          frozen_tables_->frozen_info_set_action_offsets.size());
+  return true;
 }
 
 int CFRSolver::run_warmup_phase(
