@@ -1889,6 +1889,33 @@ void CFRSolver::run_iterations(int iterations,
   const bool can_use_frozen_regret_only =
       config_.regret_only_training && max_depth == 0;
 
+  const bool should_run_frozen_phase = prepare_frozen_training(
+      *root_public_state_id, num_threads, max_depth, can_use_frozen_regret_only,
+      player_a_hands_view, player_b_hands_view);
+  const CompactPublicState root_state =
+      frozen_tables_->public_state_rows[*root_public_state_id].state;
+  const int completed_warmup = run_warmup_phase(
+      iterations, *root_public_state_id, root_state, range_sampler,
+      player_a_hands_view, player_b_hands_view, max_depth,
+      should_run_frozen_phase, can_use_frozen_regret_only);
+  maybe_run_frozen_phase(iterations, completed_warmup, num_threads,
+                         *root_public_state_id, range_sampler,
+                         player_a_training_range, player_b_training_range);
+
+  LOG(INFO) << "CFR iterations completed";
+  LOG(INFO) << "Iterations run: " << iterations_run_;
+  LOG(INFO) << "Information sets: " << get_info_set_count();
+  LOG(INFO) << "Public states: " << get_public_state_count();
+  LOG(INFO) << "Player A average EV: " << get_expected_value(0);
+}
+
+bool CFRSolver::prepare_frozen_training(
+    uint32_t root_public_state_id,
+    int num_threads,
+    int max_depth,
+    bool can_use_frozen_regret_only,
+    const TrainingRangeView& player_a_hands_view,
+    const TrainingRangeView& player_b_hands_view) {
   bool public_state_prebuild_complete = false;
   const bool should_prebuild_public_states =
       !frozen_ && (num_threads > 1 || can_use_frozen_regret_only) &&
@@ -1897,7 +1924,7 @@ void CFRSolver::run_iterations(int iterations,
     VLOG(1) << "Prebuilding compact public-state rows...";
     const auto prebuild_start = std::chrono::steady_clock::now();
     public_state_prebuild_complete =
-        prebuild_public_state_rows(*root_public_state_id, max_depth);
+        prebuild_public_state_rows(root_public_state_id, max_depth);
     const auto prebuild_end = std::chrono::steady_clock::now();
     last_training_run_stats_.prebuild_seconds =
         std::chrono::duration<double>(prebuild_end - prebuild_start).count();
@@ -1916,12 +1943,13 @@ void CFRSolver::run_iterations(int iterations,
       should_prebuild_public_states
           ? static_cast<int64_t>(frozen_tables_->betting_history_rows.size())
           : 0;
+
   bool betting_history_transition_prebuild_complete = false;
   bool chance_transition_prebuild_complete = false;
   bool action_transition_prebuild_complete = false;
   if (should_prebuild_public_states && public_state_prebuild_complete) {
     const PrebuildValidationStats validation =
-        validate_prebuilt_transitions(*root_public_state_id, max_depth);
+        validate_prebuilt_transitions(root_public_state_id, max_depth);
     betting_history_transition_prebuild_complete =
         validation.betting_history_transition_prebuild_complete;
     last_training_run_stats_.prebuild_betting_history_transitions =
@@ -1969,6 +1997,7 @@ void CFRSolver::run_iterations(int iterations,
       should_prebuild_public_states && public_state_prebuild_complete &&
       betting_history_transition_prebuild_complete &&
       chance_transition_prebuild_complete && action_transition_prebuild_complete;
+
   bool info_set_prebuild_complete = false;
   if (should_prebuild_public_states && public_state_prebuild_complete &&
       betting_history_transition_prebuild_complete &&
@@ -1993,6 +2022,7 @@ void CFRSolver::run_iterations(int iterations,
       betting_history_transition_prebuild_complete &&
       chance_transition_prebuild_complete &&
       action_transition_prebuild_complete && info_set_prebuild_complete;
+
   bool private_bucket_prebuild_complete = false;
   if (last_training_run_stats_.info_set_prebuild_complete) {
     private_bucket_prebuild_complete = prebuild_private_bucket_rows();
@@ -2004,6 +2034,7 @@ void CFRSolver::run_iterations(int iterations,
   last_training_run_stats_.private_bucket_prebuild_complete =
       last_training_run_stats_.info_set_prebuild_complete &&
       private_bucket_prebuild_complete;
+
   bool frozen_info_set_lookup_prebuild_complete = false;
   if (last_training_run_stats_.private_bucket_prebuild_complete) {
     frozen_info_set_lookup_prebuild_complete =
@@ -2016,6 +2047,7 @@ void CFRSolver::run_iterations(int iterations,
   last_training_run_stats_.frozen_info_set_lookup_prebuild_complete =
       last_training_run_stats_.private_bucket_prebuild_complete &&
       frozen_info_set_lookup_prebuild_complete;
+
   const bool prebuild_tables_are_action_complete =
       should_prebuild_public_states && public_state_prebuild_complete &&
       betting_history_transition_prebuild_complete &&
@@ -2037,6 +2069,7 @@ void CFRSolver::run_iterations(int iterations,
           ? static_cast<int64_t>(
                 frozen_tables_->frozen_info_set_action_offsets.size())
           : 0;
+
   const bool can_run_frozen_phase =
       last_training_run_stats_.public_state_prebuild_complete &&
       last_training_run_stats_.betting_history_transition_prebuild_complete &&
@@ -2045,9 +2078,20 @@ void CFRSolver::run_iterations(int iterations,
       last_training_run_stats_.info_set_prebuild_complete &&
       last_training_run_stats_.private_bucket_prebuild_complete &&
       last_training_run_stats_.frozen_info_set_lookup_prebuild_complete;
-  const bool should_run_frozen_phase =
-      can_run_frozen_phase && (num_threads > 1 || can_use_frozen_regret_only);
+  return can_run_frozen_phase &&
+         (num_threads > 1 || can_use_frozen_regret_only);
+}
 
+int CFRSolver::run_warmup_phase(
+    int iterations,
+    uint32_t root_public_state_id,
+    const CompactPublicState& root_state,
+    RangeSampler& range_sampler,
+    const TrainingRangeView& player_a_hands_view,
+    const TrainingRangeView& player_b_hands_view,
+    int max_depth,
+    bool should_run_frozen_phase,
+    bool can_use_frozen_regret_only) {
   const bool auto_warmup =
       should_run_frozen_phase && !frozen_ && config_.warmup_iterations <= 0;
   int warmup_count = iterations;
@@ -2060,7 +2104,6 @@ void CFRSolver::run_iterations(int iterations,
     warmup_count = std::min(requested_warmup, iterations);
   }
 
-  // Phase 1: single-threaded warmup (allocates public states + info sets).
   LOG(INFO) << "Starting CFR iterations...";
   VLOG(1) << "Warmup phase: "
           << (auto_warmup ? "adaptive" : std::to_string(warmup_count))
@@ -2073,8 +2116,7 @@ void CFRSolver::run_iterations(int iterations,
   int no_growth_iterations = 0;
   size_t previous_info_sets = get_info_set_count();
   size_t previous_public_states = get_public_state_count();
-  const CompactPublicState root_state =
-      frozen_tables_->public_state_rows[*root_public_state_id].state;
+
   for (int i = 0; i < warmup_count; ++i) {
     const RangeDeal deal = range_sampler.sample(rng_);
     PrivateCards player_a_cards = PrivateCards::FromCombo(deal.player_a_combo);
@@ -2091,11 +2133,9 @@ void CFRSolver::run_iterations(int iterations,
       player_b_context_range = std::cref(player_b_hands_view);
     }
     double dealt_value = cfr_with_ranges(
-        *root_public_state_id, root_state,
-        player_a_cards, player_b_cards,
-        reach_probabilities, update_player,
-        cfr_iteration, 0, max_depth, scratch, player_a_context_range,
-        player_b_context_range);
+        root_public_state_id, root_state, player_a_cards, player_b_cards,
+        reach_probabilities, update_player, cfr_iteration, 0, max_depth,
+        scratch, player_a_context_range, player_b_context_range);
 
     cumulative_root_utility_ += dealt_value;
     ++iterations_run_;
@@ -2127,42 +2167,48 @@ void CFRSolver::run_iterations(int iterations,
       }
     }
   }
+
   const auto warmup_end = std::chrono::steady_clock::now();
   last_training_run_stats_.warmup_iterations = completed_warmup;
   last_training_run_stats_.warmup_seconds =
       std::chrono::duration<double>(warmup_end - warmup_start).count();
   last_training_run_stats_.warmup_cfr_updates =
       cfr_update_count_ - warmup_start_updates;
+  return completed_warmup;
+}
 
+void CFRSolver::maybe_run_frozen_phase(
+    int iterations,
+    int completed_warmup,
+    int num_threads,
+    uint32_t root_public_state_id,
+    const RangeSampler& range_sampler,
+    const TrainingRange& player_a_training_range,
+    const TrainingRange& player_b_training_range) {
   const int remaining = iterations - completed_warmup;
-  if (remaining > 0) {
-    // Phase 2: freeze the tables and run remaining iterations on workers.
-    frozen_tables_ = mutable_tables_;
-    mutable_tables_.reset();
-    frozen_ = true;
-    require_frozen_children_ = true;
-    LOG(INFO) << "Frozen after warmup: " << get_info_set_count()
-              << " info sets, " << iterations_run_
-              << " warmup iterations. Starting frozen phase ("
-              << remaining << " iterations, " << num_threads << " workers)...";
-    const int64_t frozen_start_updates = cfr_update_count_;
-    const auto frozen_start = std::chrono::steady_clock::now();
-    run_frozen_iterations(remaining, num_threads, *root_public_state_id,
-                          range_sampler,
-                          player_a_training_range, player_b_training_range);
-    const auto frozen_end = std::chrono::steady_clock::now();
-    last_training_run_stats_.frozen_iterations = remaining;
-    last_training_run_stats_.frozen_seconds =
-        std::chrono::duration<double>(frozen_end - frozen_start).count();
-    last_training_run_stats_.frozen_cfr_updates =
-        cfr_update_count_ - frozen_start_updates;
+  if (remaining <= 0) {
+    return;
   }
 
-  LOG(INFO) << "CFR iterations completed";
-  LOG(INFO) << "Iterations run: " << iterations_run_;
-  LOG(INFO) << "Information sets: " << get_info_set_count();
-  LOG(INFO) << "Public states: " << get_public_state_count();
-  LOG(INFO) << "Player A average EV: " << get_expected_value(0);
+  frozen_tables_ = mutable_tables_;
+  mutable_tables_.reset();
+  frozen_ = true;
+  require_frozen_children_ = true;
+  LOG(INFO) << "Frozen after warmup: " << get_info_set_count()
+            << " info sets, " << iterations_run_
+            << " warmup iterations. Starting frozen phase ("
+            << remaining << " iterations, " << num_threads << " workers)...";
+  const int64_t frozen_start_updates = cfr_update_count_;
+  const auto frozen_start = std::chrono::steady_clock::now();
+  run_frozen_iterations(remaining, num_threads, root_public_state_id,
+                        range_sampler, player_a_training_range,
+                        player_b_training_range);
+  const auto frozen_end = std::chrono::steady_clock::now();
+  last_training_run_stats_.frozen_iterations = remaining;
+  last_training_run_stats_.frozen_seconds =
+      std::chrono::duration<double>(frozen_end - frozen_start).count();
+  last_training_run_stats_.frozen_cfr_updates =
+      cfr_update_count_ - frozen_start_updates;
 }
 
 void CFRSolver::run_frozen_iterations(

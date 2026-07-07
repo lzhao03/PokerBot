@@ -221,6 +221,30 @@ class CFRSolver {
   void run_iterations(int iterations,
                       const HandRange& player_a_range,
                       const HandRange& player_b_range);
+  bool prepare_frozen_training(
+      uint32_t root_public_state_id,
+      int num_threads,
+      int max_depth,
+      bool can_use_frozen_regret_only,
+      const TrainingRangeView& player_a_hands_view,
+      const TrainingRangeView& player_b_hands_view);
+  int run_warmup_phase(int iterations,
+                       uint32_t root_public_state_id,
+                       const CompactPublicState& root_state,
+                       RangeSampler& range_sampler,
+                       const TrainingRangeView& player_a_hands_view,
+                       const TrainingRangeView& player_b_hands_view,
+                       int max_depth,
+                       bool should_run_frozen_phase,
+                       bool can_use_frozen_regret_only);
+  void maybe_run_frozen_phase(
+      int iterations,
+      int completed_warmup,
+      int num_threads,
+      uint32_t root_public_state_id,
+      const RangeSampler& range_sampler,
+      const TrainingRange& player_a_training_range,
+      const TrainingRange& player_b_training_range);
   void run_frozen_iterations(int iterations,
                              int num_threads,
                              uint32_t root_public_state_id,
