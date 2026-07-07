@@ -1,9 +1,16 @@
 #include "src/cfr_solver.h"
 #include "absl/log/log.h"
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/inlined_vector.h"
+#include "absl/types/span.h"
+#include "src/card_abstraction.h"
 #include "src/card_utils.h"
+#include "src/game_tree.h"
 #include "src/hand_range.h"
+#include "src/strategy_tables.h"
 #include "src/terminal_utility_cache.h"
 #include "src/thread_pool.h"
+#include "src/training_range.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -345,10 +352,6 @@ const CoarseChanceTransitionMap& CoarseChanceTransitions(StreetKind street) {
 }
 #endif
 
-int RoundedContribution(const GameState& state, int player) {
-  return state.player_contribution[player];
-}
-
 #if POKER_COARSE_PUBLIC_BUCKETS
 struct AbstractBettingState {
   int street = 0;
@@ -511,29 +514,465 @@ GameState DefaultInitialState(const SolverConfig& config) {
 
 }  // namespace
 
+CompactPublicState CompactPublicStateFromGameState(const GameState& state);
+
+struct CFRSolver::Impl {
+  using TraversalStats = CFRSolver::TraversalStats;
+  using UtilityCacheStats = CFRSolver::UtilityCacheStats;
+  using TrainingRunStats = CFRSolver::TrainingRunStats;
+  using PrivateBucketId = FrozenStrategyTables::PrivateBucketId;
+
+  struct RangeDeal {
+    RangeDeal(ComboId player_a_combo, ComboId player_b_combo)
+        : player_a_combo(player_a_combo),
+          player_b_combo(player_b_combo) {}
+
+    ComboId player_a_combo = 0;
+    ComboId player_b_combo = 0;
+  };
+
+  struct RangeSampler {
+    RangeSampler(const TrainingRange& player_a_range,
+                 const TrainingRange& player_b_range);
+
+    RangeDeal sample(std::mt19937& rng) const;
+
+    const TrainingRange& player_a_range;
+    const TrainingRange& player_b_range;
+    std::vector<float> compatible_player_b_weight;
+    std::vector<float> player_a_sample_weights;
+    std::vector<float> player_a_cumulative_weights;
+    float total_player_a_weight = 0.0f;
+    std::vector<uint32_t> compatible_player_b_offsets;
+    std::vector<uint16_t> compatible_player_b_counts;
+    std::vector<ComboId> compatible_player_b_combos;
+    std::vector<float> compatible_player_b_cumulative_weights;
+  };
+
+  struct PrivateCards {
+    static PrivateCards FromCombo(ComboId combo_id);
+
+    CardMask mask() const;
+
+    ComboId combo = 0;
+  };
+
+  struct SampledChanceTransition {
+    uint32_t child_public_state_id = GameTree::Node::kInvalidPublicStateId;
+    CompactPublicState exact_child_state;
+  };
+
+  using OptionalTrainingRange =
+      std::optional<std::reference_wrapper<const TrainingRangeView>>;
+
+  static constexpr uint32_t kCappedPublicStateId =
+      GameTree::Node::kInvalidPublicStateId - 1;
+
+  using ConditionedRanges = std::vector<TrainingRangeView>;
+  using StrategyProbabilities = absl::InlinedVector<double, 8>;
+
+  struct RangeScratchFrame {
+    ConditionedRanges conditioned_ranges;
+    TrainingRangeView public_player_a_range;
+    TrainingRangeView public_player_b_range;
+  };
+
+  struct TraversalScratch {
+    void reserve_depth(size_t depth_count) { frames.reserve(depth_count); }
+
+    RangeScratchFrame& frame(size_t depth) {
+      if (depth >= frames.capacity()) {
+        throw std::logic_error("TraversalScratch depth reserve exhausted");
+      }
+      while (frames.size() <= depth) {
+        frames.emplace_back();
+      }
+      return frames[depth];
+    }
+
+    std::vector<RangeScratchFrame> frames;
+  };
+
+  using BettingHistoryKey = FrozenStrategyTables::BettingHistoryKey;
+  using BettingHistoryKeyHash = FrozenStrategyTables::BettingHistoryKeyHash;
+  using PublicBucketId = FrozenStrategyTables::PublicBucketId;
+  using PublicStateKey = FrozenStrategyTables::PublicStateKey;
+  using PublicStateKeyHash = FrozenStrategyTables::PublicStateKeyHash;
+  using BettingHistoryRow = FrozenStrategyTables::BettingHistoryRow;
+  using InfoSetRow = FrozenStrategyTables::InfoSetRow;
+  using ChanceChildEntry = FrozenStrategyTables::ChanceChildEntry;
+  using InfoSetAddress = FrozenStrategyTables::InfoSetAddress;
+  using PublicStateRow = FrozenStrategyTables::PublicStateRow;
+  using PrivateRowChunk = FrozenStrategyTables::PrivateRowChunk;
+  using PublicInfoSetSlabPlayer = FrozenStrategyTables::PublicInfoSetSlabPlayer;
+  using PublicInfoSetSlab = FrozenStrategyTables::PublicInfoSetSlab;
+  static constexpr int kPrivateBucketChunkSize =
+      FrozenStrategyTables::kPrivateBucketChunkSize;
+
+  Impl(const SolverConfig& config);
+  Impl(const SolverConfig& config, const GameState& initial_state);
+  Impl(const SolverConfig& config,
+       std::shared_ptr<TerminalUtilityCache> utility_cache);
+  Impl(const SolverConfig& config,
+       std::shared_ptr<TerminalUtilityCache> utility_cache,
+       GameState initial_state);
+
+  void run(int iterations, ComboId player_a_hand, ComboId player_b_hand);
+  void run(int iterations, const HandRange& player_a_range,
+           const HandRange& player_b_range);
+  double evaluate_strategy(ComboId player_a_hand, ComboId player_b_hand);
+  double evaluate_strategy(int samples, const HandRange& player_a_range,
+                           const HandRange& player_b_range);
+  double get_expected_value(int player_id) const;
+  int get_iterations_run() const { return iterations_run_; }
+  int64_t get_cfr_update_count() const { return cfr_update_count_; }
+  size_t get_info_set_count() const { return frozen_tables_->info_set_count; }
+  size_t get_public_state_count() const {
+    return frozen_tables_->public_state_rows.size();
+  }
+  TraversalStats get_traversal_stats() const { return traversal_stats_; }
+  TrainingRunStats get_last_training_run_stats() const {
+    return last_training_run_stats_;
+  }
+  void add_traversal_stats(const TraversalStats& stats);
+  UtilityCacheStats get_utility_cache_stats() const;
+  static bool traversal_stats_enabled();
+
+  SolverConfig config_;
+  CompactPublicState initial_state_;
+  std::shared_ptr<GameTree> game_tree_;
+  std::mt19937 rng_;
+  double cumulative_root_utility_;
+  int iterations_run_ = 0;
+  int64_t cfr_update_count_ = 0;
+  TraversalStats traversal_stats_;
+  TrainingRunStats last_training_run_stats_;
+  std::shared_ptr<TerminalUtilityCache> utility_cache_;
+  CardAbstraction card_abstraction_;
+  bool frozen_ = false;
+  bool require_frozen_children_ = false;
+  std::shared_ptr<FrozenStrategyTables> mutable_tables_;
+  std::shared_ptr<const FrozenStrategyTables> frozen_tables_;
+  std::shared_ptr<MutableCumulativeArrays> cumulative_;
+
+  void run_iterations(int iterations,
+                      const HandRange& player_a_range,
+                      const HandRange& player_b_range);
+  void run_frozen_iterations(int iterations,
+                             int num_threads,
+                             uint32_t root_public_state_id,
+                             const RangeSampler& range_sampler,
+                             const TrainingRange& player_a_training_range,
+                             const TrainingRange& player_b_training_range);
+  double cfr_with_ranges(
+      uint32_t public_state_id,
+      const CompactPublicState& state,
+      const PrivateCards& player_a_cards,
+      const PrivateCards& player_b_cards,
+      std::array<double, 2>& reach_probabilities,
+      int update_player,
+      int iteration,
+      int depth,
+      int max_depth,
+      TraversalScratch& scratch,
+      OptionalTrainingRange player_a_range,
+      OptionalTrainingRange player_b_range);
+  struct ExactBoardState {
+    std::array<CardId, kMaxBoardCards> cards = {};
+    uint8_t count = 0;
+    CardMask mask = 0;
+  };
+  struct SampledFrozenChanceTransition {
+    uint32_t child_public_state_id = GameTree::Node::kInvalidPublicStateId;
+    ExactBoardState child_board;
+  };
+  static ExactBoardState exact_board_from_state(
+      const CompactPublicState& state);
+  static CompactPublicState state_with_exact_board(
+      CompactPublicState state,
+      const ExactBoardState& exact_board);
+  double cfr_frozen_regret_only(
+      uint32_t public_state_id,
+      const ExactBoardState& exact_board,
+      const PrivateCards& player_a_cards,
+      const PrivateCards& player_b_cards,
+      std::array<double, 2>& reach_probabilities,
+      int update_player,
+      int depth,
+      bool use_atomic_updates);
+  void average_strategy_probabilities(
+      uint32_t public_state_id,
+      const PublicStateRow& row,
+      int player,
+      const PrivateCards& private_cards,
+      StrategyProbabilities& probabilities);
+  void average_strategy_probabilities(
+      const InfoSetRow& info_set_row,
+      const PublicStateRow& public_state_row,
+      double fallback_probability,
+      StrategyProbabilities& probabilities);
+  void condition_ranges_for_actions(
+      const TrainingRangeView& range,
+      const CompactPublicState& state,
+      uint32_t public_state_id,
+      int player,
+      const int* action_ids,
+      size_t action_count,
+      ConditionedRanges& conditioned_ranges);
+  BettingHistoryKey make_betting_history_key(
+      const CompactPublicState& state) const;
+  BettingHistoryRow make_betting_history_row(
+      const CompactPublicState& state) const;
+  uint32_t get_or_create_betting_history_id(BettingHistoryKey key,
+                                            BettingHistoryRow row);
+  PublicStateKey make_public_state_key(uint32_t betting_history_id,
+                                       const CompactPublicState& state) const;
+  uint32_t get_or_create_betting_history_id(
+      const CompactPublicState& state);
+  uint32_t get_or_create_action_child_betting_history_id(
+      uint32_t parent_betting_history_id,
+      int action_index,
+      const CompactPublicState& child_state);
+  uint32_t get_or_create_chance_child_betting_history_id(
+      uint32_t parent_betting_history_id,
+      const CompactPublicState& child_state);
+  void cache_betting_history_actions(uint32_t betting_history_id,
+                                     const PublicStateRow& row);
+  PublicStateRow make_public_state_row(uint32_t betting_history_id,
+                                       CompactPublicState state);
+  std::optional<uint32_t> get_or_create_public_state_row(
+      uint32_t betting_history_id,
+      CompactPublicState state);
+  std::optional<uint32_t> get_or_create_public_state_row(
+      const CompactPublicState& state);
+  std::optional<uint32_t> action_child_public_state(
+      uint32_t public_state_id,
+      int action_index) const;
+  uint32_t required_action_child_public_state(uint32_t public_state_id,
+                                              int action_index) const;
+  uint32_t strict_action_child_public_state(const PublicStateRow& row,
+                                            size_t action_index) const;
+  std::optional<uint32_t> chance_child_public_state(
+      uint32_t public_state_id,
+      const CompactPublicState& child_state,
+      absl::Span<const CardId> cards) const;
+  uint32_t required_chance_child_public_state(
+      uint32_t public_state_id,
+      const CompactPublicState& child_state,
+      absl::Span<const CardId> cards) const;
+  uint32_t strict_chance_child_public_state(
+      const PublicStateRow& row,
+      const CompactPublicState& child_state,
+      absl::Span<const CardId> cards) const;
+  std::optional<uint32_t> chance_child_public_state(
+      uint32_t public_state_id,
+      absl::Span<const CardId> cards) const;
+  bool for_each_required_chance_transition(
+      const PublicStateRow& row,
+      const std::function<bool(const CompactPublicState&,
+                               absl::Span<const CardId>)>& callback) const;
+  int chance_child_lookup_key(const PublicStateRow& row,
+                              const CompactPublicState& child_state,
+                              absl::Span<const CardId> cards) const;
+  std::optional<uint32_t> get_or_create_action_child_public_state(
+      uint32_t public_state_id,
+      int action_index);
+  std::optional<uint32_t> get_or_create_chance_child_public_state(
+      uint32_t public_state_id,
+      const CompactPublicState& child_state,
+      absl::Span<const CardId> cards);
+  std::optional<uint32_t> get_or_create_chance_child_public_state(
+      uint32_t public_state_id,
+      absl::Span<const CardId> cards);
+  bool prebuild_public_state_rows(uint32_t root_public_state_id,
+                                  int max_depth);
+  void rebuild_chance_child_entries();
+  struct PrebuildValidationStats {
+    bool betting_history_transition_prebuild_complete = false;
+    bool action_transition_prebuild_complete = false;
+    bool chance_transition_prebuild_complete = false;
+    int64_t prebuild_betting_history_transitions = 0;
+    int64_t missing_betting_history_transitions = 0;
+    int64_t prebuild_action_transitions = 0;
+    int64_t missing_action_transitions = 0;
+    int64_t prebuild_chance_transitions = 0;
+    int64_t missing_chance_transitions = 0;
+  };
+  PrebuildValidationStats validate_prebuilt_transitions(
+      uint32_t root_public_state_id,
+      int max_depth) const;
+  bool prebuild_info_set_rows(const TrainingRangeView& player_a_range,
+                              const TrainingRangeView& player_b_range);
+  bool prebuild_private_bucket_rows();
+  bool prebuild_frozen_info_set_action_offsets();
+  PrivateBucketId private_bucket_for_frozen_row(uint32_t public_state_id,
+                                                ComboId combo_id) const;
+  uint32_t frozen_info_set_action_offset(uint32_t public_state_id,
+                                         int player,
+                                         PrivateBucketId private_bucket) const;
+  const InfoSetRow* get_or_create_info_set_row(
+      InfoSetAddress address,
+      absl::Span<const int> action_ids);
+  FrozenStrategyTables& mutable_tables();
+  InfoSetRow append_info_set_actions(absl::Span<const int> action_ids);
+  PublicInfoSetSlab& get_or_create_public_info_set_slab(
+      uint32_t public_state_id);
+  const PublicInfoSetSlab* public_info_set_slab(
+      uint32_t public_state_id) const;
+  const InfoSetRow* find_info_set_row(InfoSetAddress address) const;
+  static const InfoSetRow* find_info_set_row(
+      const PublicInfoSetSlabPlayer& player_slab,
+      PrivateBucketId private_bucket);
+  static int32_t& get_or_create_private_row_slot(
+      PublicInfoSetSlabPlayer& player_slab,
+      PrivateBucketId private_bucket);
+  double utility(const CompactPublicState& state,
+                 const PrivateCards& player_a_cards,
+                 const PrivateCards& player_b_cards);
+  double frozen_utility(const PublicStateRow& row,
+                        const ExactBoardState& exact_board,
+                        const PrivateCards& player_a_cards,
+                        const PrivateCards& player_b_cards);
+  double uncached_utility(const CompactPublicState& state,
+                          const PrivateCards& player_a_cards,
+                          const PrivateCards& player_b_cards);
+  double evaluate_strategy_node(uint32_t public_state_id,
+                                const CompactPublicState& state,
+                                const PrivateCards& player_a_cards,
+                                const PrivateCards& player_b_cards);
+  double evaluate_strategy_samples(
+      int samples,
+      uint32_t root_public_state_id,
+      RangeSampler range_sampler);
+  void update_strategy(size_t action_offset,
+                       const double* action_probabilities,
+                       size_t action_count,
+                       double reach_prob);
+  std::optional<SampledChanceTransition> sample_chance_transition(
+      uint32_t public_state_id,
+      const CompactPublicState& state,
+      CardMask known_private_cards);
+  SampledFrozenChanceTransition sample_frozen_chance_transition(
+      const PublicStateRow& row,
+      const ExactBoardState& exact_board,
+      CardMask known_private_cards);
+  double chance_sampling_cfr(
+      uint32_t public_state_id,
+      const CompactPublicState& state,
+      const PrivateCards& player_a_cards,
+      const PrivateCards& player_b_cards,
+      std::array<double, 2>& reach_probabilities,
+      int update_player,
+      int iteration,
+      int depth,
+      int max_depth,
+      TraversalScratch& scratch,
+      OptionalTrainingRange player_a_range,
+      OptionalTrainingRange player_b_range);
+  double chance_sampling_frozen_regret_only(
+      uint32_t public_state_id,
+      const ExactBoardState& exact_board,
+      const PrivateCards& player_a_cards,
+      const PrivateCards& player_b_cards,
+      std::array<double, 2>& reach_probabilities,
+      int update_player,
+      int depth,
+      bool use_atomic_updates);
+};
 
 CFRSolver::CFRSolver(const SolverConfig& config)
-    : CFRSolver(config, std::make_shared<TerminalUtilityCache>()) {
-}
+    : impl_(std::make_unique<Impl>(config)) {}
 
 CFRSolver::CFRSolver(const SolverConfig& config,
                      const GameState& initial_state)
-    : CFRSolver(config, std::make_shared<TerminalUtilityCache>(),
-                initial_state) {
+    : impl_(std::make_unique<Impl>(config, initial_state)) {}
+
+CFRSolver::~CFRSolver() = default;
+CFRSolver::CFRSolver(CFRSolver&&) noexcept = default;
+CFRSolver& CFRSolver::operator=(CFRSolver&&) noexcept = default;
+
+void CFRSolver::run(int iterations, ComboId player_a_hand,
+                    ComboId player_b_hand) {
+  impl_->run(iterations, player_a_hand, player_b_hand);
 }
 
-CFRSolver::CFRSolver(const SolverConfig& config,
+void CFRSolver::run(int iterations, const HandRange& player_a_range,
+                    const HandRange& player_b_range) {
+  impl_->run(iterations, player_a_range, player_b_range);
+}
+
+double CFRSolver::evaluate_strategy(ComboId player_a_hand,
+                                    ComboId player_b_hand) {
+  return impl_->evaluate_strategy(player_a_hand, player_b_hand);
+}
+
+double CFRSolver::evaluate_strategy(int samples,
+                                    const HandRange& player_a_range,
+                                    const HandRange& player_b_range) {
+  return impl_->evaluate_strategy(samples, player_a_range, player_b_range);
+}
+
+double CFRSolver::get_expected_value(int player_id) const {
+  return impl_->get_expected_value(player_id);
+}
+
+int CFRSolver::get_iterations_run() const {
+  return impl_->get_iterations_run();
+}
+
+int64_t CFRSolver::get_cfr_update_count() const {
+  return impl_->get_cfr_update_count();
+}
+
+size_t CFRSolver::get_info_set_count() const {
+  return impl_->get_info_set_count();
+}
+
+size_t CFRSolver::get_public_state_count() const {
+  return impl_->get_public_state_count();
+}
+
+CFRSolver::TraversalStats CFRSolver::get_traversal_stats() const {
+  return impl_->get_traversal_stats();
+}
+
+CFRSolver::TrainingRunStats CFRSolver::get_last_training_run_stats() const {
+  return impl_->get_last_training_run_stats();
+}
+
+void CFRSolver::add_traversal_stats(const TraversalStats& stats) {
+  impl_->add_traversal_stats(stats);
+}
+
+CFRSolver::UtilityCacheStats CFRSolver::get_utility_cache_stats() const {
+  return impl_->get_utility_cache_stats();
+}
+
+bool CFRSolver::traversal_stats_enabled() {
+  return Impl::traversal_stats_enabled();
+}
+
+
+CFRSolver::Impl::Impl(const SolverConfig& config)
+    : Impl(config, std::make_shared<TerminalUtilityCache>()) {
+}
+
+CFRSolver::Impl::Impl(const SolverConfig& config,
+                     const GameState& initial_state)
+    : Impl(config, std::make_shared<TerminalUtilityCache>(), initial_state) {
+}
+
+CFRSolver::Impl::Impl(const SolverConfig& config,
                      std::shared_ptr<TerminalUtilityCache> utility_cache)
-    : CFRSolver(config, std::move(utility_cache),
-                DefaultInitialState(config)) {
+    : Impl(config, std::move(utility_cache), DefaultInitialState(config)) {
 }
 
-CFRSolver::CFRSolver(
+CFRSolver::Impl::Impl(
     const SolverConfig& config,
     std::shared_ptr<TerminalUtilityCache> utility_cache,
     GameState initial_state)
   : config_(config),
-    initial_state_(std::move(initial_state)),
+    initial_state_(CompactPublicStateFromGameState(initial_state)),
     game_tree_(std::make_shared<GameTree>(config)),
     rng_(12345),
     cumulative_root_utility_(0.0),
@@ -567,14 +1006,14 @@ CFRSolver::CFRSolver(
   }
 }
 
-FrozenStrategyTables& CFRSolver::mutable_tables() {
+FrozenStrategyTables& CFRSolver::Impl::mutable_tables() {
   if (frozen_ || mutable_tables_ == nullptr) {
     throw std::logic_error("Strategy tables are frozen");
   }
   return *mutable_tables_;
 }
 
-CFRSolver::ExactBoardState CFRSolver::exact_board_from_state(
+CFRSolver::Impl::ExactBoardState CFRSolver::Impl::exact_board_from_state(
     const CompactPublicState& state) {
   return ExactBoardState{
       state.board_cards,
@@ -583,7 +1022,7 @@ CFRSolver::ExactBoardState CFRSolver::exact_board_from_state(
   };
 }
 
-CompactPublicState CFRSolver::state_with_exact_board(
+CompactPublicState CFRSolver::Impl::state_with_exact_board(
     CompactPublicState state,
     const ExactBoardState& exact_board) {
   state.board_cards = exact_board.cards;
@@ -592,18 +1031,18 @@ CompactPublicState CFRSolver::state_with_exact_board(
   return state;
 }
 
-CFRSolver::PrivateCards CFRSolver::PrivateCards::FromCombo(
+CFRSolver::Impl::PrivateCards CFRSolver::Impl::PrivateCards::FromCombo(
     ComboId combo_id) {
   PrivateCards private_cards;
   private_cards.combo = combo_id;
   return private_cards;
 }
 
-CardMask CFRSolver::PrivateCards::mask() const {
+CardMask CFRSolver::Impl::PrivateCards::mask() const {
   return ComboMask(combo);
 }
 
-CFRSolver::RangeSampler::RangeSampler(const TrainingRange& player_a_range,
+CFRSolver::Impl::RangeSampler::RangeSampler(const TrainingRange& player_a_range,
                                        const TrainingRange& player_b_range)
     : player_a_range(player_a_range),
       player_b_range(player_b_range),
@@ -658,7 +1097,7 @@ CFRSolver::RangeSampler::RangeSampler(const TrainingRange& player_a_range,
   total_player_a_weight = total_weight;
 }
 
-CFRSolver::RangeDeal CFRSolver::RangeSampler::sample(std::mt19937& rng) const {
+CFRSolver::Impl::RangeDeal CFRSolver::Impl::RangeSampler::sample(std::mt19937& rng) const {
   std::uniform_real_distribution<float> player_a_distribution(
       0.0f, total_player_a_weight);
   const float player_a_sample = player_a_distribution(rng);
@@ -696,36 +1135,7 @@ CFRSolver::RangeDeal CFRSolver::RangeSampler::sample(std::mt19937& rng) const {
                    compatible_player_b_combos[sampled_index]);
 }
 
-CFRSolver::BettingHistoryKey CFRSolver::make_betting_history_key(
-    const GameState& state) const {
-  BettingHistoryKey key;
-  key.street = static_cast<int>(state.street);
-  key.pot = state.pot;
-  key.stack_a = state.stack[0];
-  key.stack_b = state.stack[1];
-  key.all_in = state.all_in ? 1 : 0;
-  key.folded_player = state.folded_player;
-  key.player_to_act = state.player_to_act;
-  key.player_contribution_size = 2;
-  for (int i = 0; i < key.player_contribution_size; ++i) {
-    key.player_contributions[i] = RoundedContribution(state, i);
-  }
-
-  const int history_value_count = state.history.size() * 3;
-  if (history_value_count > BettingHistoryKey::kInlineHistoryValues) {
-    key.history_overflow.reserve(history_value_count -
-                                 BettingHistoryKey::kInlineHistoryValues);
-  }
-  for (const GameAction& action : state.history) {
-    AddBettingHistoryValue(key, action.player);
-    AddBettingHistoryValue(key, static_cast<int>(action.kind));
-    AddBettingHistoryValue(key, action.amount);
-  }
-
-  return key;
-}
-
-CFRSolver::BettingHistoryKey CFRSolver::make_betting_history_key(
+CFRSolver::Impl::BettingHistoryKey CFRSolver::Impl::make_betting_history_key(
     const CompactPublicState& state) const {
   BettingHistoryKey key;
   key.street = static_cast<int>(state.street);
@@ -756,23 +1166,7 @@ CFRSolver::BettingHistoryKey CFRSolver::make_betting_history_key(
   return key;
 }
 
-CFRSolver::BettingHistoryRow CFRSolver::make_betting_history_row(
-    const GameState& state) const {
-  BettingHistoryRow row;
-  row.street = static_cast<int>(state.street);
-  row.pot = state.pot;
-  row.stack = {state.stack[0], state.stack[1]};
-  row.all_in = state.all_in ? 1 : 0;
-  row.folded_player = state.folded_player;
-  row.player_to_act = state.player_to_act;
-  row.player_contributions = {
-      RoundedContribution(state, 0),
-      RoundedContribution(state, 1),
-  };
-  return row;
-}
-
-CFRSolver::BettingHistoryRow CFRSolver::make_betting_history_row(
+CFRSolver::Impl::BettingHistoryRow CFRSolver::Impl::make_betting_history_row(
     const CompactPublicState& state) const {
   BettingHistoryRow row;
   row.street = static_cast<int>(state.street);
@@ -788,21 +1182,14 @@ CFRSolver::BettingHistoryRow CFRSolver::make_betting_history_row(
   return row;
 }
 
-CFRSolver::PublicStateKey CFRSolver::make_public_state_key(
-    uint32_t betting_history_id,
-    const GameState& state) const {
-  return {betting_history_id, card_abstraction_.public_bucket(state)};
-}
-
-CFRSolver::PublicStateKey CFRSolver::make_public_state_key(
+CFRSolver::Impl::PublicStateKey CFRSolver::Impl::make_public_state_key(
     uint32_t betting_history_id,
     const CompactPublicState& state) const {
   return {betting_history_id, card_abstraction_.public_bucket(state)};
 }
 
 CompactPublicState
-CFRSolver::compact_public_state_from_game_state(
-    const GameState& state) {
+CompactPublicStateFromGameState(const GameState& state) {
   CompactPublicState compact;
   compact.stack = {state.stack[0], state.stack[1]};
   compact.pot = state.pot;
@@ -832,43 +1219,7 @@ CFRSolver::compact_public_state_from_game_state(
   return compact;
 }
 
-GameState CFRSolver::materialize_game_state(
-    const CompactPublicState& compact) const {
-  GameState state;
-  state.stack[0] = compact.stack[0];
-  state.stack[1] = compact.stack[1];
-  state.pot = compact.pot;
-  for (int i = 0; i < compact.board_count; ++i) {
-    AddBoardCard(state, compact.board_cards[static_cast<size_t>(i)]);
-  }
-  if (state.board_mask != compact.board_mask) {
-    throw std::logic_error("Compact public state board mask mismatch");
-  }
-
-  state.history.reserve(compact.history_size);
-  const uint16_t inline_history_size = std::min<uint16_t>(
-      compact.history_size, CompactPublicState::kMaxHistoryActions);
-  for (uint16_t i = 0; i < inline_history_size; ++i) {
-    state.history.push_back(MakeGameAction(CompactHistoryAction(compact, i)));
-  }
-
-  state.street = compact.street;
-  state.all_in = compact.all_in;
-  state.folded_player = compact.folded_player;
-  state.player_to_act = compact.player_to_act;
-  state.player_contribution = compact.player_contribution;
-  state.player_contribution_count = compact.player_contribution_count;
-  return state;
-}
-
-CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
-    uint32_t betting_history_id,
-    const GameState& state) {
-  return make_public_state_row(
-      betting_history_id, compact_public_state_from_game_state(state));
-}
-
-CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
+CFRSolver::Impl::PublicStateRow CFRSolver::Impl::make_public_state_row(
     uint32_t betting_history_id,
     CompactPublicState state) {
 #if POKER_COARSE_PUBLIC_BUCKETS
@@ -894,7 +1245,7 @@ CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
   return row;
 }
 
-CFRSolver::InfoSetRow CFRSolver::append_info_set_actions(
+CFRSolver::Impl::InfoSetRow CFRSolver::Impl::append_info_set_actions(
     absl::Span<const int> action_ids) {
   FrozenStrategyTables& tables = mutable_tables();
   // Keep each real infoset action block on a cache-line boundary to reduce
@@ -931,45 +1282,7 @@ CFRSolver::InfoSetRow CFRSolver::append_info_set_actions(
   return row;
 }
 
-std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
-    uint32_t betting_history_id,
-    const GameState& state) {
-  if (frozen_) {
-    auto existing = frozen_tables_->public_state_ids.find(
-        make_public_state_key(betting_history_id, state));
-    if (existing == frozen_tables_->public_state_ids.end()) {
-      return std::nullopt;
-    }
-    return existing->second;
-  }
-
-  FrozenStrategyTables& tables = mutable_tables();
-  if (config_.max_public_states > 0 &&
-      static_cast<int>(tables.public_state_rows.size()) >=
-          config_.max_public_states) {
-    auto existing = tables.public_state_ids.find(
-        make_public_state_key(betting_history_id, state));
-    if (existing != tables.public_state_ids.end()) {
-      return existing->second;
-    }
-    return std::nullopt;
-  }
-
-  PublicStateKey key = make_public_state_key(betting_history_id, state);
-  const auto [state_iter, inserted] = tables.public_state_ids.try_emplace(
-      std::move(key), static_cast<uint32_t>(tables.public_state_ids.size()));
-  if (!inserted) {
-    return state_iter->second;
-  }
-  const uint32_t public_state_id = state_iter->second;
-  tables.public_state_rows.push_back(
-      make_public_state_row(betting_history_id, state));
-  cache_betting_history_actions(betting_history_id,
-                                tables.public_state_rows.back());
-  return public_state_id;
-}
-
-std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
+std::optional<uint32_t> CFRSolver::Impl::get_or_create_public_state_row(
     uint32_t betting_history_id,
     CompactPublicState state) {
   if (frozen_) {
@@ -1007,35 +1320,30 @@ std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
   return public_state_id;
 }
 
-std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
-    const GameState& state) {
+std::optional<uint32_t> CFRSolver::Impl::get_or_create_public_state_row(
+    const CompactPublicState& state) {
   if (frozen_) {
-    const std::optional<uint32_t> betting_history_id =
-        strategy_betting_history_id(state);
-    if (!betting_history_id.has_value()) {
+    BettingHistoryKey key = make_betting_history_key(state);
+    const auto betting_history =
+        frozen_tables_->betting_history_ids.find(key);
+    if (betting_history == frozen_tables_->betting_history_ids.end()) {
       return std::nullopt;
     }
-    return get_or_create_public_state_row(*betting_history_id, state);
+    return get_or_create_public_state_row(betting_history->second, state);
   }
 
   const uint32_t betting_history_id = get_or_create_betting_history_id(state);
   return get_or_create_public_state_row(betting_history_id, state);
 }
 
-uint32_t CFRSolver::get_or_create_betting_history_id(const GameState& state) {
-  BettingHistoryKey key = make_betting_history_key(state);
-  BettingHistoryRow row = make_betting_history_row(state);
-  return get_or_create_betting_history_id(std::move(key), std::move(row));
-}
-
-uint32_t CFRSolver::get_or_create_betting_history_id(
+uint32_t CFRSolver::Impl::get_or_create_betting_history_id(
     const CompactPublicState& state) {
   BettingHistoryKey key = make_betting_history_key(state);
   BettingHistoryRow row = make_betting_history_row(state);
   return get_or_create_betting_history_id(std::move(key), std::move(row));
 }
 
-uint32_t CFRSolver::get_or_create_betting_history_id(BettingHistoryKey key,
+uint32_t CFRSolver::Impl::get_or_create_betting_history_id(BettingHistoryKey key,
                                                      BettingHistoryRow row) {
   CopyBettingHistoryValues(key, row);
   FrozenStrategyTables& tables = mutable_tables();
@@ -1053,7 +1361,7 @@ uint32_t CFRSolver::get_or_create_betting_history_id(BettingHistoryKey key,
   return betting_history_id;
 }
 
-uint32_t CFRSolver::get_or_create_action_child_betting_history_id(
+uint32_t CFRSolver::Impl::get_or_create_action_child_betting_history_id(
     uint32_t parent_betting_history_id,
     int action_index,
     const CompactPublicState& child_state) {
@@ -1093,7 +1401,7 @@ uint32_t CFRSolver::get_or_create_action_child_betting_history_id(
   return child_id;
 }
 
-uint32_t CFRSolver::get_or_create_chance_child_betting_history_id(
+uint32_t CFRSolver::Impl::get_or_create_chance_child_betting_history_id(
     uint32_t parent_betting_history_id,
     const CompactPublicState& child_state) {
   FrozenStrategyTables& tables = mutable_tables();
@@ -1114,7 +1422,7 @@ uint32_t CFRSolver::get_or_create_chance_child_betting_history_id(
   return child_id;
 }
 
-void CFRSolver::cache_betting_history_actions(
+void CFRSolver::Impl::cache_betting_history_actions(
     uint32_t betting_history_id,
     const PublicStateRow& row) {
   FrozenStrategyTables& tables = mutable_tables();
@@ -1132,7 +1440,7 @@ void CFRSolver::cache_betting_history_actions(
   }
 }
 
-std::optional<uint32_t> CFRSolver::action_child_public_state(
+std::optional<uint32_t> CFRSolver::Impl::action_child_public_state(
     uint32_t public_state_id,
     int action_index) const {
   const auto& rows = frozen_tables_->public_state_rows;
@@ -1152,7 +1460,7 @@ std::optional<uint32_t> CFRSolver::action_child_public_state(
   return child_id;
 }
 
-uint32_t CFRSolver::required_action_child_public_state(
+uint32_t CFRSolver::Impl::required_action_child_public_state(
     uint32_t public_state_id,
     int action_index) const {
   const auto& rows = frozen_tables_->public_state_rows;
@@ -1172,13 +1480,13 @@ uint32_t CFRSolver::required_action_child_public_state(
   return child_id;
 }
 
-uint32_t CFRSolver::strict_action_child_public_state(
+uint32_t CFRSolver::Impl::strict_action_child_public_state(
     const PublicStateRow& row,
     size_t action_index) const {
   return row.action_child_ids[action_index];
 }
 
-std::optional<uint32_t> CFRSolver::chance_child_public_state(
+std::optional<uint32_t> CFRSolver::Impl::chance_child_public_state(
     uint32_t public_state_id,
     const CompactPublicState& child_state,
     absl::Span<const CardId> cards) const {
@@ -1210,7 +1518,7 @@ std::optional<uint32_t> CFRSolver::chance_child_public_state(
   return entries[low].public_state_id;
 }
 
-uint32_t CFRSolver::required_chance_child_public_state(
+uint32_t CFRSolver::Impl::required_chance_child_public_state(
     uint32_t public_state_id,
     const CompactPublicState& child_state,
     absl::Span<const CardId> cards) const {
@@ -1244,7 +1552,7 @@ uint32_t CFRSolver::required_chance_child_public_state(
   return entries[low].public_state_id;
 }
 
-uint32_t CFRSolver::strict_chance_child_public_state(
+uint32_t CFRSolver::Impl::strict_chance_child_public_state(
     const PublicStateRow& row,
     const CompactPublicState& child_state,
     absl::Span<const CardId> cards) const {
@@ -1268,7 +1576,7 @@ uint32_t CFRSolver::strict_chance_child_public_state(
   return entries[low].public_state_id;
 }
 
-std::optional<uint32_t> CFRSolver::chance_child_public_state(
+std::optional<uint32_t> CFRSolver::Impl::chance_child_public_state(
     uint32_t public_state_id,
     absl::Span<const CardId> cards) const {
   const auto& rows = frozen_tables_->public_state_rows;
@@ -1281,7 +1589,7 @@ std::optional<uint32_t> CFRSolver::chance_child_public_state(
       cards);
 }
 
-bool CFRSolver::for_each_required_chance_transition(
+bool CFRSolver::Impl::for_each_required_chance_transition(
     const PublicStateRow& row,
     const std::function<bool(const CompactPublicState&,
                              absl::Span<const CardId>)>& callback) const {
@@ -1312,7 +1620,7 @@ bool CFRSolver::for_each_required_chance_transition(
   });
 }
 
-int CFRSolver::chance_child_lookup_key(
+int CFRSolver::Impl::chance_child_lookup_key(
     const PublicStateRow& row,
     const CompactPublicState& child_state,
     absl::Span<const CardId> cards) const {
@@ -1322,7 +1630,7 @@ int CFRSolver::chance_child_lookup_key(
   return static_cast<int>(card_abstraction_.public_bucket(child_state));
 }
 
-std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
+std::optional<uint32_t> CFRSolver::Impl::get_or_create_action_child_public_state(
     uint32_t public_state_id,
     int action_index) {
   const auto& rows = frozen_tables_->public_state_rows;
@@ -1420,7 +1728,7 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
   return child_id;
 }
 
-std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
+std::optional<uint32_t> CFRSolver::Impl::get_or_create_chance_child_public_state(
     uint32_t public_state_id,
     const CompactPublicState& child_state,
     absl::Span<const CardId> cards) {
@@ -1499,7 +1807,7 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
   return child_id;
 }
 
-std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
+std::optional<uint32_t> CFRSolver::Impl::get_or_create_chance_child_public_state(
     uint32_t public_state_id,
     absl::Span<const CardId> cards) {
   const auto& rows = frozen_tables_->public_state_rows;
@@ -1512,7 +1820,7 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
       cards);
 }
 
-bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
+bool CFRSolver::Impl::prebuild_public_state_rows(uint32_t root_public_state_id,
                                            int max_depth) {
   if (frozen_) {
     return true;
@@ -1593,7 +1901,7 @@ bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
   return true;
 }
 
-void CFRSolver::rebuild_chance_child_entries() {
+void CFRSolver::Impl::rebuild_chance_child_entries() {
   FrozenStrategyTables& tables = mutable_tables();
   struct PendingChanceChild {
     uint32_t parent_id = 0;
@@ -1648,7 +1956,7 @@ void CFRSolver::rebuild_chance_child_entries() {
   }
 }
 
-CFRSolver::PrebuildValidationStats CFRSolver::validate_prebuilt_transitions(
+CFRSolver::Impl::PrebuildValidationStats CFRSolver::Impl::validate_prebuilt_transitions(
     uint32_t root_public_state_id,
     int max_depth) const {
   PrebuildValidationStats stats;
@@ -1801,7 +2109,7 @@ CFRSolver::PrebuildValidationStats CFRSolver::validate_prebuilt_transitions(
   return stats;
 }
 
-bool CFRSolver::prebuild_info_set_rows(
+bool CFRSolver::Impl::prebuild_info_set_rows(
     const TrainingRangeView& player_a_range,
     const TrainingRangeView& player_b_range) {
   if (frozen_) {
@@ -1872,7 +2180,7 @@ bool CFRSolver::prebuild_info_set_rows(
   return true;
 }
 
-bool CFRSolver::prebuild_private_bucket_rows() {
+bool CFRSolver::Impl::prebuild_private_bucket_rows() {
   if (frozen_) {
     return true;
   }
@@ -1901,7 +2209,7 @@ bool CFRSolver::prebuild_private_bucket_rows() {
   return true;
 }
 
-bool CFRSolver::prebuild_frozen_info_set_action_offsets() {
+bool CFRSolver::Impl::prebuild_frozen_info_set_action_offsets() {
   if (frozen_) {
     return true;
   }
@@ -1947,12 +2255,12 @@ bool CFRSolver::prebuild_frozen_info_set_action_offsets() {
 }
 
 FrozenStrategyTables::PrivateBucketId
-CFRSolver::private_bucket_for_frozen_row(uint32_t public_state_id,
+CFRSolver::Impl::private_bucket_for_frozen_row(uint32_t public_state_id,
                                          ComboId combo_id) const {
   return frozen_tables_->private_bucket_rows[public_state_id][combo_id];
 }
 
-uint32_t CFRSolver::frozen_info_set_action_offset(
+uint32_t CFRSolver::Impl::frozen_info_set_action_offset(
     uint32_t public_state_id,
     int player,
     PrivateBucketId private_bucket) const {
@@ -1960,7 +2268,7 @@ uint32_t CFRSolver::frozen_info_set_action_offset(
                                                         [private_bucket];
 }
 
-CFRSolver::PublicInfoSetSlab& CFRSolver::get_or_create_public_info_set_slab(
+CFRSolver::Impl::PublicInfoSetSlab& CFRSolver::Impl::get_or_create_public_info_set_slab(
     uint32_t public_state_id) {
   FrozenStrategyTables& tables = mutable_tables();
   if (tables.public_info_set_slabs.size() <= public_state_id) {
@@ -1974,7 +2282,7 @@ CFRSolver::PublicInfoSetSlab& CFRSolver::get_or_create_public_info_set_slab(
   return *slab;
 }
 
-const CFRSolver::PublicInfoSetSlab* CFRSolver::public_info_set_slab(
+const CFRSolver::Impl::PublicInfoSetSlab* CFRSolver::Impl::public_info_set_slab(
     uint32_t public_state_id) const {
   const auto& slabs = frozen_tables_->public_info_set_slabs;
   if (public_state_id >= slabs.size()) {
@@ -1983,7 +2291,7 @@ const CFRSolver::PublicInfoSetSlab* CFRSolver::public_info_set_slab(
   return slabs[public_state_id].get();
 }
 
-const CFRSolver::InfoSetRow* CFRSolver::find_info_set_row(
+const CFRSolver::Impl::InfoSetRow* CFRSolver::Impl::find_info_set_row(
     InfoSetAddress address) const {
   if (address.player < 0 || address.player >= kPlayerCount ||
       address.private_bucket >= kComboCount) {
@@ -1997,7 +2305,7 @@ const CFRSolver::InfoSetRow* CFRSolver::find_info_set_row(
   return find_info_set_row(player_slab, address.private_bucket);
 }
 
-const CFRSolver::InfoSetRow* CFRSolver::find_info_set_row(
+const CFRSolver::Impl::InfoSetRow* CFRSolver::Impl::find_info_set_row(
     const PublicInfoSetSlabPlayer& player_slab,
     PrivateBucketId private_bucket) {
   if (private_bucket >= kComboCount) {
@@ -2018,7 +2326,7 @@ const CFRSolver::InfoSetRow* CFRSolver::find_info_set_row(
   return &player_slab.rows[row_id];
 }
 
-int32_t& CFRSolver::get_or_create_private_row_slot(
+int32_t& CFRSolver::Impl::get_or_create_private_row_slot(
     PublicInfoSetSlabPlayer& player_slab,
     PrivateBucketId private_bucket) {
   const size_t chunk_index = private_bucket / kPrivateBucketChunkSize;
@@ -2031,7 +2339,7 @@ int32_t& CFRSolver::get_or_create_private_row_slot(
   return chunk->rows[chunk_offset];
 }
 
-const CFRSolver::InfoSetRow* CFRSolver::get_or_create_info_set_row(
+const CFRSolver::Impl::InfoSetRow* CFRSolver::Impl::get_or_create_info_set_row(
     InfoSetAddress address,
     absl::Span<const int> action_ids) {
   if (address.player < 0 || address.player >= kPlayerCount ||
@@ -2060,18 +2368,7 @@ const CFRSolver::InfoSetRow* CFRSolver::get_or_create_info_set_row(
   return &player_slab.rows.back();
 }
 
-std::optional<uint32_t> CFRSolver::strategy_betting_history_id(
-    const GameState& state) const {
-  const auto& betting_history_ids = frozen_tables_->betting_history_ids;
-  auto betting_history =
-      betting_history_ids.find(make_betting_history_key(state));
-  if (betting_history == betting_history_ids.end()) {
-    return std::nullopt;
-  }
-  return betting_history->second;
-}
-
-void CFRSolver::add_traversal_stats(const TraversalStats& stats) {
+void CFRSolver::Impl::add_traversal_stats(const TraversalStats& stats) {
   traversal_stats_.cfr_updates += stats.cfr_updates;
   traversal_stats_.preflop_updates += stats.preflop_updates;
   traversal_stats_.flop_updates += stats.flop_updates;
@@ -2091,7 +2388,7 @@ void CFRSolver::add_traversal_stats(const TraversalStats& stats) {
       stats.betting_history_transition_misses;
 }
 
-void CFRSolver::run(int iterations, ComboId player_a_hand,
+void CFRSolver::Impl::run(int iterations, ComboId player_a_hand,
                     ComboId player_b_hand) {
   last_training_run_stats_ = {};
   if (iterations <= 0) {
@@ -2131,12 +2428,12 @@ void CFRSolver::run(int iterations, ComboId player_a_hand,
       cfr_update_count_ - start_updates;
 }
 
-void CFRSolver::run(int iterations, const HandRange& player_a_range,
+void CFRSolver::Impl::run(int iterations, const HandRange& player_a_range,
                     const HandRange& player_b_range) {
   run_iterations(iterations, player_a_range, player_b_range);
 }
 
-void CFRSolver::run_iterations(int iterations,
+void CFRSolver::Impl::run_iterations(int iterations,
                                const HandRange& player_a_range,
                                const HandRange& player_b_range) {
   last_training_run_stats_ = {};
@@ -2447,7 +2744,7 @@ void CFRSolver::run_iterations(int iterations,
   LOG(INFO) << "Player A average EV: " << get_expected_value(0);
 }
 
-void CFRSolver::run_frozen_iterations(
+void CFRSolver::Impl::run_frozen_iterations(
     int iterations,
     int num_threads,
     uint32_t root_public_state_id,
@@ -2493,7 +2790,7 @@ void CFRSolver::run_frozen_iterations(
          use_atomic_updates, &player_a_training_range,
          &player_b_training_range]() mutable {
           // Build a lightweight worker that shares frozen tables.
-          CFRSolver worker(config_, utility_cache_);
+          Impl worker(config_, utility_cache_);
           worker.mutable_tables_.reset();
           worker.frozen_tables_ = frozen_tables;
           worker.cumulative_ = cumulative;
@@ -2566,7 +2863,7 @@ void CFRSolver::run_frozen_iterations(
   iterations_run_ += completed_iterations;
 }
 
-double CFRSolver::cfr_with_ranges(
+double CFRSolver::Impl::cfr_with_ranges(
     uint32_t public_state_id,
     const CompactPublicState& state,
     const PrivateCards& player_a_cards,
@@ -2796,8 +3093,8 @@ double CFRSolver::cfr_with_ranges(
   return node_value;
 }
 
-std::optional<CFRSolver::SampledChanceTransition>
-CFRSolver::sample_chance_transition(uint32_t public_state_id,
+std::optional<CFRSolver::Impl::SampledChanceTransition>
+CFRSolver::Impl::sample_chance_transition(uint32_t public_state_id,
                                     const CompactPublicState& state,
                                     CardMask known_private_cards) {
   const auto cards = SampleStreetCards(state, known_private_cards, rng_);
@@ -2835,8 +3132,8 @@ CFRSolver::sample_chance_transition(uint32_t public_state_id,
   };
 }
 
-CFRSolver::SampledFrozenChanceTransition
-CFRSolver::sample_frozen_chance_transition(
+CFRSolver::Impl::SampledFrozenChanceTransition
+CFRSolver::Impl::sample_frozen_chance_transition(
     const PublicStateRow& row,
     const ExactBoardState& exact_board,
     CardMask known_private_cards) {
@@ -2877,7 +3174,7 @@ CFRSolver::sample_frozen_chance_transition(
   };
 }
 
-double CFRSolver::chance_sampling_cfr(
+double CFRSolver::Impl::chance_sampling_cfr(
     uint32_t public_state_id,
     const CompactPublicState& state,
     const PrivateCards& player_a_cards,
@@ -2942,7 +3239,7 @@ double CFRSolver::chance_sampling_cfr(
   return evaluated > 0 ? value / evaluated : 0.0;
 }
 
-double CFRSolver::cfr_frozen_regret_only(
+double CFRSolver::Impl::cfr_frozen_regret_only(
     uint32_t public_state_id,
     const ExactBoardState& exact_board,
     const PrivateCards& player_a_cards,
@@ -3096,7 +3393,7 @@ double CFRSolver::cfr_frozen_regret_only(
   return node_value;
 }
 
-double CFRSolver::chance_sampling_frozen_regret_only(
+double CFRSolver::Impl::chance_sampling_frozen_regret_only(
     uint32_t public_state_id,
     const ExactBoardState& exact_board,
     const PrivateCards& player_a_cards,
@@ -3124,7 +3421,7 @@ double CFRSolver::chance_sampling_frozen_regret_only(
   return samples > 0 ? value / samples : 0.0;
 }
 
-void CFRSolver::average_strategy_probabilities(
+void CFRSolver::Impl::average_strategy_probabilities(
     uint32_t public_state_id,
     const PublicStateRow& row,
     int player,
@@ -3150,7 +3447,7 @@ void CFRSolver::average_strategy_probabilities(
       *info_set_row, row, uniform_probability, probabilities);
 }
 
-void CFRSolver::average_strategy_probabilities(
+void CFRSolver::Impl::average_strategy_probabilities(
     const InfoSetRow& info_set_row,
     const PublicStateRow& public_state_row,
     double fallback_probability,
@@ -3223,7 +3520,7 @@ void CFRSolver::average_strategy_probabilities(
   }
 }
 
-void CFRSolver::condition_ranges_for_actions(
+void CFRSolver::Impl::condition_ranges_for_actions(
     const TrainingRangeView& range,
     const CompactPublicState& state,
     uint32_t public_state_id,
@@ -3310,7 +3607,7 @@ void CFRSolver::condition_ranges_for_actions(
   }
 }
 
-double CFRSolver::evaluate_strategy(ComboId player_a_hand,
+double CFRSolver::Impl::evaluate_strategy(ComboId player_a_hand,
                                     ComboId player_b_hand) {
   const std::optional<uint32_t> root_public_state_id =
       get_or_create_public_state_row(initial_state_);
@@ -3325,7 +3622,7 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
       PrivateCards::FromCombo(player_b_hand));
 }
 
-double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range,
+double CFRSolver::Impl::evaluate_strategy(int samples, const HandRange& player_a_range,
                                     const HandRange& player_b_range) {
   if (samples <= 0) {
     return 0.0;
@@ -3376,7 +3673,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
                                            *root_public_state_id,
                                        frozen_tables, cumulative,
                                        shard_samples, seed]() mutable {
-      CFRSolver worker(config, std::make_shared<TerminalUtilityCache>());
+      Impl worker(config, std::make_shared<TerminalUtilityCache>());
       worker.mutable_tables_.reset();
       worker.frozen_tables_ = frozen_tables;
       worker.cumulative_ = cumulative;
@@ -3400,7 +3697,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   return total / samples;
 }
 
-double CFRSolver::evaluate_strategy_samples(
+double CFRSolver::Impl::evaluate_strategy_samples(
     int samples,
     uint32_t root_public_state_id,
     RangeSampler range_sampler) {
@@ -3421,7 +3718,7 @@ double CFRSolver::evaluate_strategy_samples(
   return total / samples;
 }
 
-double CFRSolver::evaluate_strategy_node(
+double CFRSolver::Impl::evaluate_strategy_node(
     uint32_t public_state_id,
     const CompactPublicState& state,
     const PrivateCards& player_a_cards,
@@ -3507,7 +3804,7 @@ double CFRSolver::evaluate_strategy_node(
   return value;
 }
 
-double CFRSolver::get_expected_value(int player_id) const {
+double CFRSolver::Impl::get_expected_value(int player_id) const {
   const int iters = iterations_run_;
   if (iters == 0) {
     return 0.0;
@@ -3516,38 +3813,16 @@ double CFRSolver::get_expected_value(int player_id) const {
   return player_id == 0 ? player_a_ev : -player_a_ev;
 }
 
-CFRSolver::UtilityCacheStats CFRSolver::get_utility_cache_stats() const {
+CFRSolver::Impl::UtilityCacheStats CFRSolver::Impl::get_utility_cache_stats() const {
   TerminalUtilityCache::Stats stats = utility_cache_->stats();
   return {stats.hits, stats.misses, stats.entries};
 }
 
-bool CFRSolver::traversal_stats_enabled() {
+bool CFRSolver::Impl::traversal_stats_enabled() {
   return POKER_ENABLE_TRAVERSAL_STATS != 0;
 }
 
-double CFRSolver::utility(const GameState& state,
-                          const PrivateCards& player_a_cards,
-                          const PrivateCards& player_b_cards) {
-  const double player_a_contribution = state.player_contribution[0];
-  if (state.folded_player == 0) {
-    return -player_a_contribution;
-  }
-  if (state.folded_player == 1) {
-    return state.pot - player_a_contribution;
-  }
-
-  if (state.board_cards.size() + 2 < 5) {
-    return 0.0;
-  }
-
-  return utility_cache_->get_or_compute(
-      state, player_a_cards.combo, player_b_cards.combo, [&]() {
-        return game_tree_->get_utility(
-            state, player_a_cards.combo, player_b_cards.combo);
-      });
-}
-
-double CFRSolver::utility(const CompactPublicState& state,
+double CFRSolver::Impl::utility(const CompactPublicState& state,
                           const PrivateCards& player_a_cards,
                           const PrivateCards& player_b_cards) {
   const double player_a_contribution = state.player_contribution[0];
@@ -3569,7 +3844,7 @@ double CFRSolver::utility(const CompactPublicState& state,
       });
 }
 
-double CFRSolver::frozen_utility(const PublicStateRow& row,
+double CFRSolver::Impl::frozen_utility(const PublicStateRow& row,
                                  const ExactBoardState& exact_board,
                                  const PrivateCards& player_a_cards,
                                  const PrivateCards& player_b_cards) {
@@ -3601,26 +3876,7 @@ double CFRSolver::frozen_utility(const PublicStateRow& row,
   return (state.pot / 2.0) - player_a_contribution;
 }
 
-double CFRSolver::uncached_utility(const GameState& state,
-                                   const PrivateCards& player_a_cards,
-                                   const PrivateCards& player_b_cards) {
-  const double player_a_contribution = state.player_contribution[0];
-  if (state.folded_player == 0) {
-    return -player_a_contribution;
-  }
-  if (state.folded_player == 1) {
-    return state.pot - player_a_contribution;
-  }
-
-  if (state.board_cards.size() + 2 < 5) {
-    return 0.0;
-  }
-
-  return game_tree_->get_utility(
-      state, player_a_cards.combo, player_b_cards.combo);
-}
-
-double CFRSolver::uncached_utility(const CompactPublicState& state,
+double CFRSolver::Impl::uncached_utility(const CompactPublicState& state,
                                    const PrivateCards& player_a_cards,
                                    const PrivateCards& player_b_cards) {
   const double player_a_contribution = state.player_contribution[0];
@@ -3639,7 +3895,7 @@ double CFRSolver::uncached_utility(const CompactPublicState& state,
       state, player_a_cards.combo, player_b_cards.combo);
 }
 
-void CFRSolver::update_strategy(size_t action_offset,
+void CFRSolver::Impl::update_strategy(size_t action_offset,
                                 const double* action_probabilities,
                                 size_t action_count,
                                 double reach_prob) {

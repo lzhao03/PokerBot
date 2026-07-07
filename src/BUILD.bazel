@@ -290,12 +290,8 @@ cc_test(
     name = "cfr_solver_test",
     srcs = ["cfr_solver_test.cc"],
     deps = [
+        ":combo",
         ":cfr_solver",
-        ":cfr_solver_proto_adapter",
-        "@abseil-cpp//absl/log:globals",
-        "@abseil-cpp//absl/log:log_entry",
-        "@abseil-cpp//absl/log:log_sink",
-        "@abseil-cpp//absl/log:log_sink_registry",
     ],
 )
 
@@ -304,6 +300,7 @@ cc_test(
     srcs = ["cfr_public_bucket_test.cc"],
     copts = ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
     deps = [
+        ":combo",
         ":cfr_solver_coarse_buckets_no_stats",
         ":hand_range",
     ],
