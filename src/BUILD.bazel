@@ -97,9 +97,16 @@ cc_test(
 )
 
 cc_library(
+    name = "build_flags",
+    hdrs = ["build_flags.h"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "card_abstraction",
     hdrs = ["card_abstraction.h"],
     deps = [
+        ":build_flags",
         ":combo",
         ":poker_types",
     ],
@@ -233,6 +240,7 @@ cc_library(
 )
 
 CFR_SOLVER_DEPS = [
+    ":build_flags",
     ":card_abstraction",
     ":card_utils",
     ":game_tree",
@@ -333,6 +341,7 @@ cc_binary(
     name = "cfr_benchmark",
     srcs = ["cfr_benchmark.cc"],
     deps = [
+        ":build_flags",
         ":cfr_solver",
         ":cfr_solver_proto_adapter",
         ":hand_range",
@@ -348,6 +357,7 @@ cc_binary(
     srcs = ["cfr_benchmark.cc"],
     copts = ["-DPOKER_BENCHMARK_PROD_DEFAULTS=1"],
     deps = [
+        ":build_flags",
         ":cfr_solver_no_stats",
         ":cfr_solver_proto_adapter",
         ":hand_range",
@@ -364,6 +374,7 @@ cc_binary(
         "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
     ],
     deps = [
+        ":build_flags",
         ":cfr_solver_coarse_buckets_no_stats",
         ":cfr_solver_proto_adapter",
         ":hand_range",

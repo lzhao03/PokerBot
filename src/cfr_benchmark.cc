@@ -1,6 +1,7 @@
 #include "src/cfr_solver.h"
 #include "src/cfr_solver_proto_adapter.h"
 #include "absl/log/initialize.h"
+#include "src/build_flags.h"
 #include "src/hand_range.h"
 #include "src/poker_config.h"
 
@@ -15,16 +16,9 @@
 
 namespace {
 
-#ifndef POKER_BENCHMARK_PROD_DEFAULTS
-#define POKER_BENCHMARK_PROD_DEFAULTS 0
-#endif
+using poker::kCoarsePublicBuckets;
+using poker::kProdBenchmarkDefaults;
 
-#ifndef POKER_COARSE_PUBLIC_BUCKETS
-#define POKER_COARSE_PUBLIC_BUCKETS 0
-#endif
-
-constexpr bool kProdBenchmarkDefaults = POKER_BENCHMARK_PROD_DEFAULTS != 0;
-constexpr bool kCoarsePublicBuckets = POKER_COARSE_PUBLIC_BUCKETS != 0;
 constexpr int kDefaultIterations = kProdBenchmarkDefaults ? 5000 : 100;
 constexpr int kDefaultEvalSamples = kProdBenchmarkDefaults ? 1 : 100;
 constexpr int kDefaultMaxDepth = 0;

@@ -3,6 +3,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/types/span.h"
+#include "src/build_flags.h"
 #include "src/card_abstraction.h"
 #include "src/card_utils.h"
 #include "src/game_tree.h"
@@ -49,12 +50,6 @@ inline void AtomicFloatAdd(float* target, float delta) {
       /*weak=*/true, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
 }
 
-#ifndef POKER_ENABLE_CAS_RETRY_STATS
-#define POKER_ENABLE_CAS_RETRY_STATS 0
-#endif
-
-constexpr bool kCasRetryStatsEnabled = POKER_ENABLE_CAS_RETRY_STATS != 0;
-
 // Atomically apply CFR+ regret update: new = max(0, old + delta).
 // Uses the same CAS loop as AtomicFloatAdd but clips at zero.
 inline int64_t AtomicCFRPlusRegretUpdate(float* target, float delta) {
@@ -93,12 +88,6 @@ inline float AtomicFloatLoad(const float* src) {
   std::memcpy(&val, &bits, sizeof(float));
   return val;
 }
-
-#ifndef POKER_ENABLE_TRAVERSAL_STATS
-#define POKER_ENABLE_TRAVERSAL_STATS 1
-#endif
-
-constexpr bool kTraversalStatsEnabled = POKER_ENABLE_TRAVERSAL_STATS != 0;
 
 size_t ScratchDepthReserve(const SolverConfig& config, int max_depth) {
   if (max_depth > 0) {
@@ -3208,7 +3197,7 @@ CFRSolver::UtilityCacheStats CFRSolver::get_utility_cache_stats() const {
 }
 
 bool CFRSolver::traversal_stats_enabled() {
-  return POKER_ENABLE_TRAVERSAL_STATS != 0;
+  return kTraversalStatsEnabled;
 }
 
 double CFRSolver::utility(const CompactPublicState& state,

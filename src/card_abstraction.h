@@ -4,16 +4,11 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "src/build_flags.h"
 #include "src/combo.h"
 #include "src/poker_types.h"
 
-#ifndef POKER_COARSE_PUBLIC_BUCKETS
-#define POKER_COARSE_PUBLIC_BUCKETS 0
-#endif
-
 namespace poker {
-
-inline constexpr bool kCoarsePublicBuckets = POKER_COARSE_PUBLIC_BUCKETS != 0;
 
 using PublicBucketId = uint64_t;
 using PrivateBucketId = uint16_t;
