@@ -830,6 +830,44 @@ void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
          "frozen parallel phase should not allocate public states");
 }
 
+void CheckFullDepthTexturePublicBucketsEnterFrozenParallelPhase() {
+  SolverConfig config;
+  config.starting_stack_size = 20;
+  config.max_depth = 0;
+  config.max_public_states = 10000;
+  config.num_training_threads = 2;
+  config.warmup_iterations = 1;
+  config.regret_only_training = true;
+
+  HandRange player_a_range;
+  player_a_range.set_from_string("AA");
+  HandRange player_b_range;
+  player_b_range.set_from_string("KK");
+
+  CFRSolver solver(config);
+  solver.run(4, player_a_range, player_b_range);
+
+  const CFRSolver::TrainingRunStats stats =
+      solver.get_last_training_run_stats();
+  Expect(stats.public_state_prebuild_complete,
+         "full-depth texture public buckets should complete prebuild");
+  Expect(stats.betting_history_transition_prebuild_complete,
+         "full-depth texture public buckets should validate betting histories");
+  Expect(stats.action_transition_prebuild_complete,
+         "full-depth texture public buckets should validate action transitions");
+  Expect(stats.chance_transition_prebuild_complete,
+         "full-depth texture public buckets should validate chance transitions");
+  Expect(stats.info_set_prebuild_complete,
+         "full-depth texture buckets should prebuild infosets");
+  Expect(stats.parallel_iterations > 0,
+         "full-depth texture run should enter frozen parallel phase");
+  Expect(stats.parallel_cfr_updates > stats.parallel_iterations,
+         "full-depth frozen parallel phase should do nontrivial CFR work");
+  Expect(static_cast<int64_t>(solver.get_public_state_count()) ==
+             stats.prebuild_public_states,
+         "full-depth frozen parallel phase should not allocate public states");
+}
+
 }  // namespace poker
 
 int main() {
@@ -846,5 +884,6 @@ int main() {
   poker::CheckChanceTransitionValidationCatchesMissingRowEntry();
   poker::CheckBettingHistoryChanceTransitionValidationCatchesMissingChild();
   poker::CheckTexturePublicBucketsEnterFrozenParallelPhase();
+  poker::CheckFullDepthTexturePublicBucketsEnterFrozenParallelPhase();
   return 0;
 }

@@ -301,6 +301,14 @@ private:
       TraversalScratch& scratch,
       OptionalTrainingRange player_a_range,
       OptionalTrainingRange player_b_range);
+  double cfr_frozen_regret_only(
+      uint32_t public_state_id,
+      const CompactPublicState& state,
+      const PrivateCards& player_a_cards,
+      const PrivateCards& player_b_cards,
+      std::array<double, 2>& reach_probabilities,
+      int update_player,
+      int depth);
   void average_strategy_probabilities(
       uint32_t public_state_id,
       const PublicStateRow& row,
@@ -494,6 +502,14 @@ private:
       TraversalScratch& scratch,
       OptionalTrainingRange player_a_range,
       OptionalTrainingRange player_b_range);
+  double chance_sampling_frozen_regret_only(
+      uint32_t public_state_id,
+      const CompactPublicState& state,
+      const PrivateCards& player_a_cards,
+      const PrivateCards& player_b_cards,
+      std::array<double, 2>& reach_probabilities,
+      int update_player,
+      int depth);
 };
 
 } // namespace poker

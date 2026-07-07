@@ -2687,6 +2687,9 @@ void CFRSolver::run_iterations_parallel(
   // Workers use their own RNG and TraversalScratch; no locks needed.
   std::shared_ptr<const FrozenStrategyTables> frozen_tables = frozen_tables_;
   std::shared_ptr<MutableCumulativeArrays> cumulative = cumulative_;
+  const bool use_frozen_regret_only =
+      frozen_ && require_frozen_children_ && config_.regret_only_training &&
+      config_.max_depth == 0;
 
   ThreadPoolExecutor executor(num_threads);
   std::uniform_int_distribution<unsigned int> seed_dist;
@@ -2713,7 +2716,7 @@ void CFRSolver::run_iterations_parallel(
     const unsigned int seed = seed_dist(rng_);
     futures.push_back(executor.submit(
         [this, shard, iteration_begin, seed, root_public_state_id,
-         &range_sampler, frozen_tables, cumulative,
+         &range_sampler, frozen_tables, cumulative, use_frozen_regret_only,
          &player_a_training_range, &player_b_training_range]() mutable {
           // Build a lightweight worker that shares frozen tables.
           CFRSolver worker(config_, utility_cache_,
@@ -2724,15 +2727,17 @@ void CFRSolver::run_iterations_parallel(
           worker.frozen_ = true;
           worker.require_frozen_children_ = true;
           worker.rng_.seed(seed);
-          // Per-worker range views (read-only, built from shared training data).
+
           TrainingRangeView player_a_hands_view;
           TrainingRangeView player_b_hands_view;
-          player_a_hands_view.reset_to_all(player_a_training_range);
-          player_b_hands_view.reset_to_all(player_b_training_range);
-
           const int max_depth = config_.max_depth;
           TraversalScratch scratch;
-          scratch.reserve_depth(ScratchDepthReserve(config_, max_depth));
+          if (!use_frozen_regret_only) {
+            // Per-worker range views (read-only, built from shared training data).
+            player_a_hands_view.reset_to_all(player_a_training_range);
+            player_b_hands_view.reset_to_all(player_b_training_range);
+            scratch.reserve_depth(ScratchDepthReserve(config_, max_depth));
+          }
 
           double local_utility = 0.0;
           const CompactPublicState root_state =
@@ -2748,6 +2753,13 @@ void CFRSolver::run_iterations_parallel(
             const int cfr_iteration = iteration_begin + i;
             const int update_player = cfr_iteration % kPlayerCount;
             std::array<double, 2> reach_probabilities = {1.0, 1.0};
+            if (use_frozen_regret_only) {
+              local_utility += worker.cfr_frozen_regret_only(
+                  root_public_state_id, root_state, player_a_cards,
+                  player_b_cards, reach_probabilities, update_player, 0);
+              continue;
+            }
+
             OptionalTrainingRange player_a_context_range;
             OptionalTrainingRange player_b_context_range;
             if (max_depth > 0) {
@@ -3108,6 +3120,189 @@ double CFRSolver::chance_sampling_cfr(
                              reach_probabilities, update_player, iteration,
                              depth, max_depth, scratch, child_player_a_range,
                              child_player_b_range);
+    ++evaluated;
+  }
+
+  return evaluated > 0 ? value / evaluated : 0.0;
+}
+
+double CFRSolver::cfr_frozen_regret_only(
+    uint32_t public_state_id,
+    const CompactPublicState& state,
+    const PrivateCards& player_a_cards,
+    const PrivateCards& player_b_cards,
+    std::array<double, 2>& reach_probabilities,
+    int update_player,
+    int depth) {
+  const auto& public_state_rows = frozen_tables_->public_state_rows;
+  if (public_state_id >= public_state_rows.size()) {
+    return 0.0;
+  }
+  const PublicStateRow& row = public_state_rows[public_state_id];
+
+  if (row.is_terminal) {
+    POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.terminal_utility_calls);
+    if (state.folded_player >= 0) {
+      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.fold_utility_calls);
+    } else {
+      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.showdown_utility_calls);
+    }
+    return utility(state, player_a_cards, player_b_cards);
+  }
+
+  if (row.is_chance_node) {
+    return chance_sampling_frozen_regret_only(
+        public_state_id, state, player_a_cards, player_b_cards,
+        reach_probabilities, update_player, depth);
+  }
+
+  const int player = row.player_to_act;
+  if (!IsPlayer(player) || row.action_count == 0) {
+    return 0.0;
+  }
+  const StreetKind street = row.state.street;
+  const PrivateCards& player_cards =
+      player == 0 ? player_a_cards : player_b_cards;
+  const size_t action_count = row.action_count;
+  const InfoSetAddress info_set_address{
+      public_state_id, player,
+      card_abstraction_.private_bucket(player_cards.combo, row.state)};
+  const InfoSetRow* info_set_row = find_info_set_row(info_set_address);
+  const bool has_info_set_row =
+      info_set_row != nullptr &&
+      static_cast<size_t>(info_set_row->action_count) == action_count;
+  const size_t info_set_action_offset =
+      has_info_set_row ? info_set_row->action_offset : 0;
+
+  double action_probabilities[GameTree::kMaxActionsPerNode];
+  double action_values[GameTree::kMaxActionsPerNode];
+  for (size_t action_index = 0; action_index < action_count; ++action_index) {
+    action_values[action_index] = 0.0;
+  }
+  if (has_info_set_row) {
+    auto& regrets = cumulative_->cumulative_regrets;
+    double sum_positive_regrets = 0.0;
+    for (size_t action_index = 0; action_index < action_count;
+         ++action_index) {
+      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
+      const double positive_regret = std::max(
+          0.0,
+          static_cast<double>(
+              AtomicFloatLoad(
+                  &regrets[info_set_action_offset + action_index])));
+      action_probabilities[action_index] = positive_regret;
+      sum_positive_regrets += positive_regret;
+    }
+
+    if (sum_positive_regrets > 0.0) {
+      for (size_t action_index = 0; action_index < action_count;
+           ++action_index) {
+        action_probabilities[action_index] /= sum_positive_regrets;
+      }
+    } else {
+      const double uniform_prob = 1.0 / action_count;
+      for (size_t action_index = 0; action_index < action_count;
+           ++action_index) {
+        action_probabilities[action_index] = uniform_prob;
+      }
+    }
+  } else {
+    const double uniform_prob = 1.0 / action_count;
+    for (size_t action_index = 0; action_index < action_count;
+         ++action_index) {
+      action_probabilities[action_index] = uniform_prob;
+    }
+  }
+
+  double node_value = 0.0;
+  for (size_t action_index = 0; action_index < action_count; ++action_index) {
+    const uint32_t child_public_state_id =
+        strict_action_child_public_state(row, action_index);
+    const PublicStateRow& child_row =
+        public_state_rows[child_public_state_id];
+    const CompactPublicState child_state =
+        StateWithBoardFrom(child_row.state, state);
+
+    const double previous_reach_probability = reach_probabilities[player];
+    reach_probabilities[player] =
+        previous_reach_probability * action_probabilities[action_index];
+
+    const double action_value = cfr_frozen_regret_only(
+        child_public_state_id, child_state, player_a_cards, player_b_cards,
+        reach_probabilities, update_player, depth + 1);
+    action_values[action_index] = action_value;
+    reach_probabilities[player] = previous_reach_probability;
+    node_value += action_probabilities[action_index] * action_value;
+  }
+
+  ++cfr_update_count_;
+  POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.cfr_updates);
+  POKER_RECORD_TRAVERSAL_STAT(
+      traversal_stats_.max_decision_depth =
+          std::max(traversal_stats_.max_decision_depth, depth));
+  switch (street) {
+    case StreetKind::kPreflop:
+      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.preflop_updates);
+      break;
+    case StreetKind::kFlop:
+      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.flop_updates);
+      break;
+    case StreetKind::kTurn:
+      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.turn_updates);
+      break;
+    case StreetKind::kRiver:
+      POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.river_updates);
+      break;
+  }
+
+  if (has_info_set_row && player == update_player) {
+    const double opponent_reach_prob = reach_probabilities[1 - player];
+    auto& regrets = cumulative_->cumulative_regrets;
+    for (size_t action_index = 0; action_index < action_count; ++action_index) {
+      const double utility_sign = player == 0 ? 1.0 : -1.0;
+      const double regret =
+          opponent_reach_prob * utility_sign *
+          (action_values[action_index] - node_value);
+
+      POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.action_entry_touches += 2);
+      AtomicCFRPlusRegretUpdate(
+          &regrets[info_set_action_offset + action_index],
+          static_cast<float>(regret));
+    }
+  }
+
+  return node_value;
+}
+
+double CFRSolver::chance_sampling_frozen_regret_only(
+    uint32_t public_state_id,
+    const CompactPublicState& state,
+    const PrivateCards& player_a_cards,
+    const PrivateCards& player_b_cards,
+    std::array<double, 2>& reach_probabilities,
+    int update_player,
+    int depth) {
+  const int samples = ChanceSamples(config_);
+  POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.chance_samples += samples);
+
+  double value = 0.0;
+  int evaluated = 0;
+  const CardMask known_private_cards =
+      player_a_cards.mask() | player_b_cards.mask();
+  for (int i = 0; i < samples; ++i) {
+    std::optional<SampledChanceTransition> sampled =
+        sample_chance_transition(public_state_id, state, known_private_cards);
+    if (!sampled.has_value()) {
+      continue;
+    }
+
+    const PublicStateRow& child_row =
+        frozen_tables_->public_state_rows[sampled->child_public_state_id];
+    const CompactPublicState child_state =
+        StateWithBoardFrom(child_row.state, sampled->exact_child_state);
+    value += cfr_frozen_regret_only(
+        sampled->child_public_state_id, child_state, player_a_cards,
+        player_b_cards, reach_probabilities, update_player, depth);
     ++evaluated;
   }
 
