@@ -309,136 +309,6 @@ const CoarseChanceTransitionMap& CoarseChanceTransitions(StreetKind street) {
   }
 }
 
-struct AbstractBettingState {
-  int street = 0;
-  int pot_bucket = 0;
-  int effective_stack_bucket = 0;
-  int to_call_bucket = 0;
-  int all_in = 0;
-  int folded_player = -1;
-  int player_to_act = 0;
-};
-
-int BucketChipsForBettingHistory(int chips) {
-  if (chips <= 0) {
-    return 0;
-  }
-  int bucket = 1;
-  while (chips > 1) {
-    chips >>= 1;
-    ++bucket;
-  }
-  return bucket;
-}
-
-[[maybe_unused]] AbstractBettingState MakeAbstractBettingState(
-    const CompactPublicState& state) {
-  const int contribution_gap =
-      state.player_contribution[0] > state.player_contribution[1]
-          ? state.player_contribution[0] - state.player_contribution[1]
-          : state.player_contribution[1] - state.player_contribution[0];
-  return {
-      static_cast<int>(state.street),
-      BucketChipsForBettingHistory(state.pot),
-      BucketChipsForBettingHistory(std::min(state.stack[0], state.stack[1])),
-      BucketChipsForBettingHistory(contribution_gap),
-      state.all_in ? 1 : 0,
-      state.folded_player,
-      state.player_to_act,
-  };
-}
-
-[[maybe_unused]] void ApplyAbstractBettingState(
-    const AbstractBettingState& abstract_state,
-    FrozenStrategyTables::BettingHistoryKey& key) {
-  key.street = abstract_state.street;
-  key.pot = abstract_state.pot_bucket;
-  key.stack_a = abstract_state.effective_stack_bucket;
-  key.stack_b = 0;
-  key.all_in = abstract_state.all_in;
-  key.folded_player = abstract_state.folded_player;
-  key.player_to_act = abstract_state.player_to_act;
-  key.player_contribution_size = 1;
-  key.player_contributions = {abstract_state.to_call_bucket, 0};
-}
-
-[[maybe_unused]] void ApplyAbstractBettingState(
-    const AbstractBettingState& abstract_state,
-    FrozenStrategyTables::BettingHistoryRow& row) {
-  row.street = abstract_state.street;
-  row.pot = abstract_state.pot_bucket;
-  row.stack = {abstract_state.effective_stack_bucket, 0};
-  row.all_in = abstract_state.all_in;
-  row.folded_player = abstract_state.folded_player;
-  row.player_to_act = abstract_state.player_to_act;
-  row.player_contributions = {abstract_state.to_call_bucket, 0};
-}
-
-[[maybe_unused]] void ApplyAbstractBettingState(
-    const AbstractBettingState& abstract_state,
-    CompactPublicState& state) {
-  state.street = static_cast<StreetKind>(abstract_state.street);
-  state.pot = abstract_state.pot_bucket;
-  state.stack = {abstract_state.effective_stack_bucket,
-                 abstract_state.effective_stack_bucket};
-  state.all_in = abstract_state.all_in != 0;
-  state.folded_player = abstract_state.folded_player;
-  state.player_to_act = abstract_state.player_to_act;
-  state.player_contribution = {0, 0};
-  if (IsPlayer(abstract_state.player_to_act)) {
-    state.player_contribution[Opponent(abstract_state.player_to_act)] =
-        abstract_state.to_call_bucket;
-  }
-  state.player_contribution_count = 2;
-}
-
-void AddBettingHistoryValue(FrozenStrategyTables::BettingHistoryKey& key,
-                            int value) {
-  if (key.history_size <
-      FrozenStrategyTables::BettingHistoryKey::kInlineHistoryValues) {
-    key.history_values[static_cast<size_t>(key.history_size)] = value;
-  } else {
-    key.history_overflow.push_back(value);
-  }
-  ++key.history_size;
-}
-
-int BettingHistoryRowValue(
-    const FrozenStrategyTables::BettingHistoryRow& row,
-    int index) {
-  if (index <
-      FrozenStrategyTables::BettingHistoryKey::kInlineHistoryValues) {
-    return row.history_values[static_cast<size_t>(index)];
-  }
-  return row.history_overflow[
-      static_cast<size_t>(
-          index - FrozenStrategyTables::BettingHistoryKey::kInlineHistoryValues)];
-}
-
-void CopyBettingHistoryValues(
-    const FrozenStrategyTables::BettingHistoryKey& key,
-    FrozenStrategyTables::BettingHistoryRow& row) {
-  row.history_size = key.history_size;
-  row.history_values = key.history_values;
-  row.history_overflow = key.history_overflow;
-}
-
-void ReplaceWithAbstractActionHistory(
-    const FrozenStrategyTables::BettingHistoryRow& parent_row,
-    int action_index,
-    const CompactPublicState& child_state,
-    FrozenStrategyTables::BettingHistoryKey& key) {
-  key.history_size = 0;
-  key.history_overflow.clear();
-  for (int i = 0; i < parent_row.history_size; ++i) {
-    AddBettingHistoryValue(key, BettingHistoryRowValue(parent_row, i));
-  }
-  const CompactAction action = child_state.last_action;
-  AddBettingHistoryValue(key, action.player);
-  AddBettingHistoryValue(key, static_cast<int>(action.kind));
-  AddBettingHistoryValue(key, action_index);
-}
-
 int ChanceSamples(const SolverConfig& config) {
   return std::max(1, config.chance_samples);
 }
@@ -638,49 +508,12 @@ CFRSolver::RangeDeal CFRSolver::RangeSampler::sample(std::mt19937& rng) const {
 
 CFRSolver::BettingHistoryKey CFRSolver::make_betting_history_key(
     const CompactPublicState& state) const {
-  BettingHistoryKey key;
-  key.street = static_cast<int>(state.street);
-  key.pot = state.pot;
-  key.stack_a = state.stack[0];
-  key.stack_b = state.stack[1];
-  key.all_in = state.all_in ? 1 : 0;
-  key.folded_player = state.folded_player;
-  key.player_to_act = state.player_to_act;
-  key.player_contribution_size = 2;
-  key.player_contributions = state.player_contribution;
-  if constexpr (kCoarsePublicBuckets) {
-    ApplyAbstractBettingState(MakeAbstractBettingState(state), key);
-  }
-
-  const int history_value_count = state.history_size * 3;
-  if (history_value_count > BettingHistoryKey::kInlineHistoryValues) {
-    key.history_overflow.reserve(history_value_count -
-                                 BettingHistoryKey::kInlineHistoryValues);
-  }
-  for (uint16_t i = 0; i < state.history_size; ++i) {
-    const CompactAction action = CompactHistoryAction(state, i);
-    AddBettingHistoryValue(key, action.player);
-    AddBettingHistoryValue(key, static_cast<int>(action.kind));
-    AddBettingHistoryValue(key, action.amount);
-  }
-
-  return key;
+  return betting_abstraction_.make_history_key(state);
 }
 
 CFRSolver::BettingHistoryRow CFRSolver::make_betting_history_row(
     const CompactPublicState& state) const {
-  BettingHistoryRow row;
-  row.street = static_cast<int>(state.street);
-  row.pot = state.pot;
-  row.stack = state.stack;
-  row.all_in = state.all_in ? 1 : 0;
-  row.folded_player = state.folded_player;
-  row.player_to_act = state.player_to_act;
-  row.player_contributions = state.player_contribution;
-  if constexpr (kCoarsePublicBuckets) {
-    ApplyAbstractBettingState(MakeAbstractBettingState(state), row);
-  }
-  return row;
+  return betting_abstraction_.make_history_row(state);
 }
 
 CFRSolver::PublicStateKey CFRSolver::make_public_state_key(
@@ -723,9 +556,7 @@ CompactPublicStateFromGameState(const GameState& state) {
 CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
     uint32_t betting_history_id,
     CompactPublicState state) {
-  if constexpr (kCoarsePublicBuckets) {
-    ApplyAbstractBettingState(MakeAbstractBettingState(state), state);
-  }
+  state = betting_abstraction_.public_state_for_row(std::move(state));
   PublicStateRow row;
   row.betting_history_id = betting_history_id;
   row.public_bucket = card_abstraction_.public_bucket(state);
@@ -845,7 +676,7 @@ uint32_t CFRSolver::get_or_create_betting_history_id(
 
 uint32_t CFRSolver::get_or_create_betting_history_id(BettingHistoryKey key,
                                                      BettingHistoryRow row) {
-  CopyBettingHistoryValues(key, row);
+  betting_abstraction_.copy_history_to_row(key, row);
   FrozenStrategyTables& tables = mutable_tables();
   const auto [history_iter, inserted] = tables.betting_history_ids.try_emplace(
       std::move(key), static_cast<uint32_t>(tables.betting_history_ids.size()));
@@ -884,8 +715,8 @@ uint32_t CFRSolver::get_or_create_action_child_betting_history_id(
     const BettingHistoryRow& parent_row =
         tables.betting_history_rows[parent_betting_history_id];
     if (action_index >= 0 && action_index < parent_row.action_count) {
-      ReplaceWithAbstractActionHistory(parent_row, action_index, child_state,
-                                       child_key);
+      betting_abstraction_.replace_with_action_index_history(
+          parent_row, action_index, child_state, child_key);
     }
   }
   const uint32_t child_id = get_or_create_betting_history_id(

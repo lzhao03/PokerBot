@@ -12,6 +12,7 @@
 
 #include "absl/container/inlined_vector.h"
 #include "absl/types/span.h"
+#include "src/betting_abstraction.h"
 #include "src/card_abstraction.h"
 #include "src/game_tree.h"
 #include "src/hand_range.h"
@@ -436,6 +437,7 @@ class CFRSolver {
   TrainingRunStats last_training_run_stats_;
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   CardAbstraction card_abstraction_;
+  BettingAbstraction betting_abstraction_;
   bool frozen_ = false;
   bool require_frozen_children_ = false;
   std::shared_ptr<FrozenStrategyTables> mutable_tables_;

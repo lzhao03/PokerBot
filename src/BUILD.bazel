@@ -113,6 +113,16 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+cc_library(
+    name = "betting_abstraction",
+    hdrs = ["betting_abstraction.h"],
+    deps = [
+        ":build_flags",
+        ":strategy_tables",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 cc_test(
     name = "card_abstraction_test",
     srcs = ["card_abstraction_test.cc"],
@@ -240,6 +250,7 @@ cc_library(
 )
 
 CFR_SOLVER_DEPS = [
+    ":betting_abstraction",
     ":build_flags",
     ":card_abstraction",
     ":card_utils",
