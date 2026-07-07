@@ -79,4 +79,18 @@ size_t FrozenStrategyTables::PublicStateKeyHash::operator()(
   return seed;
 }
 
+bool FrozenStrategyTables::ChanceTransitionKey::operator==(
+    const ChanceTransitionKey& other) const {
+  return parent_public_state_id == other.parent_public_state_id &&
+         outcome_id == other.outcome_id;
+}
+
+size_t FrozenStrategyTables::ChanceTransitionKeyHash::operator()(
+    const ChanceTransitionKey& key) const {
+  size_t seed = 0;
+  HashCombine(seed, static_cast<uint64_t>(key.parent_public_state_id));
+  HashCombine(seed, key.outcome_id);
+  return seed;
+}
+
 }  // namespace poker

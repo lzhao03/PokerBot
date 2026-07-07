@@ -12,16 +12,12 @@ using PublicBucketId = uint64_t;
 using PrivateBucketId = uint16_t;
 
 struct ExactPublicCardBuckets {
-  static constexpr bool kExactPublicState = true;
-
   PublicBucketId bucket(const CompactPublicState& state) const {
     return state.board_mask;
   }
 };
 
 struct BoardTexturePublicCardBuckets {
-  static constexpr bool kExactPublicState = false;
-
   PublicBucketId bucket(const CompactPublicState& state) const {
     const int board_count = state.board_count;
     if (board_count == 0) {
@@ -288,10 +284,6 @@ struct CardAbstraction {
 
   uint32_t private_bucket_count(const CompactPublicState& state) const {
     return private_buckets.bucket_count(state);
-  }
-
-  bool public_state_is_exact() const {
-    return DefaultPublicCardBuckets::kExactPublicState;
   }
 };
 

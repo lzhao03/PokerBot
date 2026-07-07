@@ -109,6 +109,7 @@ class CFRSolver {
   using BettingHistoryKey = FrozenStrategyTables::BettingHistoryKey;
   using PublicBucketId = FrozenStrategyTables::PublicBucketId;
   using PublicStateKey = FrozenStrategyTables::PublicStateKey;
+  using ChanceTransitionKey = FrozenStrategyTables::ChanceTransitionKey;
   using BettingHistoryRow = FrozenStrategyTables::BettingHistoryRow;
   using InfoSetRow = FrozenStrategyTables::InfoSetRow;
   using InfoSetAddress = FrozenStrategyTables::InfoSetAddress;
@@ -315,8 +316,7 @@ class CFRSolver {
       int action_index) const;
   std::optional<uint32_t> chance_child_public_state(
       uint32_t public_state_id,
-      const CompactPublicState& child_state,
-      absl::Span<const CardId> cards) const;
+      const CompactPublicState& child_state) const;
   std::optional<uint32_t> chance_child_public_state(
       uint32_t public_state_id,
       absl::Span<const CardId> cards) const;
@@ -324,16 +324,14 @@ class CFRSolver {
       const PublicStateRow& row,
       const std::function<bool(const CompactPublicState&,
                                absl::Span<const CardId>)>& callback) const;
-  int32_t chance_outcome_id(const PublicStateRow& row,
-                            const CompactPublicState& child_state,
-                            absl::Span<const CardId> cards) const;
+  PublicBucketId chance_outcome_id(
+      const CompactPublicState& child_state) const;
   std::optional<uint32_t> get_or_create_action_child_public_state(
       uint32_t public_state_id,
       int action_index);
   std::optional<uint32_t> get_or_create_chance_child_public_state(
       uint32_t public_state_id,
-      const CompactPublicState& child_state,
-      absl::Span<const CardId> cards);
+      const CompactPublicState& child_state);
   std::optional<uint32_t> get_or_create_chance_child_public_state(
       uint32_t public_state_id,
       absl::Span<const CardId> cards);

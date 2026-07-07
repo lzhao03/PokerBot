@@ -95,6 +95,17 @@ class FrozenStrategyTables {
     size_t operator()(const PublicStateKey& key) const;
   };
 
+  struct ChanceTransitionKey {
+    uint32_t parent_public_state_id = 0;
+    PublicBucketId outcome_id = 0;
+
+    bool operator==(const ChanceTransitionKey& other) const;
+  };
+
+  struct ChanceTransitionKeyHash {
+    size_t operator()(const ChanceTransitionKey& key) const;
+  };
+
   struct BettingHistoryRow {
     BettingHistoryRow() {
       action_ids.fill(0);
@@ -124,7 +135,7 @@ class FrozenStrategyTables {
   };
 
   struct ChanceChildEntry {
-    int outcome_id = 0;
+    PublicBucketId outcome_id = 0;
     uint32_t public_state_id = GameTree::kInvalidPublicStateId;
   };
 
@@ -143,7 +154,6 @@ class FrozenStrategyTables {
     CompactPublicState state;
     uint32_t betting_history_id = GameTree::kInvalidBettingHistoryId;
     PublicBucketId public_bucket = 0;
-    bool public_state_is_exact = true;
     bool is_terminal = false;
     bool is_chance_node = false;
     int player_to_act = -1;
@@ -183,7 +193,8 @@ class FrozenStrategyTables {
   absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>
       public_state_ids;
   std::vector<PublicStateRow> public_state_rows;
-  absl::flat_hash_map<uint64_t, uint32_t> public_chance_child_ids;
+  absl::flat_hash_map<ChanceTransitionKey, uint32_t, ChanceTransitionKeyHash>
+      public_chance_child_ids;
   std::vector<ChanceChildEntry> chance_child_entries;
   std::vector<BettingHistoryRow> betting_history_rows;
   std::vector<std::array<PrivateBucketId, kComboCount>> private_bucket_rows;
