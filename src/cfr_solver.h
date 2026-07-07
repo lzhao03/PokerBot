@@ -408,6 +408,11 @@ class CFRSolver {
                        const double* action_probabilities,
                        size_t action_count,
                        double reach_prob);
+  void fill_regret_matched_strategy(size_t action_offset,
+                                    size_t action_count,
+                                    bool has_info_set_row,
+                                    bool use_atomic_loads,
+                                    double* action_probabilities);
   std::optional<SampledChanceTransition> sample_chance_transition(
       uint32_t public_state_id,
       const CompactPublicState& state,

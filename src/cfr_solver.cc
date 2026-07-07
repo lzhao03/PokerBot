@@ -2208,40 +2208,10 @@ double CFRSolver::cfr_with_ranges(
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     action_values[action_index] = 0.0;
   }
-  if (has_info_set_row) {
-    auto& regrets = cumulative_->cumulative_regrets;
-    double sum_positive_regrets = 0.0;
-    for (size_t action_index = 0; action_index < action_count;
-         ++action_index) {
-      record_action_entry_touches();
-      const double positive_regret = std::max(
-          0.0,
-          static_cast<double>(
-              AtomicFloatLoad(
-                  &regrets[info_set_action_offset + action_index])));
-      action_probabilities[action_index] = positive_regret;
-      sum_positive_regrets += positive_regret;
-    }
-
-    if (sum_positive_regrets > 0.0) {
-      for (size_t action_index = 0; action_index < action_count;
-           ++action_index) {
-        action_probabilities[action_index] /= sum_positive_regrets;
-      }
-    } else {
-      const double uniform_prob = 1.0 / action_count;
-      for (size_t action_index = 0; action_index < action_count;
-           ++action_index) {
-        action_probabilities[action_index] = uniform_prob;
-      }
-    }
-  } else {
-    const double uniform_prob = 1.0 / action_count;
-    for (size_t action_index = 0; action_index < action_count;
-         ++action_index) {
-      action_probabilities[action_index] = uniform_prob;
-    }
-  }
+  fill_regret_matched_strategy(info_set_action_offset, action_count,
+                               has_info_set_row,
+                               /*use_atomic_loads=*/true,
+                               action_probabilities);
 
   double node_value = 0.0;
   RangeScratchFrame& scratch_frame = scratch.frame(depth);
@@ -2542,42 +2512,9 @@ double CFRSolver::cfr_frozen_regret_only(
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     action_values[action_index] = 0.0;
   }
-  if (has_info_set_row) {
-    auto& regrets = cumulative_->cumulative_regrets;
-    double sum_positive_regrets = 0.0;
-    for (size_t action_index = 0; action_index < action_count;
-         ++action_index) {
-      record_action_entry_touches();
-      const float raw_regret =
-          use_atomic_updates
-              ? AtomicFloatLoad(&regrets[info_set_action_offset +
-                                         action_index])
-              : regrets[info_set_action_offset + action_index];
-      const double positive_regret =
-          std::max(0.0, static_cast<double>(raw_regret));
-      action_probabilities[action_index] = positive_regret;
-      sum_positive_regrets += positive_regret;
-    }
-
-    if (sum_positive_regrets > 0.0) {
-      for (size_t action_index = 0; action_index < action_count;
-           ++action_index) {
-        action_probabilities[action_index] /= sum_positive_regrets;
-      }
-    } else {
-      const double uniform_prob = 1.0 / action_count;
-      for (size_t action_index = 0; action_index < action_count;
-           ++action_index) {
-        action_probabilities[action_index] = uniform_prob;
-      }
-    }
-  } else {
-    const double uniform_prob = 1.0 / action_count;
-    for (size_t action_index = 0; action_index < action_count;
-         ++action_index) {
-      action_probabilities[action_index] = uniform_prob;
-    }
-  }
+  fill_regret_matched_strategy(info_set_action_offset, action_count,
+                               has_info_set_row, use_atomic_updates,
+                               action_probabilities);
 
   double node_value = 0.0;
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
@@ -3115,6 +3052,49 @@ void CFRSolver::update_strategy(size_t action_offset,
     const float delta = static_cast<float>(
         reach_prob * action_probabilities[action_index]);
     AtomicFloatAdd(&strategies[action_offset + action_index], delta);
+  }
+}
+
+void CFRSolver::fill_regret_matched_strategy(
+    size_t action_offset,
+    size_t action_count,
+    bool has_info_set_row,
+    bool use_atomic_loads,
+    double* action_probabilities) {
+  if (!has_info_set_row) {
+    const double uniform_prob = 1.0 / action_count;
+    for (size_t action_index = 0; action_index < action_count;
+         ++action_index) {
+      action_probabilities[action_index] = uniform_prob;
+    }
+    return;
+  }
+
+  const auto& regrets = cumulative_->cumulative_regrets;
+  double sum_positive_regrets = 0.0;
+  for (size_t action_index = 0; action_index < action_count; ++action_index) {
+    record_action_entry_touches();
+    const float raw_regret =
+        use_atomic_loads
+            ? AtomicFloatLoad(&regrets[action_offset + action_index])
+            : regrets[action_offset + action_index];
+    const double positive_regret =
+        std::max(0.0, static_cast<double>(raw_regret));
+    action_probabilities[action_index] = positive_regret;
+    sum_positive_regrets += positive_regret;
+  }
+
+  if (sum_positive_regrets > 0.0) {
+    for (size_t action_index = 0; action_index < action_count;
+         ++action_index) {
+      action_probabilities[action_index] /= sum_positive_regrets;
+    }
+    return;
+  }
+
+  const double uniform_prob = 1.0 / action_count;
+  for (size_t action_index = 0; action_index < action_count; ++action_index) {
+    action_probabilities[action_index] = uniform_prob;
   }
 }
 
