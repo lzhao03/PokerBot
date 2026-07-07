@@ -1417,14 +1417,14 @@ void CFRSolver::rebuild_chance_child_entries() {
   }
 }
 
-CFRSolver::PrebuildValidationStats CFRSolver::validate_prebuilt_transitions(
+bool CFRSolver::validate_prebuilt_transitions(
     uint32_t root_public_state_id,
-    int max_depth) const {
-  PrebuildValidationStats stats;
+    int max_depth,
+    TrainingRunStats& stats) const {
   const auto& rows = frozen_tables_->public_state_rows;
   const auto& history_rows = frozen_tables_->betting_history_rows;
   if (root_public_state_id >= rows.size()) {
-    return stats;
+    return false;
   }
   stats.betting_history_transition_prebuild_complete = true;
   stats.action_transition_prebuild_complete = true;
@@ -1476,7 +1476,7 @@ CFRSolver::PrebuildValidationStats CFRSolver::validate_prebuilt_transitions(
       stats.betting_history_transition_prebuild_complete = false;
       stats.action_transition_prebuild_complete = false;
       stats.chance_transition_prebuild_complete = false;
-      return stats;
+      return false;
     }
     const PublicStateRow& row = rows[entry.public_state_id];
     if (row.is_terminal) {
@@ -1567,7 +1567,9 @@ CFRSolver::PrebuildValidationStats CFRSolver::validate_prebuilt_transitions(
     }
   }
 
-  return stats;
+  return stats.betting_history_transition_prebuild_complete &&
+         stats.action_transition_prebuild_complete &&
+         stats.chance_transition_prebuild_complete;
 }
 
 bool CFRSolver::prebuild_info_set_rows(
@@ -1944,65 +1946,35 @@ bool CFRSolver::prepare_frozen_training(
           ? static_cast<int64_t>(frozen_tables_->betting_history_rows.size())
           : 0;
 
-  bool betting_history_transition_prebuild_complete = false;
-  bool chance_transition_prebuild_complete = false;
-  bool action_transition_prebuild_complete = false;
+  bool transition_prebuild_complete = false;
   if (should_prebuild_public_states && public_state_prebuild_complete) {
-    const PrebuildValidationStats validation =
-        validate_prebuilt_transitions(root_public_state_id, max_depth);
-    betting_history_transition_prebuild_complete =
-        validation.betting_history_transition_prebuild_complete;
-    last_training_run_stats_.prebuild_betting_history_transitions =
-        validation.prebuild_betting_history_transitions;
-    last_training_run_stats_.missing_betting_history_transitions =
-        validation.missing_betting_history_transitions;
-    if (!betting_history_transition_prebuild_complete) {
+    transition_prebuild_complete = validate_prebuilt_transitions(
+        root_public_state_id, max_depth, last_training_run_stats_);
+    if (!last_training_run_stats_
+             .betting_history_transition_prebuild_complete) {
       LOG(INFO) << "Betting-history transition prebuild validation failed; "
                 << "continuing without a frozen phase";
     }
-    if (betting_history_transition_prebuild_complete) {
-      chance_transition_prebuild_complete =
-          validation.chance_transition_prebuild_complete;
-      last_training_run_stats_.prebuild_chance_transitions =
-          validation.prebuild_chance_transitions;
-      last_training_run_stats_.missing_chance_transitions =
-          validation.missing_chance_transitions;
-      if (!chance_transition_prebuild_complete) {
+    if (last_training_run_stats_
+            .betting_history_transition_prebuild_complete) {
+      if (!last_training_run_stats_.chance_transition_prebuild_complete) {
         LOG(INFO) << "Chance-transition prebuild validation failed; "
                   << "continuing without a frozen phase";
       }
     }
-    if (betting_history_transition_prebuild_complete &&
-        chance_transition_prebuild_complete) {
-      action_transition_prebuild_complete =
-          validation.action_transition_prebuild_complete;
-      last_training_run_stats_.prebuild_action_transitions =
-          validation.prebuild_action_transitions;
-      last_training_run_stats_.missing_action_transitions =
-          validation.missing_action_transitions;
-      if (!action_transition_prebuild_complete) {
+    if (last_training_run_stats_
+            .betting_history_transition_prebuild_complete &&
+        last_training_run_stats_.chance_transition_prebuild_complete) {
+      if (!last_training_run_stats_.action_transition_prebuild_complete) {
         LOG(INFO) << "Action-transition prebuild validation failed; "
                   << "continuing without a frozen phase";
       }
     }
   }
-  last_training_run_stats_.betting_history_transition_prebuild_complete =
-      should_prebuild_public_states && public_state_prebuild_complete &&
-      betting_history_transition_prebuild_complete;
-  last_training_run_stats_.chance_transition_prebuild_complete =
-      should_prebuild_public_states && public_state_prebuild_complete &&
-      betting_history_transition_prebuild_complete &&
-      chance_transition_prebuild_complete;
-  last_training_run_stats_.action_transition_prebuild_complete =
-      should_prebuild_public_states && public_state_prebuild_complete &&
-      betting_history_transition_prebuild_complete &&
-      chance_transition_prebuild_complete && action_transition_prebuild_complete;
 
   bool info_set_prebuild_complete = false;
   if (should_prebuild_public_states && public_state_prebuild_complete &&
-      betting_history_transition_prebuild_complete &&
-      chance_transition_prebuild_complete &&
-      action_transition_prebuild_complete) {
+      transition_prebuild_complete) {
     VLOG(1) << "Prebuilding infoset rows...";
     const auto info_set_prebuild_start = std::chrono::steady_clock::now();
     info_set_prebuild_complete =
@@ -2019,9 +1991,7 @@ bool CFRSolver::prepare_frozen_training(
   }
   last_training_run_stats_.info_set_prebuild_complete =
       should_prebuild_public_states && public_state_prebuild_complete &&
-      betting_history_transition_prebuild_complete &&
-      chance_transition_prebuild_complete &&
-      action_transition_prebuild_complete && info_set_prebuild_complete;
+      transition_prebuild_complete && info_set_prebuild_complete;
 
   bool private_bucket_prebuild_complete = false;
   if (last_training_run_stats_.info_set_prebuild_complete) {
@@ -2050,8 +2020,7 @@ bool CFRSolver::prepare_frozen_training(
 
   const bool prebuild_tables_are_action_complete =
       should_prebuild_public_states && public_state_prebuild_complete &&
-      betting_history_transition_prebuild_complete &&
-      chance_transition_prebuild_complete && action_transition_prebuild_complete;
+      transition_prebuild_complete;
   last_training_run_stats_.prebuild_info_sets =
       prebuild_tables_are_action_complete
           ? static_cast<int64_t>(get_info_set_count())

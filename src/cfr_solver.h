@@ -199,18 +199,6 @@ class CFRSolver {
     std::vector<RangeScratchFrame> frames;
   };
 
-  struct PrebuildValidationStats {
-    bool betting_history_transition_prebuild_complete = false;
-    bool action_transition_prebuild_complete = false;
-    bool chance_transition_prebuild_complete = false;
-    int64_t prebuild_betting_history_transitions = 0;
-    int64_t missing_betting_history_transitions = 0;
-    int64_t prebuild_action_transitions = 0;
-    int64_t missing_action_transitions = 0;
-    int64_t prebuild_chance_transitions = 0;
-    int64_t missing_chance_transitions = 0;
-  };
-
   CFRSolver(const SolverConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache);
   CFRSolver(const SolverConfig& config,
@@ -352,9 +340,10 @@ class CFRSolver {
   bool prebuild_public_state_rows(uint32_t root_public_state_id,
                                   int max_depth);
   void rebuild_chance_child_entries();
-  PrebuildValidationStats validate_prebuilt_transitions(
+  bool validate_prebuilt_transitions(
       uint32_t root_public_state_id,
-      int max_depth) const;
+      int max_depth,
+      TrainingRunStats& stats) const;
   bool prebuild_info_set_rows(const TrainingRangeView& player_a_range,
                               const TrainingRangeView& player_b_range);
   bool prebuild_private_bucket_rows();
