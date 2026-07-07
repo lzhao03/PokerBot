@@ -1219,6 +1219,12 @@ uint32_t CFRSolver::required_action_child_public_state(
   return child_id;
 }
 
+uint32_t CFRSolver::strict_action_child_public_state(
+    const PublicStateRow& row,
+    size_t action_index) const {
+  return row.action_child_ids[action_index];
+}
+
 std::optional<uint32_t> CFRSolver::chance_child_public_state(
     uint32_t public_state_id,
     const CompactPublicState& child_state,
@@ -1280,6 +1286,30 @@ uint32_t CFRSolver::required_chance_child_public_state(
   if (low == end || entries[low].key != child_key ||
       entries[low].public_state_id == GameTree::Node::kInvalidPublicStateId ||
       entries[low].public_state_id >= rows.size()) {
+    throw std::logic_error("frozen chance child public state is missing");
+  }
+  return entries[low].public_state_id;
+}
+
+uint32_t CFRSolver::strict_chance_child_public_state(
+    const PublicStateRow& row,
+    const CompactPublicState& child_state,
+    absl::Span<const CardId> cards) const {
+  const size_t begin = row.chance_child_offset;
+  const size_t end = begin + row.chance_child_count;
+  const auto& entries = frozen_tables_->chance_child_entries;
+  const int child_key = chance_child_lookup_key(row, child_state, cards);
+  size_t low = begin;
+  size_t high = end;
+  while (low < high) {
+    const size_t mid = low + (high - low) / 2;
+    if (entries[mid].key < child_key) {
+      low = mid + 1;
+    } else {
+      high = mid;
+    }
+  }
+  if (low == end || entries[low].key != child_key) {
     throw std::logic_error("frozen chance child public state is missing");
   }
   return entries[low].public_state_id;
@@ -2890,8 +2920,8 @@ double CFRSolver::cfr_with_ranges(
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     uint32_t child_public_state_id = GameTree::Node::kInvalidPublicStateId;
     if (frozen_ && require_frozen_children_) {
-      child_public_state_id = required_action_child_public_state(
-          public_state_id, static_cast<int>(action_index));
+      child_public_state_id =
+          strict_action_child_public_state(row, action_index);
     } else if (frozen_) {
       std::optional<uint32_t> frozen_child_public_state_id =
           action_child_public_state(public_state_id,
@@ -2989,8 +3019,10 @@ CFRSolver::sample_chance_transition(uint32_t public_state_id,
       game_tree_->apply_chance(state, cards);
   uint32_t child_public_state_id = GameTree::Node::kInvalidPublicStateId;
   if (frozen_ && require_frozen_children_) {
-    child_public_state_id = required_chance_child_public_state(
-        public_state_id, sampled_child_state, cards);
+    const PublicStateRow& row =
+        frozen_tables_->public_state_rows[public_state_id];
+    child_public_state_id =
+        strict_chance_child_public_state(row, sampled_child_state, cards);
   } else if (frozen_) {
     std::optional<uint32_t> frozen_child_public_state_id =
         chance_child_public_state(public_state_id, sampled_child_state, cards);

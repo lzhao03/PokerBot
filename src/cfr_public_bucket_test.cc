@@ -823,6 +823,8 @@ void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
          "complete shallow prebuild should enter the frozen parallel phase");
   Expect(stats.parallel_cfr_updates > 0,
          "frozen parallel phase should do CFR work");
+  Expect(stats.parallel_cfr_updates == stats.parallel_iterations,
+         "shallow frozen parallel work should have stable CFR updates per hand");
   Expect(static_cast<int64_t>(solver.get_public_state_count()) ==
              stats.prebuild_public_states,
          "frozen parallel phase should not allocate public states");
