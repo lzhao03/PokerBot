@@ -995,6 +995,8 @@ void CheckSingleWorkerFullDepthTexturePublicBucketsEnterFrozenPhase() {
          "single-worker frozen training should report warmup CFR work");
   Expect(stats.parallel_cfr_updates > stats.parallel_iterations,
          "single-worker frozen training should do nontrivial frozen CFR work");
+  Expect(solver.get_traversal_stats().atomic_regret_update_retries == 0,
+         "single-worker frozen training should not use atomic regret updates");
   Expect(static_cast<int64_t>(solver.get_public_state_count()) ==
              stats.prebuild_public_states,
          "single-worker frozen phase should not allocate public states");

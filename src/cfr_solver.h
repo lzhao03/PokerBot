@@ -43,6 +43,7 @@ public:
     int64_t fold_utility_calls = 0;
     int64_t showdown_utility_calls = 0;
     int64_t action_entry_touches = 0;
+    int64_t atomic_regret_update_retries = 0;
     int64_t betting_history_transition_hits = 0;
     int64_t betting_history_transition_misses = 0;
   };
@@ -327,7 +328,8 @@ private:
       const PrivateCards& player_b_cards,
       std::array<double, 2>& reach_probabilities,
       int update_player,
-      int depth);
+      int depth,
+      bool use_atomic_updates);
   void average_strategy_probabilities(
       uint32_t public_state_id,
       const PublicStateRow& row,
@@ -543,7 +545,8 @@ private:
       const PrivateCards& player_b_cards,
       std::array<double, 2>& reach_probabilities,
       int update_player,
-      int depth);
+      int depth,
+      bool use_atomic_updates);
 };
 
 } // namespace poker

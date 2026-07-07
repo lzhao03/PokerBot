@@ -44,11 +44,19 @@ inline void AtomicFloatAdd(float* target, float delta) {
       /*weak=*/true, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
 }
 
+#ifndef POKER_ENABLE_CAS_RETRY_STATS
+#define POKER_ENABLE_CAS_RETRY_STATS 0
+#endif
+
 // Atomically apply CFR+ regret update: new = max(0, old + delta).
 // Uses the same CAS loop as AtomicFloatAdd but clips at zero.
-inline void AtomicCFRPlusRegretUpdate(float* target, float delta) {
+inline int64_t AtomicCFRPlusRegretUpdate(float* target, float delta) {
   static_assert(sizeof(float) == sizeof(int32_t), "float must be 32-bit");
   int32_t old_bits, new_bits;
+  bool exchanged = false;
+#if POKER_ENABLE_CAS_RETRY_STATS
+  int64_t retries = 0;
+#endif
   do {
     old_bits = __atomic_load_n(reinterpret_cast<int32_t*>(target),
                                __ATOMIC_RELAXED);
@@ -56,9 +64,20 @@ inline void AtomicCFRPlusRegretUpdate(float* target, float delta) {
     std::memcpy(&old_val, &old_bits, sizeof(float));
     float new_val = std::max(0.0f, old_val + delta);
     std::memcpy(&new_bits, &new_val, sizeof(float));
-  } while (!__atomic_compare_exchange_n(
-      reinterpret_cast<int32_t*>(target), &old_bits, new_bits,
-      /*weak=*/true, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
+    exchanged = __atomic_compare_exchange_n(
+        reinterpret_cast<int32_t*>(target), &old_bits, new_bits,
+        /*weak=*/true, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+#if POKER_ENABLE_CAS_RETRY_STATS
+    if (!exchanged) {
+      ++retries;
+    }
+#endif
+  } while (!exchanged);
+#if POKER_ENABLE_CAS_RETRY_STATS
+  return retries;
+#else
+  return 0;
+#endif
 }
 
 // Relaxed atomic load of a float (naturally-aligned 32-bit load is atomic
@@ -2463,6 +2482,8 @@ void CFRSolver::add_traversal_stats(const TraversalStats& stats) {
   traversal_stats_.fold_utility_calls += stats.fold_utility_calls;
   traversal_stats_.showdown_utility_calls += stats.showdown_utility_calls;
   traversal_stats_.action_entry_touches += stats.action_entry_touches;
+  traversal_stats_.atomic_regret_update_retries +=
+      stats.atomic_regret_update_retries;
   traversal_stats_.betting_history_transition_hits +=
       stats.betting_history_transition_hits;
   traversal_stats_.betting_history_transition_misses +=
@@ -2837,6 +2858,7 @@ void CFRSolver::run_iterations_parallel(
   const bool use_frozen_regret_only =
       frozen_ && require_frozen_children_ && config_.regret_only_training &&
       config_.max_depth == 0;
+  const bool use_atomic_updates = num_threads > 1;
 
   ThreadPoolExecutor executor(num_threads);
   std::uniform_int_distribution<unsigned int> seed_dist;
@@ -2864,7 +2886,8 @@ void CFRSolver::run_iterations_parallel(
     futures.push_back(executor.submit(
         [this, shard, iteration_begin, seed, root_public_state_id,
          &range_sampler, frozen_tables, cumulative, use_frozen_regret_only,
-         &player_a_training_range, &player_b_training_range]() mutable {
+         use_atomic_updates, &player_a_training_range,
+         &player_b_training_range]() mutable {
           // Build a lightweight worker that shares frozen tables.
           CFRSolver worker(config_, utility_cache_,
                            continuation_value_provider_);
@@ -2905,7 +2928,8 @@ void CFRSolver::run_iterations_parallel(
             if (use_frozen_regret_only) {
               local_utility += worker.cfr_frozen_regret_only(
                   root_public_state_id, root_board, player_a_cards,
-                  player_b_cards, reach_probabilities, update_player, 0);
+                  player_b_cards, reach_probabilities, update_player, 0,
+                  use_atomic_updates);
               continue;
             }
 
@@ -3324,7 +3348,8 @@ double CFRSolver::cfr_frozen_regret_only(
     const PrivateCards& player_b_cards,
     std::array<double, 2>& reach_probabilities,
     int update_player,
-    int depth) {
+    int depth,
+    bool use_atomic_updates) {
   const auto& public_state_rows = frozen_tables_->public_state_rows;
   if (public_state_id >= public_state_rows.size()) {
     return 0.0;
@@ -3344,7 +3369,7 @@ double CFRSolver::cfr_frozen_regret_only(
   if (row.is_chance_node) {
     return chance_sampling_frozen_regret_only(
         public_state_id, exact_board, player_a_cards, player_b_cards,
-        reach_probabilities, update_player, depth);
+        reach_probabilities, update_player, depth, use_atomic_updates);
   }
 
   const int player = row.player_to_act;
@@ -3373,11 +3398,13 @@ double CFRSolver::cfr_frozen_regret_only(
     for (size_t action_index = 0; action_index < action_count;
          ++action_index) {
       POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.action_entry_touches);
-      const double positive_regret = std::max(
-          0.0,
-          static_cast<double>(
-              AtomicFloatLoad(
-                  &regrets[info_set_action_offset + action_index])));
+      const float raw_regret =
+          use_atomic_updates
+              ? AtomicFloatLoad(&regrets[info_set_action_offset +
+                                         action_index])
+              : regrets[info_set_action_offset + action_index];
+      const double positive_regret =
+          std::max(0.0, static_cast<double>(raw_regret));
       action_probabilities[action_index] = positive_regret;
       sum_positive_regrets += positive_regret;
     }
@@ -3413,7 +3440,7 @@ double CFRSolver::cfr_frozen_regret_only(
 
     const double action_value = cfr_frozen_regret_only(
         child_public_state_id, exact_board, player_a_cards, player_b_cards,
-        reach_probabilities, update_player, depth + 1);
+        reach_probabilities, update_player, depth + 1, use_atomic_updates);
     action_values[action_index] = action_value;
     reach_probabilities[player] = previous_reach_probability;
     node_value += action_probabilities[action_index] * action_value;
@@ -3449,9 +3476,19 @@ double CFRSolver::cfr_frozen_regret_only(
           (action_values[action_index] - node_value);
 
       POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.action_entry_touches += 2);
-      AtomicCFRPlusRegretUpdate(
-          &regrets[info_set_action_offset + action_index],
-          static_cast<float>(regret));
+      float* regret_entry = &regrets[info_set_action_offset + action_index];
+      if (use_atomic_updates) {
+#if POKER_ENABLE_CAS_RETRY_STATS
+        traversal_stats_.atomic_regret_update_retries +=
+            AtomicCFRPlusRegretUpdate(regret_entry,
+                                      static_cast<float>(regret));
+#else
+        AtomicCFRPlusRegretUpdate(regret_entry, static_cast<float>(regret));
+#endif
+      } else {
+        *regret_entry = std::max(0.0f,
+                                 *regret_entry + static_cast<float>(regret));
+      }
     }
   }
 
@@ -3465,7 +3502,8 @@ double CFRSolver::chance_sampling_frozen_regret_only(
     const PrivateCards& player_b_cards,
     std::array<double, 2>& reach_probabilities,
     int update_player,
-    int depth) {
+    int depth,
+    bool use_atomic_updates) {
   const PublicStateRow& row = frozen_tables_->public_state_rows[public_state_id];
   const int samples = ChanceSamples(config_);
   POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.chance_samples += samples);
@@ -3478,7 +3516,8 @@ double CFRSolver::chance_sampling_frozen_regret_only(
         sample_frozen_chance_transition(row, exact_board, known_private_cards);
     value += cfr_frozen_regret_only(
         sampled.child_public_state_id, sampled.child_board, player_a_cards,
-        player_b_cards, reach_probabilities, update_player, depth);
+        player_b_cards, reach_probabilities, update_player, depth,
+        use_atomic_updates);
   }
 
   return samples > 0 ? value / samples : 0.0;

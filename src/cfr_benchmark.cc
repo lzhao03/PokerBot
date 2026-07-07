@@ -273,6 +273,9 @@ poker::CFRSolver::TraversalStats TraversalDelta(
       after.showdown_utility_calls - before.showdown_utility_calls;
   delta.action_entry_touches =
       after.action_entry_touches - before.action_entry_touches;
+  delta.atomic_regret_update_retries =
+      after.atomic_regret_update_retries -
+      before.atomic_regret_update_retries;
   return delta;
 }
 
@@ -369,6 +372,7 @@ void RunBenchmark(const std::string& name,
             << result.traversal_stats.action_entry_touches << "\t"
             << RatePerSecond(result.traversal_stats.action_entry_touches,
                              elapsed.count()) << "\t"
+            << result.traversal_stats.atomic_regret_update_retries << "\t"
             << result.traversal_stats.preflop_updates << "\t"
             << result.traversal_stats.flop_updates << "\t"
             << result.traversal_stats.turn_updates << "\t"
@@ -512,6 +516,7 @@ int main(int argc, char** argv) {
               << "\tmax_info_sets\tmax_public_states"
               << "\tinfo_set_cap_hit\tpublic_state_cap_hit"
               << "\taction_entry_touches\taction_entry_touches_per_second"
+              << "\tatomic_regret_update_retries"
               << "\tpreflop_updates\tflop_updates\tturn_updates"
               << "\triver_updates\tmax_decision_depth"
               << "\tchild_nodes_created\tchance_samples"
