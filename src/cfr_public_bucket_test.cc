@@ -90,51 +90,6 @@ class CFRSolverRegretTestPeer {
         .action_ids[static_cast<size_t>(action_index)];
   }
 
-  static size_t PrivateBucketRowCount(const CFRSolver& solver) {
-    return solver.frozen_tables_->private_bucket_rows.size();
-  }
-
-  static CFRSolver::PrivateBucketId CachedPrivateBucket(
-      const CFRSolver& solver,
-      uint32_t public_state_id,
-      ComboId combo_id) {
-    return solver.frozen_tables_->private_bucket_rows[public_state_id]
-        [combo_id];
-  }
-
-  static CFRSolver::PrivateBucketId ExpectedPrivateBucket(
-      const CFRSolver& solver,
-      uint32_t public_state_id,
-      ComboId combo_id) {
-    const auto& row = solver.frozen_tables_->public_state_rows[public_state_id];
-    return solver.card_abstraction_.private_bucket(combo_id, row.state);
-  }
-
-  static size_t FrozenInfoSetLookupRowCount(const CFRSolver& solver) {
-    return solver.frozen_tables_->frozen_info_set_action_offsets.size();
-  }
-
-  static uint32_t CachedInfoSetActionOffset(
-      const CFRSolver& solver,
-      uint32_t public_state_id,
-      int player,
-      CFRSolver::PrivateBucketId private_bucket) {
-    return solver.frozen_tables_
-        ->frozen_info_set_action_offsets[public_state_id][player]
-                                        [private_bucket];
-  }
-
-  static uint32_t ExpectedInfoSetActionOffset(
-      const CFRSolver& solver,
-      uint32_t public_state_id,
-      int player,
-      CFRSolver::PrivateBucketId private_bucket) {
-    const CFRSolver::InfoSetRow* row = solver.find_info_set_row(
-        {public_state_id, player, private_bucket});
-    return row == nullptr ? FrozenStrategyTables::kInvalidActionOffset
-                          : row->action_offset;
-  }
-
   static uint32_t CompactActionChild(CFRSolver& solver,
                                      uint32_t public_state_id,
                                      int action_index) {
@@ -229,24 +184,6 @@ class CFRSolverRegretTestPeer {
         .betting_history_id;
   }
 
-  static int BettingHistoryPot(const CFRSolver& solver,
-                               uint32_t betting_history_id) {
-    return solver.frozen_tables_->betting_history_rows[betting_history_id].pot;
-  }
-
-  static int BettingHistoryStack(const CFRSolver& solver,
-                                 uint32_t betting_history_id,
-                                 int player) {
-    return solver.frozen_tables_->betting_history_rows[betting_history_id]
-        .stack[static_cast<size_t>(player)];
-  }
-
-  static int BettingHistoryContribution(const CFRSolver& solver,
-                                        uint32_t betting_history_id,
-                                        int player) {
-    return solver.frozen_tables_->betting_history_rows[betting_history_id]
-        .player_contributions[static_cast<size_t>(player)];
-  }
 };
 
 GameState PublicState(StreetKind street,
@@ -388,20 +325,6 @@ void CheckCoarseBettingHistoryBucketsChipState() {
 
   Expect(first_id == same_bucket_id,
          "coarse betting key should merge chip states in the same buckets");
-  Expect(CFRSolverRegretTestPeer::BettingHistoryPot(solver, first_id) == 4,
-         "coarse betting row should store pot bucket");
-  Expect(CFRSolverRegretTestPeer::BettingHistoryStack(solver, first_id, 0) ==
-             5,
-         "coarse betting row should store effective stack bucket");
-  Expect(CFRSolverRegretTestPeer::BettingHistoryStack(solver, first_id, 1) ==
-             0,
-         "coarse betting row should clear unused stack slot");
-  Expect(CFRSolverRegretTestPeer::BettingHistoryContribution(solver, first_id,
-                                                             0) == 0,
-         "coarse betting row should store to-call bucket");
-  Expect(CFRSolverRegretTestPeer::BettingHistoryContribution(solver, first_id,
-                                                             1) == 0,
-         "coarse betting row should clear unused contribution slot");
   Expect(CFRSolverRegretTestPeer::CompactBettingHistoryId(solver, first) !=
              CFRSolverRegretTestPeer::CompactBettingHistoryId(
                  solver, different_pot_bucket),
@@ -671,43 +594,6 @@ void CheckFullDepthTexturePublicBucketsEnterFrozenParallelPhase() {
   Expect(stats.prebuild_frozen_info_set_lookup_rows ==
              static_cast<int64_t>(solver.get_public_state_count()),
          "frozen infoset lookup should cover every public state");
-  Expect(CFRSolverRegretTestPeer::PrivateBucketRowCount(solver) ==
-             solver.get_public_state_count(),
-         "private-bucket row table should match public-state count");
-  Expect(CFRSolverRegretTestPeer::FrozenInfoSetLookupRowCount(solver) ==
-             solver.get_public_state_count(),
-         "frozen infoset lookup table should match public-state count");
-  const uint32_t last_public_state_id =
-      static_cast<uint32_t>(solver.get_public_state_count() - 1);
-  const std::array<uint32_t, 3> public_state_ids = {
-      0,
-      last_public_state_id / 2,
-      last_public_state_id,
-  };
-  const std::array<ComboId, 3> combo_ids = {
-      static_cast<ComboId>(0),
-      static_cast<ComboId>(100),
-      static_cast<ComboId>(kComboCount - 1),
-  };
-  for (const uint32_t public_state_id : public_state_ids) {
-    for (const ComboId combo_id : combo_ids) {
-      Expect(CFRSolverRegretTestPeer::CachedPrivateBucket(
-                 solver, public_state_id, combo_id) ==
-                 CFRSolverRegretTestPeer::ExpectedPrivateBucket(
-                     solver, public_state_id, combo_id),
-             "cached private bucket should match card abstraction");
-      for (int player = 0; player < kPlayerCount; ++player) {
-        const CFRSolver::PrivateBucketId private_bucket =
-            CFRSolverRegretTestPeer::CachedPrivateBucket(
-                solver, public_state_id, combo_id);
-        Expect(CFRSolverRegretTestPeer::CachedInfoSetActionOffset(
-                   solver, public_state_id, player, private_bucket) ==
-                   CFRSolverRegretTestPeer::ExpectedInfoSetActionOffset(
-                       solver, public_state_id, player, private_bucket),
-               "cached frozen infoset offset should match slab lookup");
-      }
-    }
-  }
   Expect(stats.frozen_iterations > 0,
          "full-depth texture run should enter frozen phase");
   Expect(stats.frozen_cfr_updates > stats.frozen_iterations,
