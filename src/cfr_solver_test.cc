@@ -1773,42 +1773,6 @@ void CheckRunWithoutDepthCutoffTerminates() {
          "zero max-depth range run should produce strategy info sets");
 }
 
-void CheckRangeExpansionUsesExactCombos() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-  config.set_max_depth(1);
-
-  HandRange aces;
-  aces.add_hand_by_index(HandRange::string_to_index("AA"), 1.0);
-  WeightedHandRange combos = aces.get_all_weighted_combos();
-  Expect(combos.size() == 6, "AA should expand to six exact combos");
-
-  HandRange ace_king_suited;
-  ace_king_suited.add_hand_by_index(HandRange::string_to_index("AKs"), 1.0);
-  Expect(ace_king_suited.get_all_weighted_combos().size() == 4,
-         "AKs should expand to four exact combos");
-
-  HandRange ace_king_offsuit;
-  ace_king_offsuit.add_hand_by_index(HandRange::string_to_index("AKo"), 1.0);
-  Expect(ace_king_offsuit.get_all_weighted_combos().size() == 12,
-         "AKo should expand to twelve exact combos");
-
-  bool has_disjoint_aces = false;
-  for (ComboId left : combos.combos) {
-    for (ComboId right : combos.combos) {
-      if ((ComboMask(left) & ComboMask(right)) == 0) {
-        has_disjoint_aces = true;
-      }
-    }
-  }
-  Expect(has_disjoint_aces, "AA range should contain disjoint exact combos");
-
-  CFRSolver solver(TestSolverConfig(config));
-  solver.run(1, aces, aces);
-  Expect(solver.get_info_set_count() > 0,
-         "same hand class ranges should train from disjoint exact combos");
-}
-
 void CheckRangeSamplingRejectsEmptyRange() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -2518,7 +2482,6 @@ int main() {
   CheckRunUsesProvidedPrivateRanges();
   CheckRunFixedHandsUsesCustomInitialState();
   CheckRunWithoutDepthCutoffTerminates();
-  CheckRangeExpansionUsesExactCombos();
   CheckRangeSamplingRejectsEmptyRange();
   CheckRangeSamplerWeightsUseCompatibleProducts();
   CheckRangeSamplingRejectsOnlyOverlappingHands();

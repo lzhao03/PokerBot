@@ -292,7 +292,6 @@ private:
       const int* action_ids,
       size_t action_count,
       ConditionedRanges& conditioned_ranges);
-  void validate_public_state_row_actions(uint32_t public_state_id) const;
   BettingHistoryKey make_betting_history_key(const GameState& state) const;
   BettingHistoryKey make_betting_history_key(
       const CompactPublicState& state) const;

@@ -1132,30 +1132,6 @@ void CFRSolver::cache_betting_history_actions(
   }
 }
 
-void CFRSolver::validate_public_state_row_actions(
-    uint32_t public_state_id) const {
-  const auto& public_rows = frozen_tables_->public_state_rows;
-  if (public_state_id >= public_rows.size()) {
-    throw std::logic_error("Public state row is missing");
-  }
-  const PublicStateRow& row = public_rows[public_state_id];
-  const auto& betting_history_rows = frozen_tables_->betting_history_rows;
-  if (row.betting_history_id >= betting_history_rows.size()) {
-    throw std::logic_error("Betting history row is missing");
-  }
-  const BettingHistoryRow& betting_history =
-      betting_history_rows[row.betting_history_id];
-  if (betting_history.action_count != row.action_count) {
-    throw std::logic_error("Betting history actions are not aligned");
-  }
-  for (int i = 0; i < row.action_count; ++i) {
-    if (betting_history.action_ids[static_cast<size_t>(i)] !=
-        row.action_ids[static_cast<size_t>(i)]) {
-      throw std::logic_error("Betting history action key mismatch");
-    }
-  }
-}
-
 std::optional<uint32_t> CFRSolver::action_child_public_state(
     uint32_t public_state_id,
     int action_index) const {
