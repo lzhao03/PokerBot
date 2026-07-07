@@ -4045,6 +4045,10 @@ CFRSolver::UtilityCacheStats CFRSolver::get_utility_cache_stats() const {
   return {stats.hits, stats.misses, stats.entries};
 }
 
+bool CFRSolver::traversal_stats_enabled() {
+  return POKER_ENABLE_TRAVERSAL_STATS != 0;
+}
+
 double CFRSolver::utility(const GameState& state,
                           const PrivateCards& player_a_cards,
                           const PrivateCards& player_b_cards) {

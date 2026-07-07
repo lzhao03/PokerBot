@@ -156,6 +156,7 @@ public:
   }
   void add_traversal_stats(const TraversalStats& stats);
   UtilityCacheStats get_utility_cache_stats() const;
+  static bool traversal_stats_enabled();
   void set_continuation_value_provider(
       std::shared_ptr<ContinuationValueProvider> provider);
 

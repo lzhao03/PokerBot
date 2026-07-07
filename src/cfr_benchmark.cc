@@ -311,7 +311,7 @@ void RunBenchmark(const std::string& name,
   const int64_t primary_hands = PrimaryHands(result);
   std::cout << name << "\t" << elapsed.count() << "\t" << result.result << "\t"
             << (UseParallelPrimaryMetric(training) ? "parallel" : "total")
-            << "\t"
+            << "\t" << poker::CFRSolver::traversal_stats_enabled() << "\t"
             << primary_updates << "\t"
             << RatePerSecond(primary_updates, primary_seconds) << "\t"
             << RatePerHand(primary_updates, primary_hands) << "\t"
@@ -470,6 +470,7 @@ int main(int argc, char** argv) {
 
     std::cout << "case\tseconds\tresult"
               << "\tprimary_cfr_phase"
+              << "\ttraversal_stats_enabled"
               << "\tprimary_cfr_node_updates"
               << "\tprimary_cfr_node_updates_per_second"
               << "\tprimary_cfr_node_updates_per_hand"

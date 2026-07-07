@@ -380,6 +380,8 @@ cc_binary(
     ],
 )
 
+# Prod benchmark targets use no-stats solver libraries so absolute training
+# throughput is not polluted by hot-loop traversal counters.
 cc_binary(
     name = "cfr_prod_benchmark",
     srcs = ["cfr_benchmark.cc"],
