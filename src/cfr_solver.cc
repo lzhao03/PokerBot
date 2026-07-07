@@ -1648,18 +1648,18 @@ void CFRSolver::rebuild_chance_child_entries() {
   }
 }
 
-bool CFRSolver::validate_prebuilt_betting_history_transitions(
+CFRSolver::PrebuildValidationStats CFRSolver::validate_prebuilt_transitions(
     uint32_t root_public_state_id,
-    int max_depth,
-    int64_t* betting_history_transitions,
-    int64_t* missing_betting_history_transitions) const {
-  *betting_history_transitions = 0;
-  *missing_betting_history_transitions = 0;
+    int max_depth) const {
+  PrebuildValidationStats stats;
   const auto& rows = frozen_tables_->public_state_rows;
   const auto& history_rows = frozen_tables_->betting_history_rows;
   if (root_public_state_id >= rows.size()) {
-    return false;
+    return stats;
   }
+  stats.betting_history_transition_prebuild_complete = true;
+  stats.action_transition_prebuild_complete = true;
+  stats.chance_transition_prebuild_complete = true;
 
   struct QueueEntry {
     uint32_t public_state_id = 0;
@@ -1683,11 +1683,31 @@ bool CFRSolver::validate_prebuilt_betting_history_transitions(
     return true;
   };
 
-  bool complete = true;
+  auto valid_public_child = [&](uint32_t public_state_id) {
+    return public_state_id != GameTree::Node::kInvalidPublicStateId &&
+           public_state_id != kCappedPublicStateId &&
+           public_state_id < rows.size();
+  };
+  auto mark_missing_betting_history = [&] {
+    ++stats.missing_betting_history_transitions;
+    stats.betting_history_transition_prebuild_complete = false;
+  };
+  auto mark_missing_action = [&] {
+    ++stats.missing_action_transitions;
+    stats.action_transition_prebuild_complete = false;
+  };
+  auto mark_missing_chance = [&] {
+    ++stats.missing_chance_transitions;
+    stats.chance_transition_prebuild_complete = false;
+  };
+
   for (size_t cursor = 0; cursor < queue.size(); ++cursor) {
     const QueueEntry entry = queue[cursor];
     if (entry.public_state_id >= rows.size()) {
-      return false;
+      stats.betting_history_transition_prebuild_complete = false;
+      stats.action_transition_prebuild_complete = false;
+      stats.chance_transition_prebuild_complete = false;
+      return stats;
     }
     const PublicStateRow& row = rows[entry.public_state_id];
     if (row.is_terminal) {
@@ -1695,8 +1715,7 @@ bool CFRSolver::validate_prebuilt_betting_history_transitions(
     }
 
     if (row.betting_history_id >= history_rows.size()) {
-      ++*missing_betting_history_transitions;
-      complete = false;
+      mark_missing_betting_history();
       continue;
     }
     const BettingHistoryRow& history_row =
@@ -1706,33 +1725,36 @@ bool CFRSolver::validate_prebuilt_betting_history_transitions(
       const bool chance_complete = for_each_required_chance_transition(
           row, [&](const CompactPublicState& child_state,
                    absl::Span<const CardId> cards) {
-        ++*betting_history_transitions;
+        ++stats.prebuild_chance_transitions;
+        ++stats.prebuild_betting_history_transitions;
         const std::optional<uint32_t> child_public_state_id =
             chance_child_public_state(entry.public_state_id, child_state,
                                       cards);
-        if (history_row.chance_child_id ==
-                GameTree::Node::kInvalidBettingHistoryId ||
-            history_row.chance_child_id >= history_rows.size() ||
-            !child_public_state_id.has_value() ||
-            *child_public_state_id >= rows.size()) {
-          ++*missing_betting_history_transitions;
-          complete = false;
-          return true;
+        const bool valid_child = child_public_state_id.has_value() &&
+                                 valid_public_child(*child_public_state_id);
+        if (!valid_child) {
+          mark_missing_chance();
         }
-        if (rows[*child_public_state_id].betting_history_id !=
-            history_row.chance_child_id) {
-          ++*missing_betting_history_transitions;
-          complete = false;
+        const bool valid_betting_child =
+            valid_child &&
+            history_row.chance_child_id !=
+                GameTree::Node::kInvalidBettingHistoryId &&
+            history_row.chance_child_id < history_rows.size();
+        if (!valid_betting_child) {
+          mark_missing_betting_history();
+        } else if (rows[*child_public_state_id].betting_history_id !=
+                   history_row.chance_child_id) {
+          mark_missing_betting_history();
         }
-        if (!enqueue(*child_public_state_id, entry.depth)) {
-          ++*missing_betting_history_transitions;
-          complete = false;
+        if (valid_child && !enqueue(*child_public_state_id, entry.depth)) {
+          mark_missing_chance();
+          mark_missing_betting_history();
         }
         return true;
       });
       if (!chance_complete) {
-        ++*missing_betting_history_transitions;
-        complete = false;
+        mark_missing_chance();
+        mark_missing_betting_history();
       }
       continue;
     }
@@ -1742,221 +1764,41 @@ bool CFRSolver::validate_prebuilt_betting_history_transitions(
     }
 
     if (history_row.action_count != row.action_count) {
-      ++*missing_betting_history_transitions;
-      complete = false;
+      mark_missing_betting_history();
     }
     for (int action_index = 0; action_index < row.action_count;
          ++action_index) {
-      ++*betting_history_transitions;
+      ++stats.prebuild_action_transitions;
+      ++stats.prebuild_betting_history_transitions;
       const size_t action_slot = static_cast<size_t>(action_index);
       const uint32_t child_betting_history_id =
           history_row.action_child_ids[action_slot];
       const uint32_t child_public_state_id = row.action_child_ids[action_slot];
-      if (history_row.action_ids[action_slot] != row.action_ids[action_slot] ||
-          child_betting_history_id ==
-              GameTree::Node::kInvalidBettingHistoryId ||
-          child_betting_history_id >= history_rows.size() ||
-          child_public_state_id == GameTree::Node::kInvalidPublicStateId ||
-          child_public_state_id == kCappedPublicStateId ||
-          child_public_state_id >= rows.size()) {
-        ++*missing_betting_history_transitions;
-        complete = false;
-        continue;
+      const bool valid_action_child = valid_public_child(child_public_state_id);
+      if (!valid_action_child) {
+        mark_missing_action();
       }
-      if (rows[child_public_state_id].betting_history_id !=
-          child_betting_history_id) {
-        ++*missing_betting_history_transitions;
-        complete = false;
+      const bool valid_betting_child =
+          valid_action_child &&
+          history_row.action_ids[action_slot] == row.action_ids[action_slot] &&
+          child_betting_history_id !=
+              GameTree::Node::kInvalidBettingHistoryId &&
+          child_betting_history_id < history_rows.size();
+      if (!valid_betting_child) {
+        mark_missing_betting_history();
+      } else if (rows[child_public_state_id].betting_history_id !=
+                 child_betting_history_id) {
+        mark_missing_betting_history();
       }
-      if (!enqueue(child_public_state_id, entry.depth + 1)) {
-        ++*missing_betting_history_transitions;
-        complete = false;
-      }
-    }
-  }
-
-  return complete && *missing_betting_history_transitions == 0;
-}
-
-bool CFRSolver::validate_prebuilt_action_transitions(
-    uint32_t root_public_state_id,
-    int max_depth,
-    int64_t* action_transitions,
-    int64_t* missing_action_transitions) const {
-  *action_transitions = 0;
-  *missing_action_transitions = 0;
-  const auto& rows = frozen_tables_->public_state_rows;
-  if (root_public_state_id >= rows.size()) {
-    return false;
-  }
-
-  struct QueueEntry {
-    uint32_t public_state_id = 0;
-    int depth = 0;
-  };
-
-  std::vector<QueueEntry> queue;
-  std::vector<char> queued(rows.size(), 0);
-  queue.reserve(1024);
-  queue.push_back({root_public_state_id, 0});
-  queued[root_public_state_id] = 1;
-
-  auto enqueue = [&](uint32_t public_state_id, int depth) {
-    if (public_state_id >= rows.size()) {
-      return false;
-    }
-    if (!queued[public_state_id]) {
-      queued[public_state_id] = 1;
-      queue.push_back({public_state_id, depth});
-    }
-    return true;
-  };
-
-  bool complete = true;
-  for (size_t cursor = 0; cursor < queue.size(); ++cursor) {
-    const QueueEntry entry = queue[cursor];
-    if (entry.public_state_id >= rows.size()) {
-      return false;
-    }
-    const PublicStateRow& row = rows[entry.public_state_id];
-    if (row.is_terminal) {
-      continue;
-    }
-
-    if (row.is_chance_node) {
-      const bool chance_complete = for_each_required_chance_transition(
-          row, [&](const CompactPublicState& child_state,
-                   absl::Span<const CardId> cards) {
-            const std::optional<uint32_t> child_public_state_id =
-                chance_child_public_state(entry.public_state_id, child_state,
-                                          cards);
-            if (!child_public_state_id.has_value()) {
-              return false;
-            }
-            return enqueue(*child_public_state_id, entry.depth);
-          });
-      if (!chance_complete) {
-        complete = false;
-      }
-      continue;
-    }
-
-    if (max_depth > 0 && entry.depth >= max_depth) {
-      continue;
-    }
-
-    for (int action_index = 0; action_index < row.action_count;
-         ++action_index) {
-      ++*action_transitions;
-      const uint32_t child_id =
-          row.action_child_ids[static_cast<size_t>(action_index)];
-      if (child_id == GameTree::Node::kInvalidPublicStateId ||
-          child_id == kCappedPublicStateId || child_id >= rows.size()) {
-        ++*missing_action_transitions;
-        complete = false;
-        continue;
-      }
-      if (!enqueue(child_id, entry.depth + 1)) {
-        ++*missing_action_transitions;
-        complete = false;
+      if (valid_action_child &&
+          !enqueue(child_public_state_id, entry.depth + 1)) {
+        mark_missing_action();
+        mark_missing_betting_history();
       }
     }
   }
 
-  return complete && *missing_action_transitions == 0;
-}
-
-bool CFRSolver::validate_prebuilt_chance_transitions(
-    uint32_t root_public_state_id,
-    int max_depth,
-    int64_t* chance_transitions,
-    int64_t* missing_chance_transitions) const {
-  *chance_transitions = 0;
-  *missing_chance_transitions = 0;
-  const auto& rows = frozen_tables_->public_state_rows;
-  if (root_public_state_id >= rows.size()) {
-    return false;
-  }
-
-  struct QueueEntry {
-    uint32_t public_state_id = 0;
-    int depth = 0;
-  };
-
-  std::vector<QueueEntry> queue;
-  std::vector<char> queued(rows.size(), 0);
-  queue.reserve(1024);
-  queue.push_back({root_public_state_id, 0});
-  queued[root_public_state_id] = 1;
-
-  auto enqueue = [&](uint32_t public_state_id, int depth) {
-    if (public_state_id >= rows.size()) {
-      return false;
-    }
-    if (!queued[public_state_id]) {
-      queued[public_state_id] = 1;
-      queue.push_back({public_state_id, depth});
-    }
-    return true;
-  };
-
-  bool complete = true;
-  for (size_t cursor = 0; cursor < queue.size(); ++cursor) {
-    const QueueEntry entry = queue[cursor];
-    if (entry.public_state_id >= rows.size()) {
-      return false;
-    }
-    const PublicStateRow& row = rows[entry.public_state_id];
-    if (row.is_terminal) {
-      continue;
-    }
-
-    if (row.is_chance_node) {
-      const bool chance_complete = for_each_required_chance_transition(
-          row, [&](const CompactPublicState& child_state,
-                   absl::Span<const CardId> cards) {
-        ++*chance_transitions;
-        const std::optional<uint32_t> child_public_state_id =
-            chance_child_public_state(entry.public_state_id, child_state,
-                                      cards);
-        if (!child_public_state_id.has_value()) {
-          ++*missing_chance_transitions;
-          complete = false;
-          return true;
-        }
-        if (!enqueue(*child_public_state_id, entry.depth)) {
-          ++*missing_chance_transitions;
-          complete = false;
-        }
-        return true;
-      });
-      if (!chance_complete) {
-        ++*missing_chance_transitions;
-        complete = false;
-      }
-      continue;
-    }
-
-    if (max_depth > 0 && entry.depth >= max_depth) {
-      continue;
-    }
-
-    for (int action_index = 0; action_index < row.action_count;
-         ++action_index) {
-      const uint32_t child_id =
-          row.action_child_ids[static_cast<size_t>(action_index)];
-      if (child_id == GameTree::Node::kInvalidPublicStateId ||
-          child_id == kCappedPublicStateId || child_id >= rows.size()) {
-        complete = false;
-        continue;
-      }
-      if (!enqueue(child_id, entry.depth + 1)) {
-        complete = false;
-      }
-    }
-  }
-
-  return complete && *missing_chance_transitions == 0;
+  return stats;
 }
 
 bool CFRSolver::prebuild_info_set_rows(
@@ -2357,51 +2199,54 @@ void CFRSolver::run_iterations(int iterations,
           ? static_cast<int64_t>(frozen_tables_->betting_history_rows.size())
           : 0;
   bool betting_history_transition_prebuild_complete = false;
+  bool chance_transition_prebuild_complete = false;
+  bool action_transition_prebuild_complete = false;
   if (should_prebuild_public_states && public_state_prebuild_complete) {
+    const PrebuildValidationStats validation =
+        validate_prebuilt_transitions(*root_public_state_id, max_depth);
     betting_history_transition_prebuild_complete =
-        validate_prebuilt_betting_history_transitions(
-            *root_public_state_id, max_depth,
-            &last_training_run_stats_.prebuild_betting_history_transitions,
-            &last_training_run_stats_.missing_betting_history_transitions);
+        validation.betting_history_transition_prebuild_complete;
+    last_training_run_stats_.prebuild_betting_history_transitions =
+        validation.prebuild_betting_history_transitions;
+    last_training_run_stats_.missing_betting_history_transitions =
+        validation.missing_betting_history_transitions;
     if (!betting_history_transition_prebuild_complete) {
       LOG(INFO) << "Betting-history transition prebuild validation failed; "
                 << "continuing without a frozen phase";
+    }
+    if (betting_history_transition_prebuild_complete) {
+      chance_transition_prebuild_complete =
+          validation.chance_transition_prebuild_complete;
+      last_training_run_stats_.prebuild_chance_transitions =
+          validation.prebuild_chance_transitions;
+      last_training_run_stats_.missing_chance_transitions =
+          validation.missing_chance_transitions;
+      if (!chance_transition_prebuild_complete) {
+        LOG(INFO) << "Chance-transition prebuild validation failed; "
+                  << "continuing without a frozen phase";
+      }
+    }
+    if (betting_history_transition_prebuild_complete &&
+        chance_transition_prebuild_complete) {
+      action_transition_prebuild_complete =
+          validation.action_transition_prebuild_complete;
+      last_training_run_stats_.prebuild_action_transitions =
+          validation.prebuild_action_transitions;
+      last_training_run_stats_.missing_action_transitions =
+          validation.missing_action_transitions;
+      if (!action_transition_prebuild_complete) {
+        LOG(INFO) << "Action-transition prebuild validation failed; "
+                  << "continuing without a frozen phase";
+      }
     }
   }
   last_training_run_stats_.betting_history_transition_prebuild_complete =
       should_prebuild_public_states && public_state_prebuild_complete &&
       betting_history_transition_prebuild_complete;
-  bool chance_transition_prebuild_complete = false;
-  if (should_prebuild_public_states && public_state_prebuild_complete &&
-      betting_history_transition_prebuild_complete) {
-    chance_transition_prebuild_complete =
-        validate_prebuilt_chance_transitions(
-            *root_public_state_id, max_depth,
-            &last_training_run_stats_.prebuild_chance_transitions,
-            &last_training_run_stats_.missing_chance_transitions);
-    if (!chance_transition_prebuild_complete) {
-      LOG(INFO) << "Chance-transition prebuild validation failed; "
-                << "continuing without a frozen phase";
-    }
-  }
   last_training_run_stats_.chance_transition_prebuild_complete =
       should_prebuild_public_states && public_state_prebuild_complete &&
       betting_history_transition_prebuild_complete &&
       chance_transition_prebuild_complete;
-  bool action_transition_prebuild_complete = false;
-  if (should_prebuild_public_states && public_state_prebuild_complete &&
-      betting_history_transition_prebuild_complete &&
-      chance_transition_prebuild_complete) {
-    action_transition_prebuild_complete =
-        validate_prebuilt_action_transitions(
-            *root_public_state_id, max_depth,
-            &last_training_run_stats_.prebuild_action_transitions,
-            &last_training_run_stats_.missing_action_transitions);
-    if (!action_transition_prebuild_complete) {
-      LOG(INFO) << "Action-transition prebuild validation failed; "
-                << "continuing without a frozen phase";
-    }
-  }
   last_training_run_stats_.action_transition_prebuild_complete =
       should_prebuild_public_states && public_state_prebuild_complete &&
       betting_history_transition_prebuild_complete &&

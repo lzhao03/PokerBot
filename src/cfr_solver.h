@@ -373,21 +373,21 @@ private:
   bool prebuild_public_state_rows(uint32_t root_public_state_id,
                                   int max_depth);
   void rebuild_chance_child_entries();
-  bool validate_prebuilt_betting_history_transitions(
+  struct PrebuildValidationStats {
+    bool betting_history_transition_prebuild_complete = false;
+    bool action_transition_prebuild_complete = false;
+    bool chance_transition_prebuild_complete = false;
+    int64_t prebuild_betting_history_transitions = 0;
+    int64_t missing_betting_history_transitions = 0;
+    int64_t prebuild_action_transitions = 0;
+    int64_t missing_action_transitions = 0;
+    int64_t prebuild_chance_transitions = 0;
+    int64_t missing_chance_transitions = 0;
+  };
+
+  PrebuildValidationStats validate_prebuilt_transitions(
       uint32_t root_public_state_id,
-      int max_depth,
-      int64_t* betting_history_transitions,
-      int64_t* missing_betting_history_transitions) const;
-  bool validate_prebuilt_action_transitions(
-      uint32_t root_public_state_id,
-      int max_depth,
-      int64_t* action_transitions,
-      int64_t* missing_action_transitions) const;
-  bool validate_prebuilt_chance_transitions(
-      uint32_t root_public_state_id,
-      int max_depth,
-      int64_t* chance_transitions,
-      int64_t* missing_chance_transitions) const;
+      int max_depth) const;
   bool prebuild_info_set_rows(const TrainingRangeView& player_a_range,
                               const TrainingRangeView& player_b_range);
   bool prebuild_private_bucket_rows();
