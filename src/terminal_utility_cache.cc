@@ -25,6 +25,43 @@ TerminalUtilityCache::Stats TerminalUtilityCache::stats() const {
   return stats;
 }
 
+double TerminalUtilityCache::get_or_compute(
+    const CompactPublicState& state,
+    ComboId player_a_hand,
+    ComboId player_b_hand,
+    const std::function<double()>& compute) {
+  return get_or_compute_key(
+      key_for(state, player_a_hand, player_b_hand), compute);
+}
+
+double TerminalUtilityCache::get_or_compute_key(
+    Key key,
+    const std::function<double()>& compute) {
+  Shard& shard = shards_[key.hash & (kShardCount - 1)];
+
+  {
+    std::lock_guard<std::mutex> lock(shard.mutex);
+    auto it = shard.values.find(key);
+    if (it != shard.values.end()) {
+      ++shard.hits;
+      return it->second;
+    }
+  }
+
+  const double value = compute();
+
+  {
+    std::lock_guard<std::mutex> lock(shard.mutex);
+    auto inserted = shard.values.emplace(key, value);
+    if (inserted.second) {
+      ++shard.misses;
+      return value;
+    }
+    ++shard.hits;
+    return inserted.first->second;
+  }
+}
+
 bool TerminalUtilityCache::Key::operator==(const Key& other) const {
   return street == other.street && pot == other.pot &&
          player_a_contribution == other.player_a_contribution &&
@@ -53,23 +90,6 @@ size_t TerminalUtilityCache::compute_hash(const Key& key) {
 }
 
 TerminalUtilityCache::Key TerminalUtilityCache::key_for(
-    const GameState& state,
-    ComboId player_a_hand,
-    ComboId player_b_hand) {
-  Key key;
-  key.street = static_cast<int>(state.street);
-  key.pot = state.pot;
-  key.player_a_contribution = state.player_contribution[0];
-  key.player_b_contribution = state.player_contribution[1];
-  key.board_size = static_cast<int>(state.board_cards.size());
-  key.player_a_hand = player_a_hand;
-  key.player_b_hand = player_b_hand;
-  key.board_mask = state.board_mask;
-  key.hash = compute_hash(key);
-  return key;
-}
-
-TerminalUtilityCache::Key TerminalUtilityCache::key_for(
     const CompactPublicState& state,
     ComboId player_a_hand,
     ComboId player_b_hand) {
@@ -82,31 +102,6 @@ TerminalUtilityCache::Key TerminalUtilityCache::key_for(
   key.player_a_hand = player_a_hand;
   key.player_b_hand = player_b_hand;
   key.board_mask = state.board_mask;
-  key.hash = compute_hash(key);
-  return key;
-}
-
-TerminalUtilityCache::Key TerminalUtilityCache::key_for(
-    StreetKind street,
-    int pot,
-    int player_a_contribution,
-    int player_b_contribution,
-    const std::array<CardId, kMaxBoardCards>& board_cards,
-    int board_count,
-    ComboId player_a_hand,
-    ComboId player_b_hand) {
-  Key key;
-  key.street = static_cast<int>(street);
-  key.pot = pot;
-  key.player_a_contribution = player_a_contribution;
-  key.player_b_contribution = player_b_contribution;
-  key.board_size = board_count;
-  key.player_a_hand = player_a_hand;
-  key.player_b_hand = player_b_hand;
-  key.board_mask = 0;
-  for (int i = 0; i < board_count; ++i) {
-    key.board_mask |= CardBit(board_cards[static_cast<size_t>(i)]);
-  }
   key.hash = compute_hash(key);
   return key;
 }
