@@ -571,8 +571,6 @@ double BestResponseEvaluator::sampled_range_best_response_value(
   }
 
   SolverConfig config = solver_.config_;
-  std::shared_ptr<ContinuationValueProvider> continuation_value_provider =
-      solver_.continuation_value_provider_;
   std::shared_ptr<const FrozenStrategyTables> frozen_tables =
       solver_.frozen_tables_;
   std::shared_ptr<MutableCumulativeArrays> cumulative = solver_.cumulative_;
@@ -586,10 +584,8 @@ double BestResponseEvaluator::sampled_range_best_response_value(
     futures.push_back(executor.submit([config, &best_response_hands,
                                        &opponent_hands, frozen_tables,
                                        cumulative,
-                                       continuation_value_provider,
                                        shard_samples, seed, best_response_player]() {
-      CFRSolver worker(config, std::make_shared<TerminalUtilityCache>(),
-                       continuation_value_provider);
+      CFRSolver worker(config, std::make_shared<TerminalUtilityCache>());
       worker.mutable_tables_.reset();
       worker.frozen_tables_ = frozen_tables;
       worker.cumulative_ = cumulative;

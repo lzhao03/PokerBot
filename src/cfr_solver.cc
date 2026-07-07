@@ -2,7 +2,6 @@
 #include "absl/log/log.h"
 #include "src/best_response.h"
 #include "src/card_utils.h"
-#include "src/continuation_value.h"
 #include "src/hand_range.h"
 #include "src/terminal_utility_cache.h"
 #include "src/thread_pool.h"
@@ -133,12 +132,6 @@ void PublicCompatibleRangeInto(const TrainingRangeView& hands,
       compatible_hands.add(hands.combo(i), hands.weight(i));
     }
   }
-}
-
-void PublicCompatibleRangeInto(const TrainingRangeView& hands,
-                               const GameState& state,
-                               TrainingRangeView& compatible_hands) {
-  PublicCompatibleRangeInto(hands, state.board_mask, compatible_hands);
 }
 
 int ChanceCardsKey(absl::Span<const CardId> cards) {
@@ -527,29 +520,18 @@ CFRSolver::CFRSolver(const SolverConfig& config)
 CFRSolver::CFRSolver(const SolverConfig& config,
                      const GameState& initial_state)
     : CFRSolver(config, std::make_shared<TerminalUtilityCache>(),
-                std::make_shared<BettingRoundTerminalValueProvider>(),
                 initial_state) {
 }
 
 CFRSolver::CFRSolver(const SolverConfig& config,
                      std::shared_ptr<TerminalUtilityCache> utility_cache)
     : CFRSolver(config, std::move(utility_cache),
-                std::make_shared<BettingRoundTerminalValueProvider>()) {
-}
-
-CFRSolver::CFRSolver(
-    const SolverConfig& config,
-    std::shared_ptr<TerminalUtilityCache> utility_cache,
-    std::shared_ptr<ContinuationValueProvider> continuation_value_provider)
-    : CFRSolver(config, std::move(utility_cache),
-                std::move(continuation_value_provider),
                 DefaultInitialState(config)) {
 }
 
 CFRSolver::CFRSolver(
     const SolverConfig& config,
     std::shared_ptr<TerminalUtilityCache> utility_cache,
-    std::shared_ptr<ContinuationValueProvider> continuation_value_provider,
     GameState initial_state)
   : config_(config),
     initial_state_(std::move(initial_state)),
@@ -557,7 +539,6 @@ CFRSolver::CFRSolver(
     rng_(12345),
     cumulative_root_utility_(0.0),
     utility_cache_(std::move(utility_cache)),
-    continuation_value_provider_(std::move(continuation_value_provider)),
     mutable_tables_(std::make_shared<FrozenStrategyTables>()),
     frozen_tables_(mutable_tables_),
     cumulative_(std::make_shared<MutableCumulativeArrays>()) {
@@ -610,14 +591,6 @@ CompactPublicState CFRSolver::state_with_exact_board(
   state.board_count = exact_board.count;
   state.board_mask = exact_board.mask;
   return state;
-}
-
-void CFRSolver::set_continuation_value_provider(
-    std::shared_ptr<ContinuationValueProvider> provider) {
-  if (provider == nullptr) {
-    throw std::invalid_argument("Continuation value provider cannot be null");
-  }
-  continuation_value_provider_ = std::move(provider);
 }
 
 GameTree::Node& CFRSolver::get_or_build_root() {
@@ -2889,8 +2862,7 @@ void CFRSolver::run_frozen_iterations(
          use_atomic_updates, &player_a_training_range,
          &player_b_training_range]() mutable {
           // Build a lightweight worker that shares frozen tables.
-          CFRSolver worker(config_, utility_cache_,
-                           continuation_value_provider_);
+          CFRSolver worker(config_, utility_cache_);
           worker.mutable_tables_.reset();
           worker.frozen_tables_ = frozen_tables;
           worker.cumulative_ = cumulative;
@@ -3004,13 +2976,11 @@ double CFRSolver::cfr_with_ranges(
   }
 
   if (max_depth > 0 && depth >= max_depth) {
-    // Continuation providers still consume GameState. This cutoff path is
-    // intentionally left materialized until continuation contexts move compact.
-    const GameState materialized_state = materialize_game_state(state);
-    ContinuationContext context = build_continuation_context(
-        materialized_state, player_a_cards.combo, player_b_cards.combo,
-        player_a_range, player_b_range);
-    return continuation_value_provider_->value(*game_tree_, context);
+    (void)player_a_range;
+    (void)player_b_range;
+    return game_tree_->is_betting_round_over(state)
+               ? uncached_utility(state, player_a_cards, player_b_cards)
+               : 0.0;
   }
 
   const int player = row.player_to_act;
@@ -3709,23 +3679,6 @@ void CFRSolver::condition_ranges_for_actions(
   }
 }
 
-ContinuationContext CFRSolver::build_continuation_context(
-    const GameState& state,
-    ComboId player_a_hand,
-    ComboId player_b_hand,
-    OptionalTrainingRange player_a_range,
-    OptionalTrainingRange player_b_range) const {
-  ContinuationContext context =
-      ContinuationContext::ExactHands(state, player_a_hand, player_b_hand);
-  if (player_a_range.has_value() && player_b_range.has_value()) {
-    PublicCompatibleRangeInto(
-        player_a_range->get(), state, context.player_a_range);
-    PublicCompatibleRangeInto(
-        player_b_range->get(), state, context.player_b_range);
-  }
-  return context;
-}
-
 double CFRSolver::evaluate_strategy(ComboId player_a_hand,
                                     ComboId player_b_hand) {
   const std::optional<uint32_t> root_public_state_id =
@@ -3778,8 +3731,6 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   }
 
   SolverConfig config = config_;
-  std::shared_ptr<ContinuationValueProvider> continuation_value_provider =
-      continuation_value_provider_;
   std::shared_ptr<const FrozenStrategyTables> frozen_tables = frozen_tables_;
   std::shared_ptr<MutableCumulativeArrays> cumulative = cumulative_;
   std::vector<std::future<std::pair<double, int64_t>>> futures;
@@ -3793,10 +3744,8 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
                                        root_public_state_id =
                                            *root_public_state_id,
                                        frozen_tables, cumulative,
-                                       continuation_value_provider,
                                        shard_samples, seed]() mutable {
-      CFRSolver worker(config, std::make_shared<TerminalUtilityCache>(),
-                       continuation_value_provider);
+      CFRSolver worker(config, std::make_shared<TerminalUtilityCache>());
       worker.mutable_tables_.reset();
       worker.frozen_tables_ = frozen_tables;
       worker.cumulative_ = cumulative;

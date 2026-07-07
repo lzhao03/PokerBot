@@ -198,19 +198,6 @@ cc_test(
 )
 
 cc_library(
-    name = "continuation_value",
-    srcs = ["continuation_value.cc"],
-    hdrs = ["continuation_value.h"],
-    deps = [
-        ":combo",
-        ":game_tree",
-        ":poker_types",
-        ":training_range",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "terminal_utility_cache",
     srcs = ["terminal_utility_cache.cc"],
     hdrs = ["terminal_utility_cache.h"],
@@ -246,23 +233,9 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
-cc_library(
-    name = "subgame_value",
-    srcs = ["subgame_value.cc"],
-    hdrs = ["subgame_value.h"],
-    deps = [
-        ":cfr_solver",
-        ":continuation_value",
-        ":game_tree",
-        ":poker_types",
-    ],
-    visibility = ["//visibility:public"],
-)
-
 CFR_SOLVER_DEPS = [
     ":card_abstraction",
     ":card_utils",
-    ":continuation_value",
     ":game_tree",
     ":hand_range",
     ":strategy_tables",
@@ -325,8 +298,6 @@ cc_test(
     deps = [
         ":cfr_solver",
         ":cfr_solver_proto_adapter",
-        ":continuation_value",
-        ":subgame_value",
         "@abseil-cpp//absl/log:globals",
         "@abseil-cpp//absl/log:log_entry",
         "@abseil-cpp//absl/log:log_sink",

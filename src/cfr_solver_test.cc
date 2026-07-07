@@ -4,10 +4,8 @@
 #include "absl/log/log_sink.h"
 #include "absl/log/log_sink_registry.h"
 #include "src/best_response.h"
-#include "src/continuation_value.h"
 #include "src/cfr_solver_proto_adapter.h"
 #include "src/hand_range.h"
-#include "src/subgame_value.h"
 
 #include <algorithm>
 #include <array>
@@ -829,60 +827,6 @@ void ExpectThrows(Fn fn, const char* message) {
   throw std::runtime_error(message);
 }
 
-class FixedContinuationValueProvider : public ContinuationValueProvider {
- public:
-  explicit FixedContinuationValueProvider(double value) : value_(value) {}
-
-  using ContinuationValueProvider::value;
-
-  double value(GameTree& game_tree,
-               const ContinuationContext& context) const override {
-    (void)game_tree;
-    ++calls_;
-    saw_empty_ranges_ = !context.has_ranges();
-    if (context.has_ranges()) {
-      saw_ranges_ = true;
-      last_player_a_range_size_ = context.player_a_range.size();
-      last_player_b_range_size_ = context.player_b_range.size();
-      last_player_a_range_weight_ = 0.0;
-      last_player_b_range_weight_ = 0.0;
-      for (size_t i = 0; i < context.player_a_range.size(); ++i) {
-        last_player_a_range_weight_ += context.player_a_range.weight(i);
-      }
-      for (size_t i = 0; i < context.player_b_range.size(); ++i) {
-        last_player_b_range_weight_ += context.player_b_range.weight(i);
-      }
-    }
-    return value_;
-  }
-
-  int calls() const { return calls_; }
-  bool saw_empty_ranges() const { return saw_empty_ranges_; }
-  bool saw_ranges() const { return saw_ranges_; }
-  size_t last_player_a_range_size() const {
-    return last_player_a_range_size_;
-  }
-  size_t last_player_b_range_size() const {
-    return last_player_b_range_size_;
-  }
-  double last_player_a_range_weight() const {
-    return last_player_a_range_weight_;
-  }
-  double last_player_b_range_weight() const {
-    return last_player_b_range_weight_;
-  }
-
- private:
-  double value_;
-  mutable int calls_ = 0;
-  mutable bool saw_empty_ranges_ = false;
-  mutable bool saw_ranges_ = false;
-  mutable size_t last_player_a_range_size_ = 0;
-  mutable size_t last_player_b_range_size_ = 0;
-  mutable double last_player_a_range_weight_ = 0.0;
-  mutable double last_player_b_range_weight_ = 0.0;
-};
-
 class CapturingLogSink : public absl::LogSink {
  public:
   void Send(const absl::LogEntry& entry) override {
@@ -1016,48 +960,8 @@ Hand MakeHand(int first_rank, Suit first_suit, int second_rank, Suit second_suit
   return hand;
 }
 
-Suit TestProtoSuit(CardId card_id) {
-  switch (SuitFromCardId(card_id)) {
-    case SuitKind::kDiamonds:
-      return Suit::DIAMONDS;
-    case SuitKind::kClubs:
-      return Suit::CLUBS;
-    case SuitKind::kSpades:
-      return Suit::SPADES;
-    case SuitKind::kHearts:
-      return Suit::HEARTS;
-  }
-  return Suit::HEARTS;
-}
-
-Hand TestHandFromCombo(ComboId combo_id) {
-  const ComboInfo& combo = GetComboInfo(combo_id);
-  return MakeHand(RankFromCardId(combo.card0), TestProtoSuit(combo.card0),
-                  RankFromCardId(combo.card1), TestProtoSuit(combo.card1));
-}
-
 void AddHand(HandRange& range, const Hand& hand, double weight) {
   range.add_combo(TestComboId(hand), weight);
-}
-
-double TestTotalWeight(const WeightedHandRange& hands) {
-  double total = 0.0;
-  for (double weight : hands.weights) {
-    total += weight;
-  }
-  return total;
-}
-
-double TestTotalWeightForRank(const WeightedHandRange& hands, int rank) {
-  double total = 0.0;
-  for (size_t i = 0; i < hands.size(); ++i) {
-    const ComboInfo& combo = GetComboInfo(hands.combos[i]);
-    if (RankFromCardId(combo.card0) == rank &&
-        RankFromCardId(combo.card1) == rank) {
-      total += hands.weights[i];
-    }
-  }
-  return total;
 }
 
 BoardState InitialRootState(const PokerConfig& config) {
@@ -2740,112 +2644,6 @@ BoardState RiverPlayerBFacingSmallCallState() {
   return state;
 }
 
-void CheckExactHandNestedCfrContinuationSolvesRiverCallSubgame() {
-  PokerConfig config;
-  config.set_starting_stack_size(10);
-
-  ExactHandNestedCFRContinuationValueProvider provider(
-      TestSolverConfig(config), 1);
-  GameTree game_tree(TestSolverConfig(config));
-  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
-  Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
-  double value = provider.value(
-      game_tree, TestGameState(RiverFacingCallState()),
-      TestComboId(player_a_hand), TestComboId(player_b_hand));
-
-  Expect(std::abs(value - 2.5) < 0.000001,
-         "exact-hand nested CFR continuation should solve from the cutoff state");
-}
-
-void CheckExactHandNestedCfrContinuationCachesSubgames() {
-  PokerConfig config;
-  config.set_starting_stack_size(10);
-
-  ExactHandNestedCFRContinuationValueProvider provider(
-      TestSolverConfig(config), 1);
-  GameTree game_tree(TestSolverConfig(config));
-  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
-  Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
-  BoardState state = RiverFacingCallState();
-
-  double first = provider.value(game_tree, TestGameState(state),
-                                TestComboId(player_a_hand),
-                                TestComboId(player_b_hand));
-  ExactHandNestedCFRContinuationValueProvider::Stats first_stats =
-      provider.stats();
-  double second = provider.value(game_tree, TestGameState(state),
-                                 TestComboId(player_a_hand),
-                                 TestComboId(player_b_hand));
-  ExactHandNestedCFRContinuationValueProvider::Stats second_stats =
-      provider.stats();
-
-  Expect(first == second, "cached subgame value should match the first solve");
-  Expect(first_stats.misses == 1 && first_stats.hits == 0 &&
-             first_stats.entries == 1,
-         "first subgame lookup should miss and populate the cache");
-  Expect(second_stats.misses == 1 && second_stats.hits == 1 &&
-             second_stats.entries == 1,
-         "second subgame lookup should hit the cache");
-}
-
-void CheckExactHandNestedCfrContinuationSeparatesPrivateHands() {
-  PokerConfig config;
-  config.set_starting_stack_size(10);
-
-  ExactHandNestedCFRContinuationValueProvider provider(
-      TestSolverConfig(config), 1);
-  GameTree game_tree(TestSolverConfig(config));
-  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
-  Hand losing_player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
-  Hand winning_player_b_hand = MakeHand(2, Suit::SPADES, 2, Suit::CLUBS);
-  BoardState state = RiverFacingCallState();
-
-  double value_against_loser =
-      provider.value(game_tree, TestGameState(state), TestComboId(player_a_hand),
-                     TestComboId(losing_player_b_hand));
-  double value_against_winner =
-      provider.value(game_tree, TestGameState(state), TestComboId(player_a_hand),
-                     TestComboId(winning_player_b_hand));
-  ExactHandNestedCFRContinuationValueProvider::Stats stats = provider.stats();
-
-  Expect(std::abs(value_against_loser - 2.5) < 0.000001,
-         "exact-hand continuation should value player A's winning showdown");
-  Expect(std::abs(value_against_winner + 7.5) < 0.000001,
-         "exact-hand continuation should value player A's losing showdown");
-  Expect(stats.misses == 2 && stats.hits == 0 && stats.entries == 2,
-         "exact-hand continuation should cache different private hands separately");
-}
-
-void CheckCfrDepthLimitUsesExactHandNestedContinuationProvider() {
-  PokerConfig config;
-  config.set_starting_stack_size(10);
-
-  auto provider =
-      std::make_shared<ExactHandNestedCFRContinuationValueProvider>(
-          TestSolverConfig(config), 1);
-  CFRSolver solver(TestSolverConfig(config));
-  solver.set_continuation_value_provider(provider);
-
-  GameTree::Node node;
-  node.state = TestGameState(RiverFacingCallState());
-  node.player_to_act = 0;
-  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
-  Hand player_b_hand = MakeHand(13, Suit::HEARTS, 13, Suit::SPADES);
-  std::array<double, 2> reach_probabilities = {1.0, 1.0};
-
-  double first = TestCfr(solver, node, player_a_hand, player_b_hand,
-                            reach_probabilities, 0, 1, 1);
-  double second = TestCfr(solver, node, player_a_hand, player_b_hand,
-                             reach_probabilities, 1, 1, 1);
-  ExactHandNestedCFRContinuationValueProvider::Stats stats = provider->stats();
-
-  Expect(std::abs(first - 2.5) < 0.000001 &&
-             std::abs(second - 2.5) < 0.000001,
-         "CFR depth cutoff should use exact-hand nested continuation values");
-  Expect(stats.misses == 1 && stats.hits == 1 && stats.entries == 1,
-         "CFR depth cutoff should reuse exact-hand nested continuation values");
-}
-
 GameTree::Node TerminalShowdownNode(const std::vector<Card>& board_cards) {
   GameTree::Node node;
   node.state = TestGameState(ShowdownState(board_cards));
@@ -2929,107 +2727,6 @@ void CheckDepthLimitDoesNotScoreUncalledBet() {
   Expect(value == 0.0, "depth cutoff should not score unresolved bets");
 }
 
-void CheckDepthLimitUsesContinuationValueProvider() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-
-  CFRSolver solver(TestSolverConfig(config));
-  auto provider = std::make_shared<FixedContinuationValueProvider>(7.0);
-  solver.set_continuation_value_provider(provider);
-
-  GameTree::Node node;
-  node.state.set_player_to_act(0);
-  node.state.set_folded_player(-1);
-  node.player_to_act = 0;
-  node.add_action(MakeGameAction(ActionType::CHECK), GameTree::action_key(MakeGameAction(ActionType::CHECK)));
-
-  Hand player_a_hand;
-  Hand player_b_hand;
-  std::array<double, 2> reach_probabilities = {1.0, 1.0};
-  double value =
-      TestCfr(solver, node, player_a_hand, player_b_hand, reach_probabilities, 0, 1, 1);
-
-  Expect(value == 7.0,
-         "depth cutoff should use the continuation value provider");
-  Expect(provider->calls() == 1,
-         "depth cutoff should pass through the continuation provider");
-  Expect(provider->saw_empty_ranges(),
-         "exact-hand CFR cutoff context should not include ranges yet");
-}
-
-void CheckRangeRunPassesContinuationRanges() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-  config.set_max_depth(1);
-
-  HandRange player_a_range;
-  player_a_range.set_from_string("AA,KK");
-  HandRange player_b_range;
-  player_b_range.set_from_string("QQ,JJ");
-
-  CFRSolver solver(TestSolverConfig(config),
-                   TestGameState(FlopRangeCutoffState()));
-  auto provider = std::make_shared<FixedContinuationValueProvider>(7.0);
-  solver.set_continuation_value_provider(provider);
-  solver.run(1, player_a_range, player_b_range);
-
-  Expect(provider->calls() > 0,
-         "range-trained run should hit the continuation provider");
-  Expect(provider->saw_ranges(),
-         "range-trained cutoff context should include configured ranges");
-  Expect(provider->last_player_a_range_size() ==
-             player_a_range.get_all_weighted_combos().size(),
-         "player A continuation range should include compatible configured hands");
-  Expect(provider->last_player_b_range_size() ==
-             player_b_range.get_all_weighted_combos().size(),
-         "player B continuation range should include compatible configured hands");
-  Expect(std::abs(provider->last_player_a_range_weight() -
-                  TestTotalWeight(player_a_range.get_all_weighted_combos())) <
-             0.000001,
-         "non-acting player range weights should pass through unchanged");
-  Expect(std::abs(provider->last_player_b_range_weight() -
-                  (TestTotalWeight(player_b_range.get_all_weighted_combos()) /
-                   2.0)) < 0.000001,
-         "acting player range weights should be conditioned by action probability");
-}
-
-void CheckRangeRunActionConditionsRangesByHandStrategy() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-  config.set_max_depth(1);
-
-  BoardState root_state = FlopRangeCutoffState();
-  HandRange player_a_range;
-  player_a_range.set_from_string("AA");
-  HandRange player_b_range;
-  player_b_range.set_from_string("QQ,JJ");
-
-  CFRSolver solver(TestSolverConfig(config), TestGameState(root_state));
-  auto provider = std::make_shared<FixedContinuationValueProvider>(7.0);
-  solver.set_continuation_value_provider(provider);
-
-  WeightedHandRange player_b_combos = player_b_range.get_all_weighted_combos();
-  for (ComboId combo : player_b_combos.combos) {
-    const ComboInfo& combo_info = GetComboInfo(combo);
-    int preferred_action =
-        RankFromCardId(combo_info.card0) == 12
-            ? TestActionKey(ActionType::ALL_IN, 20)
-            : TestActionKey(ActionType::CHECK);
-    CFRSolverRegretTestPeer::SetRegret(
-        solver, root_state, 1, TestHandFromCombo(combo), preferred_action, 1.0);
-  }
-
-  solver.run(1, player_a_range, player_b_range);
-
-  double queens_weight =
-      TestTotalWeightForRank(player_b_range.get_all_weighted_combos(), 12);
-  Expect(provider->last_player_b_range_size() == 6,
-         "all-in branch should keep only hands that choose all-in");
-  Expect(std::abs(provider->last_player_b_range_weight() - queens_weight) <
-             0.000001,
-         "all-in branch should preserve only all-in hand weights");
-}
-
 void CheckActionConditioningSkipsBoardBlockedRangeHands() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -3090,8 +2787,6 @@ void CheckZeroMaxDepthDoesNotCutOff() {
   config.set_starting_stack_size(10);
 
   CFRSolver solver(TestSolverConfig(config));
-  auto provider = std::make_shared<FixedContinuationValueProvider>(7.0);
-  solver.set_continuation_value_provider(provider);
   GameTree::Node root;
   root.state = TestGameState(RiverFacingCallState());
 
@@ -3103,8 +2798,6 @@ void CheckZeroMaxDepthDoesNotCutOff() {
 
   Expect(std::abs(value - 2.5) < 0.000001,
          "zero max depth should not cut off CFR traversal");
-  Expect(provider->calls() == 0,
-         "zero max depth should not call the continuation provider");
 }
 
 void CheckChanceDoesNotConsumeDepth() {
@@ -3630,15 +3323,8 @@ int main() {
   CheckTerminalUtilityBeatsDepthLimit();
   CheckDepthLimitUsesShowdownUtility();
   CheckDepthLimitDoesNotScoreUncalledBet();
-  CheckDepthLimitUsesContinuationValueProvider();
-  CheckRangeRunPassesContinuationRanges();
-  CheckRangeRunActionConditionsRangesByHandStrategy();
   CheckActionConditioningSkipsBoardBlockedRangeHands();
   CheckActionConditioningIndexTracksNewInfoSets();
-  CheckExactHandNestedCfrContinuationSolvesRiverCallSubgame();
-  CheckExactHandNestedCfrContinuationCachesSubgames();
-  CheckExactHandNestedCfrContinuationSeparatesPrivateHands();
-  CheckCfrDepthLimitUsesExactHandNestedContinuationProvider();
   CheckZeroMaxDepthDoesNotCutOff();
   CheckChanceDoesNotConsumeDepth();
   CheckChanceSamplesVisitMultipleBoards();

@@ -23,8 +23,6 @@
 
 namespace poker {
 
-struct ContinuationContext;
-class ContinuationValueProvider;
 class TerminalUtilityCache;
 class BestResponseEvaluator;
 
@@ -136,9 +134,6 @@ public:
   void add_traversal_stats(const TraversalStats& stats);
   UtilityCacheStats get_utility_cache_stats() const;
   static bool traversal_stats_enabled();
-  void set_continuation_value_provider(
-      std::shared_ptr<ContinuationValueProvider> provider);
-
 private:
   friend class BestResponseEvaluator;
   friend class CFRSolverRegretTestPeer;
@@ -235,10 +230,6 @@ private:
             std::shared_ptr<TerminalUtilityCache> utility_cache);
   CFRSolver(const SolverConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache,
-            std::shared_ptr<ContinuationValueProvider> continuation_value_provider);
-  CFRSolver(const SolverConfig& config,
-            std::shared_ptr<TerminalUtilityCache> utility_cache,
-            std::shared_ptr<ContinuationValueProvider> continuation_value_provider,
             GameState initial_state);
 
   SolverConfig config_;
@@ -251,7 +242,6 @@ private:
   TraversalStats traversal_stats_;
   TrainingRunStats last_training_run_stats_;
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
-  std::shared_ptr<ContinuationValueProvider> continuation_value_provider_;
   CardAbstraction card_abstraction_;
   // Set to true after warmup; workers may only write cumulative arrays.
   bool frozen_ = false;
@@ -461,12 +451,6 @@ private:
   static int32_t& get_or_create_private_row_slot(
       PublicInfoSetSlabPlayer& player_slab,
       PrivateBucketId private_bucket);
-  ContinuationContext build_continuation_context(
-      const GameState& state,
-      ComboId player_a_hand,
-      ComboId player_b_hand,
-      OptionalTrainingRange player_a_range,
-      OptionalTrainingRange player_b_range) const;
   double utility(const GameState& state,
                  const PrivateCards& player_a_cards,
                  const PrivateCards& player_b_cards);
