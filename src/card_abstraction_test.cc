@@ -13,12 +13,12 @@ void Expect(bool condition, const char* message) {
   }
 }
 
-GameState PublicState(StreetKind street,
-                      CardId first,
-                      CardId second,
-                      CardId third,
-                      CardId fourth = 0) {
-  GameState state;
+CompactPublicState PublicState(StreetKind street,
+                               CardId first,
+                               CardId second,
+                               CardId third,
+                               CardId fourth = 0) {
+  CompactPublicState state;
   state.street = street;
   AddBoardCard(state, first);
   AddBoardCard(state, second);
@@ -29,8 +29,8 @@ GameState PublicState(StreetKind street,
   return state;
 }
 
-GameState PreflopState() {
-  GameState state;
+CompactPublicState PreflopState() {
+  CompactPublicState state;
   state.street = StreetKind::kPreflop;
   return state;
 }
@@ -45,12 +45,12 @@ ComboId ExactCombo(int first_rank,
 
 void CheckExactPublicBucketsUseBoardMask() {
   ExactPublicCardBuckets buckets;
-  const GameState first =
+  const CompactPublicState first =
       PublicState(StreetKind::kFlop,
                   MakeCardId(2, SuitKind::kHearts),
                   MakeCardId(7, SuitKind::kDiamonds),
                   MakeCardId(11, SuitKind::kClubs));
-  const GameState reordered =
+  const CompactPublicState reordered =
       PublicState(StreetKind::kFlop,
                   MakeCardId(11, SuitKind::kClubs),
                   MakeCardId(2, SuitKind::kHearts),
@@ -64,27 +64,27 @@ void CheckExactPublicBucketsUseBoardMask() {
 
 void CheckTextureBucketsUseBoardTexture() {
   BoardTexturePublicCardBuckets buckets;
-  const GameState first_flop =
+  const CompactPublicState first_flop =
       PublicState(StreetKind::kFlop,
                   MakeCardId(2, SuitKind::kHearts),
                   MakeCardId(7, SuitKind::kDiamonds),
                   MakeCardId(11, SuitKind::kClubs));
-  const GameState same_texture_flop =
+  const CompactPublicState same_texture_flop =
       PublicState(StreetKind::kFlop,
                   MakeCardId(3, SuitKind::kHearts),
                   MakeCardId(8, SuitKind::kDiamonds),
                   MakeCardId(12, SuitKind::kClubs));
-  const GameState paired_flop =
+  const CompactPublicState paired_flop =
       PublicState(StreetKind::kFlop,
                   MakeCardId(2, SuitKind::kHearts),
                   MakeCardId(2, SuitKind::kDiamonds),
                   MakeCardId(11, SuitKind::kClubs));
-  const GameState monotone_flop =
+  const CompactPublicState monotone_flop =
       PublicState(StreetKind::kFlop,
                   MakeCardId(2, SuitKind::kHearts),
                   MakeCardId(7, SuitKind::kHearts),
                   MakeCardId(11, SuitKind::kHearts));
-  const GameState turn =
+  const CompactPublicState turn =
       PublicState(StreetKind::kTurn,
                   MakeCardId(2, SuitKind::kHearts),
                   MakeCardId(7, SuitKind::kDiamonds),
@@ -103,7 +103,7 @@ void CheckTextureBucketsUseBoardTexture() {
 
 void CheckExactPrivateBucketsUseComboId() {
   ExactPrivateBuckets buckets;
-  const GameState state = PreflopState();
+  const CompactPublicState state = PreflopState();
   const ComboId aces =
       ExactCombo(14, SuitKind::kSpades, 14, SuitKind::kHearts);
 
@@ -116,7 +116,7 @@ void CheckExactPrivateBucketsUseComboId() {
 #if POKER_COARSE_PUBLIC_BUCKETS
 void CheckCoarsePrivateBucketsMergeCombos() {
   CoarsePrivateBuckets buckets;
-  const GameState state = PreflopState();
+  const CompactPublicState state = PreflopState();
   const ComboId ace_king_spades =
       ExactCombo(14, SuitKind::kSpades, 13, SuitKind::kSpades);
   const ComboId ace_king_hearts =

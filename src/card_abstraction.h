@@ -14,8 +14,7 @@ using PrivateBucketId = uint16_t;
 struct ExactPublicCardBuckets {
   static constexpr bool kExactPublicState = true;
 
-  template <typename State>
-  PublicBucketId bucket(const State& state) const {
+  PublicBucketId bucket(const CompactPublicState& state) const {
     return state.board_mask;
   }
 };
@@ -23,9 +22,8 @@ struct ExactPublicCardBuckets {
 struct BoardTexturePublicCardBuckets {
   static constexpr bool kExactPublicState = false;
 
-  template <typename State>
-  PublicBucketId bucket(const State& state) const {
-    const int board_count = BoardCount(state);
+  PublicBucketId bucket(const CompactPublicState& state) const {
+    const int board_count = state.board_count;
     if (board_count == 0) {
       return 0;
     }
@@ -86,14 +84,6 @@ struct BoardTexturePublicCardBuckets {
   static constexpr int kTextureBucketsPerStreet =
       3 * kSuitBuckets * kStraightBuckets * kHighBuckets;
 
-  static int BoardCount(const GameState& state) {
-    return static_cast<int>(state.board_cards.size());
-  }
-
-  static int BoardCount(const CompactPublicState& state) {
-    return state.board_count;
-  }
-
   static int CountBits(uint16_t value) {
     int count = 0;
     while (value != 0) {
@@ -126,13 +116,11 @@ using DefaultPublicCardBuckets = ExactPublicCardBuckets;
 #endif
 
 struct ExactPrivateBuckets {
-  template <typename State>
-  PrivateBucketId bucket(ComboId combo_id, const State&) const {
+  PrivateBucketId bucket(ComboId combo_id, const CompactPublicState&) const {
     return combo_id;
   }
 
-  template <typename State>
-  uint32_t bucket_count(const State&) const {
+  uint32_t bucket_count(const CompactPublicState&) const {
     return kComboCount;
   }
 };
@@ -144,8 +132,8 @@ struct CoarsePrivateBuckets {
   static constexpr uint32_t kBucketCount =
       kPreflopBucketCount + 3 * kPostflopBucketsPerStreet;
 
-  template <typename State>
-  PrivateBucketId bucket(ComboId combo_id, const State& state) const {
+  PrivateBucketId bucket(ComboId combo_id,
+                         const CompactPublicState& state) const {
     const ComboInfo& combo = GetComboInfo(combo_id);
     const int rank0 = RankFromCardId(combo.card0);
     const int rank1 = RankFromCardId(combo.card1);
@@ -155,7 +143,7 @@ struct CoarsePrivateBuckets {
     const bool suited = SuitFromCardId(combo.card0) ==
                         SuitFromCardId(combo.card1);
 
-    if (state.street == StreetKind::kPreflop || BoardCount(state) == 0) {
+    if (state.street == StreetKind::kPreflop || state.board_count == 0) {
       const int shape = pair ? 0 : (suited ? 1 : 2);
       return static_cast<PrivateBucketId>(
           shape * 12 + HighRankGroup(high) * 3 + LowRankGroup(low));
@@ -170,20 +158,11 @@ struct CoarsePrivateBuckets {
         local_bucket);
   }
 
-  template <typename State>
-  uint32_t bucket_count(const State&) const {
+  uint32_t bucket_count(const CompactPublicState&) const {
     return kBucketCount;
   }
 
  private:
-  static int BoardCount(const GameState& state) {
-    return static_cast<int>(state.board_cards.size());
-  }
-
-  static int BoardCount(const CompactPublicState& state) {
-    return state.board_count;
-  }
-
   static int HighRankGroup(int rank) {
     if (rank >= 14) {
       return 0;
@@ -212,12 +191,12 @@ struct CoarsePrivateBuckets {
     return 2;
   }
 
-  template <typename State>
-  static int MadeBucket(const ComboInfo& combo, const State& state) {
+  static int MadeBucket(const ComboInfo& combo,
+                        const CompactPublicState& state) {
     int rank_counts[15] = {};
     ++rank_counts[RankFromCardId(combo.card0)];
     ++rank_counts[RankFromCardId(combo.card1)];
-    for (int i = 0; i < BoardCount(state); ++i) {
+    for (int i = 0; i < state.board_count; ++i) {
       ++rank_counts[
           RankFromCardId(state.board_cards[static_cast<size_t>(i)])];
     }
@@ -241,8 +220,8 @@ struct CoarsePrivateBuckets {
     return pairs == 1 ? 1 : 0;
   }
 
-  template <typename State>
-  static int DrawBucket(const ComboInfo& combo, const State& state) {
+  static int DrawBucket(const ComboInfo& combo,
+                        const CompactPublicState& state) {
     int suit_counts[4] = {};
     uint16_t rank_mask = 0;
     auto add_card = [&](CardId card) {
@@ -252,7 +231,7 @@ struct CoarsePrivateBuckets {
     };
     add_card(combo.card0);
     add_card(combo.card1);
-    for (int i = 0; i < BoardCount(state); ++i) {
+    for (int i = 0; i < state.board_count; ++i) {
       add_card(state.board_cards[static_cast<size_t>(i)]);
     }
 
@@ -298,18 +277,16 @@ struct CardAbstraction {
   ExactPrivateBuckets private_buckets;
 #endif
 
-  template <typename State>
-  PublicBucketId public_bucket(const State& state) const {
+  PublicBucketId public_bucket(const CompactPublicState& state) const {
     return public_buckets.bucket(state);
   }
 
-  template <typename State>
-  PrivateBucketId private_bucket(ComboId combo_id, const State& state) const {
+  PrivateBucketId private_bucket(ComboId combo_id,
+                                 const CompactPublicState& state) const {
     return private_buckets.bucket(combo_id, state);
   }
 
-  template <typename State>
-  uint32_t private_bucket_count(const State& state) const {
+  uint32_t private_bucket_count(const CompactPublicState& state) const {
     return private_buckets.bucket_count(state);
   }
 
