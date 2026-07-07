@@ -26,7 +26,6 @@ int CardsForNextStreet(StreetKind street) {
     case StreetKind::kRiver:
       return 0;
   }
-  return 0;
 }
 
 absl::InlinedVector<CardId, 5> SampleStreetCards(

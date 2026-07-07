@@ -85,7 +85,6 @@ int StreetBetSizesSize(const SolverConfig& config, StreetKind street) {
     case StreetKind::kRiver:
       return config.river_bet_sizes.size();
   }
-  return 0;
 }
 
 double BetSizeForStreet(const SolverConfig& config,
@@ -105,7 +104,6 @@ double BetSizeForStreet(const SolverConfig& config,
     case StreetKind::kRiver:
       return config.river_bet_sizes[index];
   }
-  return config.bet_sizes[index];
 }
 
 int BetSizesSize(const SolverConfig& config, StreetKind street) {

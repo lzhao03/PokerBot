@@ -230,7 +230,6 @@ StreetKind StreetAfterChance(StreetKind street) {
     case StreetKind::kRiver:
       return StreetKind::kRiver;
   }
-  return StreetKind::kRiver;
 }
 
 int BoardCardsForStreet(StreetKind street) {
@@ -244,7 +243,6 @@ int BoardCardsForStreet(StreetKind street) {
     case StreetKind::kRiver:
       return 5;
   }
-  return 0;
 }
 
 struct CoarseChanceTransitionTemplate {
@@ -338,7 +336,6 @@ const CoarseChanceTransitionMap& CoarseChanceTransitions(StreetKind street) {
     case StreetKind::kRiver:
       return river;
   }
-  return river;
 }
 #endif
 
