@@ -93,7 +93,7 @@ void PrintUsage(const char* program) {
       << "  --max-public-states=N           cap public-state rows (default "
       << kDefaultMaxPublicStates << ", 0 = unlimited)\n"
       << "  --threads=N                     parallel training threads (0 or 1 = single-threaded)\n"
-      << "  --warmup-iterations=N           single-threaded warmup before parallel phase (0 = auto)\n"
+      << "  --warmup-iterations=N           single-threaded warmup before frozen phase (0 = auto)\n"
       << "  --max-memory-mb=N                hard memory limit in MB (default "
       << kDefaultMemoryLimitMb << ", 0 = unlimited)\n"
       << "  --log                           show INFO logs and VLOG(1) progress\n";

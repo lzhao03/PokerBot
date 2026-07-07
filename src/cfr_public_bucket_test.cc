@@ -864,15 +864,15 @@ void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
          "shallow coarse prebuild should create infosets");
   Expect(stats.warmup_iterations == 2,
          "alternating updates should warm both players before freezing");
-  Expect(stats.parallel_iterations == 1,
-         "complete shallow prebuild should enter the frozen parallel phase");
-  Expect(stats.parallel_cfr_updates > 0,
-         "frozen parallel phase should do CFR work");
-  Expect(stats.parallel_cfr_updates == stats.parallel_iterations,
-         "shallow frozen parallel work should have stable CFR updates per hand");
+  Expect(stats.frozen_iterations == 1,
+         "complete shallow prebuild should enter the frozen phase");
+  Expect(stats.frozen_cfr_updates > 0,
+         "frozen phase should do CFR work");
+  Expect(stats.frozen_cfr_updates == stats.frozen_iterations,
+         "shallow frozen work should have stable CFR updates per hand");
   Expect(static_cast<int64_t>(solver.get_public_state_count()) ==
              stats.prebuild_public_states,
-         "frozen parallel phase should not allocate public states");
+         "frozen phase should not allocate public states");
 }
 
 void CheckFullDepthTexturePublicBucketsEnterFrozenParallelPhase() {
@@ -951,13 +951,13 @@ void CheckFullDepthTexturePublicBucketsEnterFrozenParallelPhase() {
       }
     }
   }
-  Expect(stats.parallel_iterations > 0,
-         "full-depth texture run should enter frozen parallel phase");
-  Expect(stats.parallel_cfr_updates > stats.parallel_iterations,
-         "full-depth frozen parallel phase should do nontrivial CFR work");
+  Expect(stats.frozen_iterations > 0,
+         "full-depth texture run should enter frozen phase");
+  Expect(stats.frozen_cfr_updates > stats.frozen_iterations,
+         "full-depth frozen phase should do nontrivial CFR work");
   Expect(static_cast<int64_t>(solver.get_public_state_count()) ==
              stats.prebuild_public_states,
-         "full-depth frozen parallel phase should not allocate public states");
+         "full-depth frozen phase should not allocate public states");
 }
 
 void CheckSingleWorkerFullDepthTexturePublicBucketsEnterFrozenPhase() {
@@ -989,11 +989,11 @@ void CheckSingleWorkerFullDepthTexturePublicBucketsEnterFrozenPhase() {
          "single-worker full-depth texture buckets should prebuild frozen lookup");
   Expect(stats.warmup_iterations == 1,
          "single-worker frozen training should use configured warmup");
-  Expect(stats.parallel_iterations == 3,
+  Expect(stats.frozen_iterations == 3,
          "single-worker frozen training should report remaining frozen iterations");
   Expect(stats.warmup_cfr_updates > 0,
          "single-worker frozen training should report warmup CFR work");
-  Expect(stats.parallel_cfr_updates > stats.parallel_iterations,
+  Expect(stats.frozen_cfr_updates > stats.frozen_iterations,
          "single-worker frozen training should do nontrivial frozen CFR work");
   Expect(solver.get_traversal_stats().atomic_regret_update_retries == 0,
          "single-worker frozen training should not use atomic regret updates");

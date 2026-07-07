@@ -2823,17 +2823,17 @@ void CFRSolver::run_iterations(int iterations,
               << " info sets, " << iterations_run_
               << " warmup iterations. Starting frozen phase ("
               << remaining << " iterations, " << num_threads << " workers)...";
-    const int64_t parallel_start_updates = cfr_update_count_;
-    const auto parallel_start = std::chrono::steady_clock::now();
-    run_iterations_parallel(remaining, num_threads, *root_public_state_id,
-                            range_sampler,
-                            player_a_training_range, player_b_training_range);
-    const auto parallel_end = std::chrono::steady_clock::now();
-    last_training_run_stats_.parallel_iterations = remaining;
-    last_training_run_stats_.parallel_seconds =
-        std::chrono::duration<double>(parallel_end - parallel_start).count();
-    last_training_run_stats_.parallel_cfr_updates =
-        cfr_update_count_ - parallel_start_updates;
+    const int64_t frozen_start_updates = cfr_update_count_;
+    const auto frozen_start = std::chrono::steady_clock::now();
+    run_frozen_iterations(remaining, num_threads, *root_public_state_id,
+                          range_sampler,
+                          player_a_training_range, player_b_training_range);
+    const auto frozen_end = std::chrono::steady_clock::now();
+    last_training_run_stats_.frozen_iterations = remaining;
+    last_training_run_stats_.frozen_seconds =
+        std::chrono::duration<double>(frozen_end - frozen_start).count();
+    last_training_run_stats_.frozen_cfr_updates =
+        cfr_update_count_ - frozen_start_updates;
   }
 
   LOG(INFO) << "CFR iterations completed";
@@ -2843,7 +2843,7 @@ void CFRSolver::run_iterations(int iterations,
   LOG(INFO) << "Player A average EV: " << get_expected_value(0);
 }
 
-void CFRSolver::run_iterations_parallel(
+void CFRSolver::run_frozen_iterations(
     int iterations,
     int num_threads,
     uint32_t root_public_state_id,

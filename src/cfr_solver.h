@@ -77,11 +77,11 @@ public:
     double prebuild_seconds = 0.0;
     double info_set_prebuild_seconds = 0.0;
     int warmup_iterations = 0;
-    int parallel_iterations = 0;
+    int frozen_iterations = 0;
     double warmup_seconds = 0.0;
-    double parallel_seconds = 0.0;
+    double frozen_seconds = 0.0;
     int64_t warmup_cfr_updates = 0;
-    int64_t parallel_cfr_updates = 0;
+    int64_t frozen_cfr_updates = 0;
   };
 
   using PrivateBucketId = FrozenStrategyTables::PrivateBucketId;
@@ -288,12 +288,12 @@ private:
   void run_iterations(int iterations,
                       const HandRange& player_a_range,
                       const HandRange& player_b_range);
-  void run_iterations_parallel(int iterations,
-                                int num_threads,
-                                uint32_t root_public_state_id,
-                                const RangeSampler& range_sampler,
-                                const TrainingRange& player_a_training_range,
-                                const TrainingRange& player_b_training_range);
+  void run_frozen_iterations(int iterations,
+                             int num_threads,
+                             uint32_t root_public_state_id,
+                             const RangeSampler& range_sampler,
+                             const TrainingRange& player_a_training_range,
+                             const TrainingRange& player_b_training_range);
   double cfr_with_ranges(
       uint32_t public_state_id,
       const CompactPublicState& state,

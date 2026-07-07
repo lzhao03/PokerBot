@@ -2156,8 +2156,8 @@ void CheckRunUpdatesExpectedValue() {
       solver.get_last_training_run_stats();
   Expect(run_stats.warmup_iterations == 1,
          "single-thread run should report warmup iterations");
-  Expect(run_stats.parallel_iterations == 0,
-         "single-thread run should not report a parallel phase");
+  Expect(run_stats.frozen_iterations == 0,
+         "depth-limited single-thread run should not report a frozen phase");
   Expect(run_stats.warmup_cfr_updates == 1,
          "single-thread run should report warmup CFR updates");
 
@@ -2198,15 +2198,15 @@ void CheckRangeRunTracksParallelTrainingStats() {
   const CFRSolver::TrainingRunStats stats =
       solver.get_last_training_run_stats();
   Expect(stats.public_state_prebuild_complete,
-         "parallel run should prebuild a complete public-state graph");
+         "frozen run should prebuild a complete public-state graph");
   Expect(stats.betting_history_transition_prebuild_complete,
-         "parallel run should validate complete betting-history transitions");
+         "frozen run should validate complete betting-history transitions");
   Expect(stats.chance_transition_prebuild_complete,
-         "parallel run should validate complete chance transitions");
+         "frozen run should validate complete chance transitions");
   Expect(stats.action_transition_prebuild_complete,
-         "parallel run should validate complete action transitions");
+         "frozen run should validate complete action transitions");
   Expect(stats.info_set_prebuild_complete,
-         "parallel run should prebuild a complete infoset table");
+         "frozen run should prebuild a complete infoset table");
   Expect(stats.missing_chance_transitions == 0,
          "complete public-state prebuild should not miss chance transitions");
   Expect(stats.prebuild_betting_history_transitions > 0,
@@ -2222,14 +2222,14 @@ void CheckRangeRunTracksParallelTrainingStats() {
   Expect(stats.prebuild_action_entries > 0,
          "infoset prebuild should create action entries before warmup");
   Expect(stats.warmup_iterations == 2,
-         "parallel alternating run should warm both update players");
-  Expect(stats.parallel_iterations == 1,
-         "parallel run should report remaining parallel iterations");
+         "frozen alternating run should warm both update players");
+  Expect(stats.frozen_iterations == 1,
+         "frozen run should report remaining frozen iterations");
   Expect(stats.warmup_cfr_updates > 0,
-         "parallel run should report warmup CFR updates");
-  Expect(stats.parallel_cfr_updates > 0,
-         "parallel run should report parallel CFR updates");
-  Expect(stats.warmup_cfr_updates + stats.parallel_cfr_updates ==
+         "frozen run should report warmup CFR updates");
+  Expect(stats.frozen_cfr_updates > 0,
+         "frozen run should report frozen CFR updates");
+  Expect(stats.warmup_cfr_updates + stats.frozen_cfr_updates ==
              solver.get_cfr_update_count(),
          "phase CFR updates should add up to total CFR updates");
 }
@@ -2266,7 +2266,7 @@ void CheckAutoWarmupDoesNotFreezeAfterPublicStateCap() {
          "incomplete public-state prebuild should not validate action transitions");
   Expect(stats.warmup_iterations == 20,
          "auto warmup should consume the run after hitting a cap");
-  Expect(stats.parallel_iterations == 0,
+  Expect(stats.frozen_iterations == 0,
          "auto warmup should not freeze a capped incomplete tree");
 }
 
@@ -2303,8 +2303,8 @@ void CheckInfosetPrebuildCapPreventsFreeze() {
          "infoset cap should report incomplete prebuild");
   Expect(stats.prebuild_info_sets == 1,
          "infoset prebuild should stop at the configured cap");
-  Expect(stats.parallel_iterations == 0,
-         "incomplete infoset prebuild should not enter frozen parallel phase");
+  Expect(stats.frozen_iterations == 0,
+         "incomplete infoset prebuild should not enter frozen phase");
 }
 
 void CheckInfosetPrebuildSkipsBoardBlockedCombos() {

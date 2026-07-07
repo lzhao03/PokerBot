@@ -279,32 +279,32 @@ poker::CFRSolver::TraversalStats TraversalDelta(
   return delta;
 }
 
-bool UseParallelPrimaryMetric(
+bool UseFrozenPrimaryMetric(
     const poker::CFRSolver::TrainingRunStats& training) {
-  return training.parallel_iterations > 0;
+  return training.frozen_iterations > 0;
 }
 
 const char* PrimaryCfrPhase(
     const poker::CFRSolver::TrainingRunStats& training) {
-  return UseParallelPrimaryMetric(training) ? "frozen" : "total";
+  return UseFrozenPrimaryMetric(training) ? "frozen" : "total";
 }
 
 int64_t PrimaryCfrNodeUpdates(const BenchmarkResult& result) {
   const auto& training = result.training_stats;
-  return UseParallelPrimaryMetric(training) ? training.parallel_cfr_updates
-                                            : result.cfr_node_updates;
+  return UseFrozenPrimaryMetric(training) ? training.frozen_cfr_updates
+                                          : result.cfr_node_updates;
 }
 
 double PrimarySeconds(const BenchmarkResult& result, double elapsed_seconds) {
   const auto& training = result.training_stats;
-  return UseParallelPrimaryMetric(training) ? training.parallel_seconds
-                                            : elapsed_seconds;
+  return UseFrozenPrimaryMetric(training) ? training.frozen_seconds
+                                          : elapsed_seconds;
 }
 
 int64_t PrimaryHands(const BenchmarkResult& result) {
   const auto& training = result.training_stats;
-  return UseParallelPrimaryMetric(training) ? training.parallel_iterations
-                                            : result.hands;
+  return UseFrozenPrimaryMetric(training) ? training.frozen_iterations
+                                          : result.hands;
 }
 
 void RunBenchmark(const std::string& name,
@@ -354,13 +354,13 @@ void RunBenchmark(const std::string& name,
                              training.warmup_seconds) << "\t"
             << RatePerHand(training.warmup_cfr_updates,
                            training.warmup_iterations) << "\t"
-            << training.parallel_seconds << "\t"
-            << training.parallel_iterations << "\t"
-            << training.parallel_cfr_updates << "\t"
-            << RatePerSecond(training.parallel_cfr_updates,
-                             training.parallel_seconds) << "\t"
-            << RatePerHand(training.parallel_cfr_updates,
-                           training.parallel_iterations) << "\t"
+            << training.frozen_seconds << "\t"
+            << training.frozen_iterations << "\t"
+            << training.frozen_cfr_updates << "\t"
+            << RatePerSecond(training.frozen_cfr_updates,
+                             training.frozen_seconds) << "\t"
+            << RatePerHand(training.frozen_cfr_updates,
+                           training.frozen_iterations) << "\t"
             << result.hands << "\t"
             << RatePerSecond(result.hands, elapsed.count()) << "\t"
             << result.info_sets << "\t"
@@ -507,10 +507,10 @@ int main(int argc, char** argv) {
               << "\twarmup_cfr_node_updates"
               << "\twarmup_cfr_node_updates_per_second"
               << "\twarmup_cfr_node_updates_per_hand"
-              << "\tparallel_seconds\tparallel_iterations"
-              << "\tparallel_cfr_node_updates"
-              << "\tparallel_cfr_node_updates_per_second"
-              << "\tparallel_cfr_node_updates_per_hand"
+              << "\tfrozen_seconds\tfrozen_iterations"
+              << "\tfrozen_cfr_node_updates"
+              << "\tfrozen_cfr_node_updates_per_second"
+              << "\tfrozen_cfr_node_updates_per_hand"
               << "\thands\thands_per_second"
               << "\tinfo_sets\tpublic_states"
               << "\tmax_info_sets\tmax_public_states"
