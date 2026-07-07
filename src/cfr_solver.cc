@@ -1,6 +1,5 @@
 #include "src/cfr_solver.h"
 #include "absl/log/log.h"
-#include "src/best_response.h"
 #include "src/card_utils.h"
 #include "src/hand_range.h"
 #include "src/terminal_utility_cache.h"
@@ -3874,51 +3873,6 @@ double CFRSolver::evaluate_strategy_node(
                                     player_a_cards, player_b_cards);
   }
   return value;
-}
-
-double CFRSolver::calculate_exploitability() {
-  return BestResponseEvaluator(*this).calculate_exploitability();
-}
-
-double CFRSolver::calculate_exploitability(int samples) {
-  return BestResponseEvaluator(*this).calculate_exploitability(samples);
-}
-
-double CFRSolver::calculate_exploitability(int samples,
-                                           const HandRange& player_a_range,
-                                           const HandRange& player_b_range) {
-  return BestResponseEvaluator(*this).calculate_exploitability(
-      samples, player_a_range, player_b_range);
-}
-
-double CFRSolver::calculate_player_a_best_response_value(
-    int samples,
-    const HandRange& player_a_range,
-    const HandRange& player_b_range) {
-  return BestResponseEvaluator(*this).calculate_player_a_best_response_value(
-      samples, player_a_range, player_b_range);
-}
-
-double CFRSolver::calculate_player_b_best_response_value(
-    int samples,
-    const HandRange& player_a_range,
-    const HandRange& player_b_range) {
-  return BestResponseEvaluator(*this).calculate_player_b_best_response_value(
-      samples, player_a_range, player_b_range);
-}
-
-double CFRSolver::calculate_exploitability(ComboId player_a_hand,
-                                           ComboId player_b_hand) {
-  return BestResponseEvaluator(*this).calculate_exploitability(
-      player_a_hand, player_b_hand);
-}
-
-GameAction CFRSolver::get_best_response_action(GameTree::Node& node,
-                                               ComboId player_a_hand,
-                                               ComboId player_b_hand,
-                                               int best_response_player) {
-  return BestResponseEvaluator(*this).get_best_response_action(
-      node, player_a_hand, player_b_hand, best_response_player);
 }
 
 double CFRSolver::get_expected_value(int player_id) const {

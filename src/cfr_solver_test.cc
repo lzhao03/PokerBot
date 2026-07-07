@@ -3,7 +3,6 @@
 #include "absl/log/log_entry.h"
 #include "absl/log/log_sink.h"
 #include "absl/log/log_sink_registry.h"
-#include "src/best_response.h"
 #include "src/cfr_solver_proto_adapter.h"
 #include "src/hand_range.h"
 
@@ -658,26 +657,6 @@ class CFRSolverRegretTestPeer {
         *public_state_id, compact_state,
         CFRSolver::PrivateCards::FromCombo(TestComboId(player_a_hand)),
         CFRSolver::PrivateCards::FromCombo(TestComboId(player_b_hand)));
-  }
-
-  static double BestResponseNode(CFRSolver& solver, GameTree::Node& node,
-                                 const Hand& player_a_hand,
-                                 const Hand& player_b_hand,
-                                 int best_response_player) {
-    return BestResponseEvaluator(solver).best_response_value(
-        node, TestComboId(player_a_hand), TestComboId(player_b_hand),
-        best_response_player);
-  }
-
-  static double BestResponseRangeNode(
-      CFRSolver& solver, GameTree::Node& node,
-      const Hand& best_response_hand,
-      const WeightedHandRange& opponent_hands,
-      int best_response_player) {
-    WeightedHandRangeView opponent_view(opponent_hands);
-    return BestResponseEvaluator(solver).best_response_value_against_range(
-        node, TestComboId(best_response_hand), opponent_view,
-        best_response_player);
   }
 
   static double Utility(CFRSolver& solver,
@@ -1880,105 +1859,6 @@ void CheckTerminalUtilityCacheReusesScores() {
   Expect(stats.entries == 1, "cache should contain one utility entry");
 }
 
-void CheckSingletonRangeMatchesExactEvaluationAndBestResponse() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-
-  Hand player_a_hand = MakeHand(14, Suit::SPADES, 13, Suit::SPADES);
-  Hand player_b_hand = MakeHand(12, Suit::HEARTS, 11, Suit::HEARTS);
-  HandRange player_a_range;
-  AddHand(player_a_range, player_a_hand, 1.0);
-  HandRange player_b_range;
-  AddHand(player_b_range, player_b_hand, 1.0);
-
-  CFRSolver solver(TestSolverConfig(config));
-  GameTree::Node node;
-  node.state.set_player_to_act(0);
-  node.state.set_folded_player(-1);
-  node.player_to_act = 0;
-  node.add_action(MakeGameAction(ActionType::FOLD), GameTree::action_key(MakeGameAction(ActionType::FOLD)));
-  node.add_action(MakeGameAction(ActionType::CALL, 1), GameTree::action_key(MakeGameAction(ActionType::CALL, 1)));
-
-  auto folded_state = [](int folded_player) {
-    GameState state;
-    state.set_pot(10);
-    state.set_folded_player(folded_player);
-    state.add_player_contribution(5);
-    state.add_player_contribution(5);
-    return state;
-  };
-
-  GameTree::Node player_a_loses_child;
-  player_a_loses_child.state = folded_state(0);
-  player_a_loses_child.is_terminal = true;
-  CFRSolverRegretTestPeer::AddChild(
-      solver, node, TestActionKey(ActionType::FOLD),
-      std::move(player_a_loses_child));
-
-  GameTree::Node player_a_wins_child;
-  player_a_wins_child.state = folded_state(1);
-  player_a_wins_child.is_terminal = true;
-  CFRSolverRegretTestPeer::AddChild(
-      solver, node, TestActionKey(ActionType::CALL, 1),
-      std::move(player_a_wins_child));
-
-  double exact_best_response = CFRSolverRegretTestPeer::BestResponseNode(
-      solver, node, player_a_hand, player_b_hand, 0);
-  WeightedHandRange player_b_singleton;
-  player_b_singleton.add(TestComboId(player_b_hand), 1.0);
-  double range_best_response = CFRSolverRegretTestPeer::BestResponseRangeNode(
-      solver, node, player_a_hand, player_b_singleton, 0);
-  Expect(std::abs(exact_best_response - range_best_response) < 0.000001,
-         "singleton range best response should match exact-hand best response");
-}
-
-void CheckExploitabilityZeroSamples() {
-  PokerConfig config;
-  CFRSolver solver(TestSolverConfig(config));
-  HandRange player_a_range;
-  HandRange player_b_range;
-  Expect(solver.calculate_exploitability(0) == 0.0,
-         "zero exploitability samples should return zero");
-  Expect(solver.calculate_player_a_best_response_value(
-             0, player_a_range, player_b_range) == 0.0,
-         "zero player A best-response samples should return zero");
-  Expect(solver.calculate_player_b_best_response_value(
-             0, player_a_range, player_b_range) == 0.0,
-         "zero player B best-response samples should return zero");
-}
-
-void CheckRangeBestResponseWrappersReturnFiniteValues() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-  config.set_max_depth(1);
-
-  HandRange player_a_range;
-  player_a_range.set_from_string("AA,KK");
-  HandRange player_b_range;
-  player_b_range.set_from_string("QQ,JJ");
-
-  CFRSolver solver(TestSolverConfig(config));
-  solver.run(2, player_a_range, player_b_range);
-
-  double player_a_value = solver.calculate_player_a_best_response_value(
-      2, player_a_range, player_b_range);
-  double player_b_value = solver.calculate_player_b_best_response_value(
-      2, player_a_range, player_b_range);
-  Expect(std::isfinite(player_a_value),
-         "player A range best-response wrapper should return a finite value");
-  Expect(std::isfinite(player_b_value),
-         "player B range best-response wrapper should return a finite value");
-
-  player_a_value = solver.calculate_player_a_best_response_value(
-      64, player_a_range, player_b_range);
-  player_b_value = solver.calculate_player_b_best_response_value(
-      64, player_a_range, player_b_range);
-  Expect(std::isfinite(player_a_value),
-         "parallel player A range best-response should return a finite value");
-  Expect(std::isfinite(player_b_value),
-         "parallel player B range best-response should return a finite value");
-}
-
 void CheckParallelEvaluationUsesWorkerLocalUtilityCaches() {
   PokerConfig config;
   config.set_starting_stack_size(6);
@@ -2537,16 +2417,6 @@ BoardState FoldedState(int folded_player) {
   return state;
 }
 
-void AddTerminalChild(CFRSolver& solver,
-                      GameTree::Node& node,
-                      int action_id,
-                      const BoardState& state) {
-  GameTree::Node child;
-  child.state = TestGameState(state);
-  child.is_terminal = true;
-  CFRSolverRegretTestPeer::AddChild(solver, node, action_id, std::move(child));
-}
-
 BoardState FlopRangeCutoffState() {
   BoardState state;
   state.set_stack_a(20);
@@ -2577,20 +2447,6 @@ void CheckRunFixedHandsUsesCustomInitialState() {
          "fixed-hand run should count iterations");
   Expect(solver.get_expected_value(0) == 5.0,
          "fixed-hand run should use the custom initial state");
-}
-
-BoardState ShowdownState(const std::vector<Card>& board_cards) {
-  BoardState state;
-  state.set_pot(20);
-  state.set_street(Street::RIVER);
-  state.set_all_in(false);
-  state.set_folded_player(-1);
-  state.add_player_contribution(10);
-  state.add_player_contribution(10);
-  for (const Card& card : board_cards) {
-    *state.add_cards() = card;
-  }
-  return state;
 }
 
 BoardState RiverFacingCallState() {
@@ -2642,13 +2498,6 @@ BoardState RiverPlayerBFacingSmallCallState() {
   state.add_player_contribution(6);
   state.add_player_contribution(5);
   return state;
-}
-
-GameTree::Node TerminalShowdownNode(const std::vector<Card>& board_cards) {
-  GameTree::Node node;
-  node.state = TestGameState(ShowdownState(board_cards));
-  node.is_terminal = true;
-  return node;
 }
 
 void CheckTerminalUtilityBeatsDepthLimit() {
@@ -2916,149 +2765,6 @@ void CheckEvaluationUsesChanceSamples() {
       player_b_hand);
   Expect(std::abs(sampled_average - expected_average) < 0.000001,
          "strategy evaluation should average configured chance samples");
-
-  CFRSolver one_sample_best_response(TestSolverConfig(one_sample_config));
-  GameTree::Node one_sample_response_node = chance_node();
-  double first_response = CFRSolverRegretTestPeer::BestResponseNode(
-      one_sample_best_response, one_sample_response_node, player_a_hand,
-      player_b_hand, 0);
-  double second_response = CFRSolverRegretTestPeer::BestResponseNode(
-      one_sample_best_response, one_sample_response_node, player_a_hand,
-      player_b_hand, 0);
-  double third_response = CFRSolverRegretTestPeer::BestResponseNode(
-      one_sample_best_response, one_sample_response_node, player_a_hand,
-      player_b_hand, 0);
-  double expected_response_average =
-      (first_response + second_response + third_response) / 3.0;
-
-  CFRSolver three_sample_best_response(TestSolverConfig(three_sample_config));
-  GameTree::Node three_sample_response_node = chance_node();
-  double sampled_response_average = CFRSolverRegretTestPeer::BestResponseNode(
-      three_sample_best_response, three_sample_response_node, player_a_hand,
-      player_b_hand, 0);
-  Expect(std::abs(sampled_response_average - expected_response_average) <
-             0.000001,
-         "best response should average configured chance samples");
-}
-
-void CheckBestResponseActionSelectsBestLegalAction() {
-  PokerConfig config;
-  config.set_starting_stack_size(10);
-
-  CFRSolver solver(TestSolverConfig(config));
-  GameTree::Node node;
-  node.state.set_player_to_act(0);
-  node.state.set_folded_player(-1);
-  node.player_to_act = 0;
-
-  GameAction player_a_loses = MakeGameAction(ActionType::FOLD);
-  GameAction player_a_wins = MakeGameAction(ActionType::CALL, 1);
-  node.add_action(player_a_loses, GameTree::action_key(player_a_loses));
-  node.add_action(player_a_wins, GameTree::action_key(player_a_wins));
-
-  AddTerminalChild(solver, node, TestActionKey(ActionType::FOLD),
-                   FoldedState(0));
-  AddTerminalChild(solver, node, TestActionKey(ActionType::CALL, 1),
-                   FoldedState(1));
-
-  Hand player_a_hand;
-  Hand player_b_hand;
-  GameAction best_action =
-      solver.get_best_response_action(
-          node, TestComboId(player_a_hand), TestComboId(player_b_hand), 0);
-  Expect(best_action.kind == ActionKind::kCall,
-         "best response should select the highest-value legal action");
-  Expect(best_action.amount == 1,
-         "best response should preserve selected action amount");
-
-  GameAction opponent_turn_action =
-      solver.get_best_response_action(
-          node, TestComboId(player_a_hand), TestComboId(player_b_hand), 1);
-  Expect(opponent_turn_action.kind == ActionKind::kNoAction,
-         "best response should return no action away from its turn");
-}
-
-void CheckRangeBestResponseDoesNotKnowOpponentHand() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-
-  CFRSolver solver(TestSolverConfig(config));
-  GameTree::Node node;
-  node.state.set_player_to_act(0);
-  node.state.set_folded_player(-1);
-  node.player_to_act = 0;
-
-  GameAction first_board = MakeGameAction(ActionType::CHECK);
-  GameAction second_board = MakeGameAction(ActionType::CALL, 1);
-  node.add_action(first_board, GameTree::action_key(first_board));
-  node.add_action(second_board, GameTree::action_key(second_board));
-
-  CFRSolverRegretTestPeer::AddChild(
-      solver, node, TestActionKey(ActionType::CHECK),
-      TerminalShowdownNode(
-          {MakeTestCard(13, Suit::SPADES), MakeTestCard(13, Suit::HEARTS),
-           MakeTestCard(3, Suit::CLUBS), MakeTestCard(4, Suit::DIAMONDS),
-           MakeTestCard(5, Suit::SPADES)}));
-  CFRSolverRegretTestPeer::AddChild(
-      solver, node, TestActionKey(ActionType::CALL, 1),
-      TerminalShowdownNode(
-          {MakeTestCard(2, Suit::SPADES), MakeTestCard(2, Suit::HEARTS),
-           MakeTestCard(3, Suit::CLUBS), MakeTestCard(4, Suit::DIAMONDS),
-           MakeTestCard(5, Suit::SPADES)}));
-
-  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
-  Hand kings = MakeHand(13, Suit::CLUBS, 13, Suit::DIAMONDS);
-  Hand twos = MakeHand(2, Suit::CLUBS, 2, Suit::DIAMONDS);
-  WeightedHandRange opponent_hands;
-  opponent_hands.add(TestComboId(kings), 1.0);
-  opponent_hands.add(TestComboId(twos), 1.0);
-
-  double clairvoyant_average =
-      (CFRSolverRegretTestPeer::BestResponseNode(solver, node, player_a_hand,
-                                                 kings, 0) +
-       CFRSolverRegretTestPeer::BestResponseNode(solver, node, player_a_hand,
-                                                 twos, 0)) /
-      2.0;
-  double range_value = CFRSolverRegretTestPeer::BestResponseRangeNode(
-      solver, node, player_a_hand, opponent_hands, 0);
-
-  Expect(clairvoyant_average > 0.0,
-         "exact-hand best response can overuse hidden opponent cards");
-  Expect(std::abs(range_value) < 0.000001,
-         "range best response should choose one action for the opponent range");
-}
-
-void CheckRangeBestResponseChanceUsesSampledOpponent() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-  config.set_chance_samples(1);
-
-  CFRSolver solver(TestSolverConfig(config));
-  GameTree::Node node;
-  node.is_chance_node = true;
-  node.state.set_pot(20);
-  node.state.set_street(Street::TURN);
-  node.state.set_all_in(true);
-  node.state.set_folded_player(-1);
-  node.state.add_player_contribution(10);
-  node.state.add_player_contribution(10);
-  AddCard(node.state, 2, Suit::CLUBS);
-  AddCard(node.state, 2, Suit::DIAMONDS);
-  AddCard(node.state, 2, Suit::HEARTS);
-  AddCard(node.state, 3, Suit::CLUBS);
-
-  Hand player_a_hand = MakeHand(14, Suit::HEARTS, 14, Suit::SPADES);
-  Hand quads = MakeHand(2, Suit::SPADES, 7, Suit::SPADES);
-  Hand air = MakeHand(13, Suit::CLUBS, 12, Suit::DIAMONDS);
-  WeightedHandRange opponent_hands;
-  opponent_hands.add(TestComboId(quads), 1.0);
-  opponent_hands.add(TestComboId(air), 1.0);
-
-  double value = CFRSolverRegretTestPeer::BestResponseRangeNode(
-      solver, node, player_a_hand, opponent_hands, 0);
-
-  Expect(std::abs(std::abs(value) - 10.0) < 0.000001,
-         "chance range best response should score the sampled opponent only");
 }
 
 void CheckPlayerBRegretsUsePlayerBUtility() {
@@ -3300,9 +3006,6 @@ int main() {
   CheckSparseSlabTracksInfoSets();
   CheckInfoSetActionBlocksAreCacheLineAligned();
   CheckTerminalUtilityCacheReusesScores();
-  CheckSingletonRangeMatchesExactEvaluationAndBestResponse();
-  CheckExploitabilityZeroSamples();
-  CheckRangeBestResponseWrappersReturnFiniteValues();
   CheckParallelEvaluationUsesWorkerLocalUtilityCaches();
   CheckRunUsesConfiguredBlinds();
   CheckRunUpdatesExpectedValue();
@@ -3329,9 +3032,6 @@ int main() {
   CheckChanceDoesNotConsumeDepth();
   CheckChanceSamplesVisitMultipleBoards();
   CheckEvaluationUsesChanceSamples();
-  CheckBestResponseActionSelectsBestLegalAction();
-  CheckRangeBestResponseDoesNotKnowOpponentHand();
-  CheckRangeBestResponseChanceUsesSampledOpponent();
   CheckPlayerBRegretsUsePlayerBUtility();
   CheckAlternatingCfrUpdatesOnlyCurrentPlayer();
   CheckCfrPlusClipsNegativeRegrets();

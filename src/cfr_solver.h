@@ -24,8 +24,6 @@
 namespace poker {
 
 class TerminalUtilityCache;
-class BestResponseEvaluator;
-
 class CFRSolver {
 public:
   struct TraversalStats {
@@ -96,27 +94,6 @@ public:
   double evaluate_strategy(int samples, const HandRange& player_a_range,
                            const HandRange& player_b_range);
   
-  // Calculate sampled exploitability of the current strategy.
-  double calculate_exploitability();
-  double calculate_exploitability(int samples);
-  double calculate_exploitability(int samples, const HandRange& player_a_range,
-                                  const HandRange& player_b_range);
-  double calculate_exploitability(ComboId player_a_hand,
-                                  ComboId player_b_hand);
-  double calculate_player_a_best_response_value(
-      int samples,
-      const HandRange& player_a_range,
-      const HandRange& player_b_range);
-  double calculate_player_b_best_response_value(
-      int samples,
-      const HandRange& player_a_range,
-      const HandRange& player_b_range);
-  // Debug helper for inspecting sampled best-response choices.
-  GameAction get_best_response_action(GameTree::Node& node,
-                                      ComboId player_a_hand,
-                                      ComboId player_b_hand,
-                                      int best_response_player);
-  
   // Get the expected value of the game for a player
   double get_expected_value(int player_id) const;
   int get_iterations_run() const { return iterations_run_; }
@@ -135,7 +112,6 @@ public:
   UtilityCacheStats get_utility_cache_stats() const;
   static bool traversal_stats_enabled();
 private:
-  friend class BestResponseEvaluator;
   friend class CFRSolverRegretTestPeer;
 
   struct RangeDeal {

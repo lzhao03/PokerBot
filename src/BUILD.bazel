@@ -250,11 +250,9 @@ CFR_SOLVER_DEPS = [
 cc_library(
     name = "cfr_solver",
     srcs = [
-        "best_response.cc",
         "cfr_solver.cc",
     ],
     hdrs = [
-        "best_response.h",
         "cfr_solver.h",
     ],
     deps = CFR_SOLVER_DEPS,
@@ -264,11 +262,9 @@ cc_library(
 cc_library(
     name = "cfr_solver_no_stats",
     srcs = [
-        "best_response.cc",
         "cfr_solver.cc",
     ],
     hdrs = [
-        "best_response.h",
         "cfr_solver.h",
     ],
     copts = ["-DPOKER_ENABLE_TRAVERSAL_STATS=0"],
@@ -278,11 +274,9 @@ cc_library(
 cc_library(
     name = "cfr_solver_coarse_buckets_no_stats",
     srcs = [
-        "best_response.cc",
         "cfr_solver.cc",
     ],
     hdrs = [
-        "best_response.h",
         "cfr_solver.h",
     ],
     copts = [

@@ -27,22 +27,18 @@ constexpr bool kProdBenchmarkDefaults = POKER_BENCHMARK_PROD_DEFAULTS != 0;
 constexpr bool kCoarsePublicBuckets = POKER_COARSE_PUBLIC_BUCKETS != 0;
 constexpr int kDefaultIterations = kProdBenchmarkDefaults ? 5000 : 100;
 constexpr int kDefaultEvalSamples = kProdBenchmarkDefaults ? 1 : 100;
-constexpr int kDefaultExploitabilitySamples = 10;
 constexpr int kDefaultMaxDepth = 0;
 constexpr int kDefaultWarmupIterations =
     kProdBenchmarkDefaults && kCoarsePublicBuckets ? 1 : 0;
 constexpr int kDefaultMaxInfoSets = kProdBenchmarkDefaults ? 500000 : 0;
 constexpr int kDefaultMaxPublicStates = kProdBenchmarkDefaults ? 200000 : 0;
-constexpr bool kDefaultSkipExploitability = kProdBenchmarkDefaults;
 constexpr const char* kDefaultRange =
     kProdBenchmarkDefaults ? "all" : "premium";
 
 struct Options {
   int iterations = kDefaultIterations;
   int eval_samples = kDefaultEvalSamples;
-  int exploitability_samples = kDefaultExploitabilitySamples;
   std::string range = kDefaultRange;
-  bool skip_exploitability = kDefaultSkipExploitability;
 };
 
 struct ParsedOptions {
@@ -113,11 +109,7 @@ void PrintUsage(const char* program) {
       << "\n"
       << "  --eval-samples=N                default " << kDefaultEvalSamples
       << "\n"
-      << "  --exploitability-samples=N      default "
-      << kDefaultExploitabilitySamples << "\n"
       << "  --range=premium|all|RANGE       default " << kDefaultRange << "\n"
-      << "  --skip-exploitability           default "
-      << (kDefaultSkipExploitability ? "true" : "false") << "\n"
       << "  --starting-stack=N              solver config override\n"
       << "  --small-blind=N                 solver config override\n"
       << "  --big-blind=N                   solver config override\n"
@@ -405,8 +397,6 @@ ParsedOptions ParseOptions(int argc, char** argv) {
     if (arg == "--help") {
       PrintUsage(argv[0]);
       std::exit(0);
-    } else if (arg == "--skip-exploitability") {
-      parsed.benchmark.skip_exploitability = true;
     } else if (arg == "--regret-only") {
       parsed.config.set_regret_only_training(true);
     } else if (ConsumePrefix(arg, "--config=", &value)) {
@@ -419,9 +409,6 @@ ParsedOptions ParseOptions(int argc, char** argv) {
       parsed.config.set_chance_samples(ParseInt(value, "--chance-samples"));
     } else if (ConsumePrefix(arg, "--eval-samples=", &value)) {
       parsed.benchmark.eval_samples = ParseInt(value, "--eval-samples");
-    } else if (ConsumePrefix(arg, "--exploitability-samples=", &value)) {
-      parsed.benchmark.exploitability_samples =
-          ParseInt(value, "--exploitability-samples");
     } else if (ConsumePrefix(arg, "--range=", &value)) {
       parsed.benchmark.range = value;
     } else if (ConsumePrefix(arg, "--starting-stack=", &value)) {
@@ -564,54 +551,6 @@ int main(int argc, char** argv) {
           CacheDelta(evaluate_solver.get_utility_cache_stats(), before)),
           config, evaluate_solver);
     });
-
-    if (!options.skip_exploitability) {
-      poker::CFRSolver exploitability_solver(config);
-      exploitability_solver.run(options.iterations, player_a_range,
-                                player_b_range);
-      RunBenchmark("best_response_player_a", [&] {
-        poker::CFRSolver::UtilityCacheStats before =
-            exploitability_solver.get_utility_cache_stats();
-        poker::CFRSolver::TraversalStats traversal_before =
-            exploitability_solver.get_traversal_stats();
-        double value = exploitability_solver.calculate_player_a_best_response_value(
-            options.exploitability_samples, player_a_range, player_b_range);
-        return WithSolverState(MakeBenchmarkResult(
-            value, options.exploitability_samples, 0,
-            TraversalDelta(exploitability_solver.get_traversal_stats(),
-                           traversal_before),
-            CacheDelta(exploitability_solver.get_utility_cache_stats(), before)),
-            config, exploitability_solver);
-      });
-      RunBenchmark("best_response_player_b", [&] {
-        poker::CFRSolver::UtilityCacheStats before =
-            exploitability_solver.get_utility_cache_stats();
-        poker::CFRSolver::TraversalStats traversal_before =
-            exploitability_solver.get_traversal_stats();
-        double value = exploitability_solver.calculate_player_b_best_response_value(
-            options.exploitability_samples, player_a_range, player_b_range);
-        return WithSolverState(MakeBenchmarkResult(
-            value, options.exploitability_samples, 0,
-            TraversalDelta(exploitability_solver.get_traversal_stats(),
-                           traversal_before),
-            CacheDelta(exploitability_solver.get_utility_cache_stats(), before)),
-            config, exploitability_solver);
-      });
-      RunBenchmark("exploitability_total", [&] {
-        poker::CFRSolver::UtilityCacheStats before =
-            exploitability_solver.get_utility_cache_stats();
-        poker::CFRSolver::TraversalStats traversal_before =
-            exploitability_solver.get_traversal_stats();
-        double value = exploitability_solver.calculate_exploitability(
-            options.exploitability_samples, player_a_range, player_b_range);
-        return WithSolverState(MakeBenchmarkResult(
-            value, options.exploitability_samples * 3, 0,
-            TraversalDelta(exploitability_solver.get_traversal_stats(),
-                           traversal_before),
-            CacheDelta(exploitability_solver.get_utility_cache_stats(), before)),
-            config, exploitability_solver);
-      });
-    }
   } catch (const std::exception& error) {
     std::cerr << "Error: " << error.what() << "\n";
     PrintUsage(argv[0]);

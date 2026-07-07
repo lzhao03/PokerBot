@@ -77,7 +77,6 @@ void PrintUsage(const char* program) {
       << "Usage: " << program << " [options]\n"
       << "  --config=PATH                  binary PokerConfig protobuf\n"
       << "  --iterations=N                 CFR iterations, default 100\n"
-      << "  --exploitability-samples=N      estimate exploitability after training\n"
       << "  --starting-stack=N\n"
       << "  --small-blind=N\n"
       << "  --big-blind=N\n"
@@ -106,7 +105,6 @@ int main(int argc, char** argv) {
 
   poker::PokerConfig config = poker::DefaultPokerConfig();
   int iterations = 100;
-  int exploitability_samples = 0;
   bool saw_global_bet_size = false;
   bool saw_max_info_sets = false;
   bool saw_max_public_states = false;
@@ -126,9 +124,6 @@ int main(int argc, char** argv) {
         poker::LoadPokerConfig(value, &config);
       } else if (ConsumePrefix(arg, "--iterations=", &value)) {
         iterations = ParseInt(value, "--iterations");
-      } else if (ConsumePrefix(arg, "--exploitability-samples=", &value)) {
-        exploitability_samples =
-            ParseInt(value, "--exploitability-samples");
       } else if (ConsumePrefix(arg, "--starting-stack=", &value)) {
         config.set_starting_stack_size(ParseInt(value, "--starting-stack"));
       } else if (ConsumePrefix(arg, "--small-blind=", &value)) {
@@ -223,13 +218,6 @@ int main(int argc, char** argv) {
     if (elapsed.count() > 0) {
       std::cout << "action_entry_touches_per_second="
                 << static_cast<double>(touches) / elapsed.count() << "\n";
-    }
-
-    if (exploitability_samples > 0) {
-      std::cout << "exploitability="
-                << solver.calculate_exploitability(
-                       exploitability_samples, player_a_range, player_b_range)
-                << "\n";
     }
   } catch (const std::exception& error) {
     std::cerr << "Error: " << error.what() << "\n";
