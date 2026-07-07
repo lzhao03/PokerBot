@@ -100,12 +100,6 @@ inline float AtomicFloatLoad(const float* src) {
 
 constexpr bool kTraversalStatsEnabled = POKER_ENABLE_TRAVERSAL_STATS != 0;
 
-#ifndef POKER_COARSE_PUBLIC_BUCKETS
-#define POKER_COARSE_PUBLIC_BUCKETS 0
-#endif
-
-constexpr bool kCoarsePublicBuckets = POKER_COARSE_PUBLIC_BUCKETS != 0;
-
 size_t ScratchDepthReserve(const SolverConfig& config, int max_depth) {
   if (max_depth > 0) {
     return static_cast<size_t>(max_depth) + 2;

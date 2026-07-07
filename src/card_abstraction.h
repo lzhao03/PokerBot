@@ -2,11 +2,18 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 #include "src/combo.h"
 #include "src/poker_types.h"
 
+#ifndef POKER_COARSE_PUBLIC_BUCKETS
+#define POKER_COARSE_PUBLIC_BUCKETS 0
+#endif
+
 namespace poker {
+
+inline constexpr bool kCoarsePublicBuckets = POKER_COARSE_PUBLIC_BUCKETS != 0;
 
 using PublicBucketId = uint64_t;
 using PrivateBucketId = uint16_t;
@@ -105,11 +112,10 @@ struct BoardTexturePublicCardBuckets {
   }
 };
 
-#if POKER_COARSE_PUBLIC_BUCKETS
-using DefaultPublicCardBuckets = BoardTexturePublicCardBuckets;
-#else
-using DefaultPublicCardBuckets = ExactPublicCardBuckets;
-#endif
+using DefaultPublicCardBuckets =
+    std::conditional_t<kCoarsePublicBuckets,
+                       BoardTexturePublicCardBuckets,
+                       ExactPublicCardBuckets>;
 
 struct ExactPrivateBuckets {
   PrivateBucketId bucket(ComboId combo_id, const CompactPublicState&) const {
@@ -121,7 +127,6 @@ struct ExactPrivateBuckets {
   }
 };
 
-#if POKER_COARSE_PUBLIC_BUCKETS
 struct CoarsePrivateBuckets {
   static constexpr uint32_t kPreflopBucketCount = 36;
   static constexpr uint32_t kPostflopBucketsPerStreet = 36;
@@ -263,15 +268,15 @@ struct CoarsePrivateBuckets {
     return wheel_count > best ? wheel_count : best;
   }
 };
-#endif
+
+using DefaultPrivateBuckets =
+    std::conditional_t<kCoarsePublicBuckets,
+                       CoarsePrivateBuckets,
+                       ExactPrivateBuckets>;
 
 struct CardAbstraction {
   DefaultPublicCardBuckets public_buckets;
-#if POKER_COARSE_PUBLIC_BUCKETS
-  CoarsePrivateBuckets private_buckets;
-#else
-  ExactPrivateBuckets private_buckets;
-#endif
+  DefaultPrivateBuckets private_buckets;
 
   PublicBucketId public_bucket(const CompactPublicState& state) const {
     return public_buckets.bucket(state);

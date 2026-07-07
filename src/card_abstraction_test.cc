@@ -113,7 +113,6 @@ void CheckExactPrivateBucketsUseComboId() {
          "exact private bucket count should equal exact combo count");
 }
 
-#if POKER_COARSE_PUBLIC_BUCKETS
 void CheckCoarsePrivateBucketsMergeCombos() {
   CoarsePrivateBuckets buckets;
   const CompactPublicState state = PreflopState();
@@ -135,7 +134,6 @@ void CheckCoarsePrivateBucketsMergeCombos() {
   Expect(buckets.bucket_count(state) < kComboCount,
          "coarse private bucket count should be smaller than exact combos");
 }
-#endif
 
 }  // namespace
 }  // namespace poker
@@ -144,8 +142,6 @@ int main() {
   poker::CheckExactPublicBucketsUseBoardMask();
   poker::CheckTextureBucketsUseBoardTexture();
   poker::CheckExactPrivateBucketsUseComboId();
-#if POKER_COARSE_PUBLIC_BUCKETS
   poker::CheckCoarsePrivateBucketsMergeCombos();
-#endif
   return 0;
 }
