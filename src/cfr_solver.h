@@ -271,6 +271,8 @@ private:
   CardAbstraction card_abstraction_;
   // Set to true after warmup; workers may only write cumulative arrays.
   bool frozen_ = false;
+  // True only when prebuild validation proved frozen child rows are complete.
+  bool require_frozen_children_ = false;
   std::shared_ptr<FrozenStrategyTables> mutable_tables_;
   std::shared_ptr<const FrozenStrategyTables> frozen_tables_;
   std::shared_ptr<MutableCumulativeArrays> cumulative_;
@@ -369,7 +371,13 @@ private:
   std::optional<uint32_t> action_child_public_state(
       uint32_t public_state_id,
       int action_index) const;
+  uint32_t required_action_child_public_state(uint32_t public_state_id,
+                                              int action_index) const;
   std::optional<uint32_t> chance_child_public_state(
+      uint32_t public_state_id,
+      const CompactPublicState& child_state,
+      absl::Span<const CardId> cards) const;
+  uint32_t required_chance_child_public_state(
       uint32_t public_state_id,
       const CompactPublicState& child_state,
       absl::Span<const CardId> cards) const;

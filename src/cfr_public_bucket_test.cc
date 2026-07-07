@@ -22,6 +22,16 @@ void Expect(bool condition, const char* message) {
   }
 }
 
+template <typename Fn>
+void ExpectThrows(Fn fn, const char* message) {
+  try {
+    fn();
+  } catch (const std::exception&) {
+    return;
+  }
+  Expect(false, message);
+}
+
 class CFRSolverRegretTestPeer {
  public:
   static CFRSolver::PublicBucketId PublicBucket(
@@ -110,6 +120,13 @@ class CFRSolverRegretTestPeer {
                                                           action_index);
   }
 
+  static uint32_t RequiredActionChild(const CFRSolver& solver,
+                                      uint32_t public_state_id,
+                                      int action_index) {
+    return solver.required_action_child_public_state(public_state_id,
+                                                     action_index);
+  }
+
   static void ClearCompactActionChild(CFRSolver& solver,
                                       uint32_t public_state_id,
                                       int action_index) {
@@ -185,6 +202,7 @@ class CFRSolverRegretTestPeer {
     solver.frozen_tables_ = solver.mutable_tables_;
     solver.mutable_tables_.reset();
     solver.frozen_ = true;
+    solver.require_frozen_children_ = true;
   }
 
   static std::optional<uint32_t> FrozenChanceChildOptional(
@@ -195,6 +213,16 @@ class CFRSolverRegretTestPeer {
     const CompactPublicState parent =
         solver.compact_public_state_from_game_state(state);
     return solver.chance_child_public_state(
+        public_state_id, solver.game_tree_->apply_chance(parent, cards), cards);
+  }
+
+  static uint32_t RequiredChanceChild(CFRSolver& solver,
+                                      uint32_t public_state_id,
+                                      const GameState& state,
+                                      absl::Span<const CardId> cards) {
+    const CompactPublicState parent =
+        solver.compact_public_state_from_game_state(state);
+    return solver.required_chance_child_public_state(
         public_state_id, solver.game_tree_->apply_chance(parent, cards), cards);
   }
 
@@ -580,12 +608,58 @@ void CheckFrozenChanceLookupCoversTextureBuckets() {
              .has_value(),
          "frozen lookup should contain monotone flop texture");
 
+  const size_t public_states_before_eval = solver.get_public_state_count();
   const double chance_value = CFRSolverRegretTestPeer::EvaluatePublicState(
       solver, public_id, state,
       ExactCombo(14, SuitKind::kHearts, 14, SuitKind::kSpades),
       ExactCombo(13, SuitKind::kClubs, 13, SuitKind::kDiamonds));
   Expect(std::isfinite(chance_value),
          "frozen chance evaluation should use row-local chance children");
+  Expect(solver.get_public_state_count() == public_states_before_eval,
+         "frozen chance evaluation should not allocate public states");
+}
+
+void CheckRequiredFrozenActionChildCatchesMissingChild() {
+  SolverConfig config;
+  config.max_depth = 1;
+  CFRSolver solver(config);
+  GameState root = BettingState(3, 19, 18, 1, 2);
+  const uint32_t public_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, root);
+  Expect(CFRSolverRegretTestPeer::PrebuildPublicStates(solver, public_id, 1),
+         "shallow action prebuild should complete");
+  CFRSolverRegretTestPeer::ClearCompactActionChild(solver, public_id, 0);
+  CFRSolverRegretTestPeer::FreezeTables(solver);
+
+  ExpectThrows(
+      [&] {
+        CFRSolverRegretTestPeer::RequiredActionChild(solver, public_id, 0);
+      },
+      "required frozen action child should throw after child is cleared");
+}
+
+void CheckRequiredFrozenChanceChildCatchesMissingChild() {
+  SolverConfig config;
+  CFRSolver solver(config);
+  const GameState state = ChanceState();
+  const uint32_t public_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, state);
+  Expect(CFRSolverRegretTestPeer::PrebuildPublicStates(solver, public_id, 0),
+         "texture prebuild should complete from a chance node");
+  CFRSolverRegretTestPeer::ClearCompactChanceChildEntries(solver, public_id);
+  CFRSolverRegretTestPeer::FreezeTables(solver);
+
+  const std::array<CardId, 3> flop = {
+      MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(7, SuitKind::kDiamonds),
+      MakeCardId(11, SuitKind::kClubs),
+  };
+  ExpectThrows(
+      [&] {
+        CFRSolverRegretTestPeer::RequiredChanceChild(solver, public_id, state,
+                                                     flop);
+      },
+      "required frozen chance child should throw after entries are cleared");
 }
 
 void CheckChanceTransitionValidationCatchesMissingRowEntry() {
@@ -699,6 +773,9 @@ void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
          "complete shallow prebuild should enter the frozen parallel phase");
   Expect(stats.parallel_cfr_updates > 0,
          "frozen parallel phase should do CFR work");
+  Expect(static_cast<int64_t>(solver.get_public_state_count()) ==
+             stats.prebuild_public_states,
+         "frozen parallel phase should not allocate public states");
 }
 
 }  // namespace poker
@@ -711,6 +788,8 @@ int main() {
   poker::CheckCoarseActionChildUsesBettingHistoryTransition();
   poker::CheckCoarseChanceChildUsesBettingHistoryTransition();
   poker::CheckFrozenChanceLookupCoversTextureBuckets();
+  poker::CheckRequiredFrozenActionChildCatchesMissingChild();
+  poker::CheckRequiredFrozenChanceChildCatchesMissingChild();
   poker::CheckChanceTransitionValidationCatchesMissingRowEntry();
   poker::CheckBettingHistoryChanceTransitionValidationCatchesMissingChild();
   poker::CheckTexturePublicBucketsEnterFrozenParallelPhase();
