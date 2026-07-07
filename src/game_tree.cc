@@ -400,6 +400,35 @@ State ApplyActionForState(const State& state, const GameAction& action) {
   return new_state;
 }
 
+template <typename State>
+double UtilityForState(const State& state,
+                       ComboId player_a_hand,
+                       ComboId player_b_hand,
+                       const HandEvaluator& hand_evaluator) {
+  const double player_a_contribution = ContributionForState(state, 0);
+
+  if (state.folded_player >= 0) {
+    if (state.folded_player == 0) {
+      return -player_a_contribution;
+    }
+    return state.pot - player_a_contribution;
+  }
+
+  if (BoardCardCount(state) + 2 < 5) {
+    return 0.0;
+  }
+
+  const int comparison =
+      hand_evaluator.compare_hands(player_a_hand, player_b_hand, state);
+  if (comparison > 0) {
+    return state.pot - player_a_contribution;
+  }
+  if (comparison < 0) {
+    return -player_a_contribution;
+  }
+  return (state.pot / 2.0) - player_a_contribution;
+}
+
 }  // namespace
 
 GameTree::GameTree(const SolverConfig& config) : config_(config) {}
@@ -464,55 +493,15 @@ CompactPublicState GameTree::apply_chance(
 double GameTree::get_utility(const GameState& state,
                              ComboId player_a_hand,
                              ComboId player_b_hand) const {
-  const double player_a_contribution = ContributionForState(state, 0);
-
-  if (state.folded_player >= 0) {
-    if (state.folded_player == 0) {
-      return -player_a_contribution;
-    }
-    return state.pot - player_a_contribution;
-  }
-
-  if (BoardCardCount(state) + 2 < 5) {
-    return 0.0;
-  }
-
-  const int comparison =
-      hand_evaluator_.compare_hands(player_a_hand, player_b_hand, state);
-  if (comparison > 0) {
-    return state.pot - player_a_contribution;
-  }
-  if (comparison < 0) {
-    return -player_a_contribution;
-  }
-  return (state.pot / 2.0) - player_a_contribution;
+  return UtilityForState(state, player_a_hand, player_b_hand,
+                         hand_evaluator_);
 }
 
 double GameTree::get_utility(const CompactPublicState& state,
                              ComboId player_a_hand,
                              ComboId player_b_hand) const {
-  const double player_a_contribution = ContributionForState(state, 0);
-
-  if (state.folded_player >= 0) {
-    if (state.folded_player == 0) {
-      return -player_a_contribution;
-    }
-    return state.pot - player_a_contribution;
-  }
-
-  if (BoardCardCount(state) + 2 < 5) {
-    return 0.0;
-  }
-
-  const int comparison =
-      hand_evaluator_.compare_hands(player_a_hand, player_b_hand, state);
-  if (comparison > 0) {
-    return state.pot - player_a_contribution;
-  }
-  if (comparison < 0) {
-    return -player_a_contribution;
-  }
-  return (state.pot / 2.0) - player_a_contribution;
+  return UtilityForState(state, player_a_hand, player_b_hand,
+                         hand_evaluator_);
 }
 
 bool GameTree::is_terminal(const GameState& state) const {
