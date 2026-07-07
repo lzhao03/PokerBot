@@ -1849,46 +1849,6 @@ void CFRSolver::add_traversal_stats(const TraversalStats& stats) {
       stats.betting_history_transition_misses;
 }
 
-void CFRSolver::run(int iterations, ComboId player_a_hand,
-                    ComboId player_b_hand) {
-  last_training_run_stats_ = {};
-  if (iterations <= 0) {
-    return;
-  }
-
-  const std::optional<uint32_t> root_public_state_id =
-      get_or_create_public_state_row(initial_state_);
-  if (!root_public_state_id.has_value()) {
-    return;
-  }
-  const int max_depth = config_.max_depth;
-  TraversalScratch scratch;
-  scratch.reserve_depth(ScratchDepthReserve(config_, max_depth));
-  const PrivateCards player_a_cards = PrivateCards::FromCombo(player_a_hand);
-  const PrivateCards player_b_cards = PrivateCards::FromCombo(player_b_hand);
-  const CompactPublicState root_state =
-      frozen_tables_->public_state_rows[*root_public_state_id].state;
-  const int64_t start_updates = cfr_update_count_;
-  const auto start = std::chrono::steady_clock::now();
-  for (int i = 0; i < iterations; ++i) {
-    std::array<double, 2> reach_probabilities = {1.0, 1.0};
-    const int update_player = iterations_run_ % kPlayerCount;
-    cumulative_root_utility_ += cfr_with_ranges(
-        *root_public_state_id, root_state,
-        player_a_cards, player_b_cards,
-        reach_probabilities, update_player, iterations_run_, 0, max_depth,
-        scratch,
-        std::nullopt, std::nullopt);
-    ++iterations_run_;
-  }
-  const auto end = std::chrono::steady_clock::now();
-  last_training_run_stats_.warmup_iterations = iterations;
-  last_training_run_stats_.warmup_seconds =
-      std::chrono::duration<double>(end - start).count();
-  last_training_run_stats_.warmup_cfr_updates =
-      cfr_update_count_ - start_updates;
-}
-
 void CFRSolver::run(int iterations, const HandRange& player_a_range,
                     const HandRange& player_b_range) {
   run_iterations(iterations, player_a_range, player_b_range);

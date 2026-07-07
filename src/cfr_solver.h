@@ -82,7 +82,6 @@ class CFRSolver {
   CFRSolver(const SolverConfig& config);
   CFRSolver(const SolverConfig& config, const GameState& initial_state);
 
-  void run(int iterations, ComboId player_a_hand, ComboId player_b_hand);
   void run(int iterations, const HandRange& player_a_range,
            const HandRange& player_b_range);
 

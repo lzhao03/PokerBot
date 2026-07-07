@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <vector>
 
 #include "src/combo.h"
 #include "src/poker_types.h"
@@ -59,12 +58,6 @@ struct HandEvaluation {
     return true;
   }
 
-  // Helper methods for evaluating hand types
-  static bool is_flush(const std::vector<CardId>& cards);
-  static bool is_straight(const std::vector<int>& ranks);
-  static bool is_straight_flush(const std::vector<CardId>& cards);
-  static bool is_royal_flush(const std::vector<CardId>& cards);
-  static std::vector<int> get_rank_counts(const std::vector<int>& ranks);
 };
 
 class HandEvaluator {
@@ -89,17 +82,6 @@ public:
                     const std::array<CardId, kMaxBoardCards>& board_cards,
                     uint8_t board_count) const;
   
-  // Find the winner between two hole cards given a board state
-  // Returns 1 if hand1 wins, -1 if hand2 wins, 0 if tie
-  int find_winner(ComboId hand1, ComboId hand2,
-                  const GameState& board_state) const;
-  int find_winner(ComboId hand1, ComboId hand2,
-                  const CompactPublicState& board_state) const;
-  
-  // Calculate equity (winning probability) for a hand against a range of hands
-  double calculate_equity(ComboId hand, const std::vector<ComboId>& opponent_range,
-                          const GameState& board_state) const;
-
 private:
   // Find the best 5-card hand from a set of cards
   HandEvaluation find_best_hand(const CardId* cards, size_t card_count) const;

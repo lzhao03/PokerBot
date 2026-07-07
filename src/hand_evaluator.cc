@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
-#include <set>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -503,74 +502,6 @@ EvaluationScore FindBestHandScore(const CardId* cards, size_t card_count) {
 
 }  // namespace
 
-// Move implementations from HandEvaluator to HandEvaluation as static methods
-bool HandEvaluation::is_flush(const std::vector<CardId>& cards) {
-  if (cards.empty()) return false;
-  
-  SuitKind first_suit = SuitFromCardId(cards[0]);
-  for (CardId card : cards) {
-    if (SuitFromCardId(card) != first_suit) {
-      return false;
-    }
-  }
-  
-  return true;
-}
-
-bool HandEvaluation::is_straight(const std::vector<int>& ranks) {
-  if (ranks.size() < 5) return false;
-  
-  // Special case: A-5-4-3-2 straight
-  if (ranks[0] == 14 && ranks[1] == 5 && ranks[2] == 4 && 
-      ranks[3] == 3 && ranks[4] == 2) {
-    return true;
-  }
-  
-  // Regular straight check
-  for (size_t i = 1; i < ranks.size(); ++i) {
-    if (ranks[i-1] != ranks[i] + 1) {
-      return false;
-    }
-  }
-  
-  return true;
-}
-
-bool HandEvaluation::is_straight_flush(const std::vector<CardId>& cards) {
-  if (!is_flush(cards)) return false;
-  
-  std::vector<int> ranks;
-  for (CardId card : cards) {
-    ranks.push_back(RankFromCardId(card));
-  }
-  std::sort(ranks.begin(), ranks.end(), std::greater<int>());
-  
-  return is_straight(ranks);
-}
-
-bool HandEvaluation::is_royal_flush(const std::vector<CardId>& cards) {
-  if (!is_flush(cards)) return false;
-  
-  std::set<int> royalRanks = {14, 13, 12, 11, 10}; // A, K, Q, J, 10
-  std::set<int> handRanks;
-  
-  for (CardId card : cards) {
-    handRanks.insert(RankFromCardId(card));
-  }
-  
-  return handRanks == royalRanks;
-}
-
-std::vector<int> HandEvaluation::get_rank_counts(const std::vector<int>& ranks) {
-  std::vector<int> counts(14, 0); // Ranks 1-14 (A=14)
-  
-  for (int rank : ranks) {
-    counts[rank-1]++;
-  }
-  
-  return counts;
-}
-
 HandEvaluation HandEvaluator::evaluate(
     const std::array<CardId, 5>& cards) const {
   return ToHandEvaluation(EvaluateFiveCardScore(cards));
@@ -629,40 +560,6 @@ int HandEvaluator::compare_hands(
       FillAllCards(hand2, board_cards, board_count, second_cards);
   return CompareCactusHands(first_cards.data(), first_count,
                             second_cards.data(), second_count);
-}
-
-int HandEvaluator::find_winner(
-    ComboId hand1,
-    ComboId hand2,
-    const GameState& board_state) const {
-  return compare_hands(hand1, hand2, board_state);
-}
-
-int HandEvaluator::find_winner(
-    ComboId hand1,
-    ComboId hand2,
-    const CompactPublicState& board_state) const {
-  return compare_hands(hand1, hand2, board_state);
-}
-
-double HandEvaluator::calculate_equity(
-    ComboId hand,
-    const std::vector<ComboId>& opponent_range,
-    const GameState& board_state) const {
-  int wins = 0;
-  int total = opponent_range.size();
-  
-  for (const auto& opponent_hand : opponent_range) {
-    int result = find_winner(hand, opponent_hand, board_state);
-    if (result > 0) {
-      wins++;
-    } else if (result == 0) {
-      // Tie, add half a win
-      wins += 0.5;
-    }
-  }
-  
-  return static_cast<double>(wins) / total;
 }
 
 HandEvaluation HandEvaluator::find_best_hand(const CardId* cards,

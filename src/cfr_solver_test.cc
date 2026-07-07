@@ -114,8 +114,11 @@ void CheckFixedTerminalHandUtility() {
   terminal.player_contribution_count = 2;
 
   CFRSolver solver(config, terminal);
-  solver.run(1, Combo(14, SuitKind::kHearts, 14, SuitKind::kSpades),
-             Combo(13, SuitKind::kHearts, 13, SuitKind::kSpades));
+  HandRange player_a = ExactRange(Combo(14, SuitKind::kHearts,
+                                        14, SuitKind::kSpades));
+  HandRange player_b = ExactRange(Combo(13, SuitKind::kHearts,
+                                        13, SuitKind::kSpades));
+  solver.run(1, player_a, player_b);
   Expect(solver.get_iterations_run() == 1,
          "fixed terminal run should still count the iteration");
   Expect(solver.get_expected_value(0) == 5.0,
