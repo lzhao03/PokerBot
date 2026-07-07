@@ -86,25 +86,6 @@ public:
 
   using PrivateBucketId = FrozenStrategyTables::PrivateBucketId;
 
-  struct StrategyInfoSetKey {
-    uint32_t public_state_id = 0;
-    PrivateBucketId private_bucket = 0;
-    int player = 0;
-  };
-
-  struct StrategyInfoSet {
-    StrategyInfoSetKey key;
-    std::vector<int> action_ids;
-    std::vector<double> probabilities;
-  };
-
-  struct StrategyProfile {
-    std::vector<StrategyInfoSet> info_sets;
-
-    bool empty() const { return info_sets.empty(); }
-    size_t size() const { return info_sets.size(); }
-  };
-
   CFRSolver(const SolverConfig& config);
   CFRSolver(const SolverConfig& config, const GameState& initial_state);
   
@@ -113,9 +94,6 @@ public:
   void run(int iterations, const HandRange& player_a_range,
            const HandRange& player_b_range);
   
-  // Get the computed strategy. Regret-only training exports the current
-  // regret-matched policy because average-strategy sums are not accumulated.
-  StrategyProfile get_strategy_profile() const;
   double evaluate_strategy(ComboId player_a_hand, ComboId player_b_hand);
   double evaluate_strategy(int samples, const HandRange& player_a_range,
                            const HandRange& player_b_range);
