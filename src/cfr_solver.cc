@@ -2491,15 +2491,12 @@ void CFRSolver::condition_ranges_for_actions(
     return;
   }
 
-  const double fallback_probability = 1.0 / action_count;
   const CardMask board_mask = state.board_mask;
   const PublicInfoSetSlab* public_slab =
       public_info_set_slab(public_state_id);
   const PublicInfoSetSlabPlayer* player_slab =
       public_slab != nullptr ? &public_slab->players[player] : nullptr;
-  const auto& action_ids = frozen_tables_->action_ids;
-  const auto& regrets = cumulative_->cumulative_regrets;
-  double regret_weights[GameTree::kMaxActionsPerNode] = {};
+  double action_probabilities[GameTree::kMaxActionsPerNode] = {};
   for (size_t i = 0; i < range_size; ++i) {
     const float range_weight = range.weight(i);
     const ComboId combo_id = range.combo(i);
@@ -2507,7 +2504,6 @@ void CFRSolver::condition_ranges_for_actions(
       continue;
     }
 
-    double positive_regret_sum = 0.0;
     const PrivateBucketId private_bucket =
         card_abstraction_.private_bucket(combo_id, state);
     const InfoSetRow* row = nullptr;
@@ -2515,43 +2511,66 @@ void CFRSolver::condition_ranges_for_actions(
       row = find_info_set_row(*player_slab, private_bucket);
     }
 
-    if (row != nullptr) {
-      const size_t table_offset = row->action_offset;
-      std::fill(regret_weights, regret_weights + action_count, 0.0);
-      const size_t info_set_action_count =
-          std::min(action_count,
-                   static_cast<size_t>(row->action_count));
-      for (size_t action_index = 0; action_index < info_set_action_count;
-           ++action_index) {
-        const size_t table_index = table_offset + action_index;
-        if (action_ids[table_index] !=
-            conditioned_action_ids[action_index]) {
-          continue;
-        }
-
-        record_action_entry_touches();
-        const double positive_regret =
-            std::max(
-                0.0,
-                static_cast<double>(
-                    AtomicFloatLoad(&regrets[table_index])));
-        regret_weights[action_index] = positive_regret;
-        positive_regret_sum += positive_regret;
-      }
-    }
+    fill_regret_matched_strategy_for_row(row, conditioned_action_ids,
+                                         action_probabilities);
 
     for (size_t action_index = 0; action_index < action_count;
          ++action_index) {
-      const double probability =
-          positive_regret_sum > 0.0
-              ? regret_weights[action_index] / positive_regret_sum
-              : fallback_probability;
-      const double conditioned_weight = range_weight * probability;
+      const double conditioned_weight =
+          range_weight * action_probabilities[action_index];
       if (conditioned_weight > 0.0) {
         conditioned_ranges[action_index].add(
             combo_id, static_cast<float>(conditioned_weight));
       }
     }
+  }
+}
+
+void CFRSolver::fill_regret_matched_strategy_for_row(
+    const InfoSetRow* row,
+    absl::Span<const int> conditioned_action_ids,
+    double* action_probabilities) {
+  const size_t action_count = conditioned_action_ids.size();
+  if (action_count == 0) {
+    return;
+  }
+  const double fallback_probability = 1.0 / action_count;
+  if (row == nullptr) {
+    std::fill(action_probabilities, action_probabilities + action_count,
+              fallback_probability);
+    return;
+  }
+
+  const auto& action_ids = frozen_tables_->action_ids;
+  const auto& regrets = cumulative_->cumulative_regrets;
+  double positive_regret_sum = 0.0;
+  std::fill(action_probabilities, action_probabilities + action_count, 0.0);
+  const size_t info_set_action_count =
+      std::min(action_count, static_cast<size_t>(row->action_count));
+  for (size_t action_index = 0; action_index < info_set_action_count;
+       ++action_index) {
+    const size_t table_index = row->action_offset + action_index;
+    if (action_ids[table_index] != conditioned_action_ids[action_index]) {
+      continue;
+    }
+
+    record_action_entry_touches();
+    const double positive_regret =
+        std::max(
+            0.0,
+            static_cast<double>(AtomicFloatLoad(&regrets[table_index])));
+    action_probabilities[action_index] = positive_regret;
+    positive_regret_sum += positive_regret;
+  }
+
+  if (positive_regret_sum <= 0.0) {
+    std::fill(action_probabilities, action_probabilities + action_count,
+              fallback_probability);
+    return;
+  }
+
+  for (size_t action_index = 0; action_index < action_count; ++action_index) {
+    action_probabilities[action_index] /= positive_regret_sum;
   }
 }
 
