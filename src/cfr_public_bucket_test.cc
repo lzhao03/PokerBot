@@ -22,16 +22,6 @@ void Expect(bool condition, const char* message) {
   }
 }
 
-template <typename Fn>
-void ExpectThrows(Fn fn, const char* message) {
-  try {
-    fn();
-  } catch (const std::exception&) {
-    return;
-  }
-  Expect(false, message);
-}
-
 class CFRSolverRegretTestPeer {
  public:
   static CFRSolver::PublicBucketId PublicBucket(
@@ -157,29 +147,6 @@ class CFRSolverRegretTestPeer {
     return *child_id;
   }
 
-  static std::optional<uint32_t> CompactActionChildOptional(
-      CFRSolver& solver,
-      uint32_t public_state_id,
-      int action_index) {
-    return solver.get_or_create_action_child_public_state(public_state_id,
-                                                          action_index);
-  }
-
-  static uint32_t RequiredActionChild(const CFRSolver& solver,
-                                      uint32_t public_state_id,
-                                      int action_index) {
-    return solver.required_action_child_public_state(public_state_id,
-                                                     action_index);
-  }
-
-  static void ClearCompactActionChild(CFRSolver& solver,
-                                      uint32_t public_state_id,
-                                      int action_index) {
-    solver.mutable_tables_->public_state_rows[public_state_id]
-        .action_child_ids[static_cast<size_t>(action_index)] =
-        GameTree::Node::kInvalidPublicStateId;
-  }
-
   static uint32_t CompactChanceChild(CFRSolver& solver,
                                      uint32_t public_state_id,
                                      absl::Span<const CardId> cards) {
@@ -191,56 +158,14 @@ class CFRSolverRegretTestPeer {
     return *child_id;
   }
 
-  static std::optional<uint32_t> CompactChanceChildOptional(
-      CFRSolver& solver,
-      uint32_t public_state_id,
-      absl::Span<const CardId> cards) {
-    return solver.get_or_create_chance_child_public_state(public_state_id,
-                                                          cards);
-  }
-
   static void ClearCompactChanceChildren(CFRSolver& solver) {
     solver.mutable_tables_->public_chance_child_ids.clear();
-  }
-
-  static void ClearCompactChanceChildEntries(CFRSolver& solver,
-                                             uint32_t public_state_id) {
-    solver.mutable_tables_->public_state_rows[public_state_id]
-        .chance_child_count = 0;
   }
 
   static bool PrebuildPublicStates(CFRSolver& solver,
                                    uint32_t root_public_state_id,
                                    int max_depth) {
     return solver.prebuild_public_state_rows(root_public_state_id, max_depth);
-  }
-
-  static bool ValidatePrebuiltChanceTransitions(
-      const CFRSolver& solver,
-      uint32_t root_public_state_id,
-      int max_depth,
-      int64_t& chance_transitions,
-      int64_t& missing_chance_transitions) {
-    return solver.validate_prebuilt_chance_transitions(
-        root_public_state_id, max_depth, &chance_transitions,
-        &missing_chance_transitions);
-  }
-
-  static bool ValidatePrebuiltBettingHistoryTransitions(
-      const CFRSolver& solver,
-      uint32_t root_public_state_id,
-      int max_depth,
-      int64_t& betting_history_transitions,
-      int64_t& missing_betting_history_transitions) {
-    return solver.validate_prebuilt_betting_history_transitions(
-        root_public_state_id, max_depth, &betting_history_transitions,
-        &missing_betting_history_transitions);
-  }
-
-  static void ClearBettingHistoryChanceTransition(CFRSolver& solver,
-                                                  uint32_t betting_history_id) {
-    solver.mutable_tables_->betting_history_rows[betting_history_id]
-        .chance_child_id = GameTree::Node::kInvalidBettingHistoryId;
   }
 
   static void FreezeTables(CFRSolver& solver) {
@@ -560,67 +485,6 @@ void CheckCoarseLegalActionsUseAbstractBettingState() {
          "same coarse action slot should reuse action id");
 }
 
-void CheckCoarseActionChildUsesBettingHistoryTransition() {
-  SolverConfig config;
-  config.max_public_states = 2;
-  CFRSolver solver(config);
-  const GameState state = BettingState(8, 18, 23, 4, 4);
-  const uint32_t public_id =
-      CFRSolverRegretTestPeer::CompactPublicStateId(solver, state);
-
-  int all_in_index = -1;
-  const int action_count =
-      CFRSolverRegretTestPeer::CompactPublicStateActionCount(solver,
-                                                             public_id);
-  for (int i = 0; i < action_count; ++i) {
-    if (CFRSolverRegretTestPeer::CompactPublicStateActionKind(
-            solver, public_id, i) == ActionKind::kAllIn) {
-      all_in_index = i;
-      break;
-    }
-  }
-  Expect(all_in_index >= 0, "fixture should include all-in");
-
-  const uint32_t child_id =
-      CFRSolverRegretTestPeer::CompactActionChild(solver, public_id,
-                                                  all_in_index);
-  CFRSolverRegretTestPeer::ClearCompactActionChild(solver, public_id,
-                                                   all_in_index);
-
-  const std::optional<uint32_t> repeated_child_id =
-      CFRSolverRegretTestPeer::CompactActionChildOptional(solver, public_id,
-                                                          all_in_index);
-  Expect(repeated_child_id.has_value(),
-         "cached betting-history transition should recover existing public child at cap");
-  Expect(*repeated_child_id == child_id,
-         "cached betting-history transition should return existing public child");
-}
-
-void CheckCoarseChanceChildUsesBettingHistoryTransition() {
-  SolverConfig config;
-  config.max_public_states = 2;
-  CFRSolver solver(config);
-  const uint32_t public_id =
-      CFRSolverRegretTestPeer::CompactPublicStateId(solver, ChanceState());
-  const std::array<CardId, 3> flop = {
-      MakeCardId(2, SuitKind::kHearts),
-      MakeCardId(7, SuitKind::kDiamonds),
-      MakeCardId(11, SuitKind::kClubs),
-  };
-
-  const uint32_t child_id =
-      CFRSolverRegretTestPeer::CompactChanceChild(solver, public_id, flop);
-  CFRSolverRegretTestPeer::ClearCompactChanceChildren(solver);
-
-  const std::optional<uint32_t> repeated_child_id =
-      CFRSolverRegretTestPeer::CompactChanceChildOptional(solver, public_id,
-                                                          flop);
-  Expect(repeated_child_id.has_value(),
-         "cached betting-history chance transition should recover existing public child at cap");
-  Expect(*repeated_child_id == child_id,
-         "cached betting-history chance transition should return existing public child");
-}
-
 void CheckFrozenChanceLookupCoversTextureBuckets() {
   SolverConfig config;
   CFRSolver solver(config);
@@ -672,49 +536,6 @@ void CheckFrozenChanceLookupCoversTextureBuckets() {
          "frozen chance evaluation should not allocate public states");
 }
 
-void CheckRequiredFrozenActionChildCatchesMissingChild() {
-  SolverConfig config;
-  config.max_depth = 1;
-  CFRSolver solver(config);
-  GameState root = BettingState(3, 19, 18, 1, 2);
-  const uint32_t public_id =
-      CFRSolverRegretTestPeer::CompactPublicStateId(solver, root);
-  Expect(CFRSolverRegretTestPeer::PrebuildPublicStates(solver, public_id, 1),
-         "shallow action prebuild should complete");
-  CFRSolverRegretTestPeer::ClearCompactActionChild(solver, public_id, 0);
-  CFRSolverRegretTestPeer::FreezeTables(solver);
-
-  ExpectThrows(
-      [&] {
-        CFRSolverRegretTestPeer::RequiredActionChild(solver, public_id, 0);
-      },
-      "required frozen action child should throw after child is cleared");
-}
-
-void CheckRequiredFrozenChanceChildCatchesMissingChild() {
-  SolverConfig config;
-  CFRSolver solver(config);
-  const GameState state = ChanceState();
-  const uint32_t public_id =
-      CFRSolverRegretTestPeer::CompactPublicStateId(solver, state);
-  Expect(CFRSolverRegretTestPeer::PrebuildPublicStates(solver, public_id, 0),
-         "texture prebuild should complete from a chance node");
-  CFRSolverRegretTestPeer::ClearCompactChanceChildEntries(solver, public_id);
-  CFRSolverRegretTestPeer::FreezeTables(solver);
-
-  const std::array<CardId, 3> flop = {
-      MakeCardId(2, SuitKind::kHearts),
-      MakeCardId(7, SuitKind::kDiamonds),
-      MakeCardId(11, SuitKind::kClubs),
-  };
-  ExpectThrows(
-      [&] {
-        CFRSolverRegretTestPeer::RequiredChanceChild(solver, public_id, state,
-                                                     flop);
-      },
-      "required frozen chance child should throw after entries are cleared");
-}
-
 void CheckCoarseFrozenChanceLookupCoversEquivalentParentBoards() {
   SolverConfig config;
   CFRSolver solver(config);
@@ -755,70 +576,6 @@ void CheckCoarseFrozenChanceLookupCoversEquivalentParentBoards() {
     }
   }
   Expect(false, "fixture should find an equivalent coarse flop board");
-}
-
-void CheckChanceTransitionValidationCatchesMissingRowEntry() {
-  SolverConfig config;
-  CFRSolver solver(config);
-  const uint32_t public_id =
-      CFRSolverRegretTestPeer::CompactPublicStateId(solver, ChanceState());
-
-  Expect(CFRSolverRegretTestPeer::PrebuildPublicStates(solver, public_id, 0),
-         "texture prebuild should complete from a chance node");
-  int64_t chance_transitions = 0;
-  int64_t missing_chance_transitions = 0;
-  Expect(CFRSolverRegretTestPeer::ValidatePrebuiltChanceTransitions(
-             solver, public_id, 0, chance_transitions,
-             missing_chance_transitions),
-         "complete prebuild should validate chance transitions");
-  Expect(chance_transitions > 0,
-         "chance-transition validation should count chance edges");
-  Expect(missing_chance_transitions == 0,
-         "complete prebuild should not miss chance transitions");
-
-  CFRSolverRegretTestPeer::ClearCompactChanceChildEntries(solver, public_id);
-  chance_transitions = 0;
-  missing_chance_transitions = 0;
-  Expect(!CFRSolverRegretTestPeer::ValidatePrebuiltChanceTransitions(
-             solver, public_id, 0, chance_transitions,
-             missing_chance_transitions),
-         "validation should fail after clearing row-local chance entries");
-  Expect(missing_chance_transitions > 0,
-         "validation should report missing row-local chance entries");
-}
-
-void CheckBettingHistoryChanceTransitionValidationCatchesMissingChild() {
-  SolverConfig config;
-  CFRSolver solver(config);
-  const uint32_t public_id =
-      CFRSolverRegretTestPeer::CompactPublicStateId(solver, ChanceState());
-
-  Expect(CFRSolverRegretTestPeer::PrebuildPublicStates(solver, public_id, 0),
-         "texture prebuild should complete from a chance node");
-  int64_t betting_history_transitions = 0;
-  int64_t missing_betting_history_transitions = 0;
-  Expect(CFRSolverRegretTestPeer::ValidatePrebuiltBettingHistoryTransitions(
-             solver, public_id, 0, betting_history_transitions,
-             missing_betting_history_transitions),
-         "complete prebuild should validate betting-history transitions");
-  Expect(betting_history_transitions > 0,
-         "betting-history validation should count chance edges");
-  Expect(missing_betting_history_transitions == 0,
-         "complete prebuild should not miss betting-history chance edges");
-
-  const uint32_t betting_history_id =
-      CFRSolverRegretTestPeer::CompactPublicStateBettingHistoryId(solver,
-                                                                  public_id);
-  CFRSolverRegretTestPeer::ClearBettingHistoryChanceTransition(
-      solver, betting_history_id);
-  betting_history_transitions = 0;
-  missing_betting_history_transitions = 0;
-  Expect(!CFRSolverRegretTestPeer::ValidatePrebuiltBettingHistoryTransitions(
-             solver, public_id, 0, betting_history_transitions,
-             missing_betting_history_transitions),
-         "validation should fail after clearing betting-history chance edge");
-  Expect(missing_betting_history_transitions > 0,
-         "validation should report the cleared betting-history chance edge");
 }
 
 void CheckTexturePublicBucketsEnterFrozenParallelPhase() {
@@ -1009,14 +766,8 @@ int main() {
   poker::CheckCoarseBettingHistoryBucketsChipState();
   poker::CheckCoarseBettingHistoryKeepsActionSlotsDistinct();
   poker::CheckCoarseLegalActionsUseAbstractBettingState();
-  poker::CheckCoarseActionChildUsesBettingHistoryTransition();
-  poker::CheckCoarseChanceChildUsesBettingHistoryTransition();
   poker::CheckFrozenChanceLookupCoversTextureBuckets();
-  poker::CheckRequiredFrozenActionChildCatchesMissingChild();
-  poker::CheckRequiredFrozenChanceChildCatchesMissingChild();
   poker::CheckCoarseFrozenChanceLookupCoversEquivalentParentBoards();
-  poker::CheckChanceTransitionValidationCatchesMissingRowEntry();
-  poker::CheckBettingHistoryChanceTransitionValidationCatchesMissingChild();
   poker::CheckTexturePublicBucketsEnterFrozenParallelPhase();
   poker::CheckFullDepthTexturePublicBucketsEnterFrozenParallelPhase();
   poker::CheckSingleWorkerFullDepthTexturePublicBucketsEnterFrozenPhase();

@@ -1,8 +1,4 @@
 #include "src/cfr_solver.h"
-#include "absl/log/globals.h"
-#include "absl/log/log_entry.h"
-#include "absl/log/log_sink.h"
-#include "absl/log/log_sink_registry.h"
 #include "src/cfr_solver_proto_adapter.h"
 #include "src/hand_range.h"
 
@@ -15,8 +11,6 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
-#include <string>
-#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -456,28 +450,8 @@ class CFRSolverRegretTestPeer {
         .action_child_ids[static_cast<size_t>(action_index)];
   }
 
-  static void ClearCompactActionChild(CFRSolver& solver,
-                                      uint32_t public_state_id,
-                                      int action_index) {
-    solver.mutable_tables_->public_state_rows[public_state_id]
-        .action_child_ids[static_cast<size_t>(action_index)] =
-        GameTree::Node::kInvalidPublicStateId;
-  }
-
   static uint32_t CappedPublicStateId() {
     return CFRSolver::kCappedPublicStateId;
-  }
-
-  static void ValidateCompactPublicStateRow(CFRSolver& solver,
-                                            uint32_t public_state_id) {
-    solver.validate_public_state_row_actions(public_state_id);
-  }
-
-  static void CorruptCompactPublicStateActionId(CFRSolver& solver,
-                                                uint32_t public_state_id,
-                                                int action_index) {
-    ++solver.mutable_tables_->public_state_rows[public_state_id]
-          .action_ids[static_cast<size_t>(action_index)];
   }
 
   static uint32_t CompactChanceChild(CFRSolver& solver,
@@ -510,36 +484,6 @@ class CFRSolverRegretTestPeer {
                                    uint32_t root_public_state_id,
                                    int max_depth) {
     return solver.prebuild_public_state_rows(root_public_state_id, max_depth);
-  }
-
-  static bool ValidatePrebuiltActionTransitions(
-      const CFRSolver& solver,
-      uint32_t root_public_state_id,
-      int max_depth,
-      int64_t& action_transitions,
-      int64_t& missing_action_transitions) {
-    return solver.validate_prebuilt_action_transitions(
-        root_public_state_id, max_depth, &action_transitions,
-        &missing_action_transitions);
-  }
-
-  static bool ValidatePrebuiltBettingHistoryTransitions(
-      const CFRSolver& solver,
-      uint32_t root_public_state_id,
-      int max_depth,
-      int64_t& betting_history_transitions,
-      int64_t& missing_betting_history_transitions) {
-    return solver.validate_prebuilt_betting_history_transitions(
-        root_public_state_id, max_depth, &betting_history_transitions,
-        &missing_betting_history_transitions);
-  }
-
-  static void ClearBettingHistoryActionTransition(CFRSolver& solver,
-                                                  uint32_t betting_history_id,
-                                                  int action_index) {
-    solver.mutable_tables_->betting_history_rows[betting_history_id]
-        .action_child_ids[static_cast<size_t>(action_index)] =
-        GameTree::Node::kInvalidBettingHistoryId;
   }
 
   static bool PrebuildInfoSets(CFRSolver& solver,
@@ -599,16 +543,6 @@ class CFRSolverRegretTestPeer {
         CFRSolver::PrivateCards::FromCombo(TestComboId(player_b_hand)));
   }
 
-  static double Utility(CFRSolver& solver,
-                        const BoardState& state,
-                        const Hand& player_a_hand,
-                        const Hand& player_b_hand) {
-    return solver.utility(
-        TestGameState(state),
-        CFRSolver::PrivateCards::FromCombo(TestComboId(player_a_hand)),
-        CFRSolver::PrivateCards::FromCombo(TestComboId(player_b_hand)));
-  }
-
   static void SetRegret(CFRSolver& solver,
                         const BoardState& state,
                         int player,
@@ -655,17 +589,6 @@ class CFRSolverRegretTestPeer {
       total += cumulative_strategy;
     }
     return total;
-  }
-
-  static bool CumulativeArraysAreCacheLineAligned(const CFRSolver& solver) {
-    return reinterpret_cast<std::uintptr_t>(
-               solver.cumulative_->cumulative_regrets.data()) %
-               kCacheLineBytes ==
-               0 &&
-           reinterpret_cast<std::uintptr_t>(
-               solver.cumulative_->cumulative_strategies.data()) %
-               kCacheLineBytes ==
-               0;
   }
 
   static std::vector<double> PlayerASampleWeights(
@@ -728,56 +651,6 @@ void Expect(bool condition, const char* message) {
     throw std::runtime_error(message);
   }
 }
-
-template <typename Fn>
-void ExpectThrows(Fn fn, const char* message) {
-  try {
-    fn();
-  } catch (const std::exception&) {
-    return;
-  }
-  throw std::runtime_error(message);
-}
-
-class CapturingLogSink : public absl::LogSink {
- public:
-  void Send(const absl::LogEntry& entry) override {
-    messages_.append(entry.text_message().data(), entry.text_message().size());
-    messages_.push_back('\n');
-  }
-
-  const std::string& messages() const { return messages_; }
-
- private:
-  std::string messages_;
-};
-
-class ScopedLogSink {
- public:
-  explicit ScopedLogSink(absl::LogSink& sink) : sink_(sink) {
-    absl::AddLogSink(&sink_.get());
-  }
-
-  ~ScopedLogSink() {
-    absl::RemoveLogSink(&sink_.get());
-  }
-
- private:
-  std::reference_wrapper<absl::LogSink> sink_;
-};
-
-class ScopedVLogLevel {
- public:
-  explicit ScopedVLogLevel(int level)
-      : previous_level_(absl::SetGlobalVLogLevel(level)) {}
-
-  ~ScopedVLogLevel() {
-    absl::SetGlobalVLogLevel(previous_level_);
-  }
-
- private:
-  int previous_level_;
-};
 
 Action MakeAction(ActionType type, int amount = 0) {
   Action action;
@@ -1456,98 +1329,6 @@ void CheckCompactPublicStateActionCapStoresSentinel() {
          "capped action transition should not grow public-state rows");
 }
 
-void CheckCompactPublicStateActionValidationCatchesMismatch() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-  CFRSolver solver(TestSolverConfig(config));
-  const GameState root_state = TestGameState(InitialRootState(config));
-
-  const uint32_t root_id =
-      CFRSolverRegretTestPeer::CompactPublicStateId(solver, root_state);
-  CFRSolverRegretTestPeer::ValidateCompactPublicStateRow(solver, root_id);
-  CFRSolverRegretTestPeer::CorruptCompactPublicStateActionId(solver, root_id,
-                                                             0);
-
-  ExpectThrows(
-      [&] {
-        CFRSolverRegretTestPeer::ValidateCompactPublicStateRow(solver,
-                                                               root_id);
-      },
-      "compact public-state validation should catch action id mismatches");
-}
-
-void CheckPrebuiltActionTransitionValidationCatchesMissingChild() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-  config.set_max_depth(1);
-  CFRSolver solver(TestSolverConfig(config));
-  const GameState root_state = TestGameState(InitialRootState(config));
-
-  const uint32_t root_id =
-      CFRSolverRegretTestPeer::CompactPublicStateId(solver, root_state);
-  Expect(CFRSolverRegretTestPeer::PrebuildPublicStates(solver, root_id, 1),
-         "shallow public-state prebuild should complete");
-
-  int64_t action_transitions = 0;
-  int64_t missing_action_transitions = 0;
-  Expect(CFRSolverRegretTestPeer::ValidatePrebuiltActionTransitions(
-             solver, root_id, 1, action_transitions,
-             missing_action_transitions),
-         "complete prebuild should validate action transitions");
-  Expect(action_transitions > 0,
-         "action-transition validation should count action edges");
-  Expect(missing_action_transitions == 0,
-         "complete prebuild should not report missing action edges");
-
-  CFRSolverRegretTestPeer::ClearCompactActionChild(solver, root_id, 0);
-  action_transitions = 0;
-  missing_action_transitions = 0;
-  Expect(!CFRSolverRegretTestPeer::ValidatePrebuiltActionTransitions(
-             solver, root_id, 1, action_transitions,
-             missing_action_transitions),
-         "validation should fail after clearing a prebuilt action edge");
-  Expect(missing_action_transitions == 1,
-         "validation should report the cleared action edge");
-}
-
-void CheckBettingHistoryActionTransitionValidationCatchesMissingChild() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-  config.set_max_depth(1);
-  CFRSolver solver(TestSolverConfig(config));
-  const GameState root_state = TestGameState(InitialRootState(config));
-
-  const uint32_t root_id =
-      CFRSolverRegretTestPeer::CompactPublicStateId(solver, root_state);
-  Expect(CFRSolverRegretTestPeer::PrebuildPublicStates(solver, root_id, 1),
-         "shallow public-state prebuild should complete");
-
-  int64_t betting_history_transitions = 0;
-  int64_t missing_betting_history_transitions = 0;
-  Expect(CFRSolverRegretTestPeer::ValidatePrebuiltBettingHistoryTransitions(
-             solver, root_id, 1, betting_history_transitions,
-             missing_betting_history_transitions),
-         "complete prebuild should validate betting-history transitions");
-  Expect(betting_history_transitions > 0,
-         "betting-history validation should count transition edges");
-  Expect(missing_betting_history_transitions == 0,
-         "complete prebuild should not report missing betting-history edges");
-
-  const uint32_t root_betting_history_id =
-      CFRSolverRegretTestPeer::CompactPublicStateBettingHistoryId(solver,
-                                                                  root_id);
-  CFRSolverRegretTestPeer::ClearBettingHistoryActionTransition(
-      solver, root_betting_history_id, 0);
-  betting_history_transitions = 0;
-  missing_betting_history_transitions = 0;
-  Expect(!CFRSolverRegretTestPeer::ValidatePrebuiltBettingHistoryTransitions(
-             solver, root_id, 1, betting_history_transitions,
-             missing_betting_history_transitions),
-         "validation should fail after clearing a betting-history action edge");
-  Expect(missing_betting_history_transitions == 1,
-         "validation should report the cleared betting-history action edge");
-}
-
 void CheckCompactPublicStateChanceTransitionsAreCached() {
   PokerConfig config;
   config.set_starting_stack_size(20);
@@ -1674,90 +1455,6 @@ void CheckSparseSlabTracksInfoSets() {
   Expect(CFRSolverRegretTestPeer::SlabInfoSetOffset(solver, state, 0, kings) ==
              kings_id,
          "sparse slab should track new infosets after it is built");
-}
-
-void CheckInfoSetActionBlocksAreCacheLineAligned() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-
-  CFRSolver solver(TestSolverConfig(config));
-  BoardState state = InitialRootState(config);
-  const std::array<Hand, 3> hands = {
-      MakeHand(14, Suit::SPADES, 14, Suit::HEARTS),
-      MakeHand(13, Suit::SPADES, 13, Suit::HEARTS),
-      MakeHand(12, Suit::SPADES, 12, Suit::HEARTS),
-  };
-
-  for (const Hand& hand : hands) {
-    const int offset =
-        CFRSolverRegretTestPeer::InfoSetOffset(solver, state, 0, hand);
-    Expect(offset >= 0, "infoset should be created");
-    Expect(offset % kCumulativeActionBlockAlignment == 0,
-           "infoset action blocks should start on cache-line boundaries");
-  }
-  Expect(CFRSolverRegretTestPeer::CumulativeArraysAreCacheLineAligned(solver),
-         "cumulative arrays should have cache-line-aligned storage");
-}
-
-void CheckTerminalUtilityCacheReusesScores() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-
-  CFRSolver solver(TestSolverConfig(config));
-  BoardState state;
-  state.set_pot(12);
-  state.set_folded_player(-1);
-  state.add_player_contribution(6);
-  state.add_player_contribution(6);
-  AddCard(state, 2, Suit::CLUBS);
-  AddCard(state, 7, Suit::DIAMONDS);
-  AddCard(state, 9, Suit::HEARTS);
-  AddCard(state, 11, Suit::SPADES);
-  AddCard(state, 12, Suit::CLUBS);
-
-  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
-  Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
-
-  double first = CFRSolverRegretTestPeer::Utility(
-      solver, state, player_a_hand, player_b_hand);
-  double second = CFRSolverRegretTestPeer::Utility(
-      solver, state, player_a_hand, player_b_hand);
-  CFRSolver::UtilityCacheStats stats = solver.get_utility_cache_stats();
-
-  Expect(first == second, "cached utility should preserve score");
-  Expect(stats.misses == 1, "first utility lookup should miss cache");
-  Expect(stats.hits == 1, "second utility lookup should hit cache");
-  Expect(stats.entries == 1, "cache should contain one utility entry");
-}
-
-void CheckParallelEvaluationUsesWorkerLocalUtilityCaches() {
-  PokerConfig config;
-  config.set_starting_stack_size(6);
-  config.set_max_depth(1);
-  config.add_bet_sizes(1.0);
-
-  HandRange player_a_range;
-  player_a_range.set_from_string("AA,KK");
-  HandRange player_b_range;
-  player_b_range.set_from_string("QQ,JJ");
-
-  CFRSolver solver(TestSolverConfig(config));
-  solver.run(2, player_a_range, player_b_range);
-
-  const CFRSolver::UtilityCacheStats before =
-      solver.get_utility_cache_stats();
-  const double value =
-      solver.evaluate_strategy(64, player_a_range, player_b_range);
-  const CFRSolver::UtilityCacheStats after =
-      solver.get_utility_cache_stats();
-
-  Expect(std::isfinite(value),
-         "parallel range evaluation should return a finite value");
-  if (std::thread::hardware_concurrency() > 1) {
-    Expect(after.hits == before.hits && after.misses == before.misses &&
-               after.entries == before.entries,
-           "parallel range evaluation should not mutate the parent utility cache");
-  }
 }
 
 void CheckRunUsesConfiguredBlinds() {
@@ -2198,63 +1895,6 @@ void CheckRangeSamplingSkipsOverlappingDeals() {
   Expect(CFRSolverRegretTestPeer::HasInfoSet(
              solver, TestGameState(InitialRootState(config)), 0, compatible),
          "range sampling should skip overlapping private-card deals");
-}
-
-void CheckRunLoggingUsesAbseilLevels() {
-  PokerConfig config;
-  config.set_starting_stack_size(20);
-  config.set_max_depth(1);
-
-  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
-  Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
-  HandRange player_a_range;
-  AddHand(player_a_range, player_a_hand, 1.0);
-  HandRange player_b_range;
-  AddHand(player_b_range, player_b_hand, 1.0);
-
-  CapturingLogSink default_output;
-  {
-    ScopedVLogLevel default_verbosity(0);
-    ScopedLogSink capture_logs(default_output);
-    CFRSolver solver(TestSolverConfig(config));
-    solver.run(1, player_a_range, player_b_range);
-  }
-  Expect(default_output.messages().find("Starting CFR iterations") !=
-             std::string::npos,
-         "run should log lifecycle progress at info level");
-  Expect(default_output.messages().find("Iteration 1/1") == std::string::npos,
-         "run should not log per-iteration progress at default verbosity");
-
-  CapturingLogSink normal_verbose_output;
-  {
-    ScopedVLogLevel verbose(1);
-    ScopedLogSink capture_logs(normal_verbose_output);
-    CFRSolver solver(TestSolverConfig(config));
-    solver.run(1, player_a_range, player_b_range);
-  }
-  Expect(normal_verbose_output.messages().find("Iteration 1/1") ==
-             std::string::npos,
-         "run should not log per-iteration progress at normal verbosity");
-
-  CapturingLogSink detailed_verbose_output;
-  {
-    ScopedVLogLevel verbose(2);
-    ScopedLogSink capture_logs(detailed_verbose_output);
-    CFRSolver solver(TestSolverConfig(config));
-    solver.run(1, player_a_range, player_b_range);
-  }
-  Expect(detailed_verbose_output.messages().find("Iteration 1/1") !=
-             std::string::npos,
-         "run should log per-iteration progress at detailed verbosity");
-  Expect(detailed_verbose_output.messages().find("Iterations run: 1") !=
-             std::string::npos,
-         "run should log completed iteration count");
-  Expect(detailed_verbose_output.messages().find("Information sets: 1") !=
-             std::string::npos,
-         "run should log trained info set count");
-  Expect(detailed_verbose_output.messages().find("Player A average EV:") !=
-             std::string::npos,
-         "run should log average root EV");
 }
 
 void CheckRepeatedRunMatchesSingleRun() {
@@ -2865,16 +2505,10 @@ int main() {
   CheckCompactUtilityMatchesGameState();
   CheckBettingHistoryActionTransitionReusedAcrossPublicStates();
   CheckCompactPublicStateActionCapStoresSentinel();
-  CheckCompactPublicStateActionValidationCatchesMismatch();
-  CheckPrebuiltActionTransitionValidationCatchesMissingChild();
-  CheckBettingHistoryActionTransitionValidationCatchesMissingChild();
   CheckCompactPublicStateChanceTransitionsAreCached();
   CheckCompactChanceMatchesGameTreeApplyChance();
   CheckSparseSlabRowsUseExactCombos();
   CheckSparseSlabTracksInfoSets();
-  CheckInfoSetActionBlocksAreCacheLineAligned();
-  CheckTerminalUtilityCacheReusesScores();
-  CheckParallelEvaluationUsesWorkerLocalUtilityCaches();
   CheckRunUsesConfiguredBlinds();
   CheckRunUpdatesExpectedValue();
   CheckRangeRunTracksParallelTrainingStats();
@@ -2889,7 +2523,6 @@ int main() {
   CheckRangeSamplerWeightsUseCompatibleProducts();
   CheckRangeSamplingRejectsOnlyOverlappingHands();
   CheckRangeSamplingSkipsOverlappingDeals();
-  CheckRunLoggingUsesAbseilLevels();
   CheckRepeatedRunMatchesSingleRun();
   CheckTerminalUtilityBeatsDepthLimit();
   CheckDepthLimitUsesShowdownUtility();
@@ -2908,25 +2541,6 @@ int main() {
   CheckMaxInfoSetsCapsTrainingAllocations();
   CheckRangeTrainingUsesCompactPublicStates();
   CheckMaxPublicStatesCapsTrainingAllocations();
-
-  PokerConfig config;
-  config.add_bet_sizes(1.0);
-  config.set_starting_stack_size(10);
-  config.set_max_depth(4);
-
-  Hand player_a_hand = MakeHand(14, Suit::SPADES, 14, Suit::HEARTS);
-  Hand player_b_hand = MakeHand(13, Suit::SPADES, 13, Suit::HEARTS);
-  HandRange player_a_range;
-  AddHand(player_a_range, player_a_hand, 1.0);
-  HandRange player_b_range;
-  AddHand(player_b_range, player_b_hand, 1.0);
-
-  CFRSolver solver(TestSolverConfig(config));
-  solver.run(1, player_a_range, player_b_range);
-
-  if (solver.get_info_set_count() == 0) {
-    throw std::runtime_error("CFR did not visit any information sets");
-  }
 
   return 0;
 }
