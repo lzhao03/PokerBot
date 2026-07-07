@@ -329,6 +329,14 @@ GameState ChanceState() {
   return state;
 }
 
+GameState FlopChanceState(CardId first, CardId second, CardId third) {
+  GameState state = PublicState(StreetKind::kFlop, first, second, third);
+  state.player_to_act = 1;
+  state.history.push_back({ActionKind::kCheck, 0, 0});
+  state.history.push_back({ActionKind::kCheck, 0, 1});
+  return state;
+}
+
 ComboId ExactCombo(int first_rank,
                    SuitKind first_suit,
                    int second_rank,
@@ -662,6 +670,48 @@ void CheckRequiredFrozenChanceChildCatchesMissingChild() {
       "required frozen chance child should throw after entries are cleared");
 }
 
+void CheckCoarseFrozenChanceLookupCoversEquivalentParentBoards() {
+  SolverConfig config;
+  CFRSolver solver(config);
+  const GameState representative = FlopChanceState(
+      MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(7, SuitKind::kDiamonds),
+      MakeCardId(11, SuitKind::kClubs));
+  const uint32_t public_id =
+      CFRSolverRegretTestPeer::CompactPublicStateId(solver, representative);
+  Expect(CFRSolverRegretTestPeer::PrebuildPublicStates(solver, public_id, 0),
+         "flop chance prebuild should complete");
+  CFRSolverRegretTestPeer::FreezeTables(solver);
+
+  const PublicBucketId bucket =
+      CFRSolverRegretTestPeer::PublicBucket(solver, representative);
+  for (int first = 0; first < kDeckCardCount; ++first) {
+    for (int second = first + 1; second < kDeckCardCount; ++second) {
+      for (int third = second + 1; third < kDeckCardCount; ++third) {
+        const GameState alternate = FlopChanceState(
+            static_cast<CardId>(first), static_cast<CardId>(second),
+            static_cast<CardId>(third));
+        if (alternate.board_mask == representative.board_mask ||
+            CFRSolverRegretTestPeer::PublicBucket(solver, alternate) !=
+                bucket) {
+          continue;
+        }
+        for (int turn = 0; turn < kDeckCardCount; ++turn) {
+          const CardId turn_card = static_cast<CardId>(turn);
+          if ((alternate.board_mask & CardBit(turn_card)) != 0) {
+            continue;
+          }
+          const std::array<CardId, 1> cards = {turn_card};
+          CFRSolverRegretTestPeer::RequiredChanceChild(
+              solver, public_id, alternate, cards);
+          return;
+        }
+      }
+    }
+  }
+  Expect(false, "fixture should find an equivalent coarse flop board");
+}
+
 void CheckChanceTransitionValidationCatchesMissingRowEntry() {
   SolverConfig config;
   CFRSolver solver(config);
@@ -790,6 +840,7 @@ int main() {
   poker::CheckFrozenChanceLookupCoversTextureBuckets();
   poker::CheckRequiredFrozenActionChildCatchesMissingChild();
   poker::CheckRequiredFrozenChanceChildCatchesMissingChild();
+  poker::CheckCoarseFrozenChanceLookupCoversEquivalentParentBoards();
   poker::CheckChanceTransitionValidationCatchesMissingRowEntry();
   poker::CheckBettingHistoryChanceTransitionValidationCatchesMissingChild();
   poker::CheckTexturePublicBucketsEnterFrozenParallelPhase();

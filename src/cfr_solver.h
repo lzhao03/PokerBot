@@ -384,6 +384,10 @@ private:
   std::optional<uint32_t> chance_child_public_state(
       uint32_t public_state_id,
       absl::Span<const CardId> cards) const;
+  bool for_each_required_chance_transition(
+      const PublicStateRow& row,
+      const std::function<bool(const CompactPublicState&,
+                               absl::Span<const CardId>)>& callback) const;
   int chance_child_lookup_key(const PublicStateRow& row,
                               const CompactPublicState& child_state,
                               absl::Span<const CardId> cards) const;

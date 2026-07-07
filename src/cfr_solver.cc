@@ -211,6 +211,129 @@ bool ForEachNextStreetDeal(const CompactPublicState& state,
   return choose(choose, 0, 0);
 }
 
+#if POKER_COARSE_PUBLIC_BUCKETS
+StreetKind StreetAfterChance(StreetKind street) {
+  switch (street) {
+    case StreetKind::kPreflop:
+      return StreetKind::kFlop;
+    case StreetKind::kFlop:
+      return StreetKind::kTurn;
+    case StreetKind::kTurn:
+    case StreetKind::kRiver:
+      return StreetKind::kRiver;
+  }
+  return StreetKind::kRiver;
+}
+
+int BoardCardsForStreet(StreetKind street) {
+  switch (street) {
+    case StreetKind::kPreflop:
+      return 0;
+    case StreetKind::kFlop:
+      return 3;
+    case StreetKind::kTurn:
+      return 4;
+    case StreetKind::kRiver:
+      return 5;
+  }
+  return 0;
+}
+
+struct CoarseChanceTransitionTemplate {
+  CompactPublicState parent_board_state;
+  absl::InlinedVector<CardId, 5> cards;
+};
+
+using CoarseChanceTransitionMap =
+    absl::flat_hash_map<PublicBucketId,
+                        std::vector<CoarseChanceTransitionTemplate>>;
+
+template <typename Callback>
+void ForEachCardCombination(int count, CardMask blocked_mask,
+                            Callback callback) {
+  absl::InlinedVector<CardId, 5> cards;
+  cards.resize(static_cast<size_t>(count));
+  auto choose = [&](auto& self, int start, int depth) -> void {
+    if (depth == count) {
+      callback(absl::Span<const CardId>(cards));
+      return;
+    }
+    const int remaining = count - depth;
+    for (int card_id = start; card_id <= kDeckCardCount - remaining;
+         ++card_id) {
+      const CardId card = static_cast<CardId>(card_id);
+      if ((blocked_mask & CardBit(card)) != 0) {
+        continue;
+      }
+      cards[static_cast<size_t>(depth)] = card;
+      self(self, card_id + 1, depth + 1);
+    }
+  };
+  choose(choose, 0, 0);
+}
+
+CoarseChanceTransitionMap BuildCoarseChanceTransitions(StreetKind street) {
+  CoarseChanceTransitionMap transitions;
+  const int board_count = BoardCardsForStreet(street);
+  const int deal_count = CardsForNextStreet(street);
+  if (deal_count <= 0) {
+    return transitions;
+  }
+
+  CardAbstraction abstraction;
+  absl::flat_hash_map<uint64_t, bool> seen;
+  ForEachCardCombination(board_count, 0, [&](absl::Span<const CardId> board) {
+    CompactPublicState parent;
+    parent.street = street;
+    for (CardId card : board) {
+      AddBoardCard(parent, card);
+    }
+    const PublicBucketId parent_bucket = abstraction.public_bucket(parent);
+    ForEachCardCombination(deal_count, parent.board_mask,
+                           [&](absl::Span<const CardId> cards) {
+      CompactPublicState child = parent;
+      child.street = StreetAfterChance(street);
+      for (CardId card : cards) {
+        AddBoardCard(child, card);
+      }
+      const PublicBucketId child_bucket = abstraction.public_bucket(child);
+      const uint64_t seen_key = (parent_bucket << 32) | child_bucket;
+      if (seen.contains(seen_key)) {
+        return;
+      }
+      seen.emplace(seen_key, true);
+      CoarseChanceTransitionTemplate transition;
+      transition.parent_board_state = parent;
+      transition.cards.assign(cards.begin(), cards.end());
+      transitions[parent_bucket].push_back(std::move(transition));
+    });
+  });
+  return transitions;
+}
+
+const CoarseChanceTransitionMap& CoarseChanceTransitions(StreetKind street) {
+  static const CoarseChanceTransitionMap preflop =
+      BuildCoarseChanceTransitions(StreetKind::kPreflop);
+  static const CoarseChanceTransitionMap flop =
+      BuildCoarseChanceTransitions(StreetKind::kFlop);
+  static const CoarseChanceTransitionMap turn =
+      BuildCoarseChanceTransitions(StreetKind::kTurn);
+  static const CoarseChanceTransitionMap river =
+      BuildCoarseChanceTransitions(StreetKind::kRiver);
+  switch (street) {
+    case StreetKind::kPreflop:
+      return preflop;
+    case StreetKind::kFlop:
+      return flop;
+    case StreetKind::kTurn:
+      return turn;
+    case StreetKind::kRiver:
+      return river;
+  }
+  return river;
+}
+#endif
+
 int RoundedContribution(const GameState& state, int player) {
   return state.player_contribution[player];
 }
@@ -1175,6 +1298,37 @@ std::optional<uint32_t> CFRSolver::chance_child_public_state(
       cards);
 }
 
+bool CFRSolver::for_each_required_chance_transition(
+    const PublicStateRow& row,
+    const std::function<bool(const CompactPublicState&,
+                             absl::Span<const CardId>)>& callback) const {
+#if POKER_COARSE_PUBLIC_BUCKETS
+  if (!row.public_state_is_exact) {
+    const auto& transitions = CoarseChanceTransitions(row.state.street);
+    const auto existing = transitions.find(row.public_bucket);
+    if (existing == transitions.end()) {
+      return false;
+    }
+    for (const CoarseChanceTransitionTemplate& transition :
+         existing->second) {
+      CompactPublicState parent_state =
+          StateWithBoardFrom(row.state, transition.parent_board_state);
+      const CompactPublicState child_state =
+          game_tree_->apply_chance(parent_state, transition.cards);
+      if (!callback(child_state,
+                    absl::Span<const CardId>(transition.cards))) {
+        return false;
+      }
+    }
+    return true;
+  }
+#endif
+
+  return ForEachNextStreetDeal(row.state, [&](absl::Span<const CardId> cards) {
+    return callback(game_tree_->apply_chance(row.state, cards), cards);
+  });
+}
+
 int CFRSolver::chance_child_lookup_key(
     const PublicStateRow& row,
     const CompactPublicState& child_state,
@@ -1418,11 +1572,12 @@ bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
     }
 
     if (row.is_chance_node) {
-      const bool complete = ForEachNextStreetDeal(
-          row.state, [&](absl::Span<const CardId> cards) {
+      const bool complete = for_each_required_chance_transition(
+          row, [&](const CompactPublicState& child_state,
+                   absl::Span<const CardId> cards) {
             std::optional<uint32_t> child_public_state_id =
                 get_or_create_chance_child_public_state(entry.public_state_id,
-                                                        cards);
+                                                        child_state, cards);
             if (!child_public_state_id.has_value()) {
               return false;
             }
@@ -1565,42 +1720,36 @@ bool CFRSolver::validate_prebuilt_betting_history_transitions(
         history_rows[row.betting_history_id];
 
     if (row.is_chance_node) {
-      const size_t offset = row.chance_child_offset;
-      const size_t count = row.chance_child_count;
-      const auto& chance_entries = frozen_tables_->chance_child_entries;
-      if (offset > chance_entries.size() ||
-          count > chance_entries.size() - offset) {
-        ++*missing_betting_history_transitions;
-        complete = false;
-        continue;
-      }
-      if (count == 0) {
-        ++*missing_betting_history_transitions;
-        complete = false;
-        continue;
-      }
-      for (size_t i = 0; i < count; ++i) {
+      const bool chance_complete = for_each_required_chance_transition(
+          row, [&](const CompactPublicState& child_state,
+                   absl::Span<const CardId> cards) {
         ++*betting_history_transitions;
-        const uint32_t child_public_state_id =
-            chance_entries[offset + i].public_state_id;
+        const std::optional<uint32_t> child_public_state_id =
+            chance_child_public_state(entry.public_state_id, child_state,
+                                      cards);
         if (history_row.chance_child_id ==
                 GameTree::Node::kInvalidBettingHistoryId ||
             history_row.chance_child_id >= history_rows.size() ||
-            child_public_state_id == GameTree::Node::kInvalidPublicStateId ||
-            child_public_state_id >= rows.size()) {
+            !child_public_state_id.has_value() ||
+            *child_public_state_id >= rows.size()) {
           ++*missing_betting_history_transitions;
           complete = false;
-          continue;
+          return true;
         }
-        if (rows[child_public_state_id].betting_history_id !=
+        if (rows[*child_public_state_id].betting_history_id !=
             history_row.chance_child_id) {
           ++*missing_betting_history_transitions;
           complete = false;
         }
-        if (!enqueue(child_public_state_id, entry.depth)) {
+        if (!enqueue(*child_public_state_id, entry.depth)) {
           ++*missing_betting_history_transitions;
           complete = false;
         }
+        return true;
+      });
+      if (!chance_complete) {
+        ++*missing_betting_history_transitions;
+        complete = false;
       }
       continue;
     }
@@ -1692,10 +1841,12 @@ bool CFRSolver::validate_prebuilt_action_transitions(
     }
 
     if (row.is_chance_node) {
-      const bool chance_complete = ForEachNextStreetDeal(
-          row.state, [&](absl::Span<const CardId> cards) {
+      const bool chance_complete = for_each_required_chance_transition(
+          row, [&](const CompactPublicState& child_state,
+                   absl::Span<const CardId> cards) {
             const std::optional<uint32_t> child_public_state_id =
-                chance_child_public_state(entry.public_state_id, cards);
+                chance_child_public_state(entry.public_state_id, child_state,
+                                          cards);
             if (!child_public_state_id.has_value()) {
               return false;
             }
@@ -1778,10 +1929,13 @@ bool CFRSolver::validate_prebuilt_chance_transitions(
     }
 
     if (row.is_chance_node) {
-      ForEachNextStreetDeal(row.state, [&](absl::Span<const CardId> cards) {
+      const bool chance_complete = for_each_required_chance_transition(
+          row, [&](const CompactPublicState& child_state,
+                   absl::Span<const CardId> cards) {
         ++*chance_transitions;
         const std::optional<uint32_t> child_public_state_id =
-            chance_child_public_state(entry.public_state_id, cards);
+            chance_child_public_state(entry.public_state_id, child_state,
+                                      cards);
         if (!child_public_state_id.has_value()) {
           ++*missing_chance_transitions;
           complete = false;
@@ -1793,6 +1947,10 @@ bool CFRSolver::validate_prebuilt_chance_transitions(
         }
         return true;
       });
+      if (!chance_complete) {
+        ++*missing_chance_transitions;
+        complete = false;
+      }
       continue;
     }
 
@@ -2830,13 +2988,7 @@ CFRSolver::sample_chance_transition(uint32_t public_state_id,
   CompactPublicState sampled_child_state =
       game_tree_->apply_chance(state, cards);
   uint32_t child_public_state_id = GameTree::Node::kInvalidPublicStateId;
-  // Coarse public rows still use representative boards for chance entries.
-  // Keep exact-card rows strict until bucket-complete chance transitions land.
-  const bool require_chance_child =
-      frozen_ && require_frozen_children_ &&
-      public_state_id < frozen_tables_->public_state_rows.size() &&
-      frozen_tables_->public_state_rows[public_state_id].public_state_is_exact;
-  if (require_chance_child) {
+  if (frozen_ && require_frozen_children_) {
     child_public_state_id = required_chance_child_public_state(
         public_state_id, sampled_child_state, cards);
   } else if (frozen_) {
