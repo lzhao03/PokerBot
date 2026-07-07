@@ -32,9 +32,9 @@ class TerminalUtilityCache {
     int player_a_contribution = 0;
     int player_b_contribution = 0;
     int board_size = 0;
-    std::array<int, 2> player_a_cards = {-1, -1};
-    std::array<int, 2> player_b_cards = {-1, -1};
-    std::array<int, 5> board_cards = {-1, -1, -1, -1, -1};
+    ComboId player_a_hand = 0;
+    ComboId player_b_hand = 0;
+    CardMask board_mask = 0;
 
     bool operator==(const Key& other) const;
   };
