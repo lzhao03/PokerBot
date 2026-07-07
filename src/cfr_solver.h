@@ -273,11 +273,6 @@ class CFRSolver {
       int depth,
       bool use_atomic_updates);
 
-  static ExactBoardState exact_board_from_state(
-      const CompactPublicState& state);
-  static CompactPublicState state_with_exact_board(
-      CompactPublicState state,
-      const ExactBoardState& exact_board);
   BettingHistoryKey make_betting_history_key(
       const CompactPublicState& state) const;
   BettingHistoryRow make_betting_history_row(

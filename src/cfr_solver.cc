@@ -576,24 +576,6 @@ FrozenStrategyTables& CFRSolver::mutable_tables() {
   return *mutable_tables_;
 }
 
-CFRSolver::ExactBoardState CFRSolver::exact_board_from_state(
-    const CompactPublicState& state) {
-  return ExactBoardState{
-      state.board_cards,
-      state.board_count,
-      state.board_mask,
-  };
-}
-
-CompactPublicState CFRSolver::state_with_exact_board(
-    CompactPublicState state,
-    const ExactBoardState& exact_board) {
-  state.board_cards = exact_board.cards;
-  state.board_count = exact_board.count;
-  state.board_mask = exact_board.mask;
-  return state;
-}
-
 CFRSolver::PrivateCards CFRSolver::PrivateCards::FromCombo(
     ComboId combo_id) {
   PrivateCards private_cards;
@@ -2292,8 +2274,11 @@ void CFRSolver::run_frozen_iterations(
           const CompactPublicState root_state =
               worker.frozen_tables_->public_state_rows[root_public_state_id]
                   .state;
-          const ExactBoardState root_board =
-              exact_board_from_state(root_state);
+          const ExactBoardState root_board{
+              root_state.board_cards,
+              root_state.board_count,
+              root_state.board_mask,
+          };
           for (int i = 0; i < shard; ++i) {
             const RangeDeal deal = range_sampler.sample(worker.rng_);
             PrivateCards player_a_cards =
