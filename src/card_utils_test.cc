@@ -46,6 +46,28 @@ void CheckCardsForNextStreet() {
          "river should deal no cards");
 }
 
+void CheckStreetAfterChance() {
+  Expect(StreetAfterChance(StreetKind::kPreflop) == StreetKind::kFlop,
+         "preflop chance should advance to flop");
+  Expect(StreetAfterChance(StreetKind::kFlop) == StreetKind::kTurn,
+         "flop chance should advance to turn");
+  Expect(StreetAfterChance(StreetKind::kTurn) == StreetKind::kRiver,
+         "turn chance should advance to river");
+  Expect(StreetAfterChance(StreetKind::kRiver) == StreetKind::kRiver,
+         "river chance should stay on river");
+}
+
+void CheckBoardCardsForStreet() {
+  Expect(BoardCardsForStreet(StreetKind::kPreflop) == 0,
+         "preflop should have no board cards");
+  Expect(BoardCardsForStreet(StreetKind::kFlop) == 3,
+         "flop should have three board cards");
+  Expect(BoardCardsForStreet(StreetKind::kTurn) == 4,
+         "turn should have four board cards");
+  Expect(BoardCardsForStreet(StreetKind::kRiver) == 5,
+         "river should have five board cards");
+}
+
 void CheckSampledStreetCardsAvoidKnownCards() {
   CardMask known_private_cards = 0;
   known_private_cards |= CardBit(MakeCardId(14, SuitKind::kSpades));
@@ -177,6 +199,8 @@ void CheckSamplingThrowsWhenDeckIsTooSmall() {
 int main() {
   poker::CheckBuildDeckHasUniqueCards();
   poker::CheckCardsForNextStreet();
+  poker::CheckStreetAfterChance();
+  poker::CheckBoardCardsForStreet();
   poker::CheckSampledStreetCardsAvoidKnownCards();
   poker::CheckCompactSampledStreetCardsAvoidKnownCards();
   poker::CheckPrimitiveSampledStreetCardsAvoidKnownCards();

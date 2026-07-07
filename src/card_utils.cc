@@ -28,6 +28,31 @@ int CardsForNextStreet(StreetKind street) {
   }
 }
 
+StreetKind StreetAfterChance(StreetKind street) {
+  switch (street) {
+    case StreetKind::kPreflop:
+      return StreetKind::kFlop;
+    case StreetKind::kFlop:
+      return StreetKind::kTurn;
+    case StreetKind::kTurn:
+    case StreetKind::kRiver:
+      return StreetKind::kRiver;
+  }
+}
+
+int BoardCardsForStreet(StreetKind street) {
+  switch (street) {
+    case StreetKind::kPreflop:
+      return 0;
+    case StreetKind::kFlop:
+      return 3;
+    case StreetKind::kTurn:
+      return 4;
+    case StreetKind::kRiver:
+      return 5;
+  }
+}
+
 absl::InlinedVector<CardId, 5> SampleStreetCards(
     StreetKind street,
     int board_count,
