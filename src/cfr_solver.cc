@@ -20,6 +20,7 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -87,6 +88,33 @@ inline float AtomicFloatLoad(const float* src) {
   float val;
   std::memcpy(&val, &bits, sizeof(float));
   return val;
+}
+
+std::optional<double> UtilityBeforeShowdown(const CompactPublicState& state,
+                                            uint8_t board_count) {
+  const double player_a_contribution = state.player_contribution[0];
+  if (state.folded_player == 0) {
+    return -player_a_contribution;
+  }
+  if (state.folded_player == 1) {
+    return state.pot - player_a_contribution;
+  }
+  if (board_count + 2 < 5) {
+    return 0.0;
+  }
+  return std::nullopt;
+}
+
+double ShowdownUtilityFromComparison(const CompactPublicState& state,
+                                     int comparison) {
+  const double player_a_contribution = state.player_contribution[0];
+  if (comparison > 0) {
+    return state.pot - player_a_contribution;
+  }
+  if (comparison < 0) {
+    return -player_a_contribution;
+  }
+  return (state.pot / 2.0) - player_a_contribution;
 }
 
 size_t ScratchDepthReserve(const SolverConfig& config, int max_depth) {
@@ -3203,16 +3231,9 @@ bool CFRSolver::traversal_stats_enabled() {
 double CFRSolver::utility(const CompactPublicState& state,
                           const PrivateCards& player_a_cards,
                           const PrivateCards& player_b_cards) {
-  const double player_a_contribution = state.player_contribution[0];
-  if (state.folded_player == 0) {
-    return -player_a_contribution;
-  }
-  if (state.folded_player == 1) {
-    return state.pot - player_a_contribution;
-  }
-
-  if (state.board_count + 2 < 5) {
-    return 0.0;
+  if (const std::optional<double> utility =
+          UtilityBeforeShowdown(state, state.board_count)) {
+    return *utility;
   }
 
   return utility_cache_->get_or_compute(
@@ -3227,16 +3248,9 @@ double CFRSolver::frozen_utility(const PublicStateRow& row,
                                  const PrivateCards& player_a_cards,
                                  const PrivateCards& player_b_cards) {
   const CompactPublicState& state = row.state;
-  const double player_a_contribution = state.player_contribution[0];
-  if (state.folded_player == 0) {
-    return -player_a_contribution;
-  }
-  if (state.folded_player == 1) {
-    return state.pot - player_a_contribution;
-  }
-
-  if (exact_board.count + 2 < 5) {
-    return 0.0;
+  if (const std::optional<double> utility =
+          UtilityBeforeShowdown(state, exact_board.count)) {
+    return *utility;
   }
 
   // Frozen sampled training sees mostly one-off showdowns; direct evaluation
@@ -3245,28 +3259,15 @@ double CFRSolver::frozen_utility(const PublicStateRow& row,
   const int comparison =
       evaluator.compare_hands(player_a_cards.combo, player_b_cards.combo,
                               exact_board.cards, exact_board.count);
-  if (comparison > 0) {
-    return state.pot - player_a_contribution;
-  }
-  if (comparison < 0) {
-    return -player_a_contribution;
-  }
-  return (state.pot / 2.0) - player_a_contribution;
+  return ShowdownUtilityFromComparison(state, comparison);
 }
 
 double CFRSolver::uncached_utility(const CompactPublicState& state,
                                    const PrivateCards& player_a_cards,
                                    const PrivateCards& player_b_cards) {
-  const double player_a_contribution = state.player_contribution[0];
-  if (state.folded_player == 0) {
-    return -player_a_contribution;
-  }
-  if (state.folded_player == 1) {
-    return state.pot - player_a_contribution;
-  }
-
-  if (state.board_count + 2 < 5) {
-    return 0.0;
+  if (const std::optional<double> utility =
+          UtilityBeforeShowdown(state, state.board_count)) {
+    return *utility;
   }
 
   return game_tree_->get_utility(
