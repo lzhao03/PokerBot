@@ -125,14 +125,6 @@ size_t ScratchDepthReserve(const SolverConfig& config, int max_depth) {
   return std::max<size_t>(32, static_cast<size_t>(stack_size) + 12);
 }
 
-CompactPublicState StateWithBoardFrom(CompactPublicState state,
-                                      const CompactPublicState& board_source) {
-  state.board_cards = board_source.board_cards;
-  state.board_count = board_source.board_count;
-  state.board_mask = board_source.board_mask;
-  return state;
-}
-
 template <typename Callback>
 bool ForEachNextStreetDeal(const CompactPublicState& state,
                            Callback callback) {
@@ -736,8 +728,8 @@ bool CFRSolver::for_each_required_chance_transition(
       return false;
     }
     for (const CoarseChanceTransitionTemplate& transition : existing->second) {
-      CompactPublicState parent_state =
-          StateWithBoardFrom(row.state, transition.parent_board_state);
+      CompactPublicState parent_state = row.state;
+      CopyBoardFrom(parent_state, transition.parent_board_state);
       const CompactPublicState child_state =
           game_tree_->apply_chance(parent_state, transition.cards);
       if (!callback(child_state, absl::Span<const CardId>(transition.cards))) {
@@ -2084,8 +2076,8 @@ double CFRSolver::cfr_with_ranges(
     }
     const PublicStateRow& child_row =
         frozen_tables_->public_state_rows[child_public_state_id];
-    const CompactPublicState child_state =
-        StateWithBoardFrom(child_row.state, state);
+    CompactPublicState child_state = child_row.state;
+    CopyBoardFrom(child_state, state);
 
     const double previous_reach_probability = reach_probabilities[player];
     reach_probabilities[player] =
@@ -2268,8 +2260,8 @@ double CFRSolver::chance_sampling_cfr(
 
     const PublicStateRow& child_row =
         frozen_tables_->public_state_rows[sampled->child_public_state_id];
-    const CompactPublicState child_state =
-        StateWithBoardFrom(child_row.state, sampled->exact_child_state);
+    CompactPublicState child_state = child_row.state;
+    CopyBoardFrom(child_state, sampled->exact_child_state);
     OptionalTrainingRange child_player_a_range = player_a_range;
     OptionalTrainingRange child_player_b_range = player_b_range;
     if (player_a_range.has_value()) {
@@ -2742,8 +2734,8 @@ double CFRSolver::evaluate_strategy_node(
       }
       const PublicStateRow& child_row =
           frozen_tables_->public_state_rows[sampled->child_public_state_id];
-      const CompactPublicState child_state =
-          StateWithBoardFrom(child_row.state, sampled->exact_child_state);
+      CompactPublicState child_state = child_row.state;
+      CopyBoardFrom(child_state, sampled->exact_child_state);
       value += evaluate_strategy_node(
           sampled->child_public_state_id, child_state, player_a_cards,
           player_b_cards);
@@ -2797,8 +2789,8 @@ double CFRSolver::evaluate_strategy_node(
     }
     const PublicStateRow& child_row =
         frozen_tables_->public_state_rows[child_public_state_id];
-    const CompactPublicState child_state =
-        StateWithBoardFrom(child_row.state, state);
+    CompactPublicState child_state = child_row.state;
+    CopyBoardFrom(child_state, state);
     value += probabilities[action_index] *
              evaluate_strategy_node(child_public_state_id, child_state,
                                     player_a_cards, player_b_cards);

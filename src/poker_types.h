@@ -214,6 +214,13 @@ inline void AddBoardCard(CompactPublicState& state, CardId card_id) {
   state.board_mask |= CardBit(card_id);
 }
 
+inline void CopyBoardFrom(CompactPublicState& state,
+                          const CompactPublicState& source) {
+  state.board_cards = source.board_cards;
+  state.board_count = source.board_count;
+  state.board_mask = source.board_mask;
+}
+
 inline void AddBoardCard(GameState& state, CardId card_id) {
   if (state.board_cards.size() >= kMaxBoardCards) {
     throw std::invalid_argument("Board already has five cards");
