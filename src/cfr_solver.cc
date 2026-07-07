@@ -1023,32 +1023,6 @@ std::optional<uint32_t> CFRSolver::action_child_public_state(
   return child_id;
 }
 
-uint32_t CFRSolver::required_action_child_public_state(
-    uint32_t public_state_id,
-    int action_index) const {
-  const auto& rows = frozen_tables_->public_state_rows;
-  if (public_state_id >= rows.size()) {
-    throw std::logic_error("frozen action parent public state is missing");
-  }
-  const PublicStateRow& row = rows[public_state_id];
-  if (action_index < 0 || action_index >= row.action_count) {
-    throw std::logic_error("frozen action child index out of range");
-  }
-  const uint32_t child_id =
-      row.action_child_ids[static_cast<size_t>(action_index)];
-  if (child_id == GameTree::Node::kInvalidPublicStateId ||
-      child_id == kCappedPublicStateId || child_id >= rows.size()) {
-    throw std::logic_error("frozen action child public state is missing");
-  }
-  return child_id;
-}
-
-uint32_t CFRSolver::strict_action_child_public_state(
-    const PublicStateRow& row,
-    size_t action_index) const {
-  return row.action_child_ids[action_index];
-}
-
 std::optional<uint32_t> CFRSolver::chance_child_public_state(
     uint32_t public_state_id,
     const CompactPublicState& child_state,
@@ -2566,8 +2540,7 @@ double CFRSolver::cfr_with_ranges(
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     uint32_t child_public_state_id = GameTree::Node::kInvalidPublicStateId;
     if (frozen_ && require_frozen_children_) {
-      child_public_state_id =
-          strict_action_child_public_state(row, action_index);
+      child_public_state_id = row.action_child_ids[action_index];
     } else if (frozen_) {
       std::optional<uint32_t> frozen_child_public_state_id =
           action_child_public_state(public_state_id,
@@ -2893,7 +2866,7 @@ double CFRSolver::cfr_frozen_regret_only(
   double node_value = 0.0;
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     const uint32_t child_public_state_id =
-        strict_action_child_public_state(row, action_index);
+        row.action_child_ids[action_index];
 
     const double previous_reach_probability = reach_probabilities[player];
     reach_probabilities[player] =
@@ -3338,8 +3311,14 @@ double CFRSolver::evaluate_strategy_node(
   for (int action_index = 0; action_index < action_count; ++action_index) {
     uint32_t child_public_state_id = GameTree::Node::kInvalidPublicStateId;
     if (frozen_ && require_frozen_children_) {
-      child_public_state_id =
-          required_action_child_public_state(public_state_id, action_index);
+      std::optional<uint32_t> frozen_child_public_state_id =
+          action_child_public_state(public_state_id, action_index);
+      if (!frozen_child_public_state_id.has_value() ||
+          *frozen_child_public_state_id >=
+              frozen_tables_->public_state_rows.size()) {
+        throw std::logic_error("frozen action child public state is missing");
+      }
+      child_public_state_id = *frozen_child_public_state_id;
     } else if (frozen_) {
       std::optional<uint32_t> frozen_child_public_state_id =
           action_child_public_state(public_state_id, action_index);

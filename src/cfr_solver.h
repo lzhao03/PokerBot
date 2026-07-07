@@ -307,10 +307,6 @@ class CFRSolver {
   std::optional<uint32_t> action_child_public_state(
       uint32_t public_state_id,
       int action_index) const;
-  uint32_t required_action_child_public_state(uint32_t public_state_id,
-                                              int action_index) const;
-  uint32_t strict_action_child_public_state(const PublicStateRow& row,
-                                            size_t action_index) const;
   std::optional<uint32_t> chance_child_public_state(
       uint32_t public_state_id,
       const CompactPublicState& child_state,
