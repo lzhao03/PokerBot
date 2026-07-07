@@ -195,6 +195,9 @@ std::string FrozenPrebuildFailure(
   if (!stats.info_set_prebuild_complete) {
     AppendFailure(&failure, "infoset prebuild incomplete");
   }
+  if (!stats.private_bucket_prebuild_complete) {
+    AppendFailure(&failure, "private-bucket prebuild incomplete");
+  }
   return failure;
 }
 
@@ -329,6 +332,8 @@ void RunBenchmark(const std::string& name,
             << training.info_set_prebuild_complete << "\t"
             << training.prebuild_info_sets << "\t"
             << training.prebuild_action_entries << "\t"
+            << training.private_bucket_prebuild_complete << "\t"
+            << training.prebuild_private_bucket_rows << "\t"
             << training.warmup_seconds << "\t"
             << training.warmup_iterations << "\t"
             << training.warmup_cfr_updates << "\t"
@@ -479,6 +484,8 @@ int main(int argc, char** argv) {
               << "\tinfo_set_prebuild_seconds"
               << "\tinfo_set_prebuild_complete"
               << "\tprebuild_info_sets\tprebuild_action_entries"
+              << "\tprivate_bucket_prebuild_complete"
+              << "\tprebuild_private_bucket_rows"
               << "\twarmup_seconds\twarmup_iterations"
               << "\twarmup_cfr_node_updates"
               << "\twarmup_cfr_node_updates_per_second"

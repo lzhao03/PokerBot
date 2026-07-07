@@ -560,6 +560,7 @@ CFRSolver::CFRSolver(
     mutable_tables_->public_state_rows.reserve(public_state_cap);
     mutable_tables_->public_chance_child_ids.reserve(public_state_cap);
     mutable_tables_->chance_child_entries.reserve(public_state_cap);
+    mutable_tables_->private_bucket_rows.reserve(public_state_cap);
     mutable_tables_->public_info_set_slabs.reserve(public_state_cap);
     mutable_tables_->betting_history_ids.reserve(public_state_cap);
     mutable_tables_->betting_history_rows.reserve(public_state_cap);
@@ -2077,6 +2078,41 @@ bool CFRSolver::prebuild_info_set_rows(
   return true;
 }
 
+bool CFRSolver::prebuild_private_bucket_rows() {
+  if (frozen_) {
+    return true;
+  }
+
+  FrozenStrategyTables& tables = mutable_tables();
+  tables.private_bucket_rows.resize(tables.public_state_rows.size());
+  for (size_t public_state_id = 0;
+       public_state_id < tables.public_state_rows.size(); ++public_state_id) {
+    const PublicStateRow& row = tables.public_state_rows[public_state_id];
+    const uint32_t bucket_count =
+        card_abstraction_.private_bucket_count(row.state);
+    if (bucket_count == 0 || bucket_count > kComboCount) {
+      return false;
+    }
+    auto& bucket_row = tables.private_bucket_rows[public_state_id];
+    for (int combo = 0; combo < kComboCount; ++combo) {
+      const PrivateBucketId private_bucket =
+          card_abstraction_.private_bucket(static_cast<ComboId>(combo),
+                                           row.state);
+      if (private_bucket >= bucket_count) {
+        return false;
+      }
+      bucket_row[static_cast<size_t>(combo)] = private_bucket;
+    }
+  }
+  return true;
+}
+
+FrozenStrategyTables::PrivateBucketId
+CFRSolver::private_bucket_for_frozen_row(uint32_t public_state_id,
+                                         ComboId combo_id) const {
+  return frozen_tables_->private_bucket_rows[public_state_id][combo_id];
+}
+
 void CFRSolver::cache_action_betting_history_transition(
     GameTree::Node& node,
     int action_index,
@@ -2540,6 +2576,17 @@ void CFRSolver::run_iterations(int iterations,
       betting_history_transition_prebuild_complete &&
       chance_transition_prebuild_complete &&
       action_transition_prebuild_complete && info_set_prebuild_complete;
+  bool private_bucket_prebuild_complete = false;
+  if (last_training_run_stats_.info_set_prebuild_complete) {
+    private_bucket_prebuild_complete = prebuild_private_bucket_rows();
+    if (!private_bucket_prebuild_complete) {
+      LOG(INFO) << "Private-bucket prebuild failed; "
+                << "continuing without a parallel frozen phase";
+    }
+  }
+  last_training_run_stats_.private_bucket_prebuild_complete =
+      last_training_run_stats_.info_set_prebuild_complete &&
+      private_bucket_prebuild_complete;
   const bool prebuild_tables_are_action_complete =
       should_prebuild_public_states && public_state_prebuild_complete &&
       betting_history_transition_prebuild_complete &&
@@ -2552,12 +2599,17 @@ void CFRSolver::run_iterations(int iterations,
       prebuild_tables_are_action_complete
           ? static_cast<int64_t>(cumulative_->cumulative_regrets.size())
           : 0;
+  last_training_run_stats_.prebuild_private_bucket_rows =
+      last_training_run_stats_.private_bucket_prebuild_complete
+          ? static_cast<int64_t>(frozen_tables_->private_bucket_rows.size())
+          : 0;
   const bool can_run_frozen_parallel =
       last_training_run_stats_.public_state_prebuild_complete &&
       last_training_run_stats_.betting_history_transition_prebuild_complete &&
       last_training_run_stats_.chance_transition_prebuild_complete &&
       last_training_run_stats_.action_transition_prebuild_complete &&
-      last_training_run_stats_.info_set_prebuild_complete;
+      last_training_run_stats_.info_set_prebuild_complete &&
+      last_training_run_stats_.private_bucket_prebuild_complete;
 
   const bool auto_warmup =
       num_threads > 1 && !frozen_ && config_.warmup_iterations <= 0;
@@ -3166,7 +3218,7 @@ double CFRSolver::cfr_frozen_regret_only(
   const size_t action_count = row.action_count;
   const InfoSetAddress info_set_address{
       public_state_id, player,
-      card_abstraction_.private_bucket(player_cards.combo, row.state)};
+      private_bucket_for_frozen_row(public_state_id, player_cards.combo)};
   const InfoSetRow* info_set_row = find_info_set_row(info_set_address);
   const bool has_info_set_row =
       info_set_row != nullptr &&

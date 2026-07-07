@@ -181,6 +181,7 @@ class FrozenStrategyTables {
   absl::flat_hash_map<uint64_t, uint32_t> public_chance_child_ids;
   std::vector<ChanceChildEntry> chance_child_entries;
   std::vector<BettingHistoryRow> betting_history_rows;
+  std::vector<std::array<PrivateBucketId, kComboCount>> private_bucket_rows;
   size_t info_set_count = 0;
   std::vector<int> action_ids;
   std::vector<std::unique_ptr<PublicInfoSetSlab>> public_info_set_slabs;

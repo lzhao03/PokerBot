@@ -59,6 +59,7 @@ public:
     bool action_transition_prebuild_complete = false;
     bool chance_transition_prebuild_complete = false;
     bool info_set_prebuild_complete = false;
+    bool private_bucket_prebuild_complete = false;
     int64_t prebuild_public_states = 0;
     int64_t prebuild_betting_histories = 0;
     int64_t prebuild_betting_history_transitions = 0;
@@ -69,6 +70,7 @@ public:
     int64_t missing_chance_transitions = 0;
     int64_t prebuild_info_sets = 0;
     int64_t prebuild_action_entries = 0;
+    int64_t prebuild_private_bucket_rows = 0;
     double prebuild_seconds = 0.0;
     double info_set_prebuild_seconds = 0.0;
     int warmup_iterations = 0;
@@ -435,6 +437,9 @@ private:
       int64_t* missing_chance_transitions) const;
   bool prebuild_info_set_rows(const TrainingRangeView& player_a_range,
                               const TrainingRangeView& player_b_range);
+  bool prebuild_private_bucket_rows();
+  PrivateBucketId private_bucket_for_frozen_row(uint32_t public_state_id,
+                                                ComboId combo_id) const;
   const InfoSetRow* get_or_create_info_set_row(
       InfoSetAddress address,
       absl::Span<const int> action_ids);

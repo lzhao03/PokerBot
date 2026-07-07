@@ -100,6 +100,26 @@ class CFRSolverRegretTestPeer {
         .action_ids[static_cast<size_t>(action_index)];
   }
 
+  static size_t PrivateBucketRowCount(const CFRSolver& solver) {
+    return solver.frozen_tables_->private_bucket_rows.size();
+  }
+
+  static CFRSolver::PrivateBucketId CachedPrivateBucket(
+      const CFRSolver& solver,
+      uint32_t public_state_id,
+      ComboId combo_id) {
+    return solver.frozen_tables_->private_bucket_rows[public_state_id]
+        [combo_id];
+  }
+
+  static CFRSolver::PrivateBucketId ExpectedPrivateBucket(
+      const CFRSolver& solver,
+      uint32_t public_state_id,
+      ComboId combo_id) {
+    const auto& row = solver.frozen_tables_->public_state_rows[public_state_id];
+    return solver.card_abstraction_.private_bucket(combo_id, row.state);
+  }
+
   static uint32_t CompactActionChild(CFRSolver& solver,
                                      uint32_t public_state_id,
                                      int action_index) {
@@ -859,6 +879,35 @@ void CheckFullDepthTexturePublicBucketsEnterFrozenParallelPhase() {
          "full-depth texture public buckets should validate chance transitions");
   Expect(stats.info_set_prebuild_complete,
          "full-depth texture buckets should prebuild infosets");
+  Expect(stats.private_bucket_prebuild_complete,
+         "full-depth texture buckets should prebuild private-bucket rows");
+  Expect(stats.prebuild_private_bucket_rows ==
+             static_cast<int64_t>(solver.get_public_state_count()),
+         "private-bucket rows should cover every public state");
+  Expect(CFRSolverRegretTestPeer::PrivateBucketRowCount(solver) ==
+             solver.get_public_state_count(),
+         "private-bucket row table should match public-state count");
+  const uint32_t last_public_state_id =
+      static_cast<uint32_t>(solver.get_public_state_count() - 1);
+  const std::array<uint32_t, 3> public_state_ids = {
+      0,
+      last_public_state_id / 2,
+      last_public_state_id,
+  };
+  const std::array<ComboId, 3> combo_ids = {
+      static_cast<ComboId>(0),
+      static_cast<ComboId>(100),
+      static_cast<ComboId>(kComboCount - 1),
+  };
+  for (const uint32_t public_state_id : public_state_ids) {
+    for (const ComboId combo_id : combo_ids) {
+      Expect(CFRSolverRegretTestPeer::CachedPrivateBucket(
+                 solver, public_state_id, combo_id) ==
+                 CFRSolverRegretTestPeer::ExpectedPrivateBucket(
+                     solver, public_state_id, combo_id),
+             "cached private bucket should match card abstraction");
+    }
+  }
   Expect(stats.parallel_iterations > 0,
          "full-depth texture run should enter frozen parallel phase");
   Expect(stats.parallel_cfr_updates > stats.parallel_iterations,
