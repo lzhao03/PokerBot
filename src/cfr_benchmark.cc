@@ -281,6 +281,11 @@ bool UseParallelPrimaryMetric(
   return training.parallel_iterations > 0;
 }
 
+const char* PrimaryCfrPhase(
+    const poker::CFRSolver::TrainingRunStats& training) {
+  return UseParallelPrimaryMetric(training) ? "frozen" : "total";
+}
+
 int64_t PrimaryCfrNodeUpdates(const BenchmarkResult& result) {
   const auto& training = result.training_stats;
   return UseParallelPrimaryMetric(training) ? training.parallel_cfr_updates
@@ -310,7 +315,7 @@ void RunBenchmark(const std::string& name,
   const double primary_seconds = PrimarySeconds(result, elapsed.count());
   const int64_t primary_hands = PrimaryHands(result);
   std::cout << name << "\t" << elapsed.count() << "\t" << result.result << "\t"
-            << (UseParallelPrimaryMetric(training) ? "parallel" : "total")
+            << PrimaryCfrPhase(training)
             << "\t" << poker::CFRSolver::traversal_stats_enabled() << "\t"
             << primary_updates << "\t"
             << RatePerSecond(primary_updates, primary_seconds) << "\t"

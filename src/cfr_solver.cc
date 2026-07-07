@@ -2546,10 +2546,12 @@ void CFRSolver::run_iterations(int iterations,
   const int num_threads =
       config_.num_training_threads <= 1 ? 1 : config_.num_training_threads;
   const int max_depth = config_.max_depth;
+  const bool can_use_frozen_regret_only =
+      config_.regret_only_training && max_depth == 0;
 
   bool public_state_prebuild_complete = false;
   const bool should_prebuild_public_states =
-      num_threads > 1 && !frozen_ &&
+      !frozen_ && (num_threads > 1 || can_use_frozen_regret_only) &&
       (config_.max_public_states > 0 || max_depth > 0);
   if (should_prebuild_public_states) {
     VLOG(1) << "Prebuilding compact public-state rows...";
@@ -2561,7 +2563,7 @@ void CFRSolver::run_iterations(int iterations,
         std::chrono::duration<double>(prebuild_end - prebuild_start).count();
     if (!public_state_prebuild_complete) {
       LOG(INFO) << "Public-state prebuild stopped before completion; "
-                << "continuing without a parallel frozen phase";
+                << "continuing without a frozen phase";
     }
   }
   last_training_run_stats_.public_state_prebuild_complete =
@@ -2583,7 +2585,7 @@ void CFRSolver::run_iterations(int iterations,
             &last_training_run_stats_.missing_betting_history_transitions);
     if (!betting_history_transition_prebuild_complete) {
       LOG(INFO) << "Betting-history transition prebuild validation failed; "
-                << "continuing without a parallel frozen phase";
+                << "continuing without a frozen phase";
     }
   }
   last_training_run_stats_.betting_history_transition_prebuild_complete =
@@ -2599,7 +2601,7 @@ void CFRSolver::run_iterations(int iterations,
             &last_training_run_stats_.missing_chance_transitions);
     if (!chance_transition_prebuild_complete) {
       LOG(INFO) << "Chance-transition prebuild validation failed; "
-                << "continuing without a parallel frozen phase";
+                << "continuing without a frozen phase";
     }
   }
   last_training_run_stats_.chance_transition_prebuild_complete =
@@ -2617,7 +2619,7 @@ void CFRSolver::run_iterations(int iterations,
             &last_training_run_stats_.missing_action_transitions);
     if (!action_transition_prebuild_complete) {
       LOG(INFO) << "Action-transition prebuild validation failed; "
-                << "continuing without a parallel frozen phase";
+                << "continuing without a frozen phase";
     }
   }
   last_training_run_stats_.action_transition_prebuild_complete =
@@ -2640,7 +2642,7 @@ void CFRSolver::run_iterations(int iterations,
             .count();
     if (!info_set_prebuild_complete) {
       LOG(INFO) << "Infoset prebuild stopped before completion; "
-                << "continuing without a parallel frozen phase";
+                << "continuing without a frozen phase";
     }
   }
   last_training_run_stats_.info_set_prebuild_complete =
@@ -2653,7 +2655,7 @@ void CFRSolver::run_iterations(int iterations,
     private_bucket_prebuild_complete = prebuild_private_bucket_rows();
     if (!private_bucket_prebuild_complete) {
       LOG(INFO) << "Private-bucket prebuild failed; "
-                << "continuing without a parallel frozen phase";
+                << "continuing without a frozen phase";
     }
   }
   last_training_run_stats_.private_bucket_prebuild_complete =
@@ -2665,7 +2667,7 @@ void CFRSolver::run_iterations(int iterations,
         prebuild_frozen_info_set_action_offsets();
     if (!frozen_info_set_lookup_prebuild_complete) {
       LOG(INFO) << "Frozen infoset lookup prebuild failed; "
-                << "continuing without a parallel frozen phase";
+                << "continuing without a frozen phase";
     }
   }
   last_training_run_stats_.frozen_info_set_lookup_prebuild_complete =
@@ -2692,7 +2694,7 @@ void CFRSolver::run_iterations(int iterations,
           ? static_cast<int64_t>(
                 frozen_tables_->frozen_info_set_action_offsets.size())
           : 0;
-  const bool can_run_frozen_parallel =
+  const bool can_run_frozen_phase =
       last_training_run_stats_.public_state_prebuild_complete &&
       last_training_run_stats_.betting_history_transition_prebuild_complete &&
       last_training_run_stats_.chance_transition_prebuild_complete &&
@@ -2700,16 +2702,19 @@ void CFRSolver::run_iterations(int iterations,
       last_training_run_stats_.info_set_prebuild_complete &&
       last_training_run_stats_.private_bucket_prebuild_complete &&
       last_training_run_stats_.frozen_info_set_lookup_prebuild_complete;
+  const bool should_run_frozen_phase =
+      can_run_frozen_phase && (num_threads > 1 || can_use_frozen_regret_only);
 
   const bool auto_warmup =
-      num_threads > 1 && !frozen_ && config_.warmup_iterations <= 0;
-  int warmup_count =
-      num_threads > 1 && !frozen_ && config_.warmup_iterations > 0
-          ? std::min(std::max(config_.warmup_iterations, kPlayerCount),
-                     iterations)
-          : iterations;
-  if (num_threads > 1 && !frozen_ && !can_run_frozen_parallel) {
-    warmup_count = iterations;
+      should_run_frozen_phase && !frozen_ && config_.warmup_iterations <= 0;
+  int warmup_count = iterations;
+  if (should_run_frozen_phase && !frozen_ &&
+      config_.warmup_iterations > 0) {
+    const int requested_warmup =
+        can_use_frozen_regret_only
+            ? config_.warmup_iterations
+            : std::max(config_.warmup_iterations, kPlayerCount);
+    warmup_count = std::min(requested_warmup, iterations);
   }
 
   // Phase 1: single-threaded warmup (allocates public states + info sets).
@@ -2772,7 +2777,7 @@ void CFRSolver::run_iterations(int iterations,
           current_public_states >=
               static_cast<size_t>(config_.max_public_states);
       // Cap hits mean the tree is incomplete; do not freeze and turn the
-      // parallel phase into mostly skipped missing-child branches.
+      // frozen phase into mostly skipped missing-child branches.
       if (!info_set_cap_hit && !public_state_cap_hit &&
           no_growth_iterations >= kAutoWarmupNoGrowthLimit) {
         break;
@@ -2788,15 +2793,15 @@ void CFRSolver::run_iterations(int iterations,
 
   const int remaining = iterations - completed_warmup;
   if (remaining > 0) {
-    // Phase 2: freeze the tables and run remaining iterations in parallel.
+    // Phase 2: freeze the tables and run remaining iterations on workers.
     frozen_tables_ = mutable_tables_;
     mutable_tables_.reset();
     frozen_ = true;
     require_frozen_children_ = true;
     LOG(INFO) << "Frozen after warmup: " << get_info_set_count()
               << " info sets, " << iterations_run_
-              << " warmup iterations. Starting parallel phase ("
-              << remaining << " iterations, " << num_threads << " threads)...";
+              << " warmup iterations. Starting frozen phase ("
+              << remaining << " iterations, " << num_threads << " workers)...";
     const int64_t parallel_start_updates = cfr_update_count_;
     const auto parallel_start = std::chrono::steady_clock::now();
     run_iterations_parallel(remaining, num_threads, *root_public_state_id,

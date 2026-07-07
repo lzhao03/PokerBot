@@ -960,6 +960,46 @@ void CheckFullDepthTexturePublicBucketsEnterFrozenParallelPhase() {
          "full-depth frozen parallel phase should not allocate public states");
 }
 
+void CheckSingleWorkerFullDepthTexturePublicBucketsEnterFrozenPhase() {
+  SolverConfig config;
+  config.starting_stack_size = 20;
+  config.max_depth = 0;
+  config.max_public_states = 10000;
+  config.num_training_threads = 1;
+  config.warmup_iterations = 1;
+  config.regret_only_training = true;
+
+  HandRange player_a_range;
+  player_a_range.set_from_string("AA");
+  HandRange player_b_range;
+  player_b_range.set_from_string("KK");
+
+  CFRSolver solver(config);
+  solver.run(4, player_a_range, player_b_range);
+
+  const CFRSolver::TrainingRunStats stats =
+      solver.get_last_training_run_stats();
+  Expect(stats.public_state_prebuild_complete,
+         "single-worker full-depth texture public buckets should complete prebuild");
+  Expect(stats.info_set_prebuild_complete,
+         "single-worker full-depth texture buckets should prebuild infosets");
+  Expect(stats.private_bucket_prebuild_complete,
+         "single-worker full-depth texture buckets should prebuild private buckets");
+  Expect(stats.frozen_info_set_lookup_prebuild_complete,
+         "single-worker full-depth texture buckets should prebuild frozen lookup");
+  Expect(stats.warmup_iterations == 1,
+         "single-worker frozen training should use configured warmup");
+  Expect(stats.parallel_iterations == 3,
+         "single-worker frozen training should report remaining frozen iterations");
+  Expect(stats.warmup_cfr_updates > 0,
+         "single-worker frozen training should report warmup CFR work");
+  Expect(stats.parallel_cfr_updates > stats.parallel_iterations,
+         "single-worker frozen training should do nontrivial frozen CFR work");
+  Expect(static_cast<int64_t>(solver.get_public_state_count()) ==
+             stats.prebuild_public_states,
+         "single-worker frozen phase should not allocate public states");
+}
+
 }  // namespace poker
 
 int main() {
@@ -977,5 +1017,6 @@ int main() {
   poker::CheckBettingHistoryChanceTransitionValidationCatchesMissingChild();
   poker::CheckTexturePublicBucketsEnterFrozenParallelPhase();
   poker::CheckFullDepthTexturePublicBucketsEnterFrozenParallelPhase();
+  poker::CheckSingleWorkerFullDepthTexturePublicBucketsEnterFrozenPhase();
   return 0;
 }
