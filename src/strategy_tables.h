@@ -57,6 +57,8 @@ class FrozenStrategyTables {
  public:
   using PrivateBucketId = uint16_t;
   using PublicBucketId = uint64_t;
+  static constexpr uint32_t kInvalidActionOffset =
+      std::numeric_limits<uint32_t>::max();
 
   struct BettingHistoryKey {
     static constexpr int kInlineHistoryValues = 48;
@@ -173,6 +175,9 @@ class FrozenStrategyTables {
     std::array<PublicInfoSetSlabPlayer, kPlayerCount> players;
   };
 
+  using FrozenInfoSetActionOffsetRow =
+      std::array<std::array<uint32_t, kComboCount>, kPlayerCount>;
+
   absl::flat_hash_map<BettingHistoryKey, uint32_t, BettingHistoryKeyHash>
       betting_history_ids;
   absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>
@@ -182,6 +187,7 @@ class FrozenStrategyTables {
   std::vector<ChanceChildEntry> chance_child_entries;
   std::vector<BettingHistoryRow> betting_history_rows;
   std::vector<std::array<PrivateBucketId, kComboCount>> private_bucket_rows;
+  std::vector<FrozenInfoSetActionOffsetRow> frozen_info_set_action_offsets;
   size_t info_set_count = 0;
   std::vector<int> action_ids;
   std::vector<std::unique_ptr<PublicInfoSetSlab>> public_info_set_slabs;

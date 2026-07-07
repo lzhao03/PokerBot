@@ -561,6 +561,7 @@ CFRSolver::CFRSolver(
     mutable_tables_->public_chance_child_ids.reserve(public_state_cap);
     mutable_tables_->chance_child_entries.reserve(public_state_cap);
     mutable_tables_->private_bucket_rows.reserve(public_state_cap);
+    mutable_tables_->frozen_info_set_action_offsets.reserve(public_state_cap);
     mutable_tables_->public_info_set_slabs.reserve(public_state_cap);
     mutable_tables_->betting_history_ids.reserve(public_state_cap);
     mutable_tables_->betting_history_rows.reserve(public_state_cap);
@@ -2107,10 +2108,63 @@ bool CFRSolver::prebuild_private_bucket_rows() {
   return true;
 }
 
+bool CFRSolver::prebuild_frozen_info_set_action_offsets() {
+  if (frozen_) {
+    return true;
+  }
+
+  FrozenStrategyTables& tables = mutable_tables();
+  tables.frozen_info_set_action_offsets.resize(tables.public_state_rows.size());
+  for (auto& offset_row : tables.frozen_info_set_action_offsets) {
+    for (auto& player_offsets : offset_row) {
+      player_offsets.fill(FrozenStrategyTables::kInvalidActionOffset);
+    }
+  }
+
+  for (size_t public_state_id = 0;
+       public_state_id < tables.public_state_rows.size(); ++public_state_id) {
+    const PublicStateRow& public_row = tables.public_state_rows[public_state_id];
+    const PublicInfoSetSlab* slab =
+        public_info_set_slab(static_cast<uint32_t>(public_state_id));
+    if (slab == nullptr) {
+      continue;
+    }
+
+    auto& offset_row =
+        tables.frozen_info_set_action_offsets[public_state_id];
+    for (int player = 0; player < kPlayerCount; ++player) {
+      const PublicInfoSetSlabPlayer& player_slab = slab->players[player];
+      auto& player_offsets = offset_row[player];
+      for (int bucket = 0; bucket < kComboCount; ++bucket) {
+        const InfoSetRow* info_set_row = find_info_set_row(
+            player_slab, static_cast<PrivateBucketId>(bucket));
+        if (info_set_row == nullptr) {
+          continue;
+        }
+        if (info_set_row->action_count != public_row.action_count) {
+          return false;
+        }
+        player_offsets[static_cast<size_t>(bucket)] =
+            info_set_row->action_offset;
+      }
+    }
+  }
+
+  return true;
+}
+
 FrozenStrategyTables::PrivateBucketId
 CFRSolver::private_bucket_for_frozen_row(uint32_t public_state_id,
                                          ComboId combo_id) const {
   return frozen_tables_->private_bucket_rows[public_state_id][combo_id];
+}
+
+uint32_t CFRSolver::frozen_info_set_action_offset(
+    uint32_t public_state_id,
+    int player,
+    PrivateBucketId private_bucket) const {
+  return frozen_tables_->frozen_info_set_action_offsets[public_state_id][player]
+                                                        [private_bucket];
 }
 
 void CFRSolver::cache_action_betting_history_transition(
@@ -2587,6 +2641,18 @@ void CFRSolver::run_iterations(int iterations,
   last_training_run_stats_.private_bucket_prebuild_complete =
       last_training_run_stats_.info_set_prebuild_complete &&
       private_bucket_prebuild_complete;
+  bool frozen_info_set_lookup_prebuild_complete = false;
+  if (last_training_run_stats_.private_bucket_prebuild_complete) {
+    frozen_info_set_lookup_prebuild_complete =
+        prebuild_frozen_info_set_action_offsets();
+    if (!frozen_info_set_lookup_prebuild_complete) {
+      LOG(INFO) << "Frozen infoset lookup prebuild failed; "
+                << "continuing without a parallel frozen phase";
+    }
+  }
+  last_training_run_stats_.frozen_info_set_lookup_prebuild_complete =
+      last_training_run_stats_.private_bucket_prebuild_complete &&
+      frozen_info_set_lookup_prebuild_complete;
   const bool prebuild_tables_are_action_complete =
       should_prebuild_public_states && public_state_prebuild_complete &&
       betting_history_transition_prebuild_complete &&
@@ -2603,13 +2669,19 @@ void CFRSolver::run_iterations(int iterations,
       last_training_run_stats_.private_bucket_prebuild_complete
           ? static_cast<int64_t>(frozen_tables_->private_bucket_rows.size())
           : 0;
+  last_training_run_stats_.prebuild_frozen_info_set_lookup_rows =
+      last_training_run_stats_.frozen_info_set_lookup_prebuild_complete
+          ? static_cast<int64_t>(
+                frozen_tables_->frozen_info_set_action_offsets.size())
+          : 0;
   const bool can_run_frozen_parallel =
       last_training_run_stats_.public_state_prebuild_complete &&
       last_training_run_stats_.betting_history_transition_prebuild_complete &&
       last_training_run_stats_.chance_transition_prebuild_complete &&
       last_training_run_stats_.action_transition_prebuild_complete &&
       last_training_run_stats_.info_set_prebuild_complete &&
-      last_training_run_stats_.private_bucket_prebuild_complete;
+      last_training_run_stats_.private_bucket_prebuild_complete &&
+      last_training_run_stats_.frozen_info_set_lookup_prebuild_complete;
 
   const bool auto_warmup =
       num_threads > 1 && !frozen_ && config_.warmup_iterations <= 0;
@@ -3216,15 +3288,12 @@ double CFRSolver::cfr_frozen_regret_only(
   const PrivateCards& player_cards =
       player == 0 ? player_a_cards : player_b_cards;
   const size_t action_count = row.action_count;
-  const InfoSetAddress info_set_address{
-      public_state_id, player,
-      private_bucket_for_frozen_row(public_state_id, player_cards.combo)};
-  const InfoSetRow* info_set_row = find_info_set_row(info_set_address);
+  const PrivateBucketId private_bucket =
+      private_bucket_for_frozen_row(public_state_id, player_cards.combo);
+  const uint32_t info_set_action_offset =
+      frozen_info_set_action_offset(public_state_id, player, private_bucket);
   const bool has_info_set_row =
-      info_set_row != nullptr &&
-      static_cast<size_t>(info_set_row->action_count) == action_count;
-  const size_t info_set_action_offset =
-      has_info_set_row ? info_set_row->action_offset : 0;
+      info_set_action_offset != FrozenStrategyTables::kInvalidActionOffset;
 
   double action_probabilities[GameTree::kMaxActionsPerNode];
   double action_values[GameTree::kMaxActionsPerNode];

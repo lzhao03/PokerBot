@@ -120,6 +120,31 @@ class CFRSolverRegretTestPeer {
     return solver.card_abstraction_.private_bucket(combo_id, row.state);
   }
 
+  static size_t FrozenInfoSetLookupRowCount(const CFRSolver& solver) {
+    return solver.frozen_tables_->frozen_info_set_action_offsets.size();
+  }
+
+  static uint32_t CachedInfoSetActionOffset(
+      const CFRSolver& solver,
+      uint32_t public_state_id,
+      int player,
+      CFRSolver::PrivateBucketId private_bucket) {
+    return solver.frozen_tables_
+        ->frozen_info_set_action_offsets[public_state_id][player]
+                                        [private_bucket];
+  }
+
+  static uint32_t ExpectedInfoSetActionOffset(
+      const CFRSolver& solver,
+      uint32_t public_state_id,
+      int player,
+      CFRSolver::PrivateBucketId private_bucket) {
+    const CFRSolver::InfoSetRow* row = solver.find_info_set_row(
+        {public_state_id, player, private_bucket});
+    return row == nullptr ? FrozenStrategyTables::kInvalidActionOffset
+                          : row->action_offset;
+  }
+
   static uint32_t CompactActionChild(CFRSolver& solver,
                                      uint32_t public_state_id,
                                      int action_index) {
@@ -881,12 +906,20 @@ void CheckFullDepthTexturePublicBucketsEnterFrozenParallelPhase() {
          "full-depth texture buckets should prebuild infosets");
   Expect(stats.private_bucket_prebuild_complete,
          "full-depth texture buckets should prebuild private-bucket rows");
+  Expect(stats.frozen_info_set_lookup_prebuild_complete,
+         "full-depth texture buckets should prebuild frozen infoset lookup");
   Expect(stats.prebuild_private_bucket_rows ==
              static_cast<int64_t>(solver.get_public_state_count()),
          "private-bucket rows should cover every public state");
+  Expect(stats.prebuild_frozen_info_set_lookup_rows ==
+             static_cast<int64_t>(solver.get_public_state_count()),
+         "frozen infoset lookup should cover every public state");
   Expect(CFRSolverRegretTestPeer::PrivateBucketRowCount(solver) ==
              solver.get_public_state_count(),
          "private-bucket row table should match public-state count");
+  Expect(CFRSolverRegretTestPeer::FrozenInfoSetLookupRowCount(solver) ==
+             solver.get_public_state_count(),
+         "frozen infoset lookup table should match public-state count");
   const uint32_t last_public_state_id =
       static_cast<uint32_t>(solver.get_public_state_count() - 1);
   const std::array<uint32_t, 3> public_state_ids = {
@@ -906,6 +939,16 @@ void CheckFullDepthTexturePublicBucketsEnterFrozenParallelPhase() {
                  CFRSolverRegretTestPeer::ExpectedPrivateBucket(
                      solver, public_state_id, combo_id),
              "cached private bucket should match card abstraction");
+      for (int player = 0; player < kPlayerCount; ++player) {
+        const CFRSolver::PrivateBucketId private_bucket =
+            CFRSolverRegretTestPeer::CachedPrivateBucket(
+                solver, public_state_id, combo_id);
+        Expect(CFRSolverRegretTestPeer::CachedInfoSetActionOffset(
+                   solver, public_state_id, player, private_bucket) ==
+                   CFRSolverRegretTestPeer::ExpectedInfoSetActionOffset(
+                       solver, public_state_id, player, private_bucket),
+               "cached frozen infoset offset should match slab lookup");
+      }
     }
   }
   Expect(stats.parallel_iterations > 0,
