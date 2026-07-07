@@ -362,7 +362,7 @@ class CFRSolver {
       absl::Span<const int> action_ids,
       std::vector<TrainingRangeView>& conditioned_ranges);
   void fill_regret_matched_strategy_for_row(
-      const InfoSetRow* row,
+      const InfoSetRow& row,
       absl::Span<const int> action_ids,
       double* action_probabilities);
   double utility(const CompactPublicState& state,

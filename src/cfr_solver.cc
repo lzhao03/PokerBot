@@ -2497,6 +2497,11 @@ void CFRSolver::condition_ranges_for_actions(
   const PublicInfoSetSlabPlayer* player_slab =
       public_slab != nullptr ? &public_slab->players[player] : nullptr;
   double action_probabilities[GameTree::kMaxActionsPerNode] = {};
+  auto fill_uniform_strategy = [&] {
+    const double uniform_probability = 1.0 / action_count;
+    std::fill(action_probabilities, action_probabilities + action_count,
+              uniform_probability);
+  };
   for (size_t i = 0; i < range_size; ++i) {
     const float range_weight = range.weight(i);
     const ComboId combo_id = range.combo(i);
@@ -2506,13 +2511,15 @@ void CFRSolver::condition_ranges_for_actions(
 
     const PrivateBucketId private_bucket =
         card_abstraction_.private_bucket(combo_id, state);
-    const InfoSetRow* row = nullptr;
-    if (player_slab != nullptr) {
-      row = find_info_set_row(*player_slab, private_bucket);
+    if (player_slab == nullptr) {
+      fill_uniform_strategy();
+    } else if (const InfoSetRow* row =
+                   find_info_set_row(*player_slab, private_bucket)) {
+      fill_regret_matched_strategy_for_row(
+          *row, conditioned_action_ids, action_probabilities);
+    } else {
+      fill_uniform_strategy();
     }
-
-    fill_regret_matched_strategy_for_row(row, conditioned_action_ids,
-                                         action_probabilities);
 
     for (size_t action_index = 0; action_index < action_count;
          ++action_index) {
@@ -2527,7 +2534,7 @@ void CFRSolver::condition_ranges_for_actions(
 }
 
 void CFRSolver::fill_regret_matched_strategy_for_row(
-    const InfoSetRow* row,
+    const InfoSetRow& row,
     absl::Span<const int> conditioned_action_ids,
     double* action_probabilities) {
   const size_t action_count = conditioned_action_ids.size();
@@ -2535,21 +2542,16 @@ void CFRSolver::fill_regret_matched_strategy_for_row(
     return;
   }
   const double fallback_probability = 1.0 / action_count;
-  if (row == nullptr) {
-    std::fill(action_probabilities, action_probabilities + action_count,
-              fallback_probability);
-    return;
-  }
 
   const auto& action_ids = frozen_tables_->action_ids;
   const auto& regrets = cumulative_->cumulative_regrets;
   double positive_regret_sum = 0.0;
   std::fill(action_probabilities, action_probabilities + action_count, 0.0);
   const size_t info_set_action_count =
-      std::min(action_count, static_cast<size_t>(row->action_count));
+      std::min(action_count, static_cast<size_t>(row.action_count));
   for (size_t action_index = 0; action_index < info_set_action_count;
        ++action_index) {
-    const size_t table_index = row->action_offset + action_index;
+    const size_t table_index = row.action_offset + action_index;
     if (action_ids[table_index] != conditioned_action_ids[action_index]) {
       continue;
     }
