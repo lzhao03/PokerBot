@@ -131,7 +131,6 @@ cc_library(
         ":combo",
         ":hand_evaluator",
         ":poker_types",
-        "@abseil-cpp//absl/container:flat_hash_map",
     ],
     visibility = ["//visibility:public"],
 )

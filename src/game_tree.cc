@@ -1,56 +1,9 @@
 #include "src/game_tree.h"
 
 #include <algorithm>
-#include <cmath>
 #include <stdexcept>
-#include <string>
-#include <utility>
 
 namespace poker {
-
-// --- GameTree::Node inline method implementations ---
-
-void GameTree::Node::add_action(const GameAction& action, int key) {
-  if (action_count >= kMaxActionsPerNode) {
-    throw std::logic_error(
-        "GameTree::Node exceeded kMaxActionsPerNode (" +
-        std::to_string(kMaxActionsPerNode) + "). Increase the constant.");
-  }
-  actions[action_count++] = {action, key, kInvalidNodeId};
-}
-
-GameTree::NodeId GameTree::Node::find_child(int key) const {
-  for (uint8_t i = 0; i < action_count; ++i) {
-    if (actions[i].key == key) return actions[i].child_id;
-  }
-  return kInvalidNodeId;
-}
-
-void GameTree::Node::set_child(int key, NodeId child_id) {
-  for (uint8_t i = 0; i < action_count; ++i) {
-    if (actions[i].key == key) {
-      actions[i].child_id = child_id;
-      return;
-    }
-  }
-  throw std::logic_error("set_child: key not found in action table");
-}
-
-GameTree::NodeId GameTree::Node::child_for_action_index(
-    int action_index) const {
-  if (action_index < 0 || action_index >= action_count) {
-    throw std::logic_error("child_for_action_index: action index out of range");
-  }
-  return actions[action_index].child_id;
-}
-
-void GameTree::Node::set_child_for_action_index(int action_index,
-                                                NodeId child_id) {
-  if (action_index < 0 || action_index >= action_count) {
-    throw std::logic_error("set_child_for_action_index: action index out of range");
-  }
-  actions[action_index].child_id = child_id;
-}
 
 namespace {
 
@@ -304,13 +257,6 @@ std::vector<GameAction> LegalActionsForState(const SolverConfig& config,
   return actions;
 }
 
-void SetLegalActions(GameTree::Node& node, std::vector<GameAction> actions) {
-  node.action_count = 0;
-  for (const GameAction& action : actions) {
-    node.add_action(action, GameTree::action_key(action));
-  }
-}
-
 void AppendStateHistory(GameState& state, const GameAction& action) {
   state.history.push_back(action);
 }
@@ -456,57 +402,13 @@ State ApplyActionForState(const State& state, const GameAction& action) {
 
 }  // namespace
 
-GameTree::GameTree(const SolverConfig& config) : config_(config) {
-  if (config.max_public_states > 0) {
-    // The legacy diagnostic tree still shares the public-state cap as its
-    // memory guard until best-response diagnostics move off GameTree nodes.
-    const size_t total_nodes = static_cast<size_t>(config.max_public_states);
-    const size_t num_blocks =
-        (total_nodes + kNodeBlockSize - 1) / kNodeBlockSize;
-    node_blocks_.reserve(num_blocks);
-  }
-}
+GameTree::GameTree(const SolverConfig& config) : config_(config) {}
 
 int GameTree::action_key(const GameAction& action) {
   if (action.amount < 0 || action.amount >= kActionKeyMultiplier) {
     throw std::invalid_argument("Action amount is outside action-key range");
   }
   return static_cast<int>(action.kind) * kActionKeyMultiplier + action.amount;
-}
-
-GameTree::Node& GameTree::root() {
-  if (!root_id_.has_value()) {
-    throw std::logic_error("Game tree root has not been built");
-  }
-  return node(*root_id_);
-}
-
-const GameTree::Node& GameTree::root() const {
-  if (!root_id_.has_value()) {
-    throw std::logic_error("Game tree root has not been built");
-  }
-  return node(*root_id_);
-}
-
-GameTree::Node& GameTree::build_tree(const GameState& initial_state) {
-  node_blocks_.clear();
-  chance_children_.clear();
-  node_count_ = 0;
-  root_id_ = node_count_;
-  Node& root = add_node(Node());
-  root.state = initial_state;
-  root.is_terminal = is_terminal(initial_state);
-  root.player_to_act = get_player_to_act(initial_state);
-
-  if (root.is_terminal) {
-    root.utility = 0.0;
-  } else if (root.player_to_act == -1) {
-    root.is_chance_node = true;
-  } else {
-    SetLegalActions(root, get_legal_actions(initial_state));
-  }
-
-  return root;
 }
 
 std::vector<GameAction> GameTree::get_legal_actions(
@@ -627,148 +529,6 @@ int GameTree::get_player_to_act(const GameState& state) const {
 
 int GameTree::get_player_to_act(const CompactPublicState& state) const {
   return PlayerToAct(state);
-}
-
-GameTree::Node& GameTree::create_child_node(Node& parent,
-                                            int child_key,
-                                            const GameAction& action) {
-  return add_child(parent, child_key, make_child_node(parent, action));
-}
-
-GameTree::Node& GameTree::create_child_node(Node& parent, int action_index) {
-  if (parent.is_chance_node) {
-    throw std::invalid_argument("Use create_chance_child_node for chance nodes");
-  }
-  if (action_index < 0 || action_index >= parent.action_count) {
-    throw std::logic_error("create_child_node: action index out of range");
-  }
-  const NodeId existing = parent.child_for_action_index(action_index);
-  if (existing != kInvalidNodeId) {
-    return node(existing);
-  }
-
-  const NodeId child_id = node_count_;
-  add_node(make_child_node(parent, parent.actions[action_index].action));
-  parent.set_child_for_action_index(action_index, child_id);
-  return node(child_id);
-}
-
-GameTree::Node GameTree::make_child_node(
-    const Node& parent,
-    const GameAction& action) const {
-  Node child;
-  child.state = apply_action(parent.state, action);
-  child.player_to_act = get_player_to_act(child.state);
-  child.is_terminal = is_terminal(child.state);
-  child.is_chance_node = !child.is_terminal && child.player_to_act == -1;
-
-  if (child.is_terminal) {
-    child.utility = 0.0;
-  } else if (!child.is_chance_node) {
-    SetLegalActions(child, get_legal_actions(child.state));
-  }
-
-  return child;
-}
-
-GameTree::Node& GameTree::create_chance_child_node(
-    Node& parent,
-    int child_key,
-    absl::Span<const CardId> cards) {
-  return add_child(parent, child_key, make_chance_child_node(parent, cards));
-}
-
-GameTree::Node GameTree::make_chance_child_node(
-    const Node& parent,
-    absl::Span<const CardId> cards) const {
-  if (!parent.is_chance_node) {
-    throw std::invalid_argument("Parent node is not a chance node");
-  }
-
-  Node child;
-  child.state = parent.state;
-  AdvanceStreet(child.state, cards);
-  child.is_terminal = is_terminal(child.state);
-  child.player_to_act = get_player_to_act(child.state);
-  child.is_chance_node = !child.is_terminal && child.player_to_act == -1;
-
-  if (child.is_terminal) {
-    child.utility = 0.0;
-  } else if (!child.is_chance_node) {
-    SetLegalActions(child, get_legal_actions(child.state));
-  }
-
-  return child;
-}
-
-GameTree::NodeId GameTree::find_chance_child(NodeId parent_id,
-                                             int child_key) const {
-  auto it = chance_children_.find(ChanceChildKey(parent_id, child_key));
-  if (it == chance_children_.end()) return kInvalidNodeId;
-  return it->second;
-}
-
-void GameTree::set_chance_child(NodeId parent_id, int child_key,
-                                NodeId child_id) {
-  chance_children_[ChanceChildKey(parent_id, child_key)] = child_id;
-}
-
-GameTree::Node& GameTree::add_child(Node& parent, int child_key, Node child) {
-  // Route chance-node child lookup through the side-table.
-  if (parent.is_chance_node) {
-    NodeId existing = find_chance_child(parent.id, child_key);
-    if (existing != kInvalidNodeId) {
-      return node(existing);
-    }
-    const NodeId child_id = node_count_;
-    add_node(std::move(child));
-    // Node references are stable: each NodeBlock pre-reserves kNodeBlockSize
-    // entries, so no internal reallocation occurs.  parent is still valid.
-    set_chance_child(parent.id, child_key, child_id);
-    return node(child_id);
-  }
-
-  // Player-action node: the action key was pre-registered by SetLegalActions.
-  NodeId existing = parent.find_child(child_key);
-  if (existing != kInvalidNodeId) {
-    return node(existing);
-  }
-
-  const NodeId child_id = node_count_;
-  add_node(std::move(child));
-  // Node references are stable (pre-reserved blocks), so parent is still valid.
-  parent.set_child(child_key, child_id);
-  return node(child_id);
-}
-
-GameTree::Node& GameTree::node(NodeId id) {
-  if (id >= node_count_) {
-    throw std::logic_error("Invalid game tree node ID " +
-                           std::to_string(id) + " for arena size " +
-                           std::to_string(node_count_));
-  }
-  return node_blocks_[id / kNodeBlockSize]->nodes[id % kNodeBlockSize];
-}
-
-const GameTree::Node& GameTree::node(NodeId id) const {
-  if (id >= node_count_) {
-    throw std::logic_error("Invalid game tree node ID " +
-                           std::to_string(id) + " for arena size " +
-                           std::to_string(node_count_));
-  }
-  return node_blocks_[id / kNodeBlockSize]->nodes[id % kNodeBlockSize];
-}
-
-GameTree::Node& GameTree::add_node(Node node) {
-  if (node_blocks_.empty() ||
-      node_blocks_.back()->nodes.size() == kNodeBlockSize) {
-    node_blocks_.push_back(std::make_unique<NodeBlock>());
-  }
-  NodeBlock& block = *node_blocks_.back();
-  node.id = node_count_;
-  block.nodes.push_back(std::move(node));
-  ++node_count_;
-  return block.nodes.back();
 }
 
 bool GameTree::is_betting_round_over(const GameState& state) const {

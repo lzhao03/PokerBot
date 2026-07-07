@@ -917,7 +917,7 @@ uint32_t CFRSolver::get_or_create_action_child_betting_history_id(
     if (action_index >= 0 && action_index < parent_row.action_count) {
       const uint32_t child_id =
           parent_row.action_child_ids[static_cast<size_t>(action_index)];
-      if (child_id != GameTree::Node::kInvalidBettingHistoryId) {
+      if (child_id != GameTree::kInvalidBettingHistoryId) {
         return child_id;
       }
     }
@@ -954,7 +954,7 @@ uint32_t CFRSolver::get_or_create_chance_child_betting_history_id(
     BettingHistoryRow& parent_row =
         tables.betting_history_rows[parent_betting_history_id];
     if (parent_row.chance_child_id !=
-        GameTree::Node::kInvalidBettingHistoryId) {
+        GameTree::kInvalidBettingHistoryId) {
       return parent_row.chance_child_id;
     }
   }
@@ -998,7 +998,7 @@ std::optional<uint32_t> CFRSolver::action_child_public_state(
   }
   const uint32_t child_id =
       row.action_child_ids[static_cast<size_t>(action_index)];
-  if (child_id == GameTree::Node::kInvalidPublicStateId ||
+  if (child_id == GameTree::kInvalidPublicStateId ||
       child_id == kCappedPublicStateId) {
     return std::nullopt;
   }
@@ -1106,7 +1106,7 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
 
   const size_t action_slot = static_cast<size_t>(action_index);
   const uint32_t existing_child_id = read_row.action_child_ids[action_slot];
-  if (existing_child_id != GameTree::Node::kInvalidPublicStateId) {
+  if (existing_child_id != GameTree::kInvalidPublicStateId) {
     POKER_RECORD_TRAVERSAL_STAT(
         ++traversal_stats_.betting_history_transition_hits);
     if (existing_child_id == kCappedPublicStateId) {
@@ -1125,7 +1125,7 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
       const uint32_t child_betting_history_id =
           parent_betting_history.action_child_ids[action_slot];
       if (child_betting_history_id !=
-          GameTree::Node::kInvalidBettingHistoryId) {
+          GameTree::kInvalidBettingHistoryId) {
         const PublicStateKey child_key{
             child_betting_history_id,
             read_row.public_bucket,
@@ -1214,7 +1214,7 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
     const uint32_t child_betting_history_id =
         betting_history_rows[cached_parent_betting_history_id].chance_child_id;
     if (child_betting_history_id !=
-        GameTree::Node::kInvalidBettingHistoryId) {
+        GameTree::kInvalidBettingHistoryId) {
       const PublicStateKey child_public_key{
           child_betting_history_id,
           static_cast<PublicBucketId>(child_key),
@@ -1367,7 +1367,7 @@ void CFRSolver::rebuild_chance_child_entries() {
   struct PendingChanceChild {
     uint32_t parent_id = 0;
     int key = 0;
-    uint32_t public_state_id = GameTree::Node::kInvalidPublicStateId;
+    uint32_t public_state_id = GameTree::kInvalidPublicStateId;
   };
 
   std::vector<PendingChanceChild> pending;
@@ -1399,7 +1399,7 @@ void CFRSolver::rebuild_chance_child_entries() {
   }
   tables.chance_child_entries.clear();
   tables.chance_child_entries.reserve(pending.size());
-  uint32_t current_parent_id = GameTree::Node::kInvalidPublicStateId;
+  uint32_t current_parent_id = GameTree::kInvalidPublicStateId;
   for (const PendingChanceChild& child : pending) {
     if (child.public_state_id >= tables.public_state_rows.size()) {
       continue;
@@ -1453,7 +1453,7 @@ CFRSolver::PrebuildValidationStats CFRSolver::validate_prebuilt_transitions(
   };
 
   auto valid_public_child = [&](uint32_t public_state_id) {
-    return public_state_id != GameTree::Node::kInvalidPublicStateId &&
+    return public_state_id != GameTree::kInvalidPublicStateId &&
            public_state_id != kCappedPublicStateId &&
            public_state_id < rows.size();
   };
@@ -1507,7 +1507,7 @@ CFRSolver::PrebuildValidationStats CFRSolver::validate_prebuilt_transitions(
         const bool valid_betting_child =
             valid_child &&
             history_row.chance_child_id !=
-                GameTree::Node::kInvalidBettingHistoryId &&
+                GameTree::kInvalidBettingHistoryId &&
             history_row.chance_child_id < history_rows.size();
         if (!valid_betting_child) {
           mark_missing_betting_history();
@@ -1551,7 +1551,7 @@ CFRSolver::PrebuildValidationStats CFRSolver::validate_prebuilt_transitions(
           valid_action_child &&
           history_row.action_ids[action_slot] == row.action_ids[action_slot] &&
           child_betting_history_id !=
-              GameTree::Node::kInvalidBettingHistoryId &&
+              GameTree::kInvalidBettingHistoryId &&
           child_betting_history_id < history_rows.size();
       if (!valid_betting_child) {
         mark_missing_betting_history();
@@ -2425,7 +2425,7 @@ double CFRSolver::cfr_with_ranges(
   }
 
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
-    uint32_t child_public_state_id = GameTree::Node::kInvalidPublicStateId;
+    uint32_t child_public_state_id = GameTree::kInvalidPublicStateId;
     if (frozen_ && require_frozen_children_) {
       child_public_state_id = row.action_child_ids[action_index];
     } else if (frozen_) {
@@ -2523,7 +2523,7 @@ CFRSolver::sample_chance_transition(uint32_t public_state_id,
   const auto cards = SampleStreetCards(state, known_private_cards, rng_);
   CompactPublicState sampled_child_state =
       game_tree_->apply_chance(state, cards);
-  uint32_t child_public_state_id = GameTree::Node::kInvalidPublicStateId;
+  uint32_t child_public_state_id = GameTree::kInvalidPublicStateId;
   if (frozen_ && require_frozen_children_) {
     std::optional<uint32_t> frozen_child_public_state_id =
         chance_child_public_state(public_state_id, sampled_child_state, cards);
@@ -3209,7 +3209,7 @@ double CFRSolver::evaluate_strategy_node(
   double value = 0.0;
   const int action_count = row.action_count;
   for (int action_index = 0; action_index < action_count; ++action_index) {
-    uint32_t child_public_state_id = GameTree::Node::kInvalidPublicStateId;
+    uint32_t child_public_state_id = GameTree::kInvalidPublicStateId;
     if (frozen_ && require_frozen_children_) {
       std::optional<uint32_t> frozen_child_public_state_id =
           action_child_public_state(public_state_id, action_index);

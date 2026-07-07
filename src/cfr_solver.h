@@ -154,7 +154,7 @@ class CFRSolver {
   };
 
   struct SampledChanceTransition {
-    uint32_t child_public_state_id = GameTree::Node::kInvalidPublicStateId;
+    uint32_t child_public_state_id = GameTree::kInvalidPublicStateId;
     CompactPublicState exact_child_state;
   };
 
@@ -165,7 +165,7 @@ class CFRSolver {
   };
 
   struct SampledFrozenChanceTransition {
-    uint32_t child_public_state_id = GameTree::Node::kInvalidPublicStateId;
+    uint32_t child_public_state_id = GameTree::kInvalidPublicStateId;
     ExactBoardState child_board;
   };
 
@@ -175,7 +175,7 @@ class CFRSolver {
   using StrategyProbabilities = absl::InlinedVector<double, 8>;
 
   static constexpr uint32_t kCappedPublicStateId =
-      GameTree::Node::kInvalidPublicStateId - 1;
+      GameTree::kInvalidPublicStateId - 1;
 
   struct RangeScratchFrame {
     ConditionedRanges conditioned_ranges;

@@ -98,7 +98,7 @@ class FrozenStrategyTables {
   struct BettingHistoryRow {
     BettingHistoryRow() {
       action_ids.fill(0);
-      action_child_ids.fill(GameTree::Node::kInvalidBettingHistoryId);
+      action_child_ids.fill(GameTree::kInvalidBettingHistoryId);
     }
 
     int street = 0;
@@ -115,7 +115,7 @@ class FrozenStrategyTables {
     uint8_t action_count = 0;
     std::array<int, GameTree::kMaxActionsPerNode> action_ids;
     std::array<uint32_t, GameTree::kMaxActionsPerNode> action_child_ids;
-    uint32_t chance_child_id = GameTree::Node::kInvalidBettingHistoryId;
+    uint32_t chance_child_id = GameTree::kInvalidBettingHistoryId;
   };
 
   struct InfoSetRow {
@@ -125,7 +125,7 @@ class FrozenStrategyTables {
 
   struct ChanceChildEntry {
     int key = 0;
-    uint32_t public_state_id = GameTree::Node::kInvalidPublicStateId;
+    uint32_t public_state_id = GameTree::kInvalidPublicStateId;
   };
 
   struct InfoSetAddress {
@@ -137,11 +137,11 @@ class FrozenStrategyTables {
   struct PublicStateRow {
     PublicStateRow() {
       action_ids.fill(0);
-      action_child_ids.fill(GameTree::Node::kInvalidPublicStateId);
+      action_child_ids.fill(GameTree::kInvalidPublicStateId);
     }
 
     CompactPublicState state;
-    uint32_t betting_history_id = GameTree::Node::kInvalidBettingHistoryId;
+    uint32_t betting_history_id = GameTree::kInvalidBettingHistoryId;
     PublicBucketId public_bucket = 0;
     bool public_state_is_exact = true;
     bool is_terminal = false;

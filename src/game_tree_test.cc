@@ -216,16 +216,6 @@ void CheckTerminalUtilityAndChance() {
          "chance should advance street, add board, and reset action");
 }
 
-void CheckNodeChildReuse() {
-  GameTree tree(TestConfig());
-  GameTree::Node& root = tree.build_tree(PreflopState());
-  GameTree::Node& first = tree.create_child_node(root, 0);
-  GameTree::Node& second = tree.create_child_node(root, 0);
-  Expect(&first == &second &&
-             root.child_for_action_index(0) == first.id,
-         "indexed child creation should reuse the same node");
-}
-
 void CheckCompactHistoryCap() {
   GameTree tree(TestConfig());
   CompactPublicState state;
@@ -251,7 +241,6 @@ int main() {
   poker::CheckLegalActionsPreserveStateInvariants();
   poker::CheckActionAbstractionShapes();
   poker::CheckTerminalUtilityAndChance();
-  poker::CheckNodeChildReuse();
   poker::CheckCompactHistoryCap();
   return 0;
 }
