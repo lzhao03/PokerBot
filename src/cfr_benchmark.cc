@@ -155,6 +155,63 @@ bool CapHit(int64_t count, int cap) {
   return cap > 0 && count >= cap;
 }
 
+bool RequireCompleteCoarseProdPrebuild(const poker::SolverConfig& config) {
+  return kProdBenchmarkDefaults && kCoarsePublicBuckets &&
+         config.num_training_threads > 1;
+}
+
+void AppendFailure(std::string* failure, const std::string& message) {
+  if (!failure->empty()) {
+    failure->append("; ");
+  }
+  failure->append(message);
+}
+
+std::string FrozenPrebuildFailure(
+    const poker::CFRSolver::TrainingRunStats& stats) {
+  std::string failure;
+  if (!stats.public_state_prebuild_complete) {
+    AppendFailure(&failure, "public-state prebuild incomplete");
+  }
+  if (!stats.betting_history_transition_prebuild_complete) {
+    AppendFailure(&failure,
+                  "betting-history transition prebuild incomplete");
+  }
+  if (stats.missing_betting_history_transitions != 0) {
+    AppendFailure(&failure, "missing betting-history transitions");
+  }
+  if (!stats.chance_transition_prebuild_complete) {
+    AppendFailure(&failure, "chance transition prebuild incomplete");
+  }
+  if (stats.missing_chance_transitions != 0) {
+    AppendFailure(&failure, "missing chance transitions");
+  }
+  if (!stats.action_transition_prebuild_complete) {
+    AppendFailure(&failure, "action transition prebuild incomplete");
+  }
+  if (stats.missing_action_transitions != 0) {
+    AppendFailure(&failure, "missing action transitions");
+  }
+  if (!stats.info_set_prebuild_complete) {
+    AppendFailure(&failure, "infoset prebuild incomplete");
+  }
+  return failure;
+}
+
+void RequireCompleteFrozenPrebuild(
+    const poker::SolverConfig& config,
+    const poker::CFRSolver::TrainingRunStats& stats) {
+  if (!RequireCompleteCoarseProdPrebuild(config)) {
+    return;
+  }
+  const std::string failure = FrozenPrebuildFailure(stats);
+  if (!failure.empty()) {
+    throw std::runtime_error("coarse prod benchmark requires complete frozen "
+                             "prebuild: " +
+                             failure);
+  }
+}
+
 BenchmarkResult MakeBenchmarkResult(
     double result,
     int64_t hands,
@@ -213,6 +270,29 @@ poker::CFRSolver::TraversalStats TraversalDelta(
   return delta;
 }
 
+bool UseParallelPrimaryMetric(
+    const poker::CFRSolver::TrainingRunStats& training) {
+  return training.parallel_iterations > 0;
+}
+
+int64_t PrimaryCfrNodeUpdates(const BenchmarkResult& result) {
+  const auto& training = result.training_stats;
+  return UseParallelPrimaryMetric(training) ? training.parallel_cfr_updates
+                                            : result.cfr_node_updates;
+}
+
+double PrimarySeconds(const BenchmarkResult& result, double elapsed_seconds) {
+  const auto& training = result.training_stats;
+  return UseParallelPrimaryMetric(training) ? training.parallel_seconds
+                                            : elapsed_seconds;
+}
+
+int64_t PrimaryHands(const BenchmarkResult& result) {
+  const auto& training = result.training_stats;
+  return UseParallelPrimaryMetric(training) ? training.parallel_iterations
+                                            : result.hands;
+}
+
 void RunBenchmark(const std::string& name,
                   const std::function<BenchmarkResult()>& benchmark) {
   auto start = std::chrono::steady_clock::now();
@@ -220,7 +300,15 @@ void RunBenchmark(const std::string& name,
   auto end = std::chrono::steady_clock::now();
   std::chrono::duration<double> elapsed = end - start;
   const auto& training = result.training_stats;
+  const int64_t primary_updates = PrimaryCfrNodeUpdates(result);
+  const double primary_seconds = PrimarySeconds(result, elapsed.count());
+  const int64_t primary_hands = PrimaryHands(result);
   std::cout << name << "\t" << elapsed.count() << "\t" << result.result << "\t"
+            << (UseParallelPrimaryMetric(training) ? "parallel" : "total")
+            << "\t"
+            << primary_updates << "\t"
+            << RatePerSecond(primary_updates, primary_seconds) << "\t"
+            << RatePerHand(primary_updates, primary_hands) << "\t"
             << result.cfr_node_updates << "\t"
             << RatePerSecond(result.cfr_node_updates, elapsed.count()) << "\t"
             << RatePerHand(result.cfr_node_updates, result.hands) << "\t"
@@ -371,6 +459,10 @@ int main(int argc, char** argv) {
     poker::HandRange player_b_range = BenchmarkRange(options);
 
     std::cout << "case\tseconds\tresult"
+              << "\tprimary_cfr_phase"
+              << "\tprimary_cfr_node_updates"
+              << "\tprimary_cfr_node_updates_per_second"
+              << "\tprimary_cfr_node_updates_per_hand"
               << "\tcfr_node_updates\tcfr_node_updates_per_second"
               << "\tcfr_node_updates_per_hand"
               << "\tprebuild_seconds\tpublic_state_prebuild_complete"
@@ -427,6 +519,7 @@ int main(int argc, char** argv) {
           options.iterations, updates, solver.get_traversal_stats(),
           solver.get_utility_cache_stats()), config, solver);
       result.training_stats = solver.get_last_training_run_stats();
+      RequireCompleteFrozenPrebuild(config, result.training_stats);
       return result;
     });
 
