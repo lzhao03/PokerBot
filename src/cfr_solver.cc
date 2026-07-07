@@ -4106,22 +4106,19 @@ double CFRSolver::frozen_utility(const PublicStateRow& row,
     return 0.0;
   }
 
-  return utility_cache_->get_or_compute(
-      state.street, state.pot, state.player_contribution[0],
-      state.player_contribution[1], exact_board.cards, exact_board.count,
-      player_a_cards.combo, player_b_cards.combo, [&]() {
-        HandEvaluator evaluator;
-        const int comparison =
-            evaluator.compare_hands(player_a_cards.combo, player_b_cards.combo,
-                                    exact_board.cards, exact_board.count);
-        if (comparison > 0) {
-          return state.pot - player_a_contribution;
-        }
-        if (comparison < 0) {
-          return -player_a_contribution;
-        }
-        return (state.pot / 2.0) - player_a_contribution;
-      });
+  // Frozen sampled training sees mostly one-off showdowns; direct evaluation
+  // is faster than paying shared cache lookup/mutation overhead.
+  HandEvaluator evaluator;
+  const int comparison =
+      evaluator.compare_hands(player_a_cards.combo, player_b_cards.combo,
+                              exact_board.cards, exact_board.count);
+  if (comparison > 0) {
+    return state.pot - player_a_contribution;
+  }
+  if (comparison < 0) {
+    return -player_a_contribution;
+  }
+  return (state.pot / 2.0) - player_a_contribution;
 }
 
 double CFRSolver::uncached_utility(const GameState& state,
