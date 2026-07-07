@@ -86,6 +86,9 @@ struct TrainingRangeView {
     weights[combo_id] += weight;
   }
 
+  const TrainingRangeView& without_mask(CardMask blocked_mask,
+                                        TrainingRangeView& scratch) const;
+
   bool empty() const { return size() == 0; }
 
   size_t size() const {

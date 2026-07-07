@@ -125,22 +125,6 @@ size_t ScratchDepthReserve(const SolverConfig& config, int max_depth) {
   return std::max<size_t>(32, static_cast<size_t>(stack_size) + 12);
 }
 
-void PublicCompatibleRangeInto(const TrainingRangeView& hands,
-                               CardMask board_mask,
-                               TrainingRangeView& compatible_hands) {
-  if (hands.empty()) {
-    compatible_hands.clear();
-    return;
-  }
-
-  compatible_hands.reset_to_filtered();
-  for (size_t i = 0; i < hands.size(); ++i) {
-    if (hands.weight(i) > 0.0 && (hands.mask(i) & board_mask) == 0) {
-      compatible_hands.add(hands.combo(i), hands.weight(i));
-    }
-  }
-}
-
 CompactPublicState StateWithBoardFrom(CompactPublicState state,
                                       const CompactPublicState& board_source) {
   state.board_cards = board_source.board_cards;
@@ -2289,14 +2273,14 @@ double CFRSolver::chance_sampling_cfr(
     OptionalTrainingRange child_player_a_range = player_a_range;
     OptionalTrainingRange child_player_b_range = player_b_range;
     if (player_a_range.has_value()) {
-      PublicCompatibleRangeInto(
-          player_a_range->get(), child_state.board_mask, public_player_a_range);
-      child_player_a_range = std::cref(public_player_a_range);
+      child_player_a_range =
+          std::cref(player_a_range->get().without_mask(
+              child_state.board_mask, public_player_a_range));
     }
     if (player_b_range.has_value()) {
-      PublicCompatibleRangeInto(
-          player_b_range->get(), child_state.board_mask, public_player_b_range);
-      child_player_b_range = std::cref(public_player_b_range);
+      child_player_b_range =
+          std::cref(player_b_range->get().without_mask(
+              child_state.board_mask, public_player_b_range));
     }
 
     value += cfr_with_ranges(sampled->child_public_state_id, child_state,

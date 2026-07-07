@@ -91,10 +91,38 @@ void CheckTrainingRangeViewResetInvariants() {
          "filtered view should be reusable after reset");
 }
 
+void CheckTrainingRangeViewWithoutMask() {
+  const poker::CardId ace_spades =
+      poker::MakeCardId(14, poker::SuitKind::kSpades);
+  const poker::CardId ace_hearts =
+      poker::MakeCardId(14, poker::SuitKind::kHearts);
+  const poker::ComboId aces = poker::CardsToComboId(ace_spades, ace_hearts);
+  const poker::ComboId kings =
+      MakeCombo(13, poker::SuitKind::kSpades, 13, poker::SuitKind::kHearts);
+
+  poker::WeightedHandRange combos;
+  combos.add(aces, 1.0);
+  combos.add(kings, 2.0);
+  const poker::TrainingRange range = poker::BuildTrainingRange(combos);
+  const poker::TrainingRangeView view(range);
+  poker::TrainingRangeView scratch;
+
+  const poker::TrainingRangeView& blocked =
+      view.without_mask(poker::CardBit(ace_spades), scratch);
+  Expect(blocked.size() == 1 && blocked.combo(0) == kings,
+         "without_mask should remove overlapping combos");
+
+  const poker::TrainingRangeView& unblocked = view.without_mask(0, scratch);
+  Expect(unblocked.size() == 2 && unblocked.combo(0) == aces &&
+             unblocked.combo(1) == kings,
+         "without_mask should reuse scratch for a later wider filter");
+}
+
 }  // namespace
 
 int main() {
   CheckTrainingRangeConversionInvariants();
   CheckTrainingRangeViewResetInvariants();
+  CheckTrainingRangeViewWithoutMask();
   return 0;
 }

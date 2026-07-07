@@ -96,6 +96,18 @@ RangeDeal RangeSampler::sample(std::mt19937& rng) const {
   return RangeDeal(player_a_combo, compatible_player_b_combos[sampled_index]);
 }
 
+const TrainingRangeView& TrainingRangeView::without_mask(
+    CardMask blocked_mask,
+    TrainingRangeView& scratch) const {
+  scratch.reset_to_filtered();
+  for (size_t i = 0; i < size(); ++i) {
+    if (weight(i) > 0.0f && (mask(i) & blocked_mask) == 0) {
+      scratch.add(combo(i), weight(i));
+    }
+  }
+  return scratch;
+}
+
 TrainingRange BuildTrainingRange(const HandRange& range) {
   return BuildTrainingRange(range.get_all_weighted_combos());
 }
