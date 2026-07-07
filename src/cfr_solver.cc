@@ -2001,12 +2001,14 @@ double CFRSolver::cfr_with_ranges(
   if (condition_player_a_range) {
     condition_ranges_for_actions(player_a_range->get(), state,
                                  public_state_id, player,
-                                 row.action_ids.data(), action_count,
+                                 absl::Span<const int>(row.action_ids.data(),
+                                                       action_count),
                                  conditioned_player_ranges);
   } else if (condition_player_b_range) {
     condition_ranges_for_actions(player_b_range->get(), state,
                                  public_state_id, player,
-                                 row.action_ids.data(), action_count,
+                                 absl::Span<const int>(row.action_ids.data(),
+                                                       action_count),
                                  conditioned_player_ranges);
   }
 
@@ -2471,9 +2473,9 @@ void CFRSolver::condition_ranges_for_actions(
     const CompactPublicState& state,
     uint32_t public_state_id,
     int player,
-    const int* conditioned_action_ids,
-    size_t action_count,
+    absl::Span<const int> conditioned_action_ids,
     std::vector<TrainingRangeView>& conditioned_ranges) {
+  const size_t action_count = conditioned_action_ids.size();
   if (action_count == 0) {
     return;
   }
@@ -2497,7 +2499,7 @@ void CFRSolver::condition_ranges_for_actions(
       public_slab != nullptr ? &public_slab->players[player] : nullptr;
   const auto& action_ids = frozen_tables_->action_ids;
   const auto& regrets = cumulative_->cumulative_regrets;
-  double positive_regrets[GameTree::kMaxActionsPerNode] = {};
+  double regret_weights[GameTree::kMaxActionsPerNode] = {};
   for (size_t i = 0; i < range_size; ++i) {
     const float range_weight = range.weight(i);
     const ComboId combo_id = range.combo(i);
@@ -2515,7 +2517,7 @@ void CFRSolver::condition_ranges_for_actions(
 
     if (row != nullptr) {
       const size_t table_offset = row->action_offset;
-      std::fill(positive_regrets, positive_regrets + action_count, 0.0);
+      std::fill(regret_weights, regret_weights + action_count, 0.0);
       const size_t info_set_action_count =
           std::min(action_count,
                    static_cast<size_t>(row->action_count));
@@ -2533,7 +2535,7 @@ void CFRSolver::condition_ranges_for_actions(
                 0.0,
                 static_cast<double>(
                     AtomicFloatLoad(&regrets[table_index])));
-        positive_regrets[action_index] = positive_regret;
+        regret_weights[action_index] = positive_regret;
         positive_regret_sum += positive_regret;
       }
     }
@@ -2542,7 +2544,7 @@ void CFRSolver::condition_ranges_for_actions(
          ++action_index) {
       const double probability =
           positive_regret_sum > 0.0
-              ? positive_regrets[action_index] / positive_regret_sum
+              ? regret_weights[action_index] / positive_regret_sum
               : fallback_probability;
       const double conditioned_weight = range_weight * probability;
       if (conditioned_weight > 0.0) {

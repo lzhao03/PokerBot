@@ -359,8 +359,7 @@ class CFRSolver {
       const CompactPublicState& state,
       uint32_t public_state_id,
       int player,
-      const int* action_ids,
-      size_t action_count,
+      absl::Span<const int> action_ids,
       std::vector<TrainingRangeView>& conditioned_ranges);
   double utility(const CompactPublicState& state,
                  const PrivateCards& player_a_cards,
