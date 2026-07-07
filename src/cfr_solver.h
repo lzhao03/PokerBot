@@ -311,14 +311,6 @@ class CFRSolver {
       uint32_t public_state_id,
       const CompactPublicState& child_state,
       absl::Span<const CardId> cards) const;
-  uint32_t required_chance_child_public_state(
-      uint32_t public_state_id,
-      const CompactPublicState& child_state,
-      absl::Span<const CardId> cards) const;
-  uint32_t strict_chance_child_public_state(
-      const PublicStateRow& row,
-      const CompactPublicState& child_state,
-      absl::Span<const CardId> cards) const;
   std::optional<uint32_t> chance_child_public_state(
       uint32_t public_state_id,
       absl::Span<const CardId> cards) const;
@@ -415,6 +407,7 @@ class CFRSolver {
       const CompactPublicState& state,
       CardMask known_private_cards);
   SampledFrozenChanceTransition sample_frozen_chance_transition(
+      uint32_t public_state_id,
       const PublicStateRow& row,
       const ExactBoardState& exact_board,
       CardMask known_private_cards);
