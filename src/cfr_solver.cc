@@ -146,17 +146,7 @@ int ChanceCardsKey(absl::Span<const CardId> cards) {
   for (int i = 0; i < n; ++i) {
     encoded[i] = EncodedCard(cards[i]);
   }
-  // Chance samples are small (max 5), so a simple sort network is cheaper than
-  // calling std::sort on a dynamically-sized vector.
-  if (n > 1) {
-    for (int i = 0; i < n - 1; ++i) {
-      for (int j = i + 1; j < n; ++j) {
-        if (encoded[j] < encoded[i]) {
-          std::swap(encoded[i], encoded[j]);
-        }
-      }
-    }
-  }
+  std::sort(encoded, encoded + n);
 
   int key = n;
   for (int i = 0; i < n; ++i) {
