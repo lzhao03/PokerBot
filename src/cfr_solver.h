@@ -121,33 +121,6 @@ class CFRSolver {
   static constexpr int kPrivateBucketChunkSize =
       FrozenStrategyTables::kPrivateBucketChunkSize;
 
-  struct RangeDeal {
-    RangeDeal(ComboId player_a_combo, ComboId player_b_combo)
-        : player_a_combo(player_a_combo),
-          player_b_combo(player_b_combo) {}
-
-    ComboId player_a_combo = 0;
-    ComboId player_b_combo = 0;
-  };
-
-  struct RangeSampler {
-    RangeSampler(const TrainingRange& player_a_range,
-                 const TrainingRange& player_b_range);
-
-    RangeDeal sample(std::mt19937& rng) const;
-
-    const TrainingRange& player_a_range;
-    const TrainingRange& player_b_range;
-    std::vector<float> compatible_player_b_weight;
-    std::vector<float> player_a_sample_weights;
-    std::vector<float> player_a_cumulative_weights;
-    float total_player_a_weight = 0.0f;
-    std::vector<uint32_t> compatible_player_b_offsets;
-    std::vector<uint16_t> compatible_player_b_counts;
-    std::vector<ComboId> compatible_player_b_combos;
-    std::vector<float> compatible_player_b_cumulative_weights;
-  };
-
   struct PrivateCards {
     static PrivateCards FromCombo(ComboId combo_id);
     CardMask mask() const;
