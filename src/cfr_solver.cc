@@ -126,6 +126,32 @@ size_t ScratchDepthReserve(const SolverConfig& config, int max_depth) {
 }
 
 template <typename Callback>
+bool ForEachCardCombination(int count, CardMask blocked_mask,
+                            Callback callback) {
+  absl::InlinedVector<CardId, 5> cards;
+  cards.resize(static_cast<size_t>(count));
+  auto choose = [&](auto& self, int start, int depth) -> bool {
+    if (depth == count) {
+      return callback(absl::Span<const CardId>(cards));
+    }
+    const int remaining = count - depth;
+    for (int card_id = start; card_id <= kDeckCardCount - remaining;
+         ++card_id) {
+      const CardId card = static_cast<CardId>(card_id);
+      if ((blocked_mask & CardBit(card)) != 0) {
+        continue;
+      }
+      cards[static_cast<size_t>(depth)] = card;
+      if (!self(self, card_id + 1, depth + 1)) {
+        return false;
+      }
+    }
+    return true;
+  };
+  return choose(choose, 0, 0);
+}
+
+template <typename Callback>
 bool ForEachNextStreetDeal(const CompactPublicState& state,
                            Callback callback) {
   const int remaining_board_slots =
@@ -136,35 +162,13 @@ bool ForEachNextStreetDeal(const CompactPublicState& state,
     return callback(absl::Span<const CardId>());
   }
 
-  std::array<CardId, kDeckCardCount> candidates = {};
-  int candidate_count = 0;
-  for (int card_id = 0; card_id < kDeckCardCount; ++card_id) {
-    const CardId candidate = static_cast<CardId>(card_id);
-    if ((state.board_mask & CardBit(candidate)) == 0) {
-      candidates[static_cast<size_t>(candidate_count)] = candidate;
-      ++candidate_count;
-    }
-  }
-  if (candidate_count < count) {
+  const int available_cards =
+      kDeckCardCount -
+      static_cast<int>(__builtin_popcountll(state.board_mask));
+  if (available_cards < count) {
     throw std::runtime_error("Not enough cards to enumerate next street");
   }
-
-  absl::InlinedVector<CardId, 5> cards;
-  cards.resize(static_cast<size_t>(count));
-  auto choose = [&](auto& self, int start, int depth) -> bool {
-    if (depth == count) {
-      return callback(absl::Span<const CardId>(cards));
-    }
-    const int remaining = count - depth;
-    for (int i = start; i <= candidate_count - remaining; ++i) {
-      cards[static_cast<size_t>(depth)] = candidates[static_cast<size_t>(i)];
-      if (!self(self, i + 1, depth + 1)) {
-        return false;
-      }
-    }
-    return true;
-  };
-  return choose(choose, 0, 0);
+  return ForEachCardCombination(count, state.board_mask, callback);
 }
 
 StreetKind StreetAfterChance(StreetKind street) {
@@ -201,30 +205,6 @@ using CoarseChanceTransitionMap =
     absl::flat_hash_map<PublicBucketId,
                         std::vector<CoarseChanceTransitionTemplate>>;
 
-template <typename Callback>
-void ForEachCardCombination(int count, CardMask blocked_mask,
-                            Callback callback) {
-  absl::InlinedVector<CardId, 5> cards;
-  cards.resize(static_cast<size_t>(count));
-  auto choose = [&](auto& self, int start, int depth) -> void {
-    if (depth == count) {
-      callback(absl::Span<const CardId>(cards));
-      return;
-    }
-    const int remaining = count - depth;
-    for (int card_id = start; card_id <= kDeckCardCount - remaining;
-         ++card_id) {
-      const CardId card = static_cast<CardId>(card_id);
-      if ((blocked_mask & CardBit(card)) != 0) {
-        continue;
-      }
-      cards[static_cast<size_t>(depth)] = card;
-      self(self, card_id + 1, depth + 1);
-    }
-  };
-  choose(choose, 0, 0);
-}
-
 CoarseChanceTransitionMap BuildCoarseChanceTransitions(StreetKind street) {
   CoarseChanceTransitionMap transitions;
   const int board_count = BoardCardsForStreet(street);
@@ -252,14 +232,16 @@ CoarseChanceTransitionMap BuildCoarseChanceTransitions(StreetKind street) {
       const PublicBucketId child_bucket = abstraction.public_bucket(child);
       const uint64_t seen_key = (parent_bucket << 32) | child_bucket;
       if (seen.contains(seen_key)) {
-        return;
+        return true;
       }
       seen.emplace(seen_key, true);
       CoarseChanceTransitionTemplate transition;
       transition.parent_board_state = parent;
       transition.cards.assign(cards.begin(), cards.end());
       transitions[parent_bucket].push_back(std::move(transition));
+      return true;
     });
+    return true;
   });
   return transitions;
 }
