@@ -520,7 +520,7 @@ private:
       CardMask known_private_cards);
   SampledFrozenChanceTransition sample_frozen_chance_transition(
       const PublicStateRow& row,
-      const CompactPublicState& exact_state,
+      const ExactBoardState& exact_board,
       CardMask known_private_cards);
   double chance_sampling_cfr(
       uint32_t public_state_id,

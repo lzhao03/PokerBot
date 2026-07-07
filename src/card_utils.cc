@@ -29,9 +29,7 @@ int CardsForNextStreet(StreetKind street) {
   return 0;
 }
 
-namespace {
-
-absl::InlinedVector<CardId, 5> SampleStreetCardsForState(
+absl::InlinedVector<CardId, 5> SampleStreetCards(
     StreetKind street,
     int board_count,
     CardMask board_mask,
@@ -84,12 +82,10 @@ absl::InlinedVector<CardId, 5> SampleStreetCardsForState(
   return sampled;
 }
 
-}  // namespace
-
 absl::InlinedVector<CardId, 5> SampleStreetCards(const GameState& state,
                                                 CardMask known_private_cards,
                                                 std::mt19937& rng) {
-  return SampleStreetCardsForState(
+  return SampleStreetCards(
       state.street, static_cast<int>(state.board_cards.size()),
       state.board_mask, known_private_cards, rng);
 }
@@ -98,7 +94,7 @@ absl::InlinedVector<CardId, 5> SampleStreetCards(
     const CompactPublicState& state,
     CardMask known_private_cards,
     std::mt19937& rng) {
-  return SampleStreetCardsForState(
+  return SampleStreetCards(
       state.street, state.board_count, state.board_mask,
       known_private_cards, rng);
 }

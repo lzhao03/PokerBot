@@ -89,6 +89,27 @@ void CheckCompactSampledStreetCardsAvoidKnownCards() {
          "compact sampled cards should avoid known cards");
 }
 
+void CheckPrimitiveSampledStreetCardsAvoidKnownCards() {
+  CardMask known_private_cards = 0;
+  known_private_cards |= CardBit(MakeCardId(14, SuitKind::kSpades));
+  known_private_cards |= CardBit(MakeCardId(13, SuitKind::kSpades));
+
+  CardMask board_mask = 0;
+  board_mask |= CardBit(MakeCardId(2, SuitKind::kClubs));
+  board_mask |= CardBit(MakeCardId(3, SuitKind::kDiamonds));
+  board_mask |= CardBit(MakeCardId(4, SuitKind::kHearts));
+  board_mask |= CardBit(MakeCardId(5, SuitKind::kSpades));
+
+  std::mt19937 rng(12345);
+  const auto sampled = SampleStreetCards(
+      StreetKind::kTurn, 4, board_mask, known_private_cards, rng);
+  Expect(sampled.size() == 1, "primitive turn sampling returns one card");
+
+  const CardMask known_cards = known_private_cards | board_mask;
+  Expect((known_cards & CardBit(sampled[0])) == 0,
+         "primitive sampled cards should avoid known cards");
+}
+
 void CheckOneCardSamplingReturnsOnlyUnblockedCard() {
   std::vector<CardId> deck = BuildDeck();
   const CardId legal_card = deck.back();
@@ -158,6 +179,7 @@ int main() {
   poker::CheckCardsForNextStreet();
   poker::CheckSampledStreetCardsAvoidKnownCards();
   poker::CheckCompactSampledStreetCardsAvoidKnownCards();
+  poker::CheckPrimitiveSampledStreetCardsAvoidKnownCards();
   poker::CheckOneCardSamplingReturnsOnlyUnblockedCard();
   poker::CheckSampledFlopCardsAreUniqueAndAvoidKnownCards();
   poker::CheckSamplingThrowsWhenDeckIsTooSmall();

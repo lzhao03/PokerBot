@@ -3208,14 +3208,42 @@ CFRSolver::sample_chance_transition(uint32_t public_state_id,
 CFRSolver::SampledFrozenChanceTransition
 CFRSolver::sample_frozen_chance_transition(
     const PublicStateRow& row,
-    const CompactPublicState& exact_state,
+    const ExactBoardState& exact_board,
     CardMask known_private_cards) {
-  const auto cards = SampleStreetCards(exact_state, known_private_cards, rng_);
-  CompactPublicState sampled_child_state =
-      game_tree_->apply_chance(exact_state, cards);
+  const auto cards = SampleStreetCards(
+      row.state.street, exact_board.count, exact_board.mask,
+      known_private_cards, rng_);
+  ExactBoardState child_board = exact_board;
+  for (CardId card : cards) {
+    child_board.cards[child_board.count] = card;
+    ++child_board.count;
+    child_board.mask |= CardBit(card);
+  }
+
+  CompactPublicState sampled_child_state = row.state;
+  switch (sampled_child_state.street) {
+    case StreetKind::kPreflop:
+      sampled_child_state.street = StreetKind::kFlop;
+      break;
+    case StreetKind::kFlop:
+      sampled_child_state.street = StreetKind::kTurn;
+      break;
+    case StreetKind::kTurn:
+      sampled_child_state.street = StreetKind::kRiver;
+      break;
+    case StreetKind::kRiver:
+      break;
+  }
+  sampled_child_state.board_cards = child_board.cards;
+  sampled_child_state.board_count = child_board.count;
+  sampled_child_state.board_mask = child_board.mask;
+  ResetHistory(sampled_child_state);
+  sampled_child_state.player_to_act =
+      sampled_child_state.street == StreetKind::kPreflop ? 0 : 1;
+
   return SampledFrozenChanceTransition{
       strict_chance_child_public_state(row, sampled_child_state, cards),
-      exact_board_from_state(sampled_child_state),
+      child_board,
   };
 }
 
@@ -3434,8 +3462,6 @@ double CFRSolver::chance_sampling_frozen_regret_only(
     int update_player,
     int depth) {
   const PublicStateRow& row = frozen_tables_->public_state_rows[public_state_id];
-  const CompactPublicState exact_state = state_with_exact_board(
-      row.state, exact_board);
   const int samples = ChanceSamples(config_);
   POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.chance_samples += samples);
 
@@ -3444,7 +3470,7 @@ double CFRSolver::chance_sampling_frozen_regret_only(
       player_a_cards.mask() | player_b_cards.mask();
   for (int i = 0; i < samples; ++i) {
     const SampledFrozenChanceTransition sampled =
-        sample_frozen_chance_transition(row, exact_state, known_private_cards);
+        sample_frozen_chance_transition(row, exact_board, known_private_cards);
     value += cfr_frozen_regret_only(
         sampled.child_public_state_id, sampled.child_board, player_a_cards,
         player_b_cards, reach_probabilities, update_player, depth);

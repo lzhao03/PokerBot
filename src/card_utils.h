@@ -10,6 +10,12 @@ namespace poker {
 
 std::vector<CardId> BuildDeck();
 int CardsForNextStreet(StreetKind street);
+absl::InlinedVector<CardId, 5> SampleStreetCards(
+    StreetKind street,
+    int board_count,
+    CardMask board_mask,
+    CardMask known_private_cards,
+    std::mt19937& rng);
 absl::InlinedVector<CardId, 5> SampleStreetCards(const GameState& state,
                                                  CardMask known_private_cards,
                                                  std::mt19937& rng);
