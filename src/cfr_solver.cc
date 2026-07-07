@@ -53,15 +53,15 @@ inline void AtomicFloatAdd(float* target, float delta) {
 #define POKER_ENABLE_CAS_RETRY_STATS 0
 #endif
 
+constexpr bool kCasRetryStatsEnabled = POKER_ENABLE_CAS_RETRY_STATS != 0;
+
 // Atomically apply CFR+ regret update: new = max(0, old + delta).
 // Uses the same CAS loop as AtomicFloatAdd but clips at zero.
 inline int64_t AtomicCFRPlusRegretUpdate(float* target, float delta) {
   static_assert(sizeof(float) == sizeof(int32_t), "float must be 32-bit");
   int32_t old_bits, new_bits;
   bool exchanged = false;
-#if POKER_ENABLE_CAS_RETRY_STATS
   int64_t retries = 0;
-#endif
   do {
     old_bits = __atomic_load_n(reinterpret_cast<int32_t*>(target),
                                __ATOMIC_RELAXED);
@@ -72,17 +72,16 @@ inline int64_t AtomicCFRPlusRegretUpdate(float* target, float delta) {
     exchanged = __atomic_compare_exchange_n(
         reinterpret_cast<int32_t*>(target), &old_bits, new_bits,
         /*weak=*/true, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
-#if POKER_ENABLE_CAS_RETRY_STATS
-    if (!exchanged) {
-      ++retries;
+    if constexpr (kCasRetryStatsEnabled) {
+      if (!exchanged) {
+        ++retries;
+      }
     }
-#endif
   } while (!exchanged);
-#if POKER_ENABLE_CAS_RETRY_STATS
-  return retries;
-#else
+  if constexpr (kCasRetryStatsEnabled) {
+    return retries;
+  }
   return 0;
-#endif
 }
 
 // Relaxed atomic load of a float (naturally-aligned 32-bit load is atomic
