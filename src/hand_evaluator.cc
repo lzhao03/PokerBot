@@ -79,6 +79,21 @@ size_t FillAllCards(ComboId hole_cards,
   return count;
 }
 
+size_t FillAllCards(ComboId hole_cards,
+                    const std::array<CardId, kMaxBoardCards>& board_cards,
+                    uint8_t board_count,
+                    std::array<CardId, 7>& all_cards) {
+  const ComboInfo& combo = GetComboInfo(hole_cards);
+  all_cards[0] = combo.card0;
+  all_cards[1] = combo.card1;
+  size_t count = 2;
+  for (uint8_t i = 0; i < board_count; ++i) {
+    all_cards[count] = board_cards[static_cast<size_t>(i)];
+    ++count;
+  }
+  return count;
+}
+
 EvaluationScore EvaluateFiveCardScore(const std::array<CardId, 5>& cards) {
   std::array<int, 5> ranks;
   size_t rank_count = 0;
@@ -597,6 +612,21 @@ int HandEvaluator::compare_hands(
   std::array<CardId, 7> second_cards;
   const size_t first_count = FillAllCards(hand1, board_state, first_cards);
   const size_t second_count = FillAllCards(hand2, board_state, second_cards);
+  return CompareCactusHands(first_cards.data(), first_count,
+                            second_cards.data(), second_count);
+}
+
+int HandEvaluator::compare_hands(
+    ComboId hand1,
+    ComboId hand2,
+    const std::array<CardId, kMaxBoardCards>& board_cards,
+    uint8_t board_count) const {
+  std::array<CardId, 7> first_cards;
+  std::array<CardId, 7> second_cards;
+  const size_t first_count =
+      FillAllCards(hand1, board_cards, board_count, first_cards);
+  const size_t second_count =
+      FillAllCards(hand2, board_cards, board_count, second_cards);
   return CompareCactusHands(first_cards.data(), first_count,
                             second_cards.data(), second_count);
 }

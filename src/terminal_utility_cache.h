@@ -59,6 +59,30 @@ class TerminalUtilityCache {
                         ComboId player_b_hand,
                         Compute compute) {
     Key key = key_for(state, player_a_hand, player_b_hand);
+    return get_or_compute_key(std::move(key), compute);
+  }
+
+  template <typename Compute>
+  double get_or_compute(StreetKind street,
+                        int pot,
+                        int player_a_contribution,
+                        int player_b_contribution,
+                        const std::array<CardId, kMaxBoardCards>& board_cards,
+                        int board_count,
+                        ComboId player_a_hand,
+                        ComboId player_b_hand,
+                        Compute compute) {
+    Key key = key_for(street, pot, player_a_contribution,
+                      player_b_contribution, board_cards, board_count,
+                      player_a_hand, player_b_hand);
+    return get_or_compute_key(std::move(key), compute);
+  }
+
+  Stats stats() const;
+
+ private:
+  template <typename Compute>
+  double get_or_compute_key(Key key, Compute compute) {
     Shard& shard = shards_[key.hash & (kShardCount - 1)];
 
     {
@@ -84,13 +108,18 @@ class TerminalUtilityCache {
     }
   }
 
-  Stats stats() const;
-
- private:
   static Key key_for(const GameState& state,
                      ComboId player_a_hand,
                      ComboId player_b_hand);
   static Key key_for(const CompactPublicState& state,
+                     ComboId player_a_hand,
+                     ComboId player_b_hand);
+  static Key key_for(StreetKind street,
+                     int pot,
+                     int player_a_contribution,
+                     int player_b_contribution,
+                     const std::array<CardId, kMaxBoardCards>& board_cards,
+                     int board_count,
                      ComboId player_a_hand,
                      ComboId player_b_hand);
   static size_t compute_hash(const Key& key);

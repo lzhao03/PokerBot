@@ -575,6 +575,24 @@ FrozenStrategyTables& CFRSolver::mutable_tables() {
   return *mutable_tables_;
 }
 
+CFRSolver::ExactBoardState CFRSolver::exact_board_from_state(
+    const CompactPublicState& state) {
+  return ExactBoardState{
+      state.board_cards,
+      state.board_count,
+      state.board_mask,
+  };
+}
+
+CompactPublicState CFRSolver::state_with_exact_board(
+    CompactPublicState state,
+    const ExactBoardState& exact_board) {
+  state.board_cards = exact_board.cards;
+  state.board_count = exact_board.count;
+  state.board_mask = exact_board.mask;
+  return state;
+}
+
 void CFRSolver::set_continuation_value_provider(
     std::shared_ptr<ContinuationValueProvider> provider) {
   if (provider == nullptr) {
@@ -2867,6 +2885,8 @@ void CFRSolver::run_iterations_parallel(
           const CompactPublicState root_state =
               worker.frozen_tables_->public_state_rows[root_public_state_id]
                   .state;
+          const ExactBoardState root_board =
+              exact_board_from_state(root_state);
           for (int i = 0; i < shard; ++i) {
             const RangeDeal deal = range_sampler.sample(worker.rng_);
             PrivateCards player_a_cards =
@@ -2879,7 +2899,7 @@ void CFRSolver::run_iterations_parallel(
             std::array<double, 2> reach_probabilities = {1.0, 1.0};
             if (use_frozen_regret_only) {
               local_utility += worker.cfr_frozen_regret_only(
-                  root_public_state_id, root_state, player_a_cards,
+                  root_public_state_id, root_board, player_a_cards,
                   player_b_cards, reach_probabilities, update_player, 0);
               continue;
             }
@@ -3252,7 +3272,7 @@ double CFRSolver::chance_sampling_cfr(
 
 double CFRSolver::cfr_frozen_regret_only(
     uint32_t public_state_id,
-    const CompactPublicState& state,
+    const ExactBoardState& exact_board,
     const PrivateCards& player_a_cards,
     const PrivateCards& player_b_cards,
     std::array<double, 2>& reach_probabilities,
@@ -3266,17 +3286,17 @@ double CFRSolver::cfr_frozen_regret_only(
 
   if (row.is_terminal) {
     POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.terminal_utility_calls);
-    if (state.folded_player >= 0) {
+    if (row.state.folded_player >= 0) {
       POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.fold_utility_calls);
     } else {
       POKER_RECORD_TRAVERSAL_STAT(++traversal_stats_.showdown_utility_calls);
     }
-    return utility(state, player_a_cards, player_b_cards);
+    return frozen_utility(row, exact_board, player_a_cards, player_b_cards);
   }
 
   if (row.is_chance_node) {
     return chance_sampling_frozen_regret_only(
-        public_state_id, state, player_a_cards, player_b_cards,
+        public_state_id, exact_board, player_a_cards, player_b_cards,
         reach_probabilities, update_player, depth);
   }
 
@@ -3339,17 +3359,13 @@ double CFRSolver::cfr_frozen_regret_only(
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     const uint32_t child_public_state_id =
         strict_action_child_public_state(row, action_index);
-    const PublicStateRow& child_row =
-        public_state_rows[child_public_state_id];
-    const CompactPublicState child_state =
-        StateWithBoardFrom(child_row.state, state);
 
     const double previous_reach_probability = reach_probabilities[player];
     reach_probabilities[player] =
         previous_reach_probability * action_probabilities[action_index];
 
     const double action_value = cfr_frozen_regret_only(
-        child_public_state_id, child_state, player_a_cards, player_b_cards,
+        child_public_state_id, exact_board, player_a_cards, player_b_cards,
         reach_probabilities, update_player, depth + 1);
     action_values[action_index] = action_value;
     reach_probabilities[player] = previous_reach_probability;
@@ -3397,12 +3413,14 @@ double CFRSolver::cfr_frozen_regret_only(
 
 double CFRSolver::chance_sampling_frozen_regret_only(
     uint32_t public_state_id,
-    const CompactPublicState& state,
+    const ExactBoardState& exact_board,
     const PrivateCards& player_a_cards,
     const PrivateCards& player_b_cards,
     std::array<double, 2>& reach_probabilities,
     int update_player,
     int depth) {
+  const CompactPublicState exact_state = state_with_exact_board(
+      frozen_tables_->public_state_rows[public_state_id].state, exact_board);
   const int samples = ChanceSamples(config_);
   POKER_RECORD_TRAVERSAL_STAT(traversal_stats_.chance_samples += samples);
 
@@ -3412,17 +3430,16 @@ double CFRSolver::chance_sampling_frozen_regret_only(
       player_a_cards.mask() | player_b_cards.mask();
   for (int i = 0; i < samples; ++i) {
     std::optional<SampledChanceTransition> sampled =
-        sample_chance_transition(public_state_id, state, known_private_cards);
+        sample_chance_transition(public_state_id, exact_state,
+                                 known_private_cards);
     if (!sampled.has_value()) {
       continue;
     }
 
-    const PublicStateRow& child_row =
-        frozen_tables_->public_state_rows[sampled->child_public_state_id];
-    const CompactPublicState child_state =
-        StateWithBoardFrom(child_row.state, sampled->exact_child_state);
+    const ExactBoardState child_board =
+        exact_board_from_state(sampled->exact_child_state);
     value += cfr_frozen_regret_only(
-        sampled->child_public_state_id, child_state, player_a_cards,
+        sampled->child_public_state_id, child_board, player_a_cards,
         player_b_cards, reach_probabilities, update_player, depth);
     ++evaluated;
   }
@@ -4037,6 +4054,41 @@ double CFRSolver::utility(const CompactPublicState& state,
       state, player_a_cards.combo, player_b_cards.combo, [&]() {
         return game_tree_->get_utility(
             state, player_a_cards.combo, player_b_cards.combo);
+      });
+}
+
+double CFRSolver::frozen_utility(const PublicStateRow& row,
+                                 const ExactBoardState& exact_board,
+                                 const PrivateCards& player_a_cards,
+                                 const PrivateCards& player_b_cards) {
+  const CompactPublicState& state = row.state;
+  const double player_a_contribution = state.player_contribution[0];
+  if (state.folded_player == 0) {
+    return -player_a_contribution;
+  }
+  if (state.folded_player == 1) {
+    return state.pot - player_a_contribution;
+  }
+
+  if (exact_board.count + 2 < 5) {
+    return 0.0;
+  }
+
+  return utility_cache_->get_or_compute(
+      state.street, state.pot, state.player_contribution[0],
+      state.player_contribution[1], exact_board.cards, exact_board.count,
+      player_a_cards.combo, player_b_cards.combo, [&]() {
+        HandEvaluator evaluator;
+        const int comparison =
+            evaluator.compare_hands(player_a_cards.combo, player_b_cards.combo,
+                                    exact_board.cards, exact_board.count);
+        if (comparison > 0) {
+          return state.pot - player_a_contribution;
+        }
+        if (comparison < 0) {
+          return -player_a_contribution;
+        }
+        return (state.pot / 2.0) - player_a_contribution;
       });
 }
 

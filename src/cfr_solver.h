@@ -305,9 +305,19 @@ private:
       TraversalScratch& scratch,
       OptionalTrainingRange player_a_range,
       OptionalTrainingRange player_b_range);
+  struct ExactBoardState {
+    std::array<CardId, kMaxBoardCards> cards = {};
+    uint8_t count = 0;
+    CardMask mask = 0;
+  };
+  static ExactBoardState exact_board_from_state(
+      const CompactPublicState& state);
+  static CompactPublicState state_with_exact_board(
+      CompactPublicState state,
+      const ExactBoardState& exact_board);
   double cfr_frozen_regret_only(
       uint32_t public_state_id,
-      const CompactPublicState& state,
+      const ExactBoardState& exact_board,
       const PrivateCards& player_a_cards,
       const PrivateCards& player_b_cards,
       std::array<double, 2>& reach_probabilities,
@@ -478,6 +488,10 @@ private:
   double utility(const CompactPublicState& state,
                  const PrivateCards& player_a_cards,
                  const PrivateCards& player_b_cards);
+  double frozen_utility(const PublicStateRow& row,
+                        const ExactBoardState& exact_board,
+                        const PrivateCards& player_a_cards,
+                        const PrivateCards& player_b_cards);
   double uncached_utility(const GameState& state,
                           const PrivateCards& player_a_cards,
                           const PrivateCards& player_b_cards);
@@ -515,7 +529,7 @@ private:
       OptionalTrainingRange player_b_range);
   double chance_sampling_frozen_regret_only(
       uint32_t public_state_id,
-      const CompactPublicState& state,
+      const ExactBoardState& exact_board,
       const PrivateCards& player_a_cards,
       const PrivateCards& player_b_cards,
       std::array<double, 2>& reach_probabilities,

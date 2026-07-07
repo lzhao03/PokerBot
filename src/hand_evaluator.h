@@ -85,6 +85,9 @@ public:
                     const GameState& board_state) const;
   int compare_hands(ComboId hand1, ComboId hand2,
                     const CompactPublicState& board_state) const;
+  int compare_hands(ComboId hand1, ComboId hand2,
+                    const std::array<CardId, kMaxBoardCards>& board_cards,
+                    uint8_t board_count) const;
   
   // Find the winner between two hole cards given a board state
   // Returns 1 if hand1 wins, -1 if hand2 wins, 0 if tie

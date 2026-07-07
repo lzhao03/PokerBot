@@ -114,6 +114,10 @@ void CheckCompactAndGameStateComparisonMatch() {
   Expect(evaluator.compare_hands(aces, kings, game_state) ==
              evaluator.compare_hands(aces, kings, compact_state),
          "compact and GameState showdown comparison should match");
+  Expect(evaluator.compare_hands(aces, kings, game_state) ==
+             evaluator.compare_hands(aces, kings, compact_state.board_cards,
+                                     compact_state.board_count),
+         "explicit-board showdown comparison should match GameState");
 }
 
 void CheckCactusCompareRepresentativeParity() {
