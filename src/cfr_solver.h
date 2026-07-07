@@ -151,6 +151,8 @@ class CFRSolver {
   static constexpr uint32_t kCappedPublicStateId =
       GameTree::kInvalidPublicStateId - 1;
 
+  // TODO: Move buffer borrowing behind TraversalScratch methods so traversal
+  // code does not manually pass scratch vectors/ranges around.
   struct RangeScratchFrame {
     std::vector<TrainingRangeView> conditioned_ranges;
     TrainingRangeView public_player_a_range;
