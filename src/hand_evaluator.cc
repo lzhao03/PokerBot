@@ -322,6 +322,8 @@ struct CactusLookupRecord {
   int key = 0;
 };
 
+constexpr size_t kCactusScoreCount = 7463;
+
 // Tables are generated once from the slow five-card scorer. Lower lookup
 // value means stronger hand, matching Cactus Kev convention.
 struct CactusTables {
@@ -383,6 +385,7 @@ struct CactusTables {
     for (size_t i = 0; i < records.size(); ++i) {
       const uint16_t value = static_cast<uint16_t>(i + 1);
       const CactusLookupRecord& record = records[i];
+      scores[value] = record.score;
       switch (record.kind) {
         case CactusLookupRecord::Kind::kFlush:
           flushes[record.key] = value;
@@ -400,6 +403,7 @@ struct CactusTables {
 
   std::array<uint16_t, 8192> flushes = {};
   std::array<uint16_t, 8192> unique5 = {};
+  std::array<EvaluationScore, kCactusScoreCount> scores = {};
   std::vector<std::pair<int, uint16_t>> products;
 };
 
@@ -484,33 +488,8 @@ int CompareCactusHands(absl::Span<const CardId> first_cards,
 }
 
 EvaluationScore FindBestHandScore(absl::Span<const CardId> cards) {
-  if (cards.size() < 5) {
-    throw std::invalid_argument("Need at least 5 cards to find best hand");
-  }
-
-  EvaluationScore bestEval;
-  std::array<CardId, 5> combo;
-  for (size_t a = 0; a + 4 < cards.size(); ++a) {
-    combo[0] = cards[a];
-    for (size_t b = a + 1; b + 3 < cards.size(); ++b) {
-      combo[1] = cards[b];
-      for (size_t c = b + 1; c + 2 < cards.size(); ++c) {
-        combo[2] = cards[c];
-        for (size_t d = c + 1; d + 1 < cards.size(); ++d) {
-          combo[3] = cards[d];
-          for (size_t e = d + 1; e < cards.size(); ++e) {
-            combo[4] = cards[e];
-            EvaluationScore currentEval = EvaluateFiveCardScore(combo);
-            if (bestEval < currentEval) {
-              bestEval = currentEval;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return bestEval;
+  const CactusTables& tables = GetCactusTables();
+  return tables.scores[EvalBestCactus(cards)];
 }
 
 }  // namespace

@@ -36,12 +36,54 @@ GameState TestBoard(std::initializer_list<CardId> cards) {
   return board;
 }
 
+HandEvaluation ReferenceBestHandFromFiveCardEvaluation(
+    const HandEvaluator& evaluator, ComboId hand, const GameState& board) {
+  std::array<CardId, 7> cards = {};
+  const ComboInfo& combo = GetComboInfo(hand);
+  cards[0] = combo.card0;
+  cards[1] = combo.card1;
+  size_t count = 2;
+  for (CardId card : board.board_cards) {
+    cards[count] = card;
+    ++count;
+  }
+
+  if (count < 5) {
+    throw std::invalid_argument("Need at least five cards");
+  }
+
+  HandEvaluation best;
+  std::array<CardId, 5> subset = {};
+  for (size_t a = 0; a + 4 < count; ++a) {
+    subset[0] = cards[a];
+    for (size_t b = a + 1; b + 3 < count; ++b) {
+      subset[1] = cards[b];
+      for (size_t c = b + 1; c + 2 < count; ++c) {
+        subset[2] = cards[c];
+        for (size_t d = c + 1; d + 1 < count; ++d) {
+          subset[3] = cards[d];
+          for (size_t e = d + 1; e < count; ++e) {
+            subset[4] = cards[e];
+            const HandEvaluation current = evaluator.evaluate(subset);
+            if (best < current) {
+              best = current;
+            }
+          }
+        }
+      }
+    }
+  }
+  return best;
+}
+
 int ReferenceCompare(const HandEvaluator& evaluator,
                      ComboId first,
                      ComboId second,
                      const GameState& board) {
-  const HandEvaluation first_eval = evaluator.evaluate_hand(first, board);
-  const HandEvaluation second_eval = evaluator.evaluate_hand(second, board);
+  const HandEvaluation first_eval =
+      ReferenceBestHandFromFiveCardEvaluation(evaluator, first, board);
+  const HandEvaluation second_eval =
+      ReferenceBestHandFromFiveCardEvaluation(evaluator, second, board);
   if (first_eval > second_eval) {
     return 1;
   }
@@ -127,6 +169,9 @@ void CheckSevenCardBestHand() {
 
   HandEvaluator evaluator;
   HandEvaluation evaluation = evaluator.evaluate_hand(hand, board);
+  Expect(evaluation == ReferenceBestHandFromFiveCardEvaluation(evaluator, hand,
+                                                              board),
+         "seven-card evaluation should match five-card reference");
   Expect(evaluation.rank == HandRank::FULL_HOUSE,
          "seven-card evaluation should choose full house");
   Expect(evaluation.kicker_count == 2, "full house should have two kickers");
@@ -148,6 +193,11 @@ void CheckCactusWheelOrdering() {
       TestCombo(6, SuitKind::kHearts, 2, SuitKind::kClubs);
   Expect(evaluator.compare_hands(six_high, wheel, straight_board) > 0,
          "Cactus compare should score wheel lower than six-high straight");
+  const HandEvaluation wheel_eval = evaluator.evaluate_hand(wheel,
+                                                            straight_board);
+  Expect(wheel_eval.rank == HandRank::STRAIGHT &&
+             wheel_eval.kicker_count == 1 && wheel_eval.kickers[0] == 5,
+         "seven-card wheel should evaluate as five-high straight");
 }
 
 void CheckCompactAndGameStateComparisonMatch() {
