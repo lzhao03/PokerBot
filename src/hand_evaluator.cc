@@ -1,5 +1,6 @@
 #include "src/hand_evaluator.h"
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -243,15 +244,6 @@ int CompareScores(const EvaluationScore& first, const EvaluationScore& second) {
   return 0;
 }
 
-int CountBits(int value) {
-  int count = 0;
-  while (value != 0) {
-    value &= value - 1;
-    ++count;
-  }
-  return count;
-}
-
 int BuildCactusCard(CardId card) {
   static constexpr std::array<int, 13> kRankPrimes = {
       2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41};
@@ -339,7 +331,7 @@ struct CactusTables {
     records.reserve(7462);
 
     for (int rank_mask = 0; rank_mask < 8192; ++rank_mask) {
-      if (CountBits(rank_mask) != 5) {
+      if (std::popcount(static_cast<unsigned int>(rank_mask)) != 5) {
         continue;
       }
       records.push_back(
@@ -438,7 +430,7 @@ uint16_t EvalFiveCactus(const CactusTables& tables,
   if ((cards[0] & cards[1] & cards[2] & cards[3] & cards[4] & 0xF000) != 0) {
     return tables.flushes[rank_mask];
   }
-  if (CountBits(rank_mask) == 5) {
+  if (std::popcount(static_cast<unsigned int>(rank_mask)) == 5) {
     return tables.unique5[rank_mask];
   }
   const int product = (cards[0] & 0xFF) * (cards[1] & 0xFF) *
