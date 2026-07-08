@@ -465,6 +465,12 @@ class CFRSolver {
       NodeRef node,
       TraversalContext& ctx,
       NodeGraph& graph);
+  template <typename EvalChild>
+  double average_sampled_chance(int samples,
+                                NodeRef node,
+                                CardMask known_private_cards,
+                                NodeGraph& graph,
+                                EvalChild&& eval_child);
 
   BettingHistoryKey make_betting_history_key(
       const CompactPublicState& state) const;

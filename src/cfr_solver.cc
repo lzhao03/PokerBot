@@ -2037,19 +2037,33 @@ double CFRSolver::chance_sampling_frozen_regret_only(
     NodeGraph& graph) {
   const int samples = ChanceSamples(config_);
   record_chance_samples(samples);
+  return average_sampled_chance(
+      samples, node, ctx.known_private_cards(), graph,
+      [&](NodeRef child) {
+        return cfr_frozen_regret_only(child, ctx, graph);
+      });
+}
 
+template <typename EvalChild>
+double CFRSolver::average_sampled_chance(
+    int samples,
+    NodeRef node,
+    CardMask known_private_cards,
+    NodeGraph& graph,
+    EvalChild&& eval_child) {
   double value = 0.0;
-  const CardMask known_private_cards = ctx.known_private_cards();
+  int evaluated = 0;
   for (int i = 0; i < samples; ++i) {
     const ChildResult child =
         graph.sample_chance_child(node, known_private_cards);
     if (child.status != ChildStatus::kOk) {
       continue;
     }
-    value += cfr_frozen_regret_only(child.node, ctx, graph);
+    value += eval_child(child.node);
+    ++evaluated;
   }
 
-  return samples > 0 ? value / samples : 0.0;
+  return evaluated > 0 ? value / evaluated : 0.0;
 }
 
 void CFRSolver::condition_ranges_for_actions(
@@ -2236,19 +2250,11 @@ double CFRSolver::evaluate_strategy_node(
   }
   if (row.is_chance_node) {
     const int samples = ChanceSamples(config_);
-    double value = 0.0;
-    int evaluated = 0;
-    const CardMask known_private_cards = ctx.known_private_cards();
-    for (int i = 0; i < samples; ++i) {
-      const ChildResult child =
-          graph.sample_chance_child(node, known_private_cards);
-      if (child.status != ChildStatus::kOk) {
-        continue;
-      }
-      value += evaluate_strategy_node(child.node, ctx, graph);
-      ++evaluated;
-    }
-    return evaluated > 0 ? value / evaluated : 0.0;
+    return average_sampled_chance(
+        samples, node, ctx.known_private_cards(), graph,
+        [&](NodeRef child) {
+          return evaluate_strategy_node(child, ctx, graph);
+        });
   }
   if (row.action_count == 0) {
     return 0.0;
