@@ -8,22 +8,6 @@
 namespace poker {
 namespace {
 
-GameAction MakeAction(ActionKind kind, int amount = 0) {
-  return {kind, amount, -1};
-}
-
-ComboId MakeCombo(int first_rank,
-                  SuitKind first_suit,
-                  int second_rank,
-                  SuitKind second_suit) {
-  return CardsToComboId(MakeCardId(first_rank, first_suit),
-                        MakeCardId(second_rank, second_suit));
-}
-
-void AddCard(CompactPublicState& state, int rank, SuitKind suit) {
-  AddBoardCard(state, MakeCardId(rank, suit));
-}
-
 SolverConfig TestConfig() {
   SolverConfig config;
   config.bet_sizes.push_back(0.5);
@@ -68,11 +52,11 @@ CompactPublicState ShowdownState() {
   state.player_to_act = 1;
   AppendHistoryAction(state, {ActionKind::kCheck, 0, 1});
   AppendHistoryAction(state, {ActionKind::kCheck, 0, 0});
-  AddCard(state, 2, SuitKind::kHearts);
-  AddCard(state, 7, SuitKind::kDiamonds);
-  AddCard(state, 9, SuitKind::kClubs);
-  AddCard(state, 11, SuitKind::kSpades);
-  AddCard(state, 12, SuitKind::kDiamonds);
+  AddBoardCard(state, MakeCardId(2, SuitKind::kHearts));
+  AddBoardCard(state, MakeCardId(7, SuitKind::kDiamonds));
+  AddBoardCard(state, MakeCardId(9, SuitKind::kClubs));
+  AddBoardCard(state, MakeCardId(11, SuitKind::kSpades));
+  AddBoardCard(state, MakeCardId(12, SuitKind::kDiamonds));
   return state;
 }
 
@@ -105,9 +89,9 @@ TEST_CASE("legal actions preserve state invariants") {
   states.push_back(PreflopState());
   states.push_back(FlopState());
   states.push_back(tree.apply_action(PreflopState(),
-                                     MakeAction(ActionKind::kRaise, 4)));
+                                     {ActionKind::kRaise, 4, -1}));
   states.push_back(tree.apply_action(FlopState(),
-                                     MakeAction(ActionKind::kCheck)));
+                                     {ActionKind::kCheck, 0, -1}));
 
   for (const CompactPublicState& state : states) {
     const int total_chips = TotalChips(state);
@@ -160,29 +144,31 @@ TEST_CASE("legal action abstraction shapes match config") {
   CHECK(HasAction(LegalActions(street_tree, FlopState()), ActionKind::kBet,
                   4));
 
-  CHECK_THROWS((void)GameTree::action_key(MakeAction(ActionKind::kCall, -1)));
+  CHECK_THROWS((void)GameTree::action_key({ActionKind::kCall, -1, -1}));
   CHECK_THROWS((void)GameTree::action_key(
-      MakeAction(ActionKind::kCall, 1000000)));
+      {ActionKind::kCall, 1000000, -1}));
 }
 
 TEST_CASE("terminal utility and chance transitions are correct") {
   GameTree tree(TestConfig());
   CompactPublicState raised = tree.apply_action(
-      PreflopState(), MakeAction(ActionKind::kRaise, 4));
+      PreflopState(), {ActionKind::kRaise, 4, -1});
   CompactPublicState folded = tree.apply_action(
-      raised, MakeAction(ActionKind::kFold));
+      raised, {ActionKind::kFold, 0, -1});
   CHECK(tree.get_utility(folded, 0, 1) == 2);
 
   ComboId player_a =
-      MakeCombo(14, SuitKind::kHearts, 14, SuitKind::kSpades);
+      CardsToComboId(MakeCardId(14, SuitKind::kHearts),
+                     MakeCardId(14, SuitKind::kSpades));
   ComboId player_b =
-      MakeCombo(13, SuitKind::kHearts, 13, SuitKind::kSpades);
+      CardsToComboId(MakeCardId(13, SuitKind::kHearts),
+                     MakeCardId(13, SuitKind::kSpades));
   CHECK(tree.is_terminal(ShowdownState()));
   CHECK(tree.get_utility(ShowdownState(), player_a, player_b) == 10);
 
   CompactPublicState closed_preflop = tree.apply_action(
-      tree.apply_action(PreflopState(), MakeAction(ActionKind::kCall)),
-      MakeAction(ActionKind::kCheck));
+      tree.apply_action(PreflopState(), {ActionKind::kCall, 0, -1}),
+      {ActionKind::kCheck, 0, -1});
   const std::array<CardId, 3> flop = {
       MakeCardId(8, SuitKind::kHearts),
       MakeCardId(9, SuitKind::kClubs),
@@ -208,7 +194,7 @@ TEST_CASE("compact history cap is enforced") {
     AppendHistoryAction(state, {ActionKind::kCheck, 0, 0});
   }
 
-  CHECK_THROWS((void)tree.apply_action(state, MakeAction(ActionKind::kCall)));
+  CHECK_THROWS((void)tree.apply_action(state, {ActionKind::kCall, 0, -1}));
 }
 
 }  // namespace
