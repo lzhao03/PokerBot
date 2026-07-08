@@ -57,8 +57,10 @@ void CheckRangeTrainingUpdatesCounters() {
   Expect(solver.get_iterations_run() == 3, "range run should record iterations");
   Expect(solver.get_cfr_update_count() > 0, "range run should visit CFR nodes");
   Expect(solver.get_info_set_count() > 0, "range run should allocate infosets");
-  Expect(stats.warmup_iterations + stats.frozen_iterations == 3,
-         "run stats should account for every iteration");
+  Expect(stats.warmup_iterations == 3,
+         "single-thread range run should use growing iterations");
+  Expect(stats.frozen_iterations == 0,
+         "single-thread range run should not use fixed-storage iterations");
 }
 
 void CheckPublicStateCapPreventsFrozenPhase() {
@@ -77,6 +79,8 @@ void CheckPublicStateCapPreventsFrozenPhase() {
       solver.get_last_training_run_stats();
   Expect(!stats.public_state_prebuild_complete,
          "public-state cap should stop prebuild completion");
+  Expect(stats.warmup_iterations == 5,
+         "incomplete prebuild should fall back to growing iterations");
   Expect(stats.frozen_iterations == 0,
          "incomplete prebuild should skip frozen training");
   Expect(solver.get_public_state_count() <= 1,

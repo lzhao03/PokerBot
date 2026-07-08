@@ -75,8 +75,10 @@ void CheckCoarseTrainingReachesFrozenPhase() {
          "coarse private bucket rows should prebuild");
   Expect(stats.frozen_info_set_lookup_prebuild_complete,
          "coarse frozen lookups should prebuild");
-  Expect(stats.frozen_iterations == 3,
-         "coarse run should use frozen iterations after warmup");
+  Expect(stats.warmup_iterations == 0,
+         "coarse prebuilt run should not use growing iterations");
+  Expect(stats.frozen_iterations == 4,
+         "coarse run should use fixed storage for every iteration");
   Expect(stats.frozen_cfr_updates > stats.frozen_iterations,
          "full-depth coarse frozen traversal should do real work");
   Expect(stats.missing_betting_history_transitions == 0,
@@ -85,6 +87,16 @@ void CheckCoarseTrainingReachesFrozenPhase() {
          "coarse action validation should have no misses");
   Expect(stats.missing_chance_transitions == 0,
          "coarse chance validation should have no misses");
+
+  solver.run(2, player_a, player_b);
+  const CFRSolver::TrainingRunStats second_stats =
+      solver.get_last_training_run_stats();
+  Expect(solver.get_iterations_run() == 6,
+         "second coarse run should keep cumulative iteration count");
+  Expect(second_stats.warmup_iterations == 0,
+         "already fixed storage should not use growing iterations");
+  Expect(second_stats.frozen_iterations == 2,
+         "already fixed storage should run fixed iterations");
 }
 
 void CheckCoarseEvaluationIsFinite() {

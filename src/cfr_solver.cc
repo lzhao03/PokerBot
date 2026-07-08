@@ -28,7 +28,6 @@ namespace poker {
 namespace {
 
 constexpr int kParallelEvaluationSampleThreshold = 32;
-constexpr int kAutoWarmupNoGrowthLimit = 100;
 
 std::optional<double> UtilityBeforeShowdown(const CompactPublicState& state,
                                             uint8_t board_count) {
@@ -255,14 +254,6 @@ CFRSolver::DecisionFrame CFRSolver::make_decision_frame(
   return frame;
 }
 
-CFRSolver::NodeGraphMode CFRSolver::default_node_graph_mode() const {
-  if (!storage_.frozen) {
-    return NodeGraphMode::kGrow;
-  }
-  return require_frozen_children_ ? NodeGraphMode::kRequirePresent
-                                  : NodeGraphMode::kSkipMissing;
-}
-
 CFRSolver::NodeGraph::NodeGraph(CFRSolver& solver,
                                 NodeGraphMode mode)
     : solver_(solver), mode_(mode) {}
@@ -447,21 +438,29 @@ void CFRSolver::run(int iterations,
   const int num_threads =
       config_.num_training_threads <= 1 ? 1 : config_.num_training_threads;
   const int max_depth = config_.max_depth;
-  const bool can_use_frozen_regret_only =
+  const bool regret_only_fast_path =
       config_.regret_only_training && max_depth == 0;
 
-  const bool should_run_frozen_phase = prepare_frozen_training(
-      *root_public_state_id, num_threads, max_depth, can_use_frozen_regret_only,
-      player_a_hands_view, player_b_hands_view);
-  const CompactPublicState root_state =
-      rows()[*root_public_state_id].state;
-  const int completed_warmup = run_warmup_phase(
-      iterations, *root_public_state_id, root_state, range_sampler,
-      player_a_hands_view, player_b_hands_view, max_depth,
-      should_run_frozen_phase, can_use_frozen_regret_only);
-  maybe_run_frozen_phase(iterations, completed_warmup, num_threads,
-                         *root_public_state_id, range_sampler,
-                         player_a_training_range, player_b_training_range);
+  bool use_prebuilt_storage = storage_.frozen;
+  if (!use_prebuilt_storage &&
+      should_use_prebuilt_training(num_threads, max_depth,
+                                   regret_only_fast_path)) {
+    use_prebuilt_storage =
+        prepare_prebuilt_training(*root_public_state_id, max_depth,
+                                  player_a_hands_view, player_b_hands_view);
+  }
+
+  if (use_prebuilt_storage) {
+    seal_prebuilt_training();
+    run_fixed_storage_iterations(iterations, num_threads,
+                                 *root_public_state_id, range_sampler,
+                                 player_a_training_range,
+                                 player_b_training_range);
+  } else {
+    run_growing_iterations(iterations, *root_public_state_id, range_sampler,
+                           player_a_hands_view, player_b_hands_view,
+                           max_depth);
+  }
 
   LOG(INFO) << "CFR iterations completed";
   LOG(INFO) << "Iterations run: " << iterations_run_;
@@ -470,19 +469,27 @@ void CFRSolver::run(int iterations,
   LOG(INFO) << "Player A average EV: " << get_expected_value(0);
 }
 
-bool CFRSolver::prepare_frozen_training(
-    uint32_t root_public_state_id,
+bool CFRSolver::should_use_prebuilt_training(
     int num_threads,
     int max_depth,
-    bool can_use_frozen_regret_only,
+    bool regret_only_fast_path) const {
+  if (storage_.frozen) {
+    return true;
+  }
+  if (num_threads <= 1 && !regret_only_fast_path) {
+    return false;
+  }
+  return config_.max_public_states > 0 || max_depth > 0;
+}
+
+bool CFRSolver::prepare_prebuilt_training(
+    uint32_t root_public_state_id,
+    int max_depth,
     const TrainingRangeView& player_a_hands_view,
     const TrainingRangeView& player_b_hands_view) {
   TrainingRunStats& stats = last_training_run_stats_;
-  const bool should_prebuild_public_states =
-      !storage_.frozen && (num_threads > 1 || can_use_frozen_regret_only) &&
-      (config_.max_public_states > 0 || max_depth > 0);
-  if (!should_prebuild_public_states) {
-    return false;
+  if (storage_.frozen) {
+    return true;
   }
 
   auto record_public_counts = [&] {
@@ -550,44 +557,32 @@ bool CFRSolver::prepare_frozen_training(
   return true;
 }
 
-int CFRSolver::run_warmup_phase(
+void CFRSolver::seal_prebuilt_training() {
+  if (!storage_.frozen) {
+    storage_.freeze();
+  }
+  require_frozen_children_ = true;
+}
+
+void CFRSolver::run_growing_iterations(
     int iterations,
     uint32_t root_public_state_id,
-    const CompactPublicState& root_state,
     RangeSampler& range_sampler,
     const TrainingRangeView& player_a_hands_view,
     const TrainingRangeView& player_b_hands_view,
-    int max_depth,
-    bool should_run_frozen_phase,
-    bool can_use_frozen_regret_only) {
-  const bool auto_warmup =
-      should_run_frozen_phase && !storage_.frozen && config_.warmup_iterations <= 0;
-  int warmup_count = iterations;
-  if (should_run_frozen_phase && !storage_.frozen &&
-      config_.warmup_iterations > 0) {
-    const int requested_warmup =
-        can_use_frozen_regret_only
-            ? config_.warmup_iterations
-            : std::max(config_.warmup_iterations, kPlayerCount);
-    warmup_count = std::min(requested_warmup, iterations);
-  }
-
+    int max_depth) {
   LOG(INFO) << "Starting CFR iterations...";
-  VLOG(1) << "Warmup phase: "
-          << (auto_warmup ? "adaptive" : std::to_string(warmup_count))
+  VLOG(1) << "Growing storage backend: " << iterations
           << " single-threaded iterations";
+  const CompactPublicState root_state = rows()[root_public_state_id].state;
   NodeGraph graph(*this, NodeGraphMode::kGrow);
   const NodeRef root_node{root_public_state_id,
                           ExactBoardFromState(root_state)};
   TraversalScratch scratch(ScratchDepthReserve(config_, max_depth));
   const int64_t warmup_start_updates = cfr_update_count_;
   const auto warmup_start = std::chrono::steady_clock::now();
-  int completed_warmup = 0;
-  int no_growth_iterations = 0;
-  size_t previous_info_sets = get_info_set_count();
-  size_t previous_public_states = get_public_state_count();
 
-  for (int i = 0; i < warmup_count; ++i) {
+  for (int i = 0; i < iterations; ++i) {
     const RangeDeal deal = range_sampler.sample(rng_);
     const TraversalDeal traversal_deal{{
         PrivateCards::FromCombo(deal.player_a_combo),
@@ -613,74 +608,14 @@ int CFRSolver::run_warmup_phase(
 
     cumulative_root_utility_ += dealt_value;
     ++iterations_run_;
-    ++completed_warmup;
-
-    if (auto_warmup) {
-      const size_t current_info_sets = get_info_set_count();
-      const size_t current_public_states = get_public_state_count();
-      if (current_info_sets == previous_info_sets &&
-          current_public_states == previous_public_states) {
-        ++no_growth_iterations;
-      } else {
-        no_growth_iterations = 0;
-        previous_info_sets = current_info_sets;
-        previous_public_states = current_public_states;
-      }
-      const bool info_set_cap_hit =
-          config_.max_info_sets > 0 &&
-          current_info_sets >= static_cast<size_t>(config_.max_info_sets);
-      const bool public_state_cap_hit =
-          config_.max_public_states > 0 &&
-          current_public_states >=
-              static_cast<size_t>(config_.max_public_states);
-      // Cap hits mean the tree is incomplete; do not freeze and turn the
-      // frozen phase into mostly skipped missing-child branches.
-      if (!info_set_cap_hit && !public_state_cap_hit &&
-          no_growth_iterations >= kAutoWarmupNoGrowthLimit) {
-        break;
-      }
-    }
   }
 
   const auto warmup_end = std::chrono::steady_clock::now();
-  last_training_run_stats_.warmup_iterations = completed_warmup;
+  last_training_run_stats_.warmup_iterations = iterations;
   last_training_run_stats_.warmup_seconds =
       std::chrono::duration<double>(warmup_end - warmup_start).count();
   last_training_run_stats_.warmup_cfr_updates =
       cfr_update_count_ - warmup_start_updates;
-  return completed_warmup;
-}
-
-void CFRSolver::maybe_run_frozen_phase(
-    int iterations,
-    int completed_warmup,
-    int num_threads,
-    uint32_t root_public_state_id,
-    const RangeSampler& range_sampler,
-    const TrainingRange& player_a_training_range,
-    const TrainingRange& player_b_training_range) {
-  const int remaining = iterations - completed_warmup;
-  if (remaining <= 0) {
-    return;
-  }
-
-  storage_.freeze();
-  require_frozen_children_ = true;
-  LOG(INFO) << "Frozen after warmup: " << get_info_set_count()
-            << " info sets, " << iterations_run_
-            << " warmup iterations. Starting frozen phase ("
-            << remaining << " iterations, " << num_threads << " workers)...";
-  const int64_t frozen_start_updates = cfr_update_count_;
-  const auto frozen_start = std::chrono::steady_clock::now();
-  run_frozen_iterations(remaining, num_threads, root_public_state_id,
-                        range_sampler, player_a_training_range,
-                        player_b_training_range);
-  const auto frozen_end = std::chrono::steady_clock::now();
-  last_training_run_stats_.frozen_iterations = remaining;
-  last_training_run_stats_.frozen_seconds =
-      std::chrono::duration<double>(frozen_end - frozen_start).count();
-  last_training_run_stats_.frozen_cfr_updates =
-      cfr_update_count_ - frozen_start_updates;
 }
 
 template <typename WorkerFn, typename AccumulateFn>
@@ -718,20 +653,25 @@ void CFRSolver::run_sharded(int work_count,
   }
 }
 
-void CFRSolver::run_frozen_iterations(
+void CFRSolver::run_fixed_storage_iterations(
     int iterations,
     int num_threads,
     uint32_t root_public_state_id,
     const RangeSampler& range_sampler,
     const TrainingRange& player_a_training_range,
     const TrainingRange& player_b_training_range) {
+  LOG(INFO) << "Starting fixed-storage CFR iterations ("
+            << iterations << " iterations, " << num_threads << " workers)...";
+  const int64_t frozen_start_updates = cfr_update_count_;
+  const auto frozen_start = std::chrono::steady_clock::now();
+
   // Each worker shares the frozen strategy tables and writes to the same
   // regret/strategy arrays.
   // Workers use their own RNG and TraversalScratch; no locks needed.
-  std::shared_ptr<const StrategyTables> frozen_tables =
+  std::shared_ptr<const StrategyTables> fixed_tables =
       storage_.frozen_tables;
   std::shared_ptr<MutableCumulativeArrays> cumulative = storage_.cumulative;
-  const bool use_frozen_regret_only =
+  const bool use_regret_only_fast_path =
       storage_.frozen && require_frozen_children_ &&
       config_.regret_only_training && config_.max_depth == 0;
   const bool use_atomic_updates = num_threads > 1;
@@ -746,14 +686,13 @@ void CFRSolver::run_frozen_iterations(
   int completed_iterations = 0;
   run_sharded(
       iterations, num_threads, iterations_run_,
-      [this, root_public_state_id, &range_sampler, frozen_tables, cumulative,
-       use_frozen_regret_only, use_atomic_updates, &player_a_training_range,
-       &player_b_training_range](int iteration_begin,
-                                 int shard,
-                                 unsigned int seed) mutable {
+      [this, root_public_state_id, &range_sampler, fixed_tables, cumulative,
+       use_regret_only_fast_path, use_atomic_updates,
+       &player_a_training_range, &player_b_training_range](
+          int iteration_begin, int shard, unsigned int seed) mutable {
           // Build a lightweight worker that shares frozen tables.
           CFRSolver worker(config_, utility_cache_);
-          worker.storage_.bind_frozen(frozen_tables, cumulative);
+          worker.storage_.bind_frozen(fixed_tables, cumulative);
           worker.require_frozen_children_ = true;
           worker.rng_.seed(seed);
 
@@ -761,10 +700,11 @@ void CFRSolver::run_frozen_iterations(
           TrainingRangeView player_b_hands_view;
           const int max_depth = config_.max_depth;
           const size_t scratch_depth =
-              use_frozen_regret_only ? 0
-                                     : ScratchDepthReserve(config_, max_depth);
+              use_regret_only_fast_path
+                  ? 0
+                  : ScratchDepthReserve(config_, max_depth);
           TraversalScratch scratch(scratch_depth);
-          if (!use_frozen_regret_only) {
+          if (!use_regret_only_fast_path) {
             // Per-worker range views (read-only, built from shared training data).
             player_a_hands_view.reset_to_all(player_a_training_range);
             player_b_hands_view.reset_to_all(player_b_training_range);
@@ -797,7 +737,7 @@ void CFRSolver::run_frozen_iterations(
             options.iteration = cfr_iteration;
             options.max_depth = max_depth;
             options.write_average_strategy = !config_.regret_only_training;
-            if (use_frozen_regret_only) {
+            if (use_regret_only_fast_path) {
               options.regret_load_mode =
                   use_atomic_updates ? RegretLoadMode::kAtomic
                                      : RegretLoadMode::kPlain;
@@ -810,7 +750,7 @@ void CFRSolver::run_frozen_iterations(
             TraversalContext ctx(traversal_deal, options, scratch,
                                  player_a_context_range,
                                  player_b_context_range);
-            if (use_frozen_regret_only) {
+            if (use_regret_only_fast_path) {
               local_utility +=
                   worker.cfr_frozen_regret_only(root_node, ctx, graph);
               continue;
@@ -828,6 +768,13 @@ void CFRSolver::run_frozen_iterations(
         completed_iterations += result.iterations;
       });
   iterations_run_ += completed_iterations;
+
+  const auto frozen_end = std::chrono::steady_clock::now();
+  last_training_run_stats_.frozen_iterations = iterations;
+  last_training_run_stats_.frozen_seconds =
+      std::chrono::duration<double>(frozen_end - frozen_start).count();
+  last_training_run_stats_.frozen_cfr_updates =
+      cfr_update_count_ - frozen_start_updates;
 }
 
 template <CFRSolver::CfrTraversalMode mode>
@@ -1207,7 +1154,8 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
       rows()[*root_public_state_id].state;
   const NodeRef root_node{*root_public_state_id,
                           ExactBoardFromState(root_state)};
-  NodeGraph graph(*this, default_node_graph_mode());
+  NodeGraph graph(*this, storage_.frozen ? NodeGraphMode::kSkipMissing
+                                         : NodeGraphMode::kGrow);
   EvaluationContext ctx{TraversalDeal{{
       PrivateCards::FromCombo(player_a_hand),
       PrivateCards::FromCombo(player_b_hand),
@@ -1282,7 +1230,8 @@ double CFRSolver::evaluate_strategy_samples(
   if (!root_node.has_value()) {
     return 0.0;
   }
-  NodeGraph graph(*this, default_node_graph_mode());
+  NodeGraph graph(*this, storage_.frozen ? NodeGraphMode::kSkipMissing
+                                         : NodeGraphMode::kGrow);
   for (int i = 0; i < samples; ++i) {
     const RangeDeal deal = range_sampler.sample(rng_);
     EvaluationContext ctx{TraversalDeal{{

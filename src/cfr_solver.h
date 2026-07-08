@@ -452,36 +452,30 @@ class CFRSolver {
             std::shared_ptr<TerminalUtilityCache> utility_cache,
             GameState initial_state);
 
-  bool prepare_frozen_training(
-      uint32_t root_public_state_id,
+  bool should_use_prebuilt_training(
       int num_threads,
       int max_depth,
-      bool can_use_frozen_regret_only,
+      bool regret_only_fast_path) const;
+  bool prepare_prebuilt_training(
+      uint32_t root_public_state_id,
+      int max_depth,
       const TrainingRangeView& player_a_hands_view,
       const TrainingRangeView& player_b_hands_view);
-  int run_warmup_phase(int iterations,
-                       uint32_t root_public_state_id,
-                       const CompactPublicState& root_state,
-                       RangeSampler& range_sampler,
-                       const TrainingRangeView& player_a_hands_view,
-                       const TrainingRangeView& player_b_hands_view,
-                       int max_depth,
-                       bool should_run_frozen_phase,
-                       bool can_use_frozen_regret_only);
-  void maybe_run_frozen_phase(
+  void seal_prebuilt_training();
+  void run_growing_iterations(
       int iterations,
-      int completed_warmup,
+      uint32_t root_public_state_id,
+      RangeSampler& range_sampler,
+      const TrainingRangeView& player_a_hands_view,
+      const TrainingRangeView& player_b_hands_view,
+      int max_depth);
+  void run_fixed_storage_iterations(
+      int iterations,
       int num_threads,
       uint32_t root_public_state_id,
       const RangeSampler& range_sampler,
       const TrainingRange& player_a_training_range,
       const TrainingRange& player_b_training_range);
-  void run_frozen_iterations(int iterations,
-                             int num_threads,
-                             uint32_t root_public_state_id,
-                             const RangeSampler& range_sampler,
-                             const TrainingRange& player_a_training_range,
-                             const TrainingRange& player_b_training_range);
   template <typename WorkerFn, typename AccumulateFn>
   void run_sharded(int work_count,
                    int worker_count,
@@ -497,7 +491,6 @@ class CFRSolver {
   static DecisionFrame make_decision_frame(
       NodeRef node,
       const PublicStateRow& row);
-  NodeGraphMode default_node_graph_mode() const;
   double cfr_with_ranges(
       NodeRef node,
       TraversalContext& ctx,

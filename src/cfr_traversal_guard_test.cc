@@ -112,12 +112,14 @@ void CheckFrozenRegretOnlyGuard() {
   solver.run(4, player_a, player_b);
   const CFRSolver::TrainingRunStats stats =
       solver.get_last_training_run_stats();
-  Expect(stats.frozen_iterations == 3,
-         "frozen guard should run frozen iterations");
+  Expect(stats.warmup_iterations == 0,
+         "frozen guard should skip growing iterations");
+  Expect(stats.frozen_iterations == 4,
+         "frozen guard should run fixed-storage iterations");
   Expect(stats.frozen_cfr_updates > stats.frozen_iterations,
          "frozen guard should do real CFR work");
   ExpectMetrics(TrainingMetrics(solver),
-                Metrics{1.0997248478223594, 822, 2870, 120, 2482},
+                Metrics{0.66192917573519394, 822, 2870, 120, 2480},
                 "frozen regret-only traversal");
 }
 

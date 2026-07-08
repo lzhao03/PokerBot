@@ -22,7 +22,8 @@ message PokerConfig {
   int64 max_info_sets = 14;
   // Number of threads for parallel training. 0 or 1 = single-threaded.
   int32 num_training_threads = 15;
-  // Single-threaded warmup iterations before frozen phase. 0 = auto.
+  // Deprecated. Training now chooses growing or prebuilt storage for the whole
+  // run.
   int32 warmup_iterations = 16;
   // Maximum number of compact public-state rows to allocate. 0 means unlimited.
   int64 max_public_states = 17;

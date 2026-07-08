@@ -71,9 +71,8 @@ struct SolverConfig {
   int max_public_states = 0;
   // Number of threads to use for parallel training. 0 or 1 = single-threaded.
   int num_training_threads = 0;
-  // Number of single-threaded warmup iterations before parallel training begins.
-  // During warmup the game tree and info set table are populated.
-  // 0 = auto: run until max_info_sets is reached or info set growth stalls.
+  // Deprecated. Training now chooses growing or prebuilt storage for the whole
+  // run.
   int warmup_iterations = 0;
 };
 
