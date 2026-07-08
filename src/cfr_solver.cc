@@ -1115,16 +1115,16 @@ CFRSolver::ActionRangeConditioning::ActionRangeConditioning(
     return;
   }
 
-  conditioned_ranges_ = &ctx.scratch_frame().conditioned_ranges;
+  RangeScratchFrame& scratch_frame = ctx.scratch_frame();
   const CompactPublicState& state = node_cursor.exact_state();
   if (condition_player_a_) {
-    solver.condition_ranges_for_actions(
+    conditioned_ranges_ = solver.condition_ranges_for_actions(
         original_player_a_range_->get(), state, public_state_id, player,
-        legal_action_ids, *conditioned_ranges_);
+        legal_action_ids, scratch_frame);
   } else {
-    solver.condition_ranges_for_actions(
+    conditioned_ranges_ = solver.condition_ranges_for_actions(
         original_player_b_range_->get(), state, public_state_id, player,
-        legal_action_ids, *conditioned_ranges_);
+        legal_action_ids, scratch_frame);
   }
 }
 
@@ -1132,7 +1132,7 @@ CFRSolver::OptionalTrainingRange
 CFRSolver::ActionRangeConditioning::player_a_range_for(
     size_t action_index) const {
   if (condition_player_a_) {
-    return std::cref((*conditioned_ranges_)[action_index]);
+    return std::cref(conditioned_ranges_.for_action(action_index));
   }
   return original_player_a_range_;
 }
@@ -1141,23 +1141,25 @@ CFRSolver::OptionalTrainingRange
 CFRSolver::ActionRangeConditioning::player_b_range_for(
     size_t action_index) const {
   if (condition_player_b_) {
-    return std::cref((*conditioned_ranges_)[action_index]);
+    return std::cref(conditioned_ranges_.for_action(action_index));
   }
   return original_player_b_range_;
 }
 
-void CFRSolver::condition_ranges_for_actions(
+CFRSolver::ActionConditionedRanges CFRSolver::condition_ranges_for_actions(
     const TrainingRangeView& range,
     const CompactPublicState& state,
     uint32_t public_state_id,
     int player,
     absl::Span<const int> conditioned_action_ids,
-    std::vector<TrainingRangeView>& conditioned_ranges) {
+    RangeScratchFrame& scratch_frame) {
   const size_t action_count = conditioned_action_ids.size();
   if (action_count == 0) {
-    return;
+    return ActionConditionedRanges();
   }
 
+  std::vector<TrainingRangeView>& conditioned_ranges =
+      scratch_frame.conditioned_ranges;
   if (conditioned_ranges.size() < action_count) {
     conditioned_ranges.resize(action_count);
   }
@@ -1166,7 +1168,9 @@ void CFRSolver::condition_ranges_for_actions(
   }
   const size_t range_size = range.size();
   if (range_size == 0) {
-    return;
+    return ActionConditionedRanges(
+        absl::Span<TrainingRangeView>(conditioned_ranges.data(),
+                                      action_count));
   }
 
   const CardMask board_mask = state.board_mask;
@@ -1195,6 +1199,9 @@ void CFRSolver::condition_ranges_for_actions(
       }
     }
   }
+
+  return ActionConditionedRanges(
+      absl::Span<TrainingRangeView>(conditioned_ranges.data(), action_count));
 }
 
 double CFRSolver::evaluate_strategy(ComboId player_a_hand,

@@ -114,6 +114,15 @@ class PublicStateGraph {
   std::optional<uint32_t> get_or_create_public_state_row(
       uint32_t betting_history_id,
       CompactPublicState state);
+  std::optional<uint32_t> find_cached_action_child(uint32_t public_state_id,
+                                                   int action_index);
+  std::optional<uint32_t> find_cached_chance_child(
+      uint32_t public_state_id,
+      const CompactPublicState& child_state);
+  bool can_create_public_state() const;
+  CompactPublicState build_action_child_state(
+      const PublicStateRow& parent_row,
+      int action_index) const;
   template <typename Callback>
   bool for_each_required_chance_transition(const PublicStateRow& row,
                                            Callback&& callback) const;
