@@ -429,10 +429,8 @@ void CFRSolver::run(int iterations,
       BuildTrainingRange(player_a_range);
   const TrainingRange player_b_training_range =
       BuildTrainingRange(player_b_range);
-  TrainingRangeView player_a_hands_view;
-  TrainingRangeView player_b_hands_view;
-  player_a_hands_view.reset_to_all(player_a_training_range);
-  player_b_hands_view.reset_to_all(player_b_training_range);
+  TrainingRangeView player_a_hands_view(player_a_training_range);
+  TrainingRangeView player_b_hands_view(player_b_training_range);
   RangeSampler range_sampler(player_a_training_range, player_b_training_range);
 
   VLOG(1) << "Preparing compact public-state rows...";
