@@ -252,7 +252,7 @@ int CountBits(int value) {
   return count;
 }
 
-int CactusCard(CardId card) {
+int BuildCactusCard(CardId card) {
   static constexpr std::array<int, 13> kRankPrimes = {
       2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41};
   static constexpr std::array<int, 4> kSuitBits = {
@@ -261,6 +261,21 @@ int CactusCard(CardId card) {
   const int suit_index = SuitIndex(SuitFromCardId(card));
   return kRankPrimes[rank_index] | (rank_index << 8) |
          kSuitBits[suit_index] | (1 << (16 + rank_index));
+}
+
+const std::array<int, kDeckCardCount>& CactusCardTable() {
+  static const std::array<int, kDeckCardCount> table = [] {
+    std::array<int, kDeckCardCount> out = {};
+    for (int id = 0; id < kDeckCardCount; ++id) {
+      out[static_cast<size_t>(id)] = BuildCactusCard(static_cast<CardId>(id));
+    }
+    return out;
+  }();
+  return table;
+}
+
+int CactusCard(CardId card) {
+  return CactusCardTable()[static_cast<size_t>(card)];
 }
 
 EvaluationScore ScoreForDistinctRanks(int rank_mask, bool flush) {
