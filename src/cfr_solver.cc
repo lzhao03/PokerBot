@@ -1802,14 +1802,13 @@ double CFRSolver::cfr_with_ranges(
           ? strategy_store_.get_or_create(info_set_address, legal_action_ids)
           : strategy_store_.find(info_set_address, action_count);
 
-  double action_probabilities[GameTree::kMaxActionsPerNode];
-  double action_values[GameTree::kMaxActionsPerNode];
-  for (size_t action_index = 0; action_index < action_count; ++action_index) {
-    action_values[action_index] = 0.0;
-  }
+  ActionScratch action_scratch;
+  absl::Span<double> action_probabilities =
+      action_scratch.probs(action_count);
+  absl::Span<double> action_values = action_scratch.vals(action_count);
   strategy_store_.regret_matching_or_uniform(
       action_block, action_count, ctx.options().regret_load_mode,
-      absl::Span<double>(action_probabilities, action_count));
+      action_probabilities);
 
   double node_value = 0.0;
   const OptionalTrainingRange player_a_range = ctx.range(0);
@@ -1889,8 +1888,7 @@ double CFRSolver::cfr_with_ranges(
 
     if (ctx.options().write_average_strategy) {
       action_block->add_average_strategy(
-          absl::Span<const double>(action_probabilities, action_count),
-          ctx.average_strategy_weight(player),
+          action_probabilities, ctx.average_strategy_weight(player),
           ctx.options().regret_update_mode);
     }
   }
@@ -1985,14 +1983,13 @@ double CFRSolver::cfr_frozen_regret_only(
       strategy_store_.find_frozen(public_state_id, player, player_cards.combo,
                                   action_count);
 
-  double action_probabilities[GameTree::kMaxActionsPerNode];
-  double action_values[GameTree::kMaxActionsPerNode];
-  for (size_t action_index = 0; action_index < action_count; ++action_index) {
-    action_values[action_index] = 0.0;
-  }
+  ActionScratch action_scratch;
+  absl::Span<double> action_probabilities =
+      action_scratch.probs(action_count);
+  absl::Span<double> action_values = action_scratch.vals(action_count);
   strategy_store_.regret_matching_or_uniform(
       action_block, action_count, ctx.options().regret_load_mode,
-      absl::Span<double>(action_probabilities, action_count));
+      action_probabilities);
 
   double node_value = 0.0;
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
@@ -2079,7 +2076,9 @@ void CFRSolver::condition_ranges_for_actions(
   }
 
   const CardMask board_mask = state.board_mask;
-  double action_probabilities[GameTree::kMaxActionsPerNode] = {};
+  ActionScratch action_scratch;
+  absl::Span<double> action_probabilities =
+      action_scratch.probs(action_count);
   for (size_t i = 0; i < range_size; ++i) {
     const float range_weight = range.weight(i);
     const ComboId combo_id = range.combo(i);
@@ -2091,7 +2090,7 @@ void CFRSolver::condition_ranges_for_actions(
         card_abstraction_.private_bucket(combo_id, state);
     strategy_store_.regret_matching_for_bucket(
         public_state_id, player, private_bucket, conditioned_action_ids,
-        absl::Span<double>(action_probabilities, action_count));
+        action_probabilities);
 
     for (size_t action_index = 0; action_index < action_count; ++action_index) {
       const double conditioned_weight =
@@ -2261,13 +2260,14 @@ double CFRSolver::evaluate_strategy_node(
   }
 
   const PrivateCards& player_cards = ctx.cards(player);
-  StrategyProbabilities probabilities;
-  probabilities.resize(row.action_count, 0.0);
+  ActionScratch action_scratch;
+  absl::Span<double> probabilities =
+      action_scratch.probs(row.action_count);
   const PrivateBucketId private_bucket =
       card_abstraction_.private_bucket(player_cards.combo, row.state);
   strategy_store_.average_strategy(
       public_state_id, row, player, private_bucket,
-      config_.regret_only_training, absl::Span<double>(probabilities));
+      config_.regret_only_training, probabilities);
 
   double value = 0.0;
   const int action_count = row.action_count;

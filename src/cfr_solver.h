@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -11,7 +12,6 @@
 #include <utility>
 #include <vector>
 
-#include "absl/container/inlined_vector.h"
 #include "absl/types/span.h"
 #include "src/betting_abstraction.h"
 #include "src/card_abstraction.h"
@@ -165,8 +165,6 @@ class CFRSolver {
 
   using OptionalTrainingRange =
       std::optional<std::reference_wrapper<const TrainingRangeView>>;
-  using StrategyProbabilities = absl::InlinedVector<double, 8>;
-
   static constexpr uint32_t kCappedPublicStateId =
       GameTree::kInvalidPublicStateId - 1;
 
@@ -253,6 +251,20 @@ class CFRSolver {
     }
 
     std::vector<RangeScratchFrame> frames;
+  };
+
+  struct ActionScratch {
+    std::array<double, GameTree::kMaxActionsPerNode> probabilities{};
+    std::array<double, GameTree::kMaxActionsPerNode> values{};
+
+    absl::Span<double> probs(size_t count) {
+      return absl::Span<double>(probabilities.data(), count);
+    }
+
+    absl::Span<double> vals(size_t count) {
+      std::fill_n(values.data(), count, 0.0);
+      return absl::Span<double>(values.data(), count);
+    }
   };
 
   class TraversalContext {
