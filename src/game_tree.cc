@@ -241,20 +241,6 @@ uint8_t LegalActionsForState(
   return action_count;
 }
 
-template <typename State>
-std::vector<GameAction> LegalActionsForState(const SolverConfig& config,
-                                             const State& state) {
-  std::array<GameAction, GameTree::kMaxActionsPerNode> action_table = {};
-  const uint8_t action_count =
-      LegalActionsForState(config, state, action_table);
-  std::vector<GameAction> actions;
-  actions.reserve(action_count);
-  for (uint8_t i = 0; i < action_count; ++i) {
-    actions.push_back(action_table[static_cast<size_t>(i)]);
-  }
-  return actions;
-}
-
 void AppendStateHistory(GameState& state, const GameAction& action) {
   state.history.push_back(action);
 }
@@ -438,14 +424,10 @@ int GameTree::action_key(const GameAction& action) {
   return static_cast<int>(action.kind) * kActionKeyMultiplier + action.amount;
 }
 
-std::vector<GameAction> GameTree::get_legal_actions(
-    const GameState& state) const {
-  return LegalActionsForState(config_, state);
-}
-
-std::vector<GameAction> GameTree::get_legal_actions(
-    const CompactPublicState& state) const {
-  return LegalActionsForState(config_, state);
+uint8_t GameTree::get_legal_actions(
+    const GameState& state,
+    std::array<GameAction, kMaxActionsPerNode>& actions) const {
+  return LegalActionsForState(config_, state, actions);
 }
 
 uint8_t GameTree::get_legal_actions(
@@ -525,14 +507,6 @@ bool GameTree::is_betting_round_over(const GameState& state) const {
 bool GameTree::is_betting_round_over(
     const CompactPublicState& state) const {
   return IsBettingRoundOver(state);
-}
-
-bool GameTree::is_hand_over(const GameState& state) const {
-  return IsHandOver(state);
-}
-
-bool GameTree::is_hand_over(const CompactPublicState& state) const {
-  return IsHandOver(state);
 }
 
 }  // namespace poker

@@ -106,6 +106,14 @@ bool HasAction(const std::vector<GameAction>& actions,
   return false;
 }
 
+std::vector<GameAction> LegalActions(const GameTree& tree,
+                                     const GameState& state) {
+  std::array<GameAction, GameTree::kMaxActionsPerNode> action_table = {};
+  const uint8_t action_count = tree.get_legal_actions(state, action_table);
+  return std::vector<GameAction>(action_table.begin(),
+                                 action_table.begin() + action_count);
+}
+
 void CheckLegalActionsPreserveStateInvariants() {
   GameTree tree(TestConfig());
   std::vector<GameState> states;
@@ -118,7 +126,7 @@ void CheckLegalActionsPreserveStateInvariants() {
 
   for (const GameState& state : states) {
     const int total_chips = TotalChips(state);
-    const std::vector<GameAction> actions = tree.get_legal_actions(state);
+    const std::vector<GameAction> actions = LegalActions(tree, state);
     Expect(!actions.empty(), "active state should have legal actions");
     for (const GameAction& action : actions) {
       const GameState next = tree.apply_action(state, action);
@@ -148,7 +156,7 @@ void CheckLegalActionsPreserveStateInvariants() {
 void CheckActionAbstractionShapes() {
   GameTree tree(TestConfig());
   const std::vector<GameAction> preflop =
-      tree.get_legal_actions(PreflopState());
+      LegalActions(tree, PreflopState());
   Expect(HasAction(preflop, ActionKind::kFold),
          "facing blind should allow fold");
   Expect(HasAction(preflop, ActionKind::kCall, 1),
@@ -162,7 +170,7 @@ void CheckActionAbstractionShapes() {
   dedup_config.bet_sizes = {0.5, 0.51};
   GameTree dedup_tree(dedup_config);
   const std::vector<GameAction> dedup_actions =
-      dedup_tree.get_legal_actions(FlopState());
+      LegalActions(dedup_tree, FlopState());
   Expect(dedup_actions.size() == 3 &&
              HasAction(dedup_actions, ActionKind::kBet, 2),
          "duplicate concrete bet sizes should collapse");
@@ -171,8 +179,8 @@ void CheckActionAbstractionShapes() {
   street_config.bet_sizes.push_back(0.5);
   street_config.flop_bet_sizes.push_back(1.0);
   GameTree street_tree(street_config);
-  Expect(HasAction(street_tree.get_legal_actions(FlopState()),
-                   ActionKind::kBet, 4),
+  Expect(HasAction(LegalActions(street_tree, FlopState()), ActionKind::kBet,
+                   4),
          "street bet sizes should override global sizes");
 
   ExpectThrows([&] { (void)GameTree::action_key(MakeAction(ActionKind::kCall,

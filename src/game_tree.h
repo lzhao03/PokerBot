@@ -3,7 +3,6 @@
 #include <array>
 #include <cstdint>
 #include <limits>
-#include <vector>
 #include "absl/types/span.h"
 #include "src/hand_evaluator.h"
 #include "src/poker_types.h"
@@ -27,9 +26,9 @@ public:
   static int action_key(const GameAction& action);
   
   // Get legal actions at a given state
-  std::vector<GameAction> get_legal_actions(const GameState& state) const;
-  std::vector<GameAction> get_legal_actions(
-      const CompactPublicState& state) const;
+  uint8_t get_legal_actions(
+      const GameState& state,
+      std::array<GameAction, kMaxActionsPerNode>& actions) const;
   uint8_t get_legal_actions(
       const CompactPublicState& state,
       std::array<GameAction, kMaxActionsPerNode>& actions) const;
@@ -65,10 +64,6 @@ public:
   bool is_betting_round_over(const GameState& state) const;
   bool is_betting_round_over(const CompactPublicState& state) const;
   
-  // Check if the hand is over
-  bool is_hand_over(const GameState& state) const;
-  bool is_hand_over(const CompactPublicState& state) const;
-
 private:
   SolverConfig config_;
   HandEvaluator hand_evaluator_;
