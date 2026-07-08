@@ -456,6 +456,31 @@ class CFRSolver {
     bool condition_player_b_ = false;
   };
 
+  template <CfrTraversalMode mode>
+  class CfrTraversal {
+   public:
+    CfrTraversal(CFRSolver& solver,
+                 TraversalContext& ctx,
+                 NodeGraph& graph)
+        : solver_(solver), ctx_(ctx), graph_(graph) {}
+
+    double value(NodeRef node);
+
+   private:
+    double terminal(NodeRef node,
+                    const PublicStateRow& row,
+                    const NodeCursor* node_cursor);
+    double chance(NodeRef node);
+    double depth_limit_value(const NodeCursor& node_cursor);
+    double decision(NodeRef node,
+                    const PublicStateRow& row,
+                    const NodeCursor* node_cursor);
+
+    CFRSolver& solver_;
+    TraversalContext& ctx_;
+    NodeGraph& graph_;
+  };
+
   CFRSolver(const SolverConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache);
   CFRSolver(const SolverConfig& config,
@@ -509,24 +534,12 @@ class CFRSolver {
       NodeRef node,
       TraversalContext& ctx,
       NodeGraph& graph);
-  template <CfrTraversalMode mode>
-  double cfr_traversal(NodeRef node,
-                       TraversalContext& ctx,
-                       NodeGraph& graph);
   double cfr_frozen_regret_only(
       NodeRef node,
       TraversalContext& ctx,
       NodeGraph& graph);
-  double chance_sampling_cfr(
-      NodeRef node,
-      TraversalContext& ctx,
-      NodeGraph& graph);
-  double chance_sampling_frozen_regret_only(
-      NodeRef node,
-      TraversalContext& ctx,
-      NodeGraph& graph);
   template <typename EvalChild>
-  double average_sampled_chance(int samples,
+  double sample_chance_children(int samples,
                                 NodeRef node,
                                 CardMask known_private_cards,
                                 NodeGraph& graph,

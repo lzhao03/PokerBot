@@ -1775,104 +1775,168 @@ void CFRSolver::run_frozen_iterations(
 }
 
 template <CFRSolver::CfrTraversalMode mode>
-double CFRSolver::cfr_traversal(
-    NodeRef node,
-    TraversalContext& ctx,
-    NodeGraph& graph) {
+double CFRSolver::CfrTraversal<mode>::value(NodeRef node) {
   const uint32_t public_state_id = node.public_state_id;
   std::optional<NodeCursor> node_cursor;
   const PublicStateRow* row_ptr = nullptr;
   if constexpr (mode == CfrTraversalMode::kNormal) {
-    node_cursor = cursor(node);
+    node_cursor = solver_.cursor(node);
     if (!node_cursor.has_value()) {
       return 0.0;
     }
     row_ptr = &node_cursor->row();
   } else {
-    const auto& public_state_rows = rows();
+    const auto& public_state_rows = solver_.rows();
     if (public_state_id >= public_state_rows.size()) {
       return 0.0;
     }
     row_ptr = &public_state_rows[public_state_id];
   }
   const PublicStateRow& row = *row_ptr;
+  const NodeCursor* cursor_ptr =
+      node_cursor.has_value() ? &*node_cursor : nullptr;
 
   if (row.is_terminal) {
-    if constexpr (mode == CfrTraversalMode::kNormal) {
-      const CompactPublicState& state = node_cursor->exact_state();
-      record_terminal_utility(state.folded_player < 0);
-      if (!ctx.use_terminal_cache() || ctx.max_depth() > 0) {
-        return uncached_utility(state, ctx.cards(0), ctx.cards(1));
-      }
-      return utility(state, ctx.cards(0), ctx.cards(1));
-    } else {
-      record_terminal_utility(row.state.folded_player < 0);
-      return frozen_utility(row, node.exact_board, ctx.cards(0),
-                            ctx.cards(1));
-    }
+    return terminal(node, row, cursor_ptr);
   }
 
   if (row.is_chance_node) {
-    if constexpr (mode == CfrTraversalMode::kNormal) {
-      return chance_sampling_cfr(node, ctx, graph);
-    } else {
-      return chance_sampling_frozen_regret_only(node, ctx, graph);
-    }
+    return chance(node);
   }
 
   if constexpr (mode == CfrTraversalMode::kNormal) {
-    if (ctx.depth_limited()) {
-      const CompactPublicState& state = node_cursor->exact_state();
-      return game_tree_->is_betting_round_over(state)
-                 ? uncached_utility(state, ctx.cards(0), ctx.cards(1))
-                 : 0.0;
+    if (ctx_.depth_limited()) {
+      return depth_limit_value(*cursor_ptr);
     }
   }
 
-  const DecisionFrame decision = make_decision_frame(node, row);
+  return decision(node, row, cursor_ptr);
+}
+
+template <CFRSolver::CfrTraversalMode mode>
+double CFRSolver::CfrTraversal<mode>::terminal(
+    NodeRef node,
+    const PublicStateRow& row,
+    const NodeCursor* node_cursor) {
+  if constexpr (mode == CfrTraversalMode::kNormal) {
+    const CompactPublicState& state = node_cursor->exact_state();
+    solver_.record_terminal_utility(state.folded_player < 0);
+    if (!ctx_.use_terminal_cache() || ctx_.max_depth() > 0) {
+      return solver_.uncached_utility(state, ctx_.cards(0), ctx_.cards(1));
+    }
+    return solver_.utility(state, ctx_.cards(0), ctx_.cards(1));
+  } else {
+    solver_.record_terminal_utility(row.state.folded_player < 0);
+    return solver_.frozen_utility(row, node.exact_board, ctx_.cards(0),
+                                  ctx_.cards(1));
+  }
+}
+
+template <CFRSolver::CfrTraversalMode mode>
+double CFRSolver::CfrTraversal<mode>::chance(NodeRef node) {
+  const int samples = ChanceSamples(solver_.config_);
+  solver_.record_chance_samples(samples);
+  if constexpr (mode == CfrTraversalMode::kFrozenRegretOnly) {
+    return solver_.sample_chance_children(
+        samples, node, ctx_.known_private_cards(), graph_,
+        [&](NodeRef child) {
+          return value(child);
+        });
+  }
+
+  TrainingRangeView* public_player_a_range = nullptr;
+  TrainingRangeView* public_player_b_range = nullptr;
+  if (ctx_.range(0).has_value() || ctx_.range(1).has_value()) {
+    RangeScratchFrame& scratch_frame = ctx_.scratch_frame();
+    public_player_a_range = &scratch_frame.public_player_a_range;
+    public_player_b_range = &scratch_frame.public_player_b_range;
+  }
+
+  return solver_.sample_chance_children(
+      samples, node, ctx_.known_private_cards(), graph_,
+      [&](NodeRef child) {
+        OptionalTrainingRange child_player_a_range = ctx_.range(0);
+        OptionalTrainingRange child_player_b_range = ctx_.range(1);
+        if (child_player_a_range.has_value()) {
+          child_player_a_range =
+              std::cref(child_player_a_range->get().without_mask(
+                  child.exact_board.mask, *public_player_a_range));
+        }
+        if (child_player_b_range.has_value()) {
+          child_player_b_range =
+              std::cref(child_player_b_range->get().without_mask(
+                  child.exact_board.mask, *public_player_b_range));
+        }
+
+        if (child_player_a_range.has_value() ||
+            child_player_b_range.has_value()) {
+          auto range_scope =
+              ctx_.set_ranges(child_player_a_range, child_player_b_range);
+          return value(child);
+        }
+        return value(child);
+      });
+}
+
+template <CFRSolver::CfrTraversalMode mode>
+double CFRSolver::CfrTraversal<mode>::depth_limit_value(
+    const NodeCursor& node_cursor) {
+  const CompactPublicState& state = node_cursor.exact_state();
+  return solver_.game_tree_->is_betting_round_over(state)
+             ? solver_.uncached_utility(state, ctx_.cards(0), ctx_.cards(1))
+             : 0.0;
+}
+
+template <CFRSolver::CfrTraversalMode mode>
+double CFRSolver::CfrTraversal<mode>::decision(
+    NodeRef node,
+    const PublicStateRow& row,
+    const NodeCursor* node_cursor) {
+  const DecisionFrame decision = solver_.make_decision_frame(node, row);
   const int player = decision.player;
   if (!IsPlayer(player) || decision.action_count == 0) {
     return 0.0;
   }
-  const PrivateCards& player_cards = ctx.cards(player);
+  const PrivateCards& player_cards = ctx_.cards(player);
 
-  const bool is_update_player = ctx.is_update_player(player);
+  const bool is_update_player = ctx_.is_update_player(player);
   const size_t action_count = decision.action_count;
   const absl::Span<const int> legal_action_ids = decision.action_ids_span();
   std::optional<ActionBlock> action_block;
   if constexpr (mode == CfrTraversalMode::kNormal) {
     const InfoSetAddress info_set_address{
         decision.public_state_id, player,
-        card_abstraction_.private_bucket(player_cards.combo, row.state)};
+        solver_.card_abstraction_.private_bucket(player_cards.combo,
+                                                 row.state)};
     action_block =
         is_update_player
-            ? strategy_store_.get_or_create(info_set_address, legal_action_ids)
-            : strategy_store_.find(info_set_address, action_count);
+            ? solver_.strategy_store_.get_or_create(info_set_address,
+                                                    legal_action_ids)
+            : solver_.strategy_store_.find(info_set_address, action_count);
   } else {
-    action_block =
-        strategy_store_.find_frozen(decision.public_state_id, player,
-                                    player_cards.combo, action_count);
+    action_block = solver_.strategy_store_.find_frozen(
+        decision.public_state_id, player, player_cards.combo, action_count);
   }
 
   ActionScratch action_scratch;
   absl::Span<double> action_probabilities =
       action_scratch.probs(action_count);
   absl::Span<double> action_values = action_scratch.vals(action_count);
-  strategy_store_.regret_matching_or_uniform(
-      action_block, action_count, ctx.options().regret_load_mode,
+  solver_.strategy_store_.regret_matching_or_uniform(
+      action_block, action_count, ctx_.options().regret_load_mode,
       action_probabilities);
 
   double node_value = 0.0;
   std::optional<ActionRangeConditioning> range_conditioning;
   if constexpr (mode == CfrTraversalMode::kNormal) {
     range_conditioning.emplace(
-        *this, ctx, *node_cursor, decision.public_state_id, player,
+        solver_, ctx_, *node_cursor, decision.public_state_id, player,
         legal_action_ids);
   }
 
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     const ChildResult child =
-        graph.action_child(node, static_cast<int>(action_index));
+        graph_.action_child(node, static_cast<int>(action_index));
     if (child.status != ChildStatus::kOk) {
       continue;
     }
@@ -1880,33 +1944,33 @@ double CFRSolver::cfr_traversal(
     double action_value = 0.0;
     {
       auto reach_scope =
-          ctx.enter_action(player, action_probabilities[action_index]);
-      auto depth_scope = ctx.descend();
+          ctx_.enter_action(player, action_probabilities[action_index]);
+      auto depth_scope = ctx_.descend();
       if constexpr (mode == CfrTraversalMode::kNormal) {
         if (range_conditioning->enabled()) {
           auto range_scope =
-              ctx.set_ranges(
+              ctx_.set_ranges(
                   range_conditioning->player_a_range_for(action_index),
                   range_conditioning->player_b_range_for(action_index));
-          action_value = cfr_traversal<mode>(child.node, ctx, graph);
+          action_value = value(child.node);
         } else {
-          action_value = cfr_traversal<mode>(child.node, ctx, graph);
+          action_value = value(child.node);
         }
       } else {
-        action_value = cfr_traversal<mode>(child.node, ctx, graph);
+        action_value = value(child.node);
       }
     }
     action_values[action_index] = action_value;
     node_value += action_probabilities[action_index] * action_value;
   }
 
-  ++cfr_update_count_;
-  record_cfr_update(decision.street, ctx.depth());
+  ++solver_.cfr_update_count_;
+  solver_.record_cfr_update(decision.street, ctx_.depth());
 
   if (action_block.has_value() && is_update_player) {
-    const double opponent_reach_prob = ctx.opponent_reach(player);
+    const double opponent_reach_prob = ctx_.opponent_reach(player);
     const RegretUpdateOptions regret_update_options =
-        ctx.regret_update_options();
+        ctx_.regret_update_options();
     for (size_t action_index = 0; action_index < action_count; ++action_index) {
       const double utility_sign = player == 0 ? 1.0 : -1.0;
       const double regret =
@@ -1918,10 +1982,10 @@ double CFRSolver::cfr_traversal(
     }
 
     if constexpr (mode == CfrTraversalMode::kNormal) {
-      if (ctx.options().write_average_strategy) {
+      if (ctx_.options().write_average_strategy) {
         action_block->add_average_strategy(
-            action_probabilities, ctx.average_strategy_weight(player),
-            ctx.options().regret_update_mode);
+            action_probabilities, ctx_.average_strategy_weight(player),
+            ctx_.options().regret_update_mode);
       }
     }
   }
@@ -1933,87 +1997,20 @@ double CFRSolver::cfr_with_ranges(
     NodeRef node,
     TraversalContext& ctx,
     NodeGraph& graph) {
-  return cfr_traversal<CfrTraversalMode::kNormal>(node, ctx, graph);
-}
-
-double CFRSolver::chance_sampling_cfr(
-    NodeRef node,
-    TraversalContext& ctx,
-    NodeGraph& graph) {
-  const auto& public_rows = rows();
-  if (node.public_state_id >= public_rows.size()) {
-    return 0.0;
-  }
-
-  const int samples = ChanceSamples(config_);
-  record_chance_samples(samples);
-  TrainingRangeView* public_player_a_range = nullptr;
-  TrainingRangeView* public_player_b_range = nullptr;
-  if (ctx.range(0).has_value() || ctx.range(1).has_value()) {
-    RangeScratchFrame& scratch_frame = ctx.scratch_frame();
-    public_player_a_range = &scratch_frame.public_player_a_range;
-    public_player_b_range = &scratch_frame.public_player_b_range;
-  }
-
-  double value = 0.0;
-  int evaluated = 0;
-  const CardMask known_private_cards = ctx.known_private_cards();
-  for (int i = 0; i < samples; ++i) {
-    const ChildResult child =
-        graph.sample_chance_child(node, known_private_cards);
-    if (child.status != ChildStatus::kOk) {
-      continue;
-    }
-
-    OptionalTrainingRange child_player_a_range = ctx.range(0);
-    OptionalTrainingRange child_player_b_range = ctx.range(1);
-    if (child_player_a_range.has_value()) {
-      child_player_a_range =
-          std::cref(child_player_a_range->get().without_mask(
-              child.node.exact_board.mask, *public_player_a_range));
-    }
-    if (child_player_b_range.has_value()) {
-      child_player_b_range =
-          std::cref(child_player_b_range->get().without_mask(
-              child.node.exact_board.mask, *public_player_b_range));
-    }
-
-    if (child_player_a_range.has_value() || child_player_b_range.has_value()) {
-      auto range_scope =
-          ctx.set_ranges(child_player_a_range, child_player_b_range);
-      value += cfr_with_ranges(child.node, ctx, graph);
-    } else {
-      value += cfr_with_ranges(child.node, ctx, graph);
-    }
-    ++evaluated;
-  }
-
-  return evaluated > 0 ? value / evaluated : 0.0;
+  return CfrTraversal<CfrTraversalMode::kNormal>(*this, ctx, graph)
+      .value(node);
 }
 
 double CFRSolver::cfr_frozen_regret_only(
     NodeRef node,
     TraversalContext& ctx,
     NodeGraph& graph) {
-  return cfr_traversal<CfrTraversalMode::kFrozenRegretOnly>(
-      node, ctx, graph);
-}
-
-double CFRSolver::chance_sampling_frozen_regret_only(
-    NodeRef node,
-    TraversalContext& ctx,
-    NodeGraph& graph) {
-  const int samples = ChanceSamples(config_);
-  record_chance_samples(samples);
-  return average_sampled_chance(
-      samples, node, ctx.known_private_cards(), graph,
-      [&](NodeRef child) {
-        return cfr_frozen_regret_only(child, ctx, graph);
-      });
+  return CfrTraversal<CfrTraversalMode::kFrozenRegretOnly>(*this, ctx, graph)
+      .value(node);
 }
 
 template <typename EvalChild>
-double CFRSolver::average_sampled_chance(
+double CFRSolver::sample_chance_children(
     int samples,
     NodeRef node,
     CardMask known_private_cards,
@@ -2266,7 +2263,7 @@ double CFRSolver::evaluate_strategy_node(
   }
   if (row.is_chance_node) {
     const int samples = ChanceSamples(config_);
-    return average_sampled_chance(
+    return sample_chance_children(
         samples, node, ctx.known_private_cards(), graph,
         [&](NodeRef child) {
           return evaluate_strategy_node(child, ctx, graph);
