@@ -452,9 +452,6 @@ class CFRSolver {
             std::shared_ptr<TerminalUtilityCache> utility_cache,
             GameState initial_state);
 
-  void run_iterations(int iterations,
-                      const HandRange& player_a_range,
-                      const HandRange& player_b_range);
   bool prepare_frozen_training(
       uint32_t root_public_state_id,
       int num_threads,

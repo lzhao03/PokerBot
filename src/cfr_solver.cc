@@ -417,14 +417,9 @@ bool CFRSolver::prebuild_info_set_rows(
   return true;
 }
 
-void CFRSolver::run(int iterations, const HandRange& player_a_range,
+void CFRSolver::run(int iterations,
+                    const HandRange& player_a_range,
                     const HandRange& player_b_range) {
-  run_iterations(iterations, player_a_range, player_b_range);
-}
-
-void CFRSolver::run_iterations(int iterations,
-                               const HandRange& player_a_range,
-                               const HandRange& player_b_range) {
   last_training_run_stats_ = {};
   if (iterations <= 0) {
     return;
