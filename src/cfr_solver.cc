@@ -2497,11 +2497,6 @@ void CFRSolver::condition_ranges_for_actions(
   const PublicInfoSetSlabPlayer* player_slab =
       public_slab != nullptr ? &public_slab->players[player] : nullptr;
   double action_probabilities[GameTree::kMaxActionsPerNode] = {};
-  auto fill_uniform_strategy = [&] {
-    const double uniform_probability = 1.0 / action_count;
-    std::fill(action_probabilities, action_probabilities + action_count,
-              uniform_probability);
-  };
   for (size_t i = 0; i < range_size; ++i) {
     const float range_weight = range.weight(i);
     const ComboId combo_id = range.combo(i);
@@ -2516,7 +2511,9 @@ void CFRSolver::condition_ranges_for_actions(
                                : find_info_set_row(*player_slab,
                                                    private_bucket);
     if (row == nullptr) {
-      fill_uniform_strategy();
+      const double uniform_probability = 1.0 / action_count;
+      std::fill(action_probabilities, action_probabilities + action_count,
+                uniform_probability);
     } else {
       fill_regret_matched_strategy_for_row(
           *row, conditioned_action_ids, action_probabilities);
