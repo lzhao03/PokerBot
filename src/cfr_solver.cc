@@ -67,6 +67,58 @@ size_t ScratchDepthReserve(const SolverConfig& config, int max_depth) {
   return std::max<size_t>(32, static_cast<size_t>(stack_size) + 12);
 }
 
+class PublicStateBfs {
+ public:
+  struct Entry {
+    uint32_t public_state_id = 0;
+    int depth = 0;
+  };
+
+  PublicStateBfs(uint32_t root_public_state_id, size_t row_count) {
+    queue_.reserve(1024);
+    queued_.resize(row_count, 0);
+    enqueue_growing(root_public_state_id, 0);
+  }
+
+  std::optional<Entry> next() {
+    if (cursor_ >= queue_.size()) {
+      return std::nullopt;
+    }
+    return queue_[cursor_++];
+  }
+
+  bool enqueue_existing(uint32_t public_state_id,
+                        int depth,
+                        size_t row_count) {
+    if (public_state_id >= row_count ||
+        public_state_id >= queued_.size()) {
+      return false;
+    }
+    enqueue_known_index(public_state_id, depth);
+    return true;
+  }
+
+  void enqueue_growing(uint32_t public_state_id, int depth) {
+    if (public_state_id >= queued_.size()) {
+      queued_.resize(static_cast<size_t>(public_state_id) + 1, 0);
+    }
+    enqueue_known_index(public_state_id, depth);
+  }
+
+ private:
+  void enqueue_known_index(uint32_t public_state_id, int depth) {
+    if (queued_[public_state_id]) {
+      return;
+    }
+    queued_[public_state_id] = 1;
+    queue_.push_back({public_state_id, depth});
+  }
+
+  std::vector<Entry> queue_;
+  std::vector<char> queued_;
+  size_t cursor_ = 0;
+};
+
 template <typename Callback>
 bool ForEachCardCombination(int count, CardMask blocked_mask,
                             Callback callback) {
@@ -908,30 +960,10 @@ bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
     return false;
   }
 
-  struct QueueEntry {
-    uint32_t public_state_id = 0;
-    int depth = 0;
-  };
-
-  std::vector<QueueEntry> queue;
-  std::vector<char> queued;
-  queue.reserve(1024);
-  queued.resize(storage_.frozen_ref().public_state_rows.size(), 0);
-  queue.push_back({root_public_state_id, 0});
-  queued[root_public_state_id] = 1;
-
-  auto enqueue = [&](uint32_t public_state_id, int depth) {
-    if (public_state_id >= queued.size()) {
-      queued.resize(static_cast<size_t>(public_state_id) + 1, 0);
-    }
-    if (!queued[public_state_id]) {
-      queued[public_state_id] = 1;
-      queue.push_back({public_state_id, depth});
-    }
-  };
-
-  for (size_t cursor = 0; cursor < queue.size(); ++cursor) {
-    const QueueEntry entry = queue[cursor];
+  PublicStateBfs bfs(root_public_state_id,
+                     storage_.frozen_ref().public_state_rows.size());
+  while (std::optional<PublicStateBfs::Entry> maybe_entry = bfs.next()) {
+    const PublicStateBfs::Entry entry = *maybe_entry;
     if (entry.public_state_id >= storage_.frozen_ref().public_state_rows.size()) {
       return false;
     }
@@ -951,7 +983,7 @@ bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
             if (!child_public_state_id.has_value()) {
               return false;
             }
-            enqueue(*child_public_state_id, entry.depth);
+            bfs.enqueue_growing(*child_public_state_id, entry.depth);
             return true;
           });
       if (!complete) {
@@ -972,7 +1004,7 @@ bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
       if (!child_public_state_id.has_value()) {
         return false;
       }
-      enqueue(*child_public_state_id, entry.depth + 1);
+      bfs.enqueue_growing(*child_public_state_id, entry.depth + 1);
     }
   }
 
@@ -1049,27 +1081,7 @@ bool CFRSolver::validate_prebuilt_transitions(
   stats.action_transition_prebuild_complete = true;
   stats.chance_transition_prebuild_complete = true;
 
-  struct QueueEntry {
-    uint32_t public_state_id = 0;
-    int depth = 0;
-  };
-
-  std::vector<QueueEntry> queue;
-  std::vector<char> queued(rows.size(), 0);
-  queue.reserve(1024);
-  queue.push_back({root_public_state_id, 0});
-  queued[root_public_state_id] = 1;
-
-  auto enqueue = [&](uint32_t public_state_id, int depth) {
-    if (public_state_id >= rows.size()) {
-      return false;
-    }
-    if (!queued[public_state_id]) {
-      queued[public_state_id] = 1;
-      queue.push_back({public_state_id, depth});
-    }
-    return true;
-  };
+  PublicStateBfs bfs(root_public_state_id, rows.size());
 
   auto valid_public_child = [&](uint32_t public_state_id) {
     return public_state_id != GameTree::kInvalidPublicStateId &&
@@ -1089,8 +1101,8 @@ bool CFRSolver::validate_prebuilt_transitions(
     stats.chance_transition_prebuild_complete = false;
   };
 
-  for (size_t cursor = 0; cursor < queue.size(); ++cursor) {
-    const QueueEntry entry = queue[cursor];
+  while (std::optional<PublicStateBfs::Entry> maybe_entry = bfs.next()) {
+    const PublicStateBfs::Entry entry = *maybe_entry;
     if (entry.public_state_id >= rows.size()) {
       stats.betting_history_transition_prebuild_complete = false;
       stats.action_transition_prebuild_complete = false;
@@ -1133,7 +1145,9 @@ bool CFRSolver::validate_prebuilt_transitions(
                    history_row.chance_child_id) {
           mark_missing_betting_history();
         }
-        if (valid_child && !enqueue(*child_public_state_id, entry.depth)) {
+        if (valid_child &&
+            !bfs.enqueue_existing(
+                *child_public_state_id, entry.depth, rows.size())) {
           mark_missing_chance();
           mark_missing_betting_history();
         }
@@ -1178,7 +1192,8 @@ bool CFRSolver::validate_prebuilt_transitions(
         mark_missing_betting_history();
       }
       if (valid_action_child &&
-          !enqueue(child_public_state_id, entry.depth + 1)) {
+          !bfs.enqueue_existing(
+              child_public_state_id, entry.depth + 1, rows.size())) {
         mark_missing_action();
         mark_missing_betting_history();
       }
