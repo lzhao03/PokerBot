@@ -79,10 +79,10 @@ class CFRSolver {
   int get_iterations_run() const { return iterations_run_; }
   int64_t get_cfr_update_count() const { return cfr_update_count_; }
   size_t get_info_set_count() const {
-    return storage_.frozen_ref().info_set_count;
+    return tables().info_set_count;
   }
   size_t get_public_state_count() const {
-    return storage_.frozen_ref().public_state_rows.size();
+    return rows().size();
   }
   TraversalStats get_traversal_stats() const { return traversal_stats_; }
   TrainingRunStats get_last_training_run_stats() const {
@@ -93,6 +93,19 @@ class CFRSolver {
   static bool traversal_stats_enabled();
 
  private:
+  const FrozenStrategyTables& tables() const {
+    return storage_.frozen_ref();
+  }
+  FrozenStrategyTables& mtables() {
+    return strategy_store_.mutable_tables();
+  }
+  MutableCumulativeArrays& arrays() {
+    return storage_.cumulative_ref();
+  }
+  const std::vector<FrozenStrategyTables::PublicStateRow>& rows() const {
+    return tables().public_state_rows;
+  }
+
   using PrivateBucketId = FrozenStrategyTables::PrivateBucketId;
   using BettingHistoryKey = FrozenStrategyTables::BettingHistoryKey;
   using PublicBucketId = FrozenStrategyTables::PublicBucketId;
@@ -436,7 +449,6 @@ class CFRSolver {
             std::shared_ptr<TerminalUtilityCache> utility_cache,
             GameState initial_state);
 
-  FrozenStrategyTables& mutable_tables();
   void run_iterations(int iterations,
                       const HandRange& player_a_range,
                       const HandRange& player_b_range);
