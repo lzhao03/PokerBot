@@ -60,7 +60,6 @@ class CFRSolver {
   TrainingRunStats get_last_training_run_stats() const {
     return last_training_run_stats_;
   }
-  void add_traversal_stats(const TraversalStats& stats);
   UtilityCacheStats get_utility_cache_stats() const;
   static bool traversal_stats_enabled();
 

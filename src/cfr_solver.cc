@@ -417,10 +417,6 @@ bool CFRSolver::prebuild_info_set_rows(
   return true;
 }
 
-void CFRSolver::add_traversal_stats(const TraversalStats& stats) {
-  traversal_stats_.add(stats);
-}
-
 void CFRSolver::run(int iterations, const HandRange& player_a_range,
                     const HandRange& player_b_range) {
   run_iterations(iterations, player_a_range, player_b_range);
@@ -834,7 +830,7 @@ void CFRSolver::run_frozen_iterations(
       },
       [&](const WorkerResult& result) {
         cumulative_root_utility_ += result.utility;
-        add_traversal_stats(result.traversal_stats);
+        traversal_stats_.add(result.traversal_stats);
         cfr_update_count_ += result.cfr_updates;
         completed_iterations += result.iterations;
       });
