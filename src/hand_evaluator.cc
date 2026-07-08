@@ -21,14 +21,7 @@ struct EvaluationScore {
     if (rank != other.rank) {
       return static_cast<int>(rank) < static_cast<int>(other.rank);
     }
-
-    const size_t limit = std::min(kicker_count, other.kicker_count);
-    for (size_t i = 0; i < limit; ++i) {
-      if (kickers[i] != other.kickers[i]) {
-        return kickers[i] < other.kickers[i];
-      }
-    }
-    return kicker_count < other.kicker_count;
+    return kickers < other.kickers;
   }
 };
 
