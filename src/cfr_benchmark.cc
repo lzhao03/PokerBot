@@ -1,5 +1,4 @@
 #include "src/cfr_solver.h"
-#include "src/cfr_solver_proto_adapter.h"
 #include "absl/log/initialize.h"
 #include "src/build_flags.h"
 #include "src/hand_range.h"

@@ -21,6 +21,7 @@ cc_library(
     hdrs = ["poker_config.h"],
     deps = [
         ":poker_cc_proto",
+        ":poker_types",
     ],
     visibility = ["//visibility:public"],
 )
@@ -328,18 +329,6 @@ cc_test(
     ],
 )
 
-cc_library(
-    name = "cfr_solver_proto_adapter",
-    srcs = ["cfr_solver_proto_adapter.cc"],
-    hdrs = ["cfr_solver_proto_adapter.h"],
-    deps = [
-        ":combo",
-        ":poker_cc_proto",
-        ":poker_types",
-    ],
-    visibility = ["//visibility:public"],
-)
-
 CFR_SOLVER_DEPS = [
     ":betting_abstraction",
     ":build_flags",
@@ -460,7 +449,6 @@ cc_binary(
     srcs = ["main.cc"],
     deps = [
         ":cfr_solver",
-        ":cfr_solver_proto_adapter",
         ":poker_config",
         "@abseil-cpp//absl/log:globals",
         "@abseil-cpp//absl/log:initialize",
@@ -472,7 +460,6 @@ cc_binary(
     srcs = ["main.cc"],
     deps = [
         ":cfr_solver_no_stats",
-        ":cfr_solver_proto_adapter",
         ":poker_config",
         "@abseil-cpp//absl/log:globals",
         "@abseil-cpp//absl/log:initialize",
@@ -485,7 +472,6 @@ cc_binary(
     deps = [
         ":build_flags",
         ":cfr_solver",
-        ":cfr_solver_proto_adapter",
         ":hand_range",
         ":poker_config",
         "@abseil-cpp//absl/log:initialize",
@@ -501,7 +487,6 @@ cc_binary(
     deps = [
         ":build_flags",
         ":cfr_solver_no_stats",
-        ":cfr_solver_proto_adapter",
         ":hand_range",
         ":poker_config",
         "@abseil-cpp//absl/log:initialize",
@@ -518,7 +503,6 @@ cc_binary(
     deps = [
         ":build_flags",
         ":cfr_solver_coarse_buckets_no_stats",
-        ":cfr_solver_proto_adapter",
         ":hand_range",
         ":poker_config",
         "@abseil-cpp//absl/log:initialize",
