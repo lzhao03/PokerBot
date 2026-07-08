@@ -17,6 +17,7 @@
 #include "src/game_tree.h"
 #include "src/hand_range.h"
 #include "src/poker_types.h"
+#include "src/public_state_graph.h"
 #include "src/strategy_store.h"
 #include "src/strategy_tables.h"
 #include "src/training_range.h"
@@ -28,41 +29,12 @@ class TerminalUtilityCache;
 class CFRSolver {
  public:
   using TraversalStats = poker::TraversalStats;
+  using TrainingRunStats = poker::TrainingRunStats;
 
   struct UtilityCacheStats {
     int64_t hits = 0;
     int64_t misses = 0;
     int64_t entries = 0;
-  };
-
-  struct TrainingRunStats {
-    bool public_state_prebuild_complete = false;
-    bool betting_history_transition_prebuild_complete = false;
-    bool action_transition_prebuild_complete = false;
-    bool chance_transition_prebuild_complete = false;
-    bool info_set_prebuild_complete = false;
-    bool private_bucket_prebuild_complete = false;
-    bool frozen_info_set_lookup_prebuild_complete = false;
-    int64_t prebuild_public_states = 0;
-    int64_t prebuild_betting_histories = 0;
-    int64_t prebuild_betting_history_transitions = 0;
-    int64_t missing_betting_history_transitions = 0;
-    int64_t prebuild_action_transitions = 0;
-    int64_t missing_action_transitions = 0;
-    int64_t prebuild_chance_transitions = 0;
-    int64_t missing_chance_transitions = 0;
-    int64_t prebuild_info_sets = 0;
-    int64_t prebuild_action_entries = 0;
-    int64_t prebuild_private_bucket_rows = 0;
-    int64_t prebuild_frozen_info_set_lookup_rows = 0;
-    double prebuild_seconds = 0.0;
-    double info_set_prebuild_seconds = 0.0;
-    int warmup_iterations = 0;
-    int frozen_iterations = 0;
-    double warmup_seconds = 0.0;
-    double frozen_seconds = 0.0;
-    int64_t warmup_cfr_updates = 0;
-    int64_t frozen_cfr_updates = 0;
   };
 
   CFRSolver(const SolverConfig& config);
@@ -107,11 +79,6 @@ class CFRSolver {
   }
 
   using PrivateBucketId = FrozenStrategyTables::PrivateBucketId;
-  using BettingHistoryKey = FrozenStrategyTables::BettingHistoryKey;
-  using PublicBucketId = FrozenStrategyTables::PublicBucketId;
-  using PublicStateKey = FrozenStrategyTables::PublicStateKey;
-  using ChanceTransitionKey = FrozenStrategyTables::ChanceTransitionKey;
-  using BettingHistoryRow = FrozenStrategyTables::BettingHistoryRow;
   using InfoSetAddress = FrozenStrategyTables::InfoSetAddress;
   using PublicStateRow = FrozenStrategyTables::PublicStateRow;
 
@@ -178,7 +145,7 @@ class CFRSolver {
   using OptionalTrainingRange =
       std::optional<std::reference_wrapper<const TrainingRangeView>>;
   static constexpr uint32_t kCappedPublicStateId =
-      GameTree::kInvalidPublicStateId - 1;
+      PublicStateGraph::kCappedPublicStateId;
 
   enum class NodeGraphMode {
     kGrow,
@@ -551,57 +518,6 @@ class CFRSolver {
                                 NodeGraph& graph,
                                 EvalChild&& eval_child);
 
-  BettingHistoryKey make_betting_history_key(
-      const CompactPublicState& state) const;
-  BettingHistoryRow make_betting_history_row(
-      const CompactPublicState& state) const;
-  PublicStateKey make_public_state_key(uint32_t betting_history_id,
-                                       const CompactPublicState& state) const;
-  PublicStateRow make_public_state_row(uint32_t betting_history_id,
-                                       CompactPublicState state);
-  uint32_t get_or_create_betting_history_id(BettingHistoryKey key,
-                                            BettingHistoryRow row);
-  uint32_t get_or_create_betting_history_id(
-      const CompactPublicState& state);
-  uint32_t get_or_create_action_child_betting_history_id(
-      uint32_t parent_betting_history_id,
-      int action_index,
-      const CompactPublicState& child_state);
-  uint32_t get_or_create_chance_child_betting_history_id(
-      uint32_t parent_betting_history_id,
-      const CompactPublicState& child_state);
-  void cache_betting_history_actions(uint32_t betting_history_id,
-                                     const PublicStateRow& row);
-  std::optional<uint32_t> get_or_create_public_state_row(
-      uint32_t betting_history_id,
-      CompactPublicState state);
-  std::optional<uint32_t> get_or_create_public_state_row(
-      const CompactPublicState& state);
-  std::optional<uint32_t> action_child_public_state(
-      uint32_t public_state_id,
-      int action_index) const;
-  std::optional<uint32_t> chance_child_public_state(
-      uint32_t public_state_id,
-      const CompactPublicState& child_state) const;
-  template <typename Callback>
-  bool for_each_required_chance_transition(
-      const PublicStateRow& row,
-      Callback&& callback) const;
-  PublicBucketId chance_outcome_id(
-      const CompactPublicState& child_state) const;
-  std::optional<uint32_t> get_or_create_action_child_public_state(
-      uint32_t public_state_id,
-      int action_index);
-  std::optional<uint32_t> get_or_create_chance_child_public_state(
-      uint32_t public_state_id,
-      const CompactPublicState& child_state);
-  bool prebuild_public_state_rows(uint32_t root_public_state_id,
-                                  int max_depth);
-  void rebuild_chance_child_entries();
-  bool validate_prebuilt_transitions(
-      uint32_t root_public_state_id,
-      int max_depth,
-      TrainingRunStats& stats) const;
   bool prebuild_info_set_rows(const TrainingRangeView& player_a_range,
                               const TrainingRangeView& player_b_range);
   void condition_ranges_for_actions(
@@ -632,9 +548,6 @@ class CFRSolver {
   void record_cfr_update(StreetKind street, int depth);
   void record_chance_samples(int64_t count);
   void record_terminal_utility(bool showdown);
-  void record_child_node_created();
-  void record_betting_history_transition_hit();
-  void record_betting_history_transition_miss();
   void record_atomic_regret_update_retries(int64_t count);
 
   SolverConfig config_;
@@ -652,6 +565,7 @@ class CFRSolver {
   bool require_frozen_children_ = false;
   SolverStorage storage_;
   StrategyStore strategy_store_;
+  PublicStateGraph public_graph_;
 };
 
 }  // namespace poker
