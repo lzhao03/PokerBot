@@ -780,18 +780,21 @@ void CFRSolver::ApplyExactBoard(CompactPublicState& state,
   state.board_mask = board.mask;
 }
 
-CompactPublicState CFRSolver::NodeView::exact_state() const {
-  CompactPublicState state = row.state;
-  CFRSolver::ApplyExactBoard(state, ref.exact_board);
-  return state;
+const CompactPublicState& CFRSolver::NodeCursor::exact_state() const {
+  if (!exact_state_.has_value()) {
+    CompactPublicState state = row_.state;
+    CFRSolver::ApplyExactBoard(state, ref_.exact_board);
+    exact_state_.emplace(std::move(state));
+  }
+  return *exact_state_;
 }
 
-std::optional<CFRSolver::NodeView> CFRSolver::view(NodeRef node) const {
+std::optional<CFRSolver::NodeCursor> CFRSolver::cursor(NodeRef node) const {
   const auto& rows = storage_.frozen_ref().public_state_rows;
   if (node.public_state_id >= rows.size()) {
     return std::nullopt;
   }
-  return NodeView{node, rows[node.public_state_id]};
+  return NodeCursor{node, rows[node.public_state_id]};
 }
 
 std::optional<CFRSolver::NodeRef> CFRSolver::root_node_ref(
@@ -857,11 +860,11 @@ CFRSolver::ChildResult
 CFRSolver::NodeGraph::sample_chance_child(
     NodeRef parent,
     CardMask known_private_cards) {
-  std::optional<NodeView> parent_view = solver_.view(parent);
-  if (!parent_view.has_value()) {
+  std::optional<NodeCursor> parent_cursor = solver_.cursor(parent);
+  if (!parent_cursor.has_value()) {
     return ChildResult{ChildStatus::kInvalid, {}};
   }
-  const CompactPublicState exact_parent_state = parent_view->exact_state();
+  const CompactPublicState& exact_parent_state = parent_cursor->exact_state();
   const auto cards =
       SampleStreetCards(exact_parent_state, known_private_cards, solver_.rng_);
   CompactPublicState exact_child_state =
@@ -1759,15 +1762,15 @@ double CFRSolver::cfr_with_ranges(
     NodeRef node,
     TraversalContext& ctx,
     NodeGraph& graph) {
-  const std::optional<NodeView> node_view = view(node);
-  if (!node_view.has_value()) {
+  const std::optional<NodeCursor> node_cursor = cursor(node);
+  if (!node_cursor.has_value()) {
     return 0.0;
   }
   const uint32_t public_state_id = node.public_state_id;
-  const PublicStateRow& row = node_view->row;
-  const CompactPublicState state = node_view->exact_state();
+  const PublicStateRow& row = node_cursor->row();
 
   if (row.is_terminal) {
+    const CompactPublicState& state = node_cursor->exact_state();
     record_terminal_utility(state.folded_player < 0);
     if (!ctx.use_terminal_cache() || ctx.max_depth() > 0) {
       return uncached_utility(state, ctx.cards(0), ctx.cards(1));
@@ -1780,6 +1783,7 @@ double CFRSolver::cfr_with_ranges(
   }
 
   if (ctx.depth_limited()) {
+    const CompactPublicState& state = node_cursor->exact_state();
     return game_tree_->is_betting_round_over(state)
                ? uncached_utility(state, ctx.cards(0), ctx.cards(1))
                : 0.0;
@@ -1827,10 +1831,12 @@ double CFRSolver::cfr_with_ranges(
     conditioned_player_ranges = &ctx.scratch_frame().conditioned_ranges;
   }
   if (condition_player_a_range) {
+    const CompactPublicState& state = node_cursor->exact_state();
     condition_ranges_for_actions(player_a_range->get(), state,
                                  public_state_id, player, legal_action_ids,
                                  *conditioned_player_ranges);
   } else if (condition_player_b_range) {
+    const CompactPublicState& state = node_cursor->exact_state();
     condition_ranges_for_actions(player_b_range->get(), state,
                                  public_state_id, player, legal_action_ids,
                                  *conditioned_player_ranges);
@@ -2224,15 +2230,15 @@ double CFRSolver::evaluate_strategy_node(
     NodeRef node,
     EvaluationContext& ctx,
     NodeGraph& graph) {
-  const std::optional<NodeView> node_view = view(node);
-  if (!node_view.has_value()) {
+  const std::optional<NodeCursor> node_cursor = cursor(node);
+  if (!node_cursor.has_value()) {
     return 0.0;
   }
   const uint32_t public_state_id = node.public_state_id;
-  const PublicStateRow& row = node_view->row;
-  const CompactPublicState state = node_view->exact_state();
+  const PublicStateRow& row = node_cursor->row();
 
   if (row.is_terminal) {
+    const CompactPublicState& state = node_cursor->exact_state();
     return utility(state, ctx.cards(0), ctx.cards(1));
   }
   if (row.is_chance_node) {

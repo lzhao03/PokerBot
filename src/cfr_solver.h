@@ -8,6 +8,7 @@
 #include <optional>
 #include <random>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
@@ -180,12 +181,19 @@ class CFRSolver {
     ExactBoardState exact_board;
   };
 
-  struct NodeView {
-    NodeRef ref;
-    PublicStateRow row;
+  class NodeCursor {
+   public:
+    NodeCursor(NodeRef ref, PublicStateRow row)
+        : ref_(ref), row_(std::move(row)) {}
 
-    CompactPublicState exact_state() const;
-    CardMask board_mask() const { return ref.exact_board.mask; }
+    NodeRef ref() const { return ref_; }
+    const PublicStateRow& row() const { return row_; }
+    const CompactPublicState& exact_state() const;
+
+   private:
+    NodeRef ref_;
+    PublicStateRow row_;
+    mutable std::optional<CompactPublicState> exact_state_;
   };
 
   enum class ChildStatus {
@@ -421,7 +429,7 @@ class CFRSolver {
       const CompactPublicState& state);
   static void ApplyExactBoard(CompactPublicState& state,
                               const ExactBoardState& board);
-  std::optional<NodeView> view(NodeRef node) const;
+  std::optional<NodeCursor> cursor(NodeRef node) const;
   std::optional<NodeRef> root_node_ref(uint32_t root_public_state_id) const;
   NodeGraphMode default_node_graph_mode() const;
   double cfr_with_ranges(
