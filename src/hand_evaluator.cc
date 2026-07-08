@@ -540,22 +540,22 @@ int HandEvaluator::compare_hands(
     ComboId hand1,
     ComboId hand2,
     const GameState& board_state) const {
-  const SevenCardHand first =
-      SevenCardHand::FromHoleAndBoard(hand1, board_state);
-  const SevenCardHand second =
-      SevenCardHand::FromHoleAndBoard(hand2, board_state);
-  return CompareCactusHands(first.cards(), second.cards());
+  std::array<CardId, kMaxBoardCards> board_cards = {};
+  const uint8_t board_count =
+      static_cast<uint8_t>(board_state.board_cards.size());
+  for (uint8_t i = 0; i < board_count; ++i) {
+    board_cards[static_cast<size_t>(i)] =
+        board_state.board_cards[static_cast<size_t>(i)];
+  }
+  return compare_hands(hand1, hand2, board_cards, board_count);
 }
 
 int HandEvaluator::compare_hands(
     ComboId hand1,
     ComboId hand2,
     const CompactPublicState& board_state) const {
-  const SevenCardHand first =
-      SevenCardHand::FromHoleAndBoard(hand1, board_state);
-  const SevenCardHand second =
-      SevenCardHand::FromHoleAndBoard(hand2, board_state);
-  return CompareCactusHands(first.cards(), second.cards());
+  return compare_hands(hand1, hand2, board_state.board_cards,
+                       board_state.board_count);
 }
 
 int HandEvaluator::compare_hands(
