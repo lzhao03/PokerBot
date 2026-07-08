@@ -65,22 +65,22 @@ class CFRSolver {
   static bool traversal_stats_enabled();
 
  private:
-  const FrozenStrategyTables& tables() const {
+  const StrategyTables& tables() const {
     return storage_.frozen_ref();
   }
-  FrozenStrategyTables& mtables() {
+  StrategyTables& mtables() {
     return strategy_store_.mutable_tables();
   }
   MutableCumulativeArrays& arrays() {
     return storage_.cumulative_ref();
   }
-  const std::vector<FrozenStrategyTables::PublicStateRow>& rows() const {
+  const std::vector<StrategyTables::PublicStateRow>& rows() const {
     return tables().public_state_rows;
   }
 
-  using PrivateBucketId = FrozenStrategyTables::PrivateBucketId;
-  using InfoSetAddress = FrozenStrategyTables::InfoSetAddress;
-  using PublicStateRow = FrozenStrategyTables::PublicStateRow;
+  using PrivateBucketId = StrategyTables::PrivateBucketId;
+  using InfoSetAddress = StrategyTables::InfoSetAddress;
+  using PublicStateRow = StrategyTables::PublicStateRow;
 
   struct PrivateCards {
     static PrivateCards FromCombo(ComboId combo_id);

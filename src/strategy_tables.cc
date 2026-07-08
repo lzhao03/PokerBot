@@ -24,7 +24,7 @@ void HashArray(size_t& seed, const std::array<int, N>& values) {
 
 }  // namespace
 
-bool FrozenStrategyTables::BettingHistoryKey::operator==(
+bool StrategyTables::BettingHistoryKey::operator==(
     const BettingHistoryKey& other) const {
   const int inline_history_size =
       std::min(history_size, kInlineHistoryValues);
@@ -41,7 +41,7 @@ bool FrozenStrategyTables::BettingHistoryKey::operator==(
          history_overflow == other.history_overflow;
 }
 
-size_t FrozenStrategyTables::BettingHistoryKeyHash::operator()(
+size_t StrategyTables::BettingHistoryKeyHash::operator()(
     const BettingHistoryKey& key) const {
   size_t seed = 0;
   HashCombine(seed, key.street);
@@ -65,13 +65,13 @@ size_t FrozenStrategyTables::BettingHistoryKeyHash::operator()(
   return seed;
 }
 
-bool FrozenStrategyTables::PublicStateKey::operator==(
+bool StrategyTables::PublicStateKey::operator==(
     const PublicStateKey& other) const {
   return betting_history_id == other.betting_history_id &&
          public_bucket == other.public_bucket;
 }
 
-size_t FrozenStrategyTables::PublicStateKeyHash::operator()(
+size_t StrategyTables::PublicStateKeyHash::operator()(
     const PublicStateKey& key) const {
   size_t seed = 0;
   HashCombine(seed, static_cast<uint64_t>(key.betting_history_id));
@@ -79,13 +79,13 @@ size_t FrozenStrategyTables::PublicStateKeyHash::operator()(
   return seed;
 }
 
-bool FrozenStrategyTables::ChanceTransitionKey::operator==(
+bool StrategyTables::ChanceTransitionKey::operator==(
     const ChanceTransitionKey& other) const {
   return parent_public_state_id == other.parent_public_state_id &&
          outcome_id == other.outcome_id;
 }
 
-size_t FrozenStrategyTables::ChanceTransitionKeyHash::operator()(
+size_t StrategyTables::ChanceTransitionKeyHash::operator()(
     const ChanceTransitionKey& key) const {
   size_t seed = 0;
   HashCombine(seed, static_cast<uint64_t>(key.parent_public_state_id));

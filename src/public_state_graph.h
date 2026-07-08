@@ -47,12 +47,12 @@ struct TrainingRunStats {
 
 class PublicStateGraph {
  public:
-  using PublicBucketId = FrozenStrategyTables::PublicBucketId;
-  using BettingHistoryKey = FrozenStrategyTables::BettingHistoryKey;
-  using BettingHistoryRow = FrozenStrategyTables::BettingHistoryRow;
-  using PublicStateKey = FrozenStrategyTables::PublicStateKey;
-  using ChanceTransitionKey = FrozenStrategyTables::ChanceTransitionKey;
-  using PublicStateRow = FrozenStrategyTables::PublicStateRow;
+  using PublicBucketId = StrategyTables::PublicBucketId;
+  using BettingHistoryKey = StrategyTables::BettingHistoryKey;
+  using BettingHistoryRow = StrategyTables::BettingHistoryRow;
+  using PublicStateKey = StrategyTables::PublicStateKey;
+  using ChanceTransitionKey = StrategyTables::ChanceTransitionKey;
+  using PublicStateRow = StrategyTables::PublicStateRow;
 
   static constexpr uint32_t kCappedPublicStateId =
       GameTree::kInvalidPublicStateId - 1;
@@ -85,8 +85,8 @@ class PublicStateGraph {
                                      TrainingRunStats& stats) const;
 
  private:
-  const FrozenStrategyTables& tables() const { return storage_.frozen_ref(); }
-  FrozenStrategyTables& mtables() { return storage_.mutable_ref(); }
+  const StrategyTables& tables() const { return storage_.frozen_ref(); }
+  StrategyTables& mtables() { return storage_.mutable_ref(); }
   const std::vector<PublicStateRow>& rows() const {
     return tables().public_state_rows;
   }

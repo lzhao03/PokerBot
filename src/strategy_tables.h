@@ -53,7 +53,7 @@ bool operator!=(const CacheLineAlignedAllocator<T>&,
   return false;
 }
 
-class FrozenStrategyTables {
+class StrategyTables {
  public:
   using PrivateBucketId = uint16_t;
   using PublicBucketId = uint64_t;

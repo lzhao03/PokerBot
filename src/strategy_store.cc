@@ -137,11 +137,11 @@ StrategyStore::StrategyStore(
       storage_(storage),
       stats_(stats) {}
 
-FrozenStrategyTables& StrategyStore::mutable_tables() {
+StrategyTables& StrategyStore::mutable_tables() {
   return tables_for_growth();
 }
 
-FrozenStrategyTables& StrategyStore::tables_for_growth() {
+StrategyTables& StrategyStore::tables_for_growth() {
   return storage_.mutable_ref();
 }
 
@@ -191,7 +191,7 @@ std::optional<ActionBlock> StrategyStore::find_frozen(
       private_bucket_for_frozen_row(public_state_id, combo_id);
   const uint32_t action_offset =
       frozen_info_set_action_offset(public_state_id, player, private_bucket);
-  if (action_offset == FrozenStrategyTables::kInvalidActionOffset) {
+  if (action_offset == StrategyTables::kInvalidActionOffset) {
     return std::nullopt;
   }
   return ActionBlock(this, action_offset,
@@ -251,7 +251,7 @@ bool StrategyStore::prebuild_private_bucket_rows() {
     return true;
   }
 
-  FrozenStrategyTables& tables = tables_for_growth();
+  StrategyTables& tables = tables_for_growth();
   tables.private_bucket_rows.resize(tables.public_state_rows.size());
   for (size_t public_state_id = 0;
        public_state_id < tables.public_state_rows.size(); ++public_state_id) {
@@ -280,11 +280,11 @@ bool StrategyStore::prebuild_frozen_info_set_action_offsets() {
     return true;
   }
 
-  FrozenStrategyTables& tables = tables_for_growth();
+  StrategyTables& tables = tables_for_growth();
   tables.frozen_info_set_action_offsets.resize(tables.public_state_rows.size());
   for (auto& offset_row : tables.frozen_info_set_action_offsets) {
     for (auto& player_offsets : offset_row) {
-      player_offsets.fill(FrozenStrategyTables::kInvalidActionOffset);
+      player_offsets.fill(StrategyTables::kInvalidActionOffset);
     }
   }
 
@@ -330,7 +330,7 @@ const StrategyStore::PublicInfoSetSlab* StrategyStore::public_info_set_slab(
 
 StrategyStore::PublicInfoSetSlab&
 StrategyStore::get_or_create_public_info_set_slab(uint32_t public_state_id) {
-  FrozenStrategyTables& tables = tables_for_growth();
+  StrategyTables& tables = tables_for_growth();
   if (tables.public_info_set_slabs.size() <= public_state_id) {
     tables.public_info_set_slabs.resize(static_cast<size_t>(public_state_id) +
                                         1);
@@ -364,9 +364,9 @@ const StrategyStore::InfoSetRow* StrategyStore::find_info_set_row(
     return nullptr;
   }
   const size_t chunk_index =
-      private_bucket / FrozenStrategyTables::kPrivateBucketChunkSize;
+      private_bucket / StrategyTables::kPrivateBucketChunkSize;
   const size_t chunk_offset =
-      private_bucket % FrozenStrategyTables::kPrivateBucketChunkSize;
+      private_bucket % StrategyTables::kPrivateBucketChunkSize;
   const std::unique_ptr<PrivateRowChunk>& chunk =
       player_slab.private_row_chunks[chunk_index];
   if (chunk == nullptr) {
@@ -384,9 +384,9 @@ int32_t& StrategyStore::get_or_create_private_row_slot(
     PublicInfoSetSlabPlayer& player_slab,
     PrivateBucketId private_bucket) {
   const size_t chunk_index =
-      private_bucket / FrozenStrategyTables::kPrivateBucketChunkSize;
+      private_bucket / StrategyTables::kPrivateBucketChunkSize;
   const size_t chunk_offset =
-      private_bucket % FrozenStrategyTables::kPrivateBucketChunkSize;
+      private_bucket % StrategyTables::kPrivateBucketChunkSize;
   std::unique_ptr<PrivateRowChunk>& chunk =
       player_slab.private_row_chunks[chunk_index];
   if (chunk == nullptr) {
@@ -428,7 +428,7 @@ const StrategyStore::InfoSetRow* StrategyStore::get_or_create_info_set_row(
 
 StrategyStore::InfoSetRow StrategyStore::append_info_set_actions(
     absl::Span<const int> action_ids) {
-  FrozenStrategyTables& tables = tables_for_growth();
+  StrategyTables& tables = tables_for_growth();
   const size_t padding =
       (kCumulativeActionBlockAlignment -
        tables.action_ids.size() % kCumulativeActionBlockAlignment) %

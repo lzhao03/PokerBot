@@ -134,21 +134,21 @@ class ActionBlock {
 };
 
 struct SolverStorage {
-  std::shared_ptr<FrozenStrategyTables> mutable_tables =
-      std::make_shared<FrozenStrategyTables>();
-  std::shared_ptr<const FrozenStrategyTables> frozen_tables = mutable_tables;
+  std::shared_ptr<StrategyTables> mutable_tables =
+      std::make_shared<StrategyTables>();
+  std::shared_ptr<const StrategyTables> frozen_tables = mutable_tables;
   std::shared_ptr<MutableCumulativeArrays> cumulative =
       std::make_shared<MutableCumulativeArrays>();
   bool frozen = false;
 
-  FrozenStrategyTables& mutable_ref() {
+  StrategyTables& mutable_ref() {
     if (frozen || mutable_tables == nullptr) {
       throw std::logic_error("Strategy tables are frozen");
     }
     return *mutable_tables;
   }
 
-  const FrozenStrategyTables& frozen_ref() const {
+  const StrategyTables& frozen_ref() const {
     return *frozen_tables;
   }
 
@@ -166,7 +166,7 @@ struct SolverStorage {
     frozen = true;
   }
 
-  void bind_frozen(std::shared_ptr<const FrozenStrategyTables> frozen_in,
+  void bind_frozen(std::shared_ptr<const StrategyTables> frozen_in,
                    std::shared_ptr<MutableCumulativeArrays> cumulative_in) {
     mutable_tables.reset();
     frozen_tables = std::move(frozen_in);
@@ -177,14 +177,14 @@ struct SolverStorage {
 
 class StrategyStore {
  public:
-  using PrivateBucketId = FrozenStrategyTables::PrivateBucketId;
-  using InfoSetAddress = FrozenStrategyTables::InfoSetAddress;
-  using InfoSetRow = FrozenStrategyTables::InfoSetRow;
-  using PublicStateRow = FrozenStrategyTables::PublicStateRow;
-  using PrivateRowChunk = FrozenStrategyTables::PrivateRowChunk;
+  using PrivateBucketId = StrategyTables::PrivateBucketId;
+  using InfoSetAddress = StrategyTables::InfoSetAddress;
+  using InfoSetRow = StrategyTables::InfoSetRow;
+  using PublicStateRow = StrategyTables::PublicStateRow;
+  using PrivateRowChunk = StrategyTables::PrivateRowChunk;
   using PublicInfoSetSlabPlayer =
-      FrozenStrategyTables::PublicInfoSetSlabPlayer;
-  using PublicInfoSetSlab = FrozenStrategyTables::PublicInfoSetSlab;
+      StrategyTables::PublicInfoSetSlabPlayer;
+  using PublicInfoSetSlab = StrategyTables::PublicInfoSetSlab;
 
   StrategyStore(
       const SolverConfig& config,
@@ -192,7 +192,7 @@ class StrategyStore {
       SolverStorage& storage,
       TraversalStats* stats);
 
-  FrozenStrategyTables& mutable_tables();
+  StrategyTables& mutable_tables();
 
   std::optional<ActionBlock> find(InfoSetAddress address,
                                   size_t expected_action_count);
@@ -225,8 +225,8 @@ class StrategyStore {
  private:
   friend class ActionBlock;
 
-  const FrozenStrategyTables& frozen_tables() const;
-  FrozenStrategyTables& tables_for_growth();
+  const StrategyTables& frozen_tables() const;
+  StrategyTables& tables_for_growth();
   MutableCumulativeArrays& cumulative();
   const MutableCumulativeArrays& cumulative() const;
 
@@ -260,7 +260,7 @@ class StrategyStore {
   TraversalStats* stats_;
 };
 
-inline const FrozenStrategyTables& StrategyStore::frozen_tables() const {
+inline const StrategyTables& StrategyStore::frozen_tables() const {
   return storage_.frozen_ref();
 }
 

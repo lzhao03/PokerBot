@@ -739,7 +739,7 @@ void CFRSolver::run_frozen_iterations(
   // Each worker shares the frozen strategy tables and writes to the same
   // regret/strategy arrays.
   // Workers use their own RNG and TraversalScratch; no locks needed.
-  std::shared_ptr<const FrozenStrategyTables> frozen_tables =
+  std::shared_ptr<const StrategyTables> frozen_tables =
       storage_.frozen_tables;
   std::shared_ptr<MutableCumulativeArrays> cumulative = storage_.cumulative;
   const bool use_frozen_regret_only =
@@ -1245,7 +1245,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   }
 
   SolverConfig config = config_;
-  std::shared_ptr<const FrozenStrategyTables> frozen_tables =
+  std::shared_ptr<const StrategyTables> frozen_tables =
       storage_.frozen_tables;
   std::shared_ptr<MutableCumulativeArrays> cumulative = storage_.cumulative;
   double total = 0.0;

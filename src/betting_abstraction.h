@@ -11,8 +11,8 @@ namespace poker {
 
 class BettingAbstraction {
  public:
-  using BettingHistoryKey = FrozenStrategyTables::BettingHistoryKey;
-  using BettingHistoryRow = FrozenStrategyTables::BettingHistoryRow;
+  using BettingHistoryKey = StrategyTables::BettingHistoryKey;
+  using BettingHistoryRow = StrategyTables::BettingHistoryRow;
 
   BettingHistoryKey make_history_key(const CompactPublicState& state) const {
     BettingHistoryKey key;

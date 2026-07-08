@@ -256,7 +256,7 @@ std::optional<uint32_t> PublicStateGraph::get_or_create_public_state_row(
     return existing->second;
   }
 
-  FrozenStrategyTables& tables = mtables();
+  StrategyTables& tables = mtables();
   if (config_.max_public_states > 0 &&
       static_cast<int>(tables.public_state_rows.size()) >=
           config_.max_public_states) {
@@ -308,7 +308,7 @@ uint32_t PublicStateGraph::get_or_create_betting_history_id(
     BettingHistoryKey key,
     BettingHistoryRow row) {
   betting_abstraction_.copy_history_to_row(key, row);
-  FrozenStrategyTables& tables = mtables();
+  StrategyTables& tables = mtables();
   const auto [history_iter, inserted] = tables.betting_history_ids.try_emplace(
       std::move(key), static_cast<uint32_t>(tables.betting_history_ids.size()));
   const uint32_t betting_history_id = history_iter->second;
@@ -327,7 +327,7 @@ uint32_t PublicStateGraph::get_or_create_action_child_betting_history_id(
     uint32_t parent_betting_history_id,
     int action_index,
     const CompactPublicState& child_state) {
-  FrozenStrategyTables& tables = mtables();
+  StrategyTables& tables = mtables();
   if (parent_betting_history_id < tables.betting_history_rows.size()) {
     BettingHistoryRow& parent_row =
         tables.betting_history_rows[parent_betting_history_id];
@@ -366,7 +366,7 @@ uint32_t PublicStateGraph::get_or_create_action_child_betting_history_id(
 uint32_t PublicStateGraph::get_or_create_chance_child_betting_history_id(
     uint32_t parent_betting_history_id,
     const CompactPublicState& child_state) {
-  FrozenStrategyTables& tables = mtables();
+  StrategyTables& tables = mtables();
   if (parent_betting_history_id < tables.betting_history_rows.size()) {
     BettingHistoryRow& parent_row =
         tables.betting_history_rows[parent_betting_history_id];
@@ -386,7 +386,7 @@ uint32_t PublicStateGraph::get_or_create_chance_child_betting_history_id(
 void PublicStateGraph::cache_betting_history_actions(
     uint32_t betting_history_id,
     const PublicStateRow& row) {
-  FrozenStrategyTables& tables = mtables();
+  StrategyTables& tables = mtables();
   if (row.action_count == 0 ||
       betting_history_id >= tables.betting_history_rows.size()) {
     return;
@@ -704,7 +704,7 @@ bool PublicStateGraph::prebuild_public_state_rows(
 }
 
 void PublicStateGraph::rebuild_chance_child_entries() {
-  FrozenStrategyTables& tables = mtables();
+  StrategyTables& tables = mtables();
   struct PendingChanceChild {
     uint32_t parent_id = 0;
     PublicBucketId outcome_id = 0;
