@@ -46,37 +46,39 @@ HandEvaluation ToHandEvaluation(const EvaluationScore& score) {
 class SevenCardHand {
  public:
   static SevenCardHand FromHoleAndBoard(ComboId hole_cards,
-                                        const GameState& board_state) {
+                                        absl::Span<const CardId> board_cards) {
     SevenCardHand hand(hole_cards);
-    for (CardId card : board_state.board_cards) {
+    for (CardId card : board_cards) {
       hand.append(card);
     }
     return hand;
   }
 
+  static SevenCardHand FromHoleAndBoard(ComboId hole_cards,
+                                        const GameState& board_state) {
+    return FromHoleAndBoard(hole_cards,
+                            absl::MakeConstSpan(board_state.board_cards));
+  }
+
   static SevenCardHand FromHoleAndBoard(
       ComboId hole_cards,
       const CompactPublicState& board_state) {
-    SevenCardHand hand(hole_cards);
-    for (uint8_t i = 0; i < board_state.board_count; ++i) {
-      hand.append(board_state.board_cards[static_cast<size_t>(i)]);
-    }
-    return hand;
+    return FromHoleAndBoard(
+        hole_cards, absl::Span<const CardId>(board_state.board_cards.data(),
+                                             board_state.board_count));
   }
 
   static SevenCardHand FromHoleAndBoard(
       ComboId hole_cards,
       const std::array<CardId, kMaxBoardCards>& board_cards,
       uint8_t board_count) {
-    SevenCardHand hand(hole_cards);
-    for (uint8_t i = 0; i < board_count; ++i) {
-      hand.append(board_cards[static_cast<size_t>(i)]);
-    }
-    return hand;
+    return FromHoleAndBoard(
+        hole_cards,
+        absl::Span<const CardId>(board_cards.data(), board_count));
   }
 
   absl::Span<const CardId> cards() const {
-    return absl::Span<const CardId>(cards_.data(), count_);
+    return {cards_.data(), count_};
   }
 
  private:
