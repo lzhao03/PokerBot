@@ -413,46 +413,43 @@ void HandRange::set_from_string(const std::string& range_str) {
 
 std::string HandRange::to_string() const {
   std::ostringstream oss;
-  
-  // Sort indices for consistent output
-  std::vector<int> indices;
-  indices.reserve(hand_weights_.size());
-  
-  for (const auto& pair : hand_weights_) {
-    indices.push_back(pair.first);
-  }
-  
-  std::sort(indices.begin(), indices.end());
 
-  std::vector<std::string> exact_hands;
-  exact_hands.reserve(exact_hand_weights_.size());
+  std::vector<std::pair<int, double>> hand_weights = hand_weights_;
+  std::sort(hand_weights.begin(), hand_weights.end());
+
+  std::vector<ComboId> exact_combos;
+  exact_combos.reserve(exact_hand_weights_.size());
   for (const auto& pair : exact_hand_weights_) {
-    exact_hands.push_back("[" + ExactHandKey(pair.first) + "]");
+    exact_combos.push_back(pair.first);
   }
-  std::sort(exact_hands.begin(), exact_hands.end());
-  
+  std::sort(exact_combos.begin(), exact_combos.end(),
+            [](ComboId left, ComboId right) {
+              return ExactHandKey(left) < ExactHandKey(right);
+            });
+
   bool needs_separator = false;
-  for (int index : indices) {
-    if (needs_separator) {
-      oss << ",";
+  auto append_part = [&](const std::string& text) {
+    if (!text.empty()) {
+      if (needs_separator) {
+        oss << ",";
+      }
+      oss << text;
+      needs_separator = true;
     }
-    
-    std::optional<HandType> type = DecodeHandTypeIndex(index);
+  };
+
+  for (const auto& [index, weight] : hand_weights) {
+    (void)weight;
+    const std::optional<HandType> type = DecodeHandTypeIndex(index);
     if (type.has_value()) {
-      oss << FormatHandType(*type);
+      append_part(FormatHandType(*type));
     }
-    needs_separator = true;
   }
 
-  for (const std::string& hand : exact_hands) {
-    if (needs_separator) {
-      oss << ",";
-    }
-
-    oss << hand;
-    needs_separator = true;
+  for (ComboId combo_id : exact_combos) {
+    append_part("[" + ExactHandKey(combo_id) + "]");
   }
-  
+
   return oss.str();
 }
 

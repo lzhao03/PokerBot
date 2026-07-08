@@ -142,6 +142,30 @@ void CheckRepresentativeComboIndexing() {
          "out-of-range hand-type index should be invalid");
 }
 
+void CheckToStringIsDeterministic() {
+  const int aces = poker::HandRange::string_to_index("AA");
+  const int kings = poker::HandRange::string_to_index("KK");
+  const poker::ComboId exact_ace_king =
+      MakeCombo(14, poker::SuitKind::kSpades, 13, poker::SuitKind::kHearts);
+  const poker::ComboId exact_queen_jack =
+      MakeCombo(12, poker::SuitKind::kClubs, 11, poker::SuitKind::kDiamonds);
+
+  poker::HandRange first;
+  first.add_hand_by_index(kings, 1.0);
+  first.add_combo(exact_queen_jack, 1.0);
+  first.add_hand_by_index(aces, 1.0);
+  first.add_combo(exact_ace_king, 1.0);
+
+  poker::HandRange second;
+  second.add_combo(exact_ace_king, 1.0);
+  second.add_hand_by_index(aces, 1.0);
+  second.add_combo(exact_queen_jack, 1.0);
+  second.add_hand_by_index(kings, 1.0);
+
+  Expect(first.to_string() == second.to_string(),
+         "range string should not depend on insertion order");
+}
+
 }  // namespace
 
 int main() {
@@ -149,5 +173,6 @@ int main() {
   CheckStringRangesAndViews();
   CheckExplicitHandTypeParsing();
   CheckRepresentativeComboIndexing();
+  CheckToStringIsDeterministic();
   return 0;
 }
