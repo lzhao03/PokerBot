@@ -826,29 +826,29 @@ std::optional<CFRSolver::NodeRef> CFRSolver::root_node_ref(
                  ExactBoardFromState(rows[root_public_state_id].state)};
 }
 
-CFRSolver::ChildResolverMode CFRSolver::default_child_resolver_mode() const {
+CFRSolver::NodeGraphMode CFRSolver::default_node_graph_mode() const {
   if (!frozen_) {
-    return ChildResolverMode::kGrow;
+    return NodeGraphMode::kGrow;
   }
-  return require_frozen_children_ ? ChildResolverMode::kRequirePresent
-                                  : ChildResolverMode::kSkipMissing;
+  return require_frozen_children_ ? NodeGraphMode::kRequirePresent
+                                  : NodeGraphMode::kSkipMissing;
 }
 
-CFRSolver::ChildResolver::ChildResolver(CFRSolver& solver,
-                                        ChildResolverMode mode)
+CFRSolver::NodeGraph::NodeGraph(CFRSolver& solver,
+                                NodeGraphMode mode)
     : solver_(solver), mode_(mode) {}
 
-std::optional<CFRSolver::NodeRef>
-CFRSolver::ChildResolver::action_child(NodeRef parent,
-                                       int action_index) {
+CFRSolver::ChildResult
+CFRSolver::NodeGraph::action_child(NodeRef parent,
+                                   int action_index) {
   std::optional<uint32_t> child_id;
   switch (mode_) {
-    case ChildResolverMode::kGrow:
+    case NodeGraphMode::kGrow:
       child_id = solver_.get_or_create_action_child_public_state(
           parent.public_state_id, action_index);
       break;
-    case ChildResolverMode::kSkipMissing:
-    case ChildResolverMode::kRequirePresent:
+    case NodeGraphMode::kSkipMissing:
+    case NodeGraphMode::kRequirePresent:
       child_id =
           solver_.action_child_public_state(parent.public_state_id,
                                             action_index);
@@ -856,28 +856,32 @@ CFRSolver::ChildResolver::action_child(NodeRef parent,
   }
 
   const auto& rows = solver_.frozen_tables_->public_state_rows;
-  const bool valid =
-      child_id.has_value() &&
-      *child_id != GameTree::kInvalidPublicStateId &&
-      *child_id != kCappedPublicStateId &&
-      *child_id < rows.size();
-  if (!valid) {
-    if (mode_ == ChildResolverMode::kRequirePresent) {
+  ChildStatus status = ChildStatus::kOk;
+  if (!child_id.has_value() ||
+      *child_id == GameTree::kInvalidPublicStateId) {
+    status = ChildStatus::kMissing;
+  } else if (*child_id == kCappedPublicStateId) {
+    status = ChildStatus::kCapped;
+  } else if (*child_id >= rows.size()) {
+    status = ChildStatus::kInvalid;
+  }
+  if (status != ChildStatus::kOk) {
+    if (mode_ == NodeGraphMode::kRequirePresent) {
       throw std::logic_error("required action child public state is missing");
     }
-    return std::nullopt;
+    return ChildResult{status, {}};
   }
 
-  return NodeRef{*child_id, parent.exact_board};
+  return ChildResult{ChildStatus::kOk, NodeRef{*child_id, parent.exact_board}};
 }
 
-std::optional<CFRSolver::NodeRef>
-CFRSolver::ChildResolver::sample_chance_child(
+CFRSolver::ChildResult
+CFRSolver::NodeGraph::sample_chance_child(
     NodeRef parent,
     CardMask known_private_cards) {
   std::optional<NodeView> parent_view = solver_.view(parent);
   if (!parent_view.has_value()) {
-    return std::nullopt;
+    return ChildResult{ChildStatus::kInvalid, {}};
   }
   const CompactPublicState exact_parent_state = parent_view->exact_state();
   const auto cards =
@@ -888,12 +892,12 @@ CFRSolver::ChildResolver::sample_chance_child(
       CFRSolver::ExactBoardFromState(exact_child_state);
   std::optional<uint32_t> child_id;
   switch (mode_) {
-    case ChildResolverMode::kGrow:
+    case NodeGraphMode::kGrow:
       child_id = solver_.get_or_create_chance_child_public_state(
           parent.public_state_id, exact_child_state);
       break;
-    case ChildResolverMode::kSkipMissing:
-    case ChildResolverMode::kRequirePresent:
+    case NodeGraphMode::kSkipMissing:
+    case NodeGraphMode::kRequirePresent:
       child_id =
           solver_.chance_child_public_state(parent.public_state_id,
                                             exact_child_state);
@@ -901,19 +905,23 @@ CFRSolver::ChildResolver::sample_chance_child(
   }
 
   const auto& rows = solver_.frozen_tables_->public_state_rows;
-  const bool valid =
-      child_id.has_value() &&
-      *child_id != GameTree::kInvalidPublicStateId &&
-      *child_id != kCappedPublicStateId &&
-      *child_id < rows.size();
-  if (!valid) {
-    if (mode_ == ChildResolverMode::kRequirePresent) {
+  ChildStatus status = ChildStatus::kOk;
+  if (!child_id.has_value() ||
+      *child_id == GameTree::kInvalidPublicStateId) {
+    status = ChildStatus::kMissing;
+  } else if (*child_id == kCappedPublicStateId) {
+    status = ChildStatus::kCapped;
+  } else if (*child_id >= rows.size()) {
+    status = ChildStatus::kInvalid;
+  }
+  if (status != ChildStatus::kOk) {
+    if (mode_ == NodeGraphMode::kRequirePresent) {
       throw std::logic_error("required chance child public state is missing");
     }
-    return std::nullopt;
+    return ChildResult{status, {}};
   }
 
-  return NodeRef{*child_id, child_board};
+  return ChildResult{ChildStatus::kOk, NodeRef{*child_id, child_board}};
 }
 
 bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
@@ -1531,7 +1539,7 @@ int CFRSolver::run_warmup_phase(
   VLOG(1) << "Warmup phase: "
           << (auto_warmup ? "adaptive" : std::to_string(warmup_count))
           << " single-threaded iterations";
-  ChildResolver children(*this, ChildResolverMode::kGrow);
+  NodeGraph graph(*this, NodeGraphMode::kGrow);
   const NodeRef root_node{root_public_state_id,
                           ExactBoardFromState(root_state)};
   TraversalScratch scratch(ScratchDepthReserve(config_, max_depth));
@@ -1564,7 +1572,7 @@ int CFRSolver::run_warmup_phase(
     options.write_average_strategy = !config_.regret_only_training;
     TraversalContext ctx(traversal_deal, options, scratch,
                          player_a_context_range, player_b_context_range);
-    double dealt_value = cfr_with_ranges(root_node, ctx, children);
+    double dealt_value = cfr_with_ranges(root_node, ctx, graph);
 
     cumulative_root_utility_ += dealt_value;
     ++iterations_run_;
@@ -1713,7 +1721,7 @@ void CFRSolver::run_frozen_iterations(
           const CompactPublicState root_state =
               worker.frozen_tables_->public_state_rows[root_public_state_id]
                   .state;
-          ChildResolver children(worker, ChildResolverMode::kRequirePresent);
+          NodeGraph graph(worker, NodeGraphMode::kRequirePresent);
           const NodeRef root_node{root_public_state_id,
                                   ExactBoardFromState(root_state)};
           for (int i = 0; i < shard; ++i) {
@@ -1749,11 +1757,12 @@ void CFRSolver::run_frozen_iterations(
                                  player_a_context_range,
                                  player_b_context_range);
             if (use_frozen_regret_only) {
-              local_utility += worker.cfr_frozen_regret_only(root_node, ctx);
+              local_utility +=
+                  worker.cfr_frozen_regret_only(root_node, ctx, graph);
               continue;
             }
 
-            local_utility += worker.cfr_with_ranges(root_node, ctx, children);
+            local_utility += worker.cfr_with_ranges(root_node, ctx, graph);
           }
           return WorkerResult{local_utility, worker.get_traversal_stats(),
                               worker.get_cfr_update_count(), shard};
@@ -1775,7 +1784,7 @@ void CFRSolver::run_frozen_iterations(
 double CFRSolver::cfr_with_ranges(
     NodeRef node,
     TraversalContext& ctx,
-    ChildResolver& children) {
+    NodeGraph& graph) {
   const std::optional<NodeView> node_view = view(node);
   if (!node_view.has_value()) {
     return 0.0;
@@ -1793,7 +1802,7 @@ double CFRSolver::cfr_with_ranges(
   }
 
   if (row.is_chance_node) {
-    return chance_sampling_cfr(node, ctx, children);
+    return chance_sampling_cfr(node, ctx, graph);
   }
 
   if (ctx.depth_limited()) {
@@ -1854,9 +1863,9 @@ double CFRSolver::cfr_with_ranges(
   }
 
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
-    std::optional<NodeRef> child =
-        children.action_child(node, static_cast<int>(action_index));
-    if (!child.has_value()) {
+    const ChildResult child =
+        graph.action_child(node, static_cast<int>(action_index));
+    if (child.status != ChildStatus::kOk) {
       continue;
     }
 
@@ -1878,9 +1887,9 @@ double CFRSolver::cfr_with_ranges(
       if (ranges_changed) {
         auto range_scope =
             ctx.set_ranges(child_player_a_range, child_player_b_range);
-        action_value = cfr_with_ranges(*child, ctx, children);
+        action_value = cfr_with_ranges(child.node, ctx, graph);
       } else {
-        action_value = cfr_with_ranges(*child, ctx, children);
+        action_value = cfr_with_ranges(child.node, ctx, graph);
       }
     }
     action_values[action_index] = action_value;
@@ -1915,54 +1924,10 @@ double CFRSolver::cfr_with_ranges(
   return node_value;
 }
 
-CFRSolver::NodeRef CFRSolver::sample_frozen_chance_transition(
-    NodeRef parent,
-    const PublicStateRow& row,
-    CardMask known_private_cards) {
-  const ExactBoardState& exact_board = parent.exact_board;
-  const auto cards = SampleStreetCards(
-      row.state.street, exact_board.count, exact_board.mask,
-      known_private_cards, rng_);
-  ExactBoardState child_board = exact_board;
-  for (CardId card : cards) {
-    child_board.cards[child_board.count] = card;
-    ++child_board.count;
-    child_board.mask |= CardBit(card);
-  }
-
-  CompactPublicState sampled_child_state = row.state;
-  switch (sampled_child_state.street) {
-    case StreetKind::kPreflop:
-      sampled_child_state.street = StreetKind::kFlop;
-      break;
-    case StreetKind::kFlop:
-      sampled_child_state.street = StreetKind::kTurn;
-      break;
-    case StreetKind::kTurn:
-      sampled_child_state.street = StreetKind::kRiver;
-      break;
-    case StreetKind::kRiver:
-      break;
-  }
-  ApplyExactBoard(sampled_child_state, child_board);
-  ResetHistory(sampled_child_state);
-  sampled_child_state.player_to_act =
-      sampled_child_state.street == StreetKind::kPreflop ? 0 : 1;
-
-  std::optional<uint32_t> child_public_state_id =
-      chance_child_public_state(parent.public_state_id, sampled_child_state);
-  if (!child_public_state_id.has_value() ||
-      *child_public_state_id >= frozen_tables_->public_state_rows.size()) {
-    throw std::logic_error("frozen chance child public state is missing");
-  }
-
-  return NodeRef{*child_public_state_id, child_board};
-}
-
 double CFRSolver::chance_sampling_cfr(
     NodeRef node,
     TraversalContext& ctx,
-    ChildResolver& children) {
+    NodeGraph& graph) {
   const auto& rows = frozen_tables_->public_state_rows;
   if (node.public_state_id >= rows.size()) {
     return 0.0;
@@ -1982,9 +1947,9 @@ double CFRSolver::chance_sampling_cfr(
   int evaluated = 0;
   const CardMask known_private_cards = ctx.known_private_cards();
   for (int i = 0; i < samples; ++i) {
-    std::optional<NodeRef> child =
-        children.sample_chance_child(node, known_private_cards);
-    if (!child.has_value()) {
+    const ChildResult child =
+        graph.sample_chance_child(node, known_private_cards);
+    if (child.status != ChildStatus::kOk) {
       continue;
     }
 
@@ -1993,20 +1958,20 @@ double CFRSolver::chance_sampling_cfr(
     if (child_player_a_range.has_value()) {
       child_player_a_range =
           std::cref(child_player_a_range->get().without_mask(
-              child->exact_board.mask, *public_player_a_range));
+              child.node.exact_board.mask, *public_player_a_range));
     }
     if (child_player_b_range.has_value()) {
       child_player_b_range =
           std::cref(child_player_b_range->get().without_mask(
-              child->exact_board.mask, *public_player_b_range));
+              child.node.exact_board.mask, *public_player_b_range));
     }
 
     if (child_player_a_range.has_value() || child_player_b_range.has_value()) {
       auto range_scope =
           ctx.set_ranges(child_player_a_range, child_player_b_range);
-      value += cfr_with_ranges(*child, ctx, children);
+      value += cfr_with_ranges(child.node, ctx, graph);
     } else {
-      value += cfr_with_ranges(*child, ctx, children);
+      value += cfr_with_ranges(child.node, ctx, graph);
     }
     ++evaluated;
   }
@@ -2016,7 +1981,8 @@ double CFRSolver::chance_sampling_cfr(
 
 double CFRSolver::cfr_frozen_regret_only(
     NodeRef node,
-    TraversalContext& ctx) {
+    TraversalContext& ctx,
+    NodeGraph& graph) {
   const auto& public_state_rows = frozen_tables_->public_state_rows;
   const uint32_t public_state_id = node.public_state_id;
   const ExactBoardState& exact_board = node.exact_board;
@@ -2031,7 +1997,7 @@ double CFRSolver::cfr_frozen_regret_only(
   }
 
   if (row.is_chance_node) {
-    return chance_sampling_frozen_regret_only(node, ctx);
+    return chance_sampling_frozen_regret_only(node, ctx, graph);
   }
 
   const int player = row.player_to_act;
@@ -2056,16 +2022,18 @@ double CFRSolver::cfr_frozen_regret_only(
 
   double node_value = 0.0;
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
-    const uint32_t child_public_state_id =
-        row.action_child_ids[action_index];
-    const NodeRef child{child_public_state_id, exact_board};
+    const ChildResult child =
+        graph.action_child(node, static_cast<int>(action_index));
+    if (child.status != ChildStatus::kOk) {
+      continue;
+    }
 
     double action_value = 0.0;
     {
       auto reach_scope =
           ctx.enter_action(player, action_probabilities[action_index]);
       auto depth_scope = ctx.descend();
-      action_value = cfr_frozen_regret_only(child, ctx);
+      action_value = cfr_frozen_regret_only(child.node, ctx, graph);
     }
     action_values[action_index] = action_value;
     node_value += action_probabilities[action_index] * action_value;
@@ -2094,18 +2062,20 @@ double CFRSolver::cfr_frozen_regret_only(
 
 double CFRSolver::chance_sampling_frozen_regret_only(
     NodeRef node,
-    TraversalContext& ctx) {
-  const PublicStateRow& row =
-      frozen_tables_->public_state_rows[node.public_state_id];
+    TraversalContext& ctx,
+    NodeGraph& graph) {
   const int samples = ChanceSamples(config_);
   record_chance_samples(samples);
 
   double value = 0.0;
   const CardMask known_private_cards = ctx.known_private_cards();
   for (int i = 0; i < samples; ++i) {
-    const NodeRef child =
-        sample_frozen_chance_transition(node, row, known_private_cards);
-    value += cfr_frozen_regret_only(child, ctx);
+    const ChildResult child =
+        graph.sample_chance_child(node, known_private_cards);
+    if (child.status != ChildStatus::kOk) {
+      continue;
+    }
+    value += cfr_frozen_regret_only(child.node, ctx, graph);
   }
 
   return samples > 0 ? value / samples : 0.0;
@@ -2171,12 +2141,12 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
       frozen_tables_->public_state_rows[*root_public_state_id].state;
   const NodeRef root_node{*root_public_state_id,
                           ExactBoardFromState(root_state)};
-  ChildResolver children(*this, default_child_resolver_mode());
+  NodeGraph graph(*this, default_node_graph_mode());
   EvaluationContext ctx{TraversalDeal{{
       PrivateCards::FromCombo(player_a_hand),
       PrivateCards::FromCombo(player_b_hand),
   }}};
-  return evaluate_strategy_node(root_node, ctx, children);
+  return evaluate_strategy_node(root_node, ctx, graph);
 }
 
 double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range,
@@ -2267,14 +2237,14 @@ double CFRSolver::evaluate_strategy_samples(
   if (!root_node.has_value()) {
     return 0.0;
   }
-  ChildResolver children(*this, default_child_resolver_mode());
+  NodeGraph graph(*this, default_node_graph_mode());
   for (int i = 0; i < samples; ++i) {
     const RangeDeal deal = range_sampler.sample(rng_);
     EvaluationContext ctx{TraversalDeal{{
         PrivateCards::FromCombo(deal.player_a_combo),
         PrivateCards::FromCombo(deal.player_b_combo),
     }}};
-    total += evaluate_strategy_node(*root_node, ctx, children);
+    total += evaluate_strategy_node(*root_node, ctx, graph);
   }
   return total / samples;
 }
@@ -2282,7 +2252,7 @@ double CFRSolver::evaluate_strategy_samples(
 double CFRSolver::evaluate_strategy_node(
     NodeRef node,
     EvaluationContext& ctx,
-    ChildResolver& children) {
+    NodeGraph& graph) {
   const std::optional<NodeView> node_view = view(node);
   if (!node_view.has_value()) {
     return 0.0;
@@ -2300,12 +2270,12 @@ double CFRSolver::evaluate_strategy_node(
     int evaluated = 0;
     const CardMask known_private_cards = ctx.known_private_cards();
     for (int i = 0; i < samples; ++i) {
-      std::optional<NodeRef> child =
-          children.sample_chance_child(node, known_private_cards);
-      if (!child.has_value()) {
+      const ChildResult child =
+          graph.sample_chance_child(node, known_private_cards);
+      if (child.status != ChildStatus::kOk) {
         continue;
       }
-      value += evaluate_strategy_node(*child, ctx, children);
+      value += evaluate_strategy_node(child.node, ctx, graph);
       ++evaluated;
     }
     return evaluated > 0 ? value / evaluated : 0.0;
@@ -2331,13 +2301,13 @@ double CFRSolver::evaluate_strategy_node(
   double value = 0.0;
   const int action_count = row.action_count;
   for (int action_index = 0; action_index < action_count; ++action_index) {
-    std::optional<NodeRef> child =
-        children.action_child(node, action_index);
-    if (!child.has_value()) {
+    const ChildResult child =
+        graph.action_child(node, action_index);
+    if (child.status != ChildStatus::kOk) {
       continue;
     }
     value += probabilities[action_index] *
-             evaluate_strategy_node(*child, ctx, children);
+             evaluate_strategy_node(child.node, ctx, graph);
   }
   return value;
 }

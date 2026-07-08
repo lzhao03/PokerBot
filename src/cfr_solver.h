@@ -167,7 +167,7 @@ class CFRSolver {
   static constexpr uint32_t kCappedPublicStateId =
       GameTree::kInvalidPublicStateId - 1;
 
-  enum class ChildResolverMode {
+  enum class NodeGraphMode {
     kGrow,
     kSkipMissing,
     kRequirePresent,
@@ -186,20 +186,32 @@ class CFRSolver {
     CardMask board_mask() const { return ref.exact_board.mask; }
   };
 
-  class ChildResolver {
-   public:
-    ChildResolver(CFRSolver& solver, ChildResolverMode mode);
+  enum class ChildStatus {
+    kOk,
+    kMissing,
+    kCapped,
+    kInvalid,
+  };
 
-    std::optional<NodeRef> action_child(
+  struct ChildResult {
+    ChildStatus status = ChildStatus::kInvalid;
+    NodeRef node;
+  };
+
+  class NodeGraph {
+   public:
+    NodeGraph(CFRSolver& solver, NodeGraphMode mode);
+
+    ChildResult action_child(
         NodeRef parent,
         int action_index);
-    std::optional<NodeRef> sample_chance_child(
+    ChildResult sample_chance_child(
         NodeRef parent,
         CardMask known_private_cards);
 
    private:
     CFRSolver& solver_;
-    ChildResolverMode mode_;
+    NodeGraphMode mode_;
   };
 
   // TODO: Move buffer borrowing behind TraversalScratch methods so traversal
@@ -409,21 +421,23 @@ class CFRSolver {
                               const ExactBoardState& board);
   std::optional<NodeView> view(NodeRef node) const;
   std::optional<NodeRef> root_node_ref(uint32_t root_public_state_id) const;
-  ChildResolverMode default_child_resolver_mode() const;
+  NodeGraphMode default_node_graph_mode() const;
   double cfr_with_ranges(
       NodeRef node,
       TraversalContext& ctx,
-      ChildResolver& children);
+      NodeGraph& graph);
   double cfr_frozen_regret_only(
       NodeRef node,
-      TraversalContext& ctx);
+      TraversalContext& ctx,
+      NodeGraph& graph);
   double chance_sampling_cfr(
       NodeRef node,
       TraversalContext& ctx,
-      ChildResolver& children);
+      NodeGraph& graph);
   double chance_sampling_frozen_regret_only(
       NodeRef node,
-      TraversalContext& ctx);
+      TraversalContext& ctx,
+      NodeGraph& graph);
 
   BettingHistoryKey make_betting_history_key(
       const CompactPublicState& state) const;
@@ -503,15 +517,11 @@ class CFRSolver {
                           const PrivateCards& player_b_cards);
   double evaluate_strategy_node(NodeRef node,
                                 EvaluationContext& ctx,
-                                ChildResolver& children);
+                                NodeGraph& graph);
   double evaluate_strategy_samples(
       int samples,
       uint32_t root_public_state_id,
       RangeSampler range_sampler);
-  NodeRef sample_frozen_chance_transition(
-      NodeRef parent,
-      const PublicStateRow& row,
-      CardMask known_private_cards);
   void record_action_entry_touches(int64_t count = 1);
   void record_cfr_update(StreetKind street, int depth);
   void record_chance_samples(int64_t count);
