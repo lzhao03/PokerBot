@@ -220,6 +220,11 @@ class CFRSolver {
         CardMask known_private_cards);
 
    private:
+    ChildResult make_child_result(
+        std::optional<uint32_t> child_id,
+        ExactBoardState exact_board,
+        const char* missing_message) const;
+
     CFRSolver& solver_;
     NodeGraphMode mode_;
   };

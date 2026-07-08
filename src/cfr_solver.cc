@@ -820,6 +820,32 @@ CFRSolver::NodeGraph::NodeGraph(CFRSolver& solver,
     : solver_(solver), mode_(mode) {}
 
 CFRSolver::ChildResult
+CFRSolver::NodeGraph::make_child_result(
+    std::optional<uint32_t> child_id,
+    ExactBoardState exact_board,
+    const char* missing_message) const {
+  const auto& rows = solver_.storage_.frozen_ref().public_state_rows;
+  ChildStatus status = ChildStatus::kOk;
+  if (!child_id.has_value() ||
+      *child_id == GameTree::kInvalidPublicStateId) {
+    status = ChildStatus::kMissing;
+  } else if (*child_id == kCappedPublicStateId) {
+    status = ChildStatus::kCapped;
+  } else if (*child_id >= rows.size()) {
+    status = ChildStatus::kInvalid;
+  }
+
+  if (status != ChildStatus::kOk) {
+    if (mode_ == NodeGraphMode::kRequirePresent) {
+      throw std::logic_error(missing_message);
+    }
+    return ChildResult{status, {}};
+  }
+
+  return ChildResult{ChildStatus::kOk, NodeRef{*child_id, exact_board}};
+}
+
+CFRSolver::ChildResult
 CFRSolver::NodeGraph::action_child(NodeRef parent,
                                    int action_index) {
   std::optional<uint32_t> child_id;
@@ -836,24 +862,8 @@ CFRSolver::NodeGraph::action_child(NodeRef parent,
       break;
   }
 
-  const auto& rows = solver_.storage_.frozen_ref().public_state_rows;
-  ChildStatus status = ChildStatus::kOk;
-  if (!child_id.has_value() ||
-      *child_id == GameTree::kInvalidPublicStateId) {
-    status = ChildStatus::kMissing;
-  } else if (*child_id == kCappedPublicStateId) {
-    status = ChildStatus::kCapped;
-  } else if (*child_id >= rows.size()) {
-    status = ChildStatus::kInvalid;
-  }
-  if (status != ChildStatus::kOk) {
-    if (mode_ == NodeGraphMode::kRequirePresent) {
-      throw std::logic_error("required action child public state is missing");
-    }
-    return ChildResult{status, {}};
-  }
-
-  return ChildResult{ChildStatus::kOk, NodeRef{*child_id, parent.exact_board}};
+  return make_child_result(child_id, parent.exact_board,
+                           "required action child public state is missing");
 }
 
 CFRSolver::ChildResult
@@ -885,24 +895,8 @@ CFRSolver::NodeGraph::sample_chance_child(
       break;
   }
 
-  const auto& rows = solver_.storage_.frozen_ref().public_state_rows;
-  ChildStatus status = ChildStatus::kOk;
-  if (!child_id.has_value() ||
-      *child_id == GameTree::kInvalidPublicStateId) {
-    status = ChildStatus::kMissing;
-  } else if (*child_id == kCappedPublicStateId) {
-    status = ChildStatus::kCapped;
-  } else if (*child_id >= rows.size()) {
-    status = ChildStatus::kInvalid;
-  }
-  if (status != ChildStatus::kOk) {
-    if (mode_ == NodeGraphMode::kRequirePresent) {
-      throw std::logic_error("required chance child public state is missing");
-    }
-    return ChildResult{status, {}};
-  }
-
-  return ChildResult{ChildStatus::kOk, NodeRef{*child_id, child_board}};
+  return make_child_result(child_id, child_board,
+                           "required chance child public state is missing");
 }
 
 bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
