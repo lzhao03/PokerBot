@@ -853,6 +853,19 @@ std::optional<CFRSolver::NodeRef> CFRSolver::root_node_ref(
                  ExactBoardFromState(public_rows[root_public_state_id].state)};
 }
 
+CFRSolver::DecisionFrame CFRSolver::make_decision_frame(
+    NodeRef node,
+    const PublicStateRow& row) {
+  DecisionFrame frame;
+  frame.public_state_id = node.public_state_id;
+  frame.player = row.player_to_act;
+  frame.street = row.state.street;
+  frame.action_count = static_cast<uint8_t>(row.action_count);
+  std::copy_n(row.action_ids.begin(), row.action_count,
+              frame.action_ids.begin());
+  return frame;
+}
+
 CFRSolver::NodeGraphMode CFRSolver::default_node_graph_mode() const {
   if (!storage_.frozen) {
     return NodeGraphMode::kGrow;
@@ -1816,21 +1829,20 @@ double CFRSolver::cfr_traversal(
     }
   }
 
-  const int player = row.player_to_act;
-  if (!IsPlayer(player) || row.action_count == 0) {
+  const DecisionFrame decision = make_decision_frame(node, row);
+  const int player = decision.player;
+  if (!IsPlayer(player) || decision.action_count == 0) {
     return 0.0;
   }
-  const StreetKind street = row.state.street;
   const PrivateCards& player_cards = ctx.cards(player);
 
   const bool is_update_player = ctx.is_update_player(player);
-  const size_t action_count = row.action_count;
-  const absl::Span<const int> legal_action_ids(row.action_ids.data(),
-                                               action_count);
+  const size_t action_count = decision.action_count;
+  const absl::Span<const int> legal_action_ids = decision.action_ids_span();
   std::optional<ActionBlock> action_block;
   if constexpr (mode == CfrTraversalMode::kNormal) {
     const InfoSetAddress info_set_address{
-        public_state_id, player,
+        decision.public_state_id, player,
         card_abstraction_.private_bucket(player_cards.combo, row.state)};
     action_block =
         is_update_player
@@ -1838,7 +1850,7 @@ double CFRSolver::cfr_traversal(
             : strategy_store_.find(info_set_address, action_count);
   } else {
     action_block =
-        strategy_store_.find_frozen(public_state_id, player,
+        strategy_store_.find_frozen(decision.public_state_id, player,
                                     player_cards.combo, action_count);
   }
 
@@ -1854,7 +1866,8 @@ double CFRSolver::cfr_traversal(
   std::optional<ActionRangeConditioning> range_conditioning;
   if constexpr (mode == CfrTraversalMode::kNormal) {
     range_conditioning.emplace(
-        *this, ctx, *node_cursor, public_state_id, player, legal_action_ids);
+        *this, ctx, *node_cursor, decision.public_state_id, player,
+        legal_action_ids);
   }
 
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
@@ -1888,7 +1901,7 @@ double CFRSolver::cfr_traversal(
   }
 
   ++cfr_update_count_;
-  record_cfr_update(street, ctx.depth());
+  record_cfr_update(decision.street, ctx.depth());
 
   if (action_block.has_value() && is_update_player) {
     const double opponent_reach_prob = ctx.opponent_reach(player);

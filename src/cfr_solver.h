@@ -284,6 +284,19 @@ class CFRSolver {
     }
   };
 
+  struct DecisionFrame {
+    uint32_t public_state_id = GameTree::kInvalidPublicStateId;
+    int player = -1;
+    StreetKind street = StreetKind::kPreflop;
+    uint8_t action_count = 0;
+    std::array<int, GameTree::kMaxActionsPerNode> action_ids = {};
+
+    absl::Span<const int> action_ids_span() const {
+      return absl::Span<const int>(
+          action_ids.data(), static_cast<size_t>(action_count));
+    }
+  };
+
   class TraversalContext {
    public:
     TraversalContext(TraversalDeal deal,
@@ -488,6 +501,9 @@ class CFRSolver {
                               const ExactBoardState& board);
   std::optional<NodeCursor> cursor(NodeRef node) const;
   std::optional<NodeRef> root_node_ref(uint32_t root_public_state_id) const;
+  static DecisionFrame make_decision_frame(
+      NodeRef node,
+      const PublicStateRow& row);
   NodeGraphMode default_node_graph_mode() const;
   double cfr_with_ranges(
       NodeRef node,
