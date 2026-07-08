@@ -1,5 +1,6 @@
 #include "src/cfr_solver_proto_adapter.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace poker {
@@ -151,6 +152,34 @@ GameState GameStateFromProto(const BoardState& state) {
   }
   for (const Action& action : state.history().actions()) {
     native.history.push_back(GameActionFromProto(action));
+  }
+  return native;
+}
+
+CompactPublicState CompactPublicStateFromProto(const BoardState& state) {
+  CompactPublicState native;
+  native.stack[0] = state.stack_a();
+  native.stack[1] = state.stack_b();
+  native.pot = state.pot();
+  native.street = ToStreetKind(state.street());
+  native.all_in = state.all_in();
+  native.folded_player = state.folded_player();
+  native.player_to_act = state.player_to_act();
+  native.player_contribution[0] =
+      state.player_contribution_size() > 0
+          ? static_cast<int>(std::lround(state.player_contribution(0)))
+          : 0;
+  native.player_contribution[1] =
+      state.player_contribution_size() > 1
+          ? static_cast<int>(std::lround(state.player_contribution(1)))
+          : 0;
+  native.player_contribution_count =
+      std::min(state.player_contribution_size(), kPlayerCount);
+  for (const Card& card : state.cards()) {
+    AddBoardCard(native, CardIdFromProto(card));
+  }
+  for (const Action& action : state.history().actions()) {
+    AppendHistoryAction(native, GameActionFromProto(action));
   }
   return native;
 }

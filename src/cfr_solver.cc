@@ -76,12 +76,12 @@ int WorkerCountForSamples(int samples) {
   return std::min(worker_count, samples);
 }
 
-GameState DefaultInitialState(const SolverConfig& config) {
+CompactPublicState DefaultInitialState(const SolverConfig& config) {
   const int small_blind = config.small_blind > 0 ? config.small_blind : 1;
   const int big_blind = config.big_blind > 0 ? config.big_blind : 2;
   const int starting_stack = config.starting_stack_size;
 
-  GameState initial_state;
+  CompactPublicState initial_state;
   initial_state.stack[0] = std::max(0, starting_stack - small_blind);
   initial_state.stack[1] = std::max(0, starting_stack - big_blind);
   initial_state.pot = small_blind + big_blind;
@@ -103,7 +103,14 @@ CFRSolver::CFRSolver(const SolverConfig& config)
 
 CFRSolver::CFRSolver(const SolverConfig& config,
                      const GameState& initial_state)
-    : CFRSolver(config, std::make_shared<TerminalUtilityCache>(), initial_state) {
+    : CFRSolver(config, std::make_shared<TerminalUtilityCache>(),
+                CompactPublicStateFromGameState(initial_state)) {
+}
+
+CFRSolver::CFRSolver(const SolverConfig& config,
+                     const CompactPublicState& initial_state)
+    : CFRSolver(config, std::make_shared<TerminalUtilityCache>(),
+                initial_state) {
 }
 
 CFRSolver::CFRSolver(const SolverConfig& config,
@@ -114,9 +121,9 @@ CFRSolver::CFRSolver(const SolverConfig& config,
 CFRSolver::CFRSolver(
     const SolverConfig& config,
     std::shared_ptr<TerminalUtilityCache> utility_cache,
-    GameState initial_state)
+    CompactPublicState initial_state)
   : config_(config),
-    initial_state_(CompactPublicStateFromGameState(initial_state)),
+    initial_state_(initial_state),
     game_tree_(std::make_shared<GameTree>(config)),
     rng_(12345),
     cumulative_root_utility_(0.0),

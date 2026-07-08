@@ -39,6 +39,8 @@ class CFRSolver {
 
   CFRSolver(const SolverConfig& config);
   CFRSolver(const SolverConfig& config, const GameState& initial_state);
+  CFRSolver(const SolverConfig& config,
+            const CompactPublicState& initial_state);
 
   void run(int iterations, const HandRange& player_a_range,
            const HandRange& player_b_range);
@@ -450,7 +452,7 @@ class CFRSolver {
             std::shared_ptr<TerminalUtilityCache> utility_cache);
   CFRSolver(const SolverConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache,
-            GameState initial_state);
+            CompactPublicState initial_state);
 
   bool should_use_prebuilt_training(
       int num_threads,
