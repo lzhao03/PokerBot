@@ -148,6 +148,53 @@ class CFRSolver {
     ComboId combo = 0;
   };
 
+  struct TraversalDeal {
+    std::array<PrivateCards, kPlayerCount> cards;
+
+    const PrivateCards& player_cards(int player) const {
+      return cards[static_cast<size_t>(player)];
+    }
+
+    CardMask known_private_cards() const {
+      return cards[0].mask() | cards[1].mask();
+    }
+  };
+
+  struct ReachState {
+    std::array<double, kPlayerCount> probability = {1.0, 1.0};
+
+    double self(int player) const {
+      return probability[static_cast<size_t>(player)];
+    }
+
+    double opponent(int player) const {
+      return probability[static_cast<size_t>(1 - player)];
+    }
+  };
+
+  struct TraversalOptions {
+    int update_player = 0;
+    int iteration = 0;
+    int max_depth = 0;
+    RegretLoadMode regret_load_mode = RegretLoadMode::kAtomic;
+    RegretUpdateMode regret_update_mode = RegretUpdateMode::kAtomic;
+    bool write_average_strategy = true;
+    bool record_atomic_retry_stats = false;
+    bool use_terminal_cache = true;
+  };
+
+  struct EvaluationContext {
+    TraversalDeal deal;
+
+    const PrivateCards& cards(int player) const {
+      return deal.player_cards(player);
+    }
+
+    CardMask known_private_cards() const {
+      return deal.known_private_cards();
+    }
+  };
+
   struct ExactBoardState {
     std::array<CardId, kMaxBoardCards> cards = {};
     uint8_t count = 0;
@@ -222,6 +269,141 @@ class CFRSolver {
     std::vector<RangeScratchFrame> frames;
   };
 
+  class TraversalContext {
+   public:
+    TraversalContext(TraversalDeal deal,
+                     TraversalOptions options,
+                     TraversalScratch& scratch,
+                     OptionalTrainingRange player_a_range = {},
+                     OptionalTrainingRange player_b_range = {})
+        : deal_(deal), options_(options), scratch_(&scratch) {
+      ranges_[0] = player_a_range;
+      ranges_[1] = player_b_range;
+    }
+
+    const TraversalDeal& deal() const { return deal_; }
+    const TraversalOptions& options() const { return options_; }
+
+    const PrivateCards& cards(int player) const {
+      return deal_.player_cards(player);
+    }
+
+    CardMask known_private_cards() const {
+      return deal_.known_private_cards();
+    }
+
+    double reach(int player) const {
+      return reach_.self(player);
+    }
+
+    double opponent_reach(int player) const {
+      return reach_.opponent(player);
+    }
+
+    bool is_update_player(int player) const {
+      return player == options_.update_player;
+    }
+
+    int iteration() const { return options_.iteration; }
+    int depth() const { return depth_; }
+    int max_depth() const { return options_.max_depth; }
+
+    bool depth_limited() const {
+      return options_.max_depth > 0 && depth_ >= options_.max_depth;
+    }
+
+    bool use_terminal_cache() const { return options_.use_terminal_cache; }
+
+    RangeScratchFrame& scratch_frame() {
+      return scratch_->frame(static_cast<size_t>(depth_));
+    }
+
+    OptionalTrainingRange range(int player) const {
+      return ranges_[static_cast<size_t>(player)];
+    }
+
+    double average_strategy_weight(int player) const {
+      return reach(player) * static_cast<double>(options_.iteration + 1);
+    }
+
+    RegretUpdateOptions regret_update_options() const {
+      return RegretUpdateOptions{options_.regret_update_mode,
+                                 options_.record_atomic_retry_stats};
+    }
+
+    class ReachScope {
+     public:
+      ReachScope(TraversalContext& ctx, int player, double probability)
+          : ctx_(ctx), player_(player) {
+        previous_ = ctx_.reach_.probability[static_cast<size_t>(player_)];
+        ctx_.reach_.probability[static_cast<size_t>(player_)] =
+            previous_ * probability;
+      }
+      ReachScope(const ReachScope&) = delete;
+      ReachScope& operator=(const ReachScope&) = delete;
+      ~ReachScope() {
+        ctx_.reach_.probability[static_cast<size_t>(player_)] = previous_;
+      }
+
+     private:
+      TraversalContext& ctx_;
+      int player_;
+      double previous_;
+    };
+
+    class DepthScope {
+     public:
+      explicit DepthScope(TraversalContext& ctx) : ctx_(ctx) {
+        ++ctx_.depth_;
+      }
+      DepthScope(const DepthScope&) = delete;
+      DepthScope& operator=(const DepthScope&) = delete;
+      ~DepthScope() { --ctx_.depth_; }
+
+     private:
+      TraversalContext& ctx_;
+    };
+
+    class RangeScope {
+     public:
+      RangeScope(TraversalContext& ctx,
+                 OptionalTrainingRange p0,
+                 OptionalTrainingRange p1)
+          : ctx_(ctx), previous_(ctx.ranges_) {
+        ctx_.ranges_[0] = p0;
+        ctx_.ranges_[1] = p1;
+      }
+      RangeScope(const RangeScope&) = delete;
+      RangeScope& operator=(const RangeScope&) = delete;
+      ~RangeScope() { ctx_.ranges_ = previous_; }
+
+     private:
+      TraversalContext& ctx_;
+      std::array<OptionalTrainingRange, kPlayerCount> previous_;
+    };
+
+    ReachScope enter_action(int player, double probability) {
+      return ReachScope(*this, player, probability);
+    }
+
+    DepthScope descend() {
+      return DepthScope(*this);
+    }
+
+    RangeScope set_ranges(OptionalTrainingRange p0,
+                          OptionalTrainingRange p1) {
+      return RangeScope(*this, p0, p1);
+    }
+
+   private:
+    TraversalDeal deal_;
+    TraversalOptions options_;
+    TraversalScratch* scratch_ = nullptr;
+    ReachState reach_;
+    std::array<OptionalTrainingRange, kPlayerCount> ranges_;
+    int depth_ = 0;
+  };
+
   CFRSolver(const SolverConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache);
   CFRSolver(const SolverConfig& config,
@@ -271,46 +453,18 @@ class CFRSolver {
   ChildResolverMode default_child_resolver_mode() const;
   double cfr_with_ranges(
       NodeRef node,
-      const PrivateCards& player_a_cards,
-      const PrivateCards& player_b_cards,
-      std::array<double, 2>& reach_probabilities,
-      int update_player,
-      int iteration,
-      int depth,
-      int max_depth,
-      TraversalScratch& scratch,
-      OptionalTrainingRange player_a_range,
-      OptionalTrainingRange player_b_range,
+      TraversalContext& ctx,
       ChildResolver& children);
   double cfr_frozen_regret_only(
       NodeRef node,
-      const PrivateCards& player_a_cards,
-      const PrivateCards& player_b_cards,
-      std::array<double, 2>& reach_probabilities,
-      int update_player,
-      int depth,
-      bool use_atomic_updates);
+      TraversalContext& ctx);
   double chance_sampling_cfr(
       NodeRef node,
-      const PrivateCards& player_a_cards,
-      const PrivateCards& player_b_cards,
-      std::array<double, 2>& reach_probabilities,
-      int update_player,
-      int iteration,
-      int depth,
-      int max_depth,
-      TraversalScratch& scratch,
-      OptionalTrainingRange player_a_range,
-      OptionalTrainingRange player_b_range,
+      TraversalContext& ctx,
       ChildResolver& children);
   double chance_sampling_frozen_regret_only(
       NodeRef node,
-      const PrivateCards& player_a_cards,
-      const PrivateCards& player_b_cards,
-      std::array<double, 2>& reach_probabilities,
-      int update_player,
-      int depth,
-      bool use_atomic_updates);
+      TraversalContext& ctx);
 
   BettingHistoryKey make_betting_history_key(
       const CompactPublicState& state) const;
@@ -440,8 +594,7 @@ class CFRSolver {
                           const PrivateCards& player_a_cards,
                           const PrivateCards& player_b_cards);
   double evaluate_strategy_node(NodeRef node,
-                                const PrivateCards& player_a_cards,
-                                const PrivateCards& player_b_cards,
+                                EvaluationContext& ctx,
                                 ChildResolver& children);
   double evaluate_strategy_samples(
       int samples,

@@ -1876,23 +1876,27 @@ int CFRSolver::run_warmup_phase(
 
   for (int i = 0; i < warmup_count; ++i) {
     const RangeDeal deal = range_sampler.sample(rng_);
-    PrivateCards player_a_cards = PrivateCards::FromCombo(deal.player_a_combo);
-    PrivateCards player_b_cards = PrivateCards::FromCombo(deal.player_b_combo);
+    const TraversalDeal traversal_deal{{
+        PrivateCards::FromCombo(deal.player_a_combo),
+        PrivateCards::FromCombo(deal.player_b_combo),
+    }};
 
     VLOG(2) << "Iteration " << i + 1 << "/" << iterations;
     int cfr_iteration = iterations_run_;
-    const int update_player = cfr_iteration % kPlayerCount;
-    std::array<double, 2> reach_probabilities = {1.0, 1.0};
     OptionalTrainingRange player_a_context_range;
     OptionalTrainingRange player_b_context_range;
     if (max_depth > 0) {
       player_a_context_range = std::cref(player_a_hands_view);
       player_b_context_range = std::cref(player_b_hands_view);
     }
-    double dealt_value = cfr_with_ranges(
-        root_node, player_a_cards, player_b_cards, reach_probabilities,
-        update_player, cfr_iteration, 0, max_depth, scratch,
-        player_a_context_range, player_b_context_range, children);
+    TraversalOptions options;
+    options.update_player = cfr_iteration % kPlayerCount;
+    options.iteration = cfr_iteration;
+    options.max_depth = max_depth;
+    options.write_average_strategy = !config_.regret_only_training;
+    TraversalContext ctx(traversal_deal, options, scratch,
+                         player_a_context_range, player_b_context_range);
+    double dealt_value = cfr_with_ranges(root_node, ctx, children);
 
     cumulative_root_utility_ += dealt_value;
     ++iterations_run_;
@@ -2044,33 +2048,42 @@ void CFRSolver::run_frozen_iterations(
                                   ExactBoardFromState(root_state)};
           for (int i = 0; i < shard; ++i) {
             const RangeDeal deal = range_sampler.sample(worker.rng_);
-            PrivateCards player_a_cards =
-                PrivateCards::FromCombo(deal.player_a_combo);
-            PrivateCards player_b_cards =
-                PrivateCards::FromCombo(deal.player_b_combo);
+            const TraversalDeal traversal_deal{{
+                PrivateCards::FromCombo(deal.player_a_combo),
+                PrivateCards::FromCombo(deal.player_b_combo),
+            }};
 
             const int cfr_iteration = iteration_begin + i;
-            const int update_player = cfr_iteration % kPlayerCount;
-            std::array<double, 2> reach_probabilities = {1.0, 1.0};
-            if (use_frozen_regret_only) {
-              local_utility += worker.cfr_frozen_regret_only(
-                  root_node, player_a_cards, player_b_cards,
-                  reach_probabilities, update_player, 0,
-                  use_atomic_updates);
-              continue;
-            }
-
             OptionalTrainingRange player_a_context_range;
             OptionalTrainingRange player_b_context_range;
             if (max_depth > 0) {
               player_a_context_range = std::cref(player_a_hands_view);
               player_b_context_range = std::cref(player_b_hands_view);
             }
-            local_utility += worker.cfr_with_ranges(
-                root_node, player_a_cards, player_b_cards,
-                reach_probabilities, update_player, cfr_iteration, 0,
-                max_depth, scratch, player_a_context_range,
-                player_b_context_range, children);
+            TraversalOptions options;
+            options.update_player = cfr_iteration % kPlayerCount;
+            options.iteration = cfr_iteration;
+            options.max_depth = max_depth;
+            options.write_average_strategy = !config_.regret_only_training;
+            if (use_frozen_regret_only) {
+              options.regret_load_mode =
+                  use_atomic_updates ? RegretLoadMode::kAtomic
+                                     : RegretLoadMode::kPlain;
+              options.regret_update_mode =
+                  use_atomic_updates ? RegretUpdateMode::kAtomic
+                                     : RegretUpdateMode::kPlain;
+              options.write_average_strategy = false;
+              options.record_atomic_retry_stats = use_atomic_updates;
+            }
+            TraversalContext ctx(traversal_deal, options, scratch,
+                                 player_a_context_range,
+                                 player_b_context_range);
+            if (use_frozen_regret_only) {
+              local_utility += worker.cfr_frozen_regret_only(root_node, ctx);
+              continue;
+            }
+
+            local_utility += worker.cfr_with_ranges(root_node, ctx, children);
           }
           return WorkerResult{local_utility, worker.get_traversal_stats(),
                               worker.get_cfr_update_count(), shard};
@@ -2091,16 +2104,7 @@ void CFRSolver::run_frozen_iterations(
 
 double CFRSolver::cfr_with_ranges(
     NodeRef node,
-    const PrivateCards& player_a_cards,
-    const PrivateCards& player_b_cards,
-    std::array<double, 2>& reach_probabilities,
-    int update_player,
-    int iteration,
-    int depth,
-    int max_depth,
-    TraversalScratch& scratch,
-    OptionalTrainingRange player_a_range,
-    OptionalTrainingRange player_b_range,
+    TraversalContext& ctx,
     ChildResolver& children) {
   const std::optional<NodeView> node_view = view(node);
   if (!node_view.has_value()) {
@@ -2112,24 +2116,19 @@ double CFRSolver::cfr_with_ranges(
 
   if (row.is_terminal) {
     record_terminal_utility(state.folded_player < 0);
-    if (max_depth > 0) {
-      return uncached_utility(state, player_a_cards, player_b_cards);
+    if (!ctx.use_terminal_cache() || ctx.max_depth() > 0) {
+      return uncached_utility(state, ctx.cards(0), ctx.cards(1));
     }
-    return utility(state, player_a_cards, player_b_cards);
+    return utility(state, ctx.cards(0), ctx.cards(1));
   }
 
   if (row.is_chance_node) {
-    return chance_sampling_cfr(node, player_a_cards, player_b_cards,
-                               reach_probabilities, update_player, iteration,
-                               depth, max_depth, scratch, player_a_range,
-                               player_b_range, children);
+    return chance_sampling_cfr(node, ctx, children);
   }
 
-  if (max_depth > 0 && depth >= max_depth) {
-    (void)player_a_range;
-    (void)player_b_range;
+  if (ctx.depth_limited()) {
     return game_tree_->is_betting_round_over(state)
-               ? uncached_utility(state, player_a_cards, player_b_cards)
+               ? uncached_utility(state, ctx.cards(0), ctx.cards(1))
                : 0.0;
   }
 
@@ -2138,13 +2137,12 @@ double CFRSolver::cfr_with_ranges(
     return 0.0;
   }
   const StreetKind street = row.state.street;
-  const PrivateCards& player_cards =
-      player == 0 ? player_a_cards : player_b_cards;
+  const PrivateCards& player_cards = ctx.cards(player);
 
   const InfoSetAddress info_set_address{
       public_state_id, player,
       card_abstraction_.private_bucket(player_cards.combo, row.state)};
-  const bool is_update_player = player == update_player;
+  const bool is_update_player = ctx.is_update_player(player);
   const size_t action_count = row.action_count;
   const absl::Span<const int> legal_action_ids(row.action_ids.data(),
                                                action_count);
@@ -2159,25 +2157,30 @@ double CFRSolver::cfr_with_ranges(
     action_values[action_index] = 0.0;
   }
   fill_regret_matching(
-      info_set, action_count, RegretLoadMode::kAtomic,
+      info_set, action_count, ctx.options().regret_load_mode,
       absl::Span<double>(action_probabilities, action_count));
 
   double node_value = 0.0;
-  RangeScratchFrame& scratch_frame = scratch.frame(depth);
-  std::vector<TrainingRangeView>& conditioned_player_ranges =
-      scratch_frame.conditioned_ranges;
+  const OptionalTrainingRange player_a_range = ctx.range(0);
+  const OptionalTrainingRange player_b_range = ctx.range(1);
   const bool condition_player_a_range =
       player == 0 && player_a_range.has_value();
   const bool condition_player_b_range =
       player == 1 && player_b_range.has_value();
+  const bool ranges_changed =
+      condition_player_a_range || condition_player_b_range;
+  std::vector<TrainingRangeView>* conditioned_player_ranges = nullptr;
+  if (ranges_changed) {
+    conditioned_player_ranges = &ctx.scratch_frame().conditioned_ranges;
+  }
   if (condition_player_a_range) {
     condition_ranges_for_actions(player_a_range->get(), state,
                                  public_state_id, player, legal_action_ids,
-                                 conditioned_player_ranges);
+                                 *conditioned_player_ranges);
   } else if (condition_player_b_range) {
     condition_ranges_for_actions(player_b_range->get(), state,
                                  public_state_id, player, legal_action_ids,
-                                 conditioned_player_ranges);
+                                 *conditioned_player_ranges);
   }
 
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
@@ -2187,34 +2190,40 @@ double CFRSolver::cfr_with_ranges(
       continue;
     }
 
-    const double previous_reach_probability = reach_probabilities[player];
-    reach_probabilities[player] =
-        previous_reach_probability * action_probabilities[action_index];
-
     OptionalTrainingRange child_player_a_range = player_a_range;
     OptionalTrainingRange child_player_b_range = player_b_range;
     if (condition_player_a_range) {
-      child_player_a_range = std::cref(conditioned_player_ranges[action_index]);
+      child_player_a_range =
+          std::cref((*conditioned_player_ranges)[action_index]);
     } else if (condition_player_b_range) {
-      child_player_b_range = std::cref(conditioned_player_ranges[action_index]);
+      child_player_b_range =
+          std::cref((*conditioned_player_ranges)[action_index]);
     }
 
-    const double action_value = cfr_with_ranges(
-        *child, player_a_cards, player_b_cards, reach_probabilities,
-        update_player, iteration, depth + 1, max_depth, scratch,
-        child_player_a_range, child_player_b_range, children);
+    double action_value = 0.0;
+    {
+      auto reach_scope =
+          ctx.enter_action(player, action_probabilities[action_index]);
+      auto depth_scope = ctx.descend();
+      if (ranges_changed) {
+        auto range_scope =
+            ctx.set_ranges(child_player_a_range, child_player_b_range);
+        action_value = cfr_with_ranges(*child, ctx, children);
+      } else {
+        action_value = cfr_with_ranges(*child, ctx, children);
+      }
+    }
     action_values[action_index] = action_value;
-    reach_probabilities[player] = previous_reach_probability;
     node_value += action_probabilities[action_index] * action_value;
   }
 
   ++cfr_update_count_;
-  record_cfr_update(street, depth);
+  record_cfr_update(street, ctx.depth());
 
   if (info_set.has_value() && is_update_player) {
-    const double opponent_reach_prob = reach_probabilities[1 - player];
-    const RegretUpdateOptions regret_update_options{
-        RegretUpdateMode::kAtomic, false};
+    const double opponent_reach_prob = ctx.opponent_reach(player);
+    const RegretUpdateOptions regret_update_options =
+        ctx.regret_update_options();
     for (size_t action_index = 0; action_index < action_count; ++action_index) {
       const double utility_sign = player == 0 ? 1.0 : -1.0;
       const double regret =
@@ -2226,12 +2235,12 @@ double CFRSolver::cfr_with_ranges(
                           regret_update_options);
     }
 
-    if (!config_.regret_only_training) {
+    if (ctx.options().write_average_strategy) {
       add_average_strategy(
           *info_set, absl::Span<const double>(action_probabilities,
                                               action_count),
-          reach_probabilities[player] * (iteration + 1),
-          RegretUpdateMode::kAtomic);
+          ctx.average_strategy_weight(player),
+          ctx.options().regret_update_mode);
     }
   }
 
@@ -2284,16 +2293,7 @@ CFRSolver::NodeRef CFRSolver::sample_frozen_chance_transition(
 
 double CFRSolver::chance_sampling_cfr(
     NodeRef node,
-    const PrivateCards& player_a_cards,
-    const PrivateCards& player_b_cards,
-    std::array<double, 2>& reach_probabilities,
-    int update_player,
-    int iteration,
-    int depth,
-    int max_depth,
-    TraversalScratch& scratch,
-    OptionalTrainingRange player_a_range,
-    OptionalTrainingRange player_b_range,
+    TraversalContext& ctx,
     ChildResolver& children) {
   const auto& rows = frozen_tables_->public_state_rows;
   if (node.public_state_id >= rows.size()) {
@@ -2302,16 +2302,17 @@ double CFRSolver::chance_sampling_cfr(
 
   const int samples = ChanceSamples(config_);
   record_chance_samples(samples);
-  RangeScratchFrame& scratch_frame = scratch.frame(depth);
-  TrainingRangeView& public_player_a_range =
-      scratch_frame.public_player_a_range;
-  TrainingRangeView& public_player_b_range =
-      scratch_frame.public_player_b_range;
+  TrainingRangeView* public_player_a_range = nullptr;
+  TrainingRangeView* public_player_b_range = nullptr;
+  if (ctx.range(0).has_value() || ctx.range(1).has_value()) {
+    RangeScratchFrame& scratch_frame = ctx.scratch_frame();
+    public_player_a_range = &scratch_frame.public_player_a_range;
+    public_player_b_range = &scratch_frame.public_player_b_range;
+  }
 
   double value = 0.0;
   int evaluated = 0;
-  const CardMask known_private_cards =
-      player_a_cards.mask() | player_b_cards.mask();
+  const CardMask known_private_cards = ctx.known_private_cards();
   for (int i = 0; i < samples; ++i) {
     std::optional<NodeRef> child =
         children.sample_chance_child(node, known_private_cards);
@@ -2319,23 +2320,26 @@ double CFRSolver::chance_sampling_cfr(
       continue;
     }
 
-    OptionalTrainingRange child_player_a_range = player_a_range;
-    OptionalTrainingRange child_player_b_range = player_b_range;
-    if (player_a_range.has_value()) {
+    OptionalTrainingRange child_player_a_range = ctx.range(0);
+    OptionalTrainingRange child_player_b_range = ctx.range(1);
+    if (child_player_a_range.has_value()) {
       child_player_a_range =
-          std::cref(player_a_range->get().without_mask(
-              child->exact_board.mask, public_player_a_range));
+          std::cref(child_player_a_range->get().without_mask(
+              child->exact_board.mask, *public_player_a_range));
     }
-    if (player_b_range.has_value()) {
+    if (child_player_b_range.has_value()) {
       child_player_b_range =
-          std::cref(player_b_range->get().without_mask(
-              child->exact_board.mask, public_player_b_range));
+          std::cref(child_player_b_range->get().without_mask(
+              child->exact_board.mask, *public_player_b_range));
     }
 
-    value += cfr_with_ranges(*child, player_a_cards, player_b_cards,
-                             reach_probabilities, update_player, iteration,
-                             depth, max_depth, scratch, child_player_a_range,
-                             child_player_b_range, children);
+    if (child_player_a_range.has_value() || child_player_b_range.has_value()) {
+      auto range_scope =
+          ctx.set_ranges(child_player_a_range, child_player_b_range);
+      value += cfr_with_ranges(*child, ctx, children);
+    } else {
+      value += cfr_with_ranges(*child, ctx, children);
+    }
     ++evaluated;
   }
 
@@ -2344,12 +2348,7 @@ double CFRSolver::chance_sampling_cfr(
 
 double CFRSolver::cfr_frozen_regret_only(
     NodeRef node,
-    const PrivateCards& player_a_cards,
-    const PrivateCards& player_b_cards,
-    std::array<double, 2>& reach_probabilities,
-    int update_player,
-    int depth,
-    bool use_atomic_updates) {
+    TraversalContext& ctx) {
   const auto& public_state_rows = frozen_tables_->public_state_rows;
   const uint32_t public_state_id = node.public_state_id;
   const ExactBoardState& exact_board = node.exact_board;
@@ -2360,13 +2359,11 @@ double CFRSolver::cfr_frozen_regret_only(
 
   if (row.is_terminal) {
     record_terminal_utility(row.state.folded_player < 0);
-    return frozen_utility(row, exact_board, player_a_cards, player_b_cards);
+    return frozen_utility(row, exact_board, ctx.cards(0), ctx.cards(1));
   }
 
   if (row.is_chance_node) {
-    return chance_sampling_frozen_regret_only(
-        node, player_a_cards, player_b_cards, reach_probabilities,
-        update_player, depth, use_atomic_updates);
+    return chance_sampling_frozen_regret_only(node, ctx);
   }
 
   const int player = row.player_to_act;
@@ -2374,8 +2371,7 @@ double CFRSolver::cfr_frozen_regret_only(
     return 0.0;
   }
   const StreetKind street = row.state.street;
-  const PrivateCards& player_cards =
-      player == 0 ? player_a_cards : player_b_cards;
+  const PrivateCards& player_cards = ctx.cards(player);
   const size_t action_count = row.action_count;
   std::optional<InfoSetHandle> info_set =
       find_frozen_info_set_handle(public_state_id, player, player_cards.combo,
@@ -2387,8 +2383,7 @@ double CFRSolver::cfr_frozen_regret_only(
     action_values[action_index] = 0.0;
   }
   fill_regret_matching(
-      info_set, action_count,
-      use_atomic_updates ? RegretLoadMode::kAtomic : RegretLoadMode::kPlain,
+      info_set, action_count, ctx.options().regret_load_mode,
       absl::Span<double>(action_probabilities, action_count));
 
   double node_value = 0.0;
@@ -2397,27 +2392,24 @@ double CFRSolver::cfr_frozen_regret_only(
         row.action_child_ids[action_index];
     const NodeRef child{child_public_state_id, exact_board};
 
-    const double previous_reach_probability = reach_probabilities[player];
-    reach_probabilities[player] =
-        previous_reach_probability * action_probabilities[action_index];
-
-    const double action_value = cfr_frozen_regret_only(
-        child, player_a_cards, player_b_cards, reach_probabilities,
-        update_player, depth + 1, use_atomic_updates);
+    double action_value = 0.0;
+    {
+      auto reach_scope =
+          ctx.enter_action(player, action_probabilities[action_index]);
+      auto depth_scope = ctx.descend();
+      action_value = cfr_frozen_regret_only(child, ctx);
+    }
     action_values[action_index] = action_value;
-    reach_probabilities[player] = previous_reach_probability;
     node_value += action_probabilities[action_index] * action_value;
   }
 
   ++cfr_update_count_;
-  record_cfr_update(street, depth);
+  record_cfr_update(street, ctx.depth());
 
-  if (info_set.has_value() && player == update_player) {
-    const double opponent_reach_prob = reach_probabilities[1 - player];
-    const RegretUpdateOptions regret_update_options{
-        use_atomic_updates ? RegretUpdateMode::kAtomic
-                           : RegretUpdateMode::kPlain,
-        use_atomic_updates};
+  if (info_set.has_value() && ctx.is_update_player(player)) {
+    const double opponent_reach_prob = ctx.opponent_reach(player);
+    const RegretUpdateOptions regret_update_options =
+        ctx.regret_update_options();
     for (size_t action_index = 0; action_index < action_count; ++action_index) {
       const double utility_sign = player == 0 ? 1.0 : -1.0;
       const double regret =
@@ -2435,26 +2427,18 @@ double CFRSolver::cfr_frozen_regret_only(
 
 double CFRSolver::chance_sampling_frozen_regret_only(
     NodeRef node,
-    const PrivateCards& player_a_cards,
-    const PrivateCards& player_b_cards,
-    std::array<double, 2>& reach_probabilities,
-    int update_player,
-    int depth,
-    bool use_atomic_updates) {
+    TraversalContext& ctx) {
   const PublicStateRow& row =
       frozen_tables_->public_state_rows[node.public_state_id];
   const int samples = ChanceSamples(config_);
   record_chance_samples(samples);
 
   double value = 0.0;
-  const CardMask known_private_cards =
-      player_a_cards.mask() | player_b_cards.mask();
+  const CardMask known_private_cards = ctx.known_private_cards();
   for (int i = 0; i < samples; ++i) {
     const NodeRef child =
         sample_frozen_chance_transition(node, row, known_private_cards);
-    value += cfr_frozen_regret_only(
-        child, player_a_cards, player_b_cards, reach_probabilities,
-        update_player, depth, use_atomic_updates);
+    value += cfr_frozen_regret_only(child, ctx);
   }
 
   return samples > 0 ? value / samples : 0.0;
@@ -2676,10 +2660,11 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
   const NodeRef root_node{*root_public_state_id,
                           ExactBoardFromState(root_state)};
   ChildResolver children(*this, default_child_resolver_mode());
-  return evaluate_strategy_node(
-      root_node, PrivateCards::FromCombo(player_a_hand),
+  EvaluationContext ctx{TraversalDeal{{
+      PrivateCards::FromCombo(player_a_hand),
       PrivateCards::FromCombo(player_b_hand),
-      children);
+  }}};
+  return evaluate_strategy_node(root_node, ctx, children);
 }
 
 double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range,
@@ -2772,19 +2757,18 @@ double CFRSolver::evaluate_strategy_samples(
   ChildResolver children(*this, default_child_resolver_mode());
   for (int i = 0; i < samples; ++i) {
     const RangeDeal deal = range_sampler.sample(rng_);
-    total += evaluate_strategy_node(
-        *root_node,
+    EvaluationContext ctx{TraversalDeal{{
         PrivateCards::FromCombo(deal.player_a_combo),
         PrivateCards::FromCombo(deal.player_b_combo),
-        children);
+    }}};
+    total += evaluate_strategy_node(*root_node, ctx, children);
   }
   return total / samples;
 }
 
 double CFRSolver::evaluate_strategy_node(
     NodeRef node,
-    const PrivateCards& player_a_cards,
-    const PrivateCards& player_b_cards,
+    EvaluationContext& ctx,
     ChildResolver& children) {
   const std::optional<NodeView> node_view = view(node);
   if (!node_view.has_value()) {
@@ -2795,22 +2779,20 @@ double CFRSolver::evaluate_strategy_node(
   const CompactPublicState state = node_view->exact_state();
 
   if (row.is_terminal) {
-    return utility(state, player_a_cards, player_b_cards);
+    return utility(state, ctx.cards(0), ctx.cards(1));
   }
   if (row.is_chance_node) {
     const int samples = ChanceSamples(config_);
     double value = 0.0;
     int evaluated = 0;
-    const CardMask known_private_cards =
-        player_a_cards.mask() | player_b_cards.mask();
+    const CardMask known_private_cards = ctx.known_private_cards();
     for (int i = 0; i < samples; ++i) {
       std::optional<NodeRef> child =
           children.sample_chance_child(node, known_private_cards);
       if (!child.has_value()) {
         continue;
       }
-      value += evaluate_strategy_node(*child, player_a_cards, player_b_cards,
-                                      children);
+      value += evaluate_strategy_node(*child, ctx, children);
       ++evaluated;
     }
     return evaluated > 0 ? value / evaluated : 0.0;
@@ -2824,8 +2806,7 @@ double CFRSolver::evaluate_strategy_node(
     return 0.0;
   }
 
-  const PrivateCards& player_cards =
-      player == 0 ? player_a_cards : player_b_cards;
+  const PrivateCards& player_cards = ctx.cards(player);
   StrategyProbabilities probabilities;
   average_strategy_probabilities(
       public_state_id, row, player, player_cards, probabilities);
@@ -2839,8 +2820,7 @@ double CFRSolver::evaluate_strategy_node(
       continue;
     }
     value += probabilities[action_index] *
-             evaluate_strategy_node(*child, player_a_cards, player_b_cards,
-                                    children);
+             evaluate_strategy_node(*child, ctx, children);
   }
   return value;
 }
