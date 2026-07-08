@@ -473,9 +473,6 @@ class CFRSolver {
   std::optional<uint32_t> chance_child_public_state(
       uint32_t public_state_id,
       const CompactPublicState& child_state) const;
-  std::optional<uint32_t> chance_child_public_state(
-      uint32_t public_state_id,
-      absl::Span<const CardId> cards) const;
   bool for_each_required_chance_transition(
       const PublicStateRow& row,
       const std::function<bool(const CompactPublicState&,
@@ -488,9 +485,6 @@ class CFRSolver {
   std::optional<uint32_t> get_or_create_chance_child_public_state(
       uint32_t public_state_id,
       const CompactPublicState& child_state);
-  std::optional<uint32_t> get_or_create_chance_child_public_state(
-      uint32_t public_state_id,
-      absl::Span<const CardId> cards);
   bool prebuild_public_state_rows(uint32_t root_public_state_id,
                                   int max_depth);
   void rebuild_chance_child_entries();

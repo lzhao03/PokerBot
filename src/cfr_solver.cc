@@ -564,18 +564,6 @@ std::optional<uint32_t> CFRSolver::chance_child_public_state(
   return entries[low].public_state_id;
 }
 
-std::optional<uint32_t> CFRSolver::chance_child_public_state(
-    uint32_t public_state_id,
-    absl::Span<const CardId> cards) const {
-  const auto& rows = storage_.frozen_ref().public_state_rows;
-  if (public_state_id >= rows.size()) {
-    return std::nullopt;
-  }
-  return chance_child_public_state(
-      public_state_id, game_tree_->apply_chance(rows[public_state_id].state,
-                                                cards));
-}
-
 bool CFRSolver::for_each_required_chance_transition(
     const PublicStateRow& row,
     const std::function<bool(const CompactPublicState&,
@@ -774,18 +762,6 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
   record_betting_history_transition_miss();
   record_child_node_created();
   return child_id;
-}
-
-std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
-    uint32_t public_state_id,
-    absl::Span<const CardId> cards) {
-  const auto& rows = storage_.frozen_ref().public_state_rows;
-  if (public_state_id >= rows.size()) {
-    return std::nullopt;
-  }
-  return get_or_create_chance_child_public_state(
-      public_state_id, game_tree_->apply_chance(rows[public_state_id].state,
-                                                cards));
 }
 
 CFRSolver::ExactBoardState CFRSolver::ExactBoardFromState(
