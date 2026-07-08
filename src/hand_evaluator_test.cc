@@ -76,6 +76,46 @@ void CheckFiveCardEvaluation() {
          "five-card royal flush should rank as royal flush");
 }
 
+void CheckWheelStraightIsFiveHigh() {
+  HandEvaluator evaluator;
+  const std::array<CardId, 5> wheel = {
+      TestCard(14, SuitKind::kHearts),
+      TestCard(5, SuitKind::kDiamonds),
+      TestCard(4, SuitKind::kClubs),
+      TestCard(3, SuitKind::kSpades),
+      TestCard(2, SuitKind::kHearts),
+  };
+  const std::array<CardId, 5> six_high = {
+      TestCard(6, SuitKind::kHearts),
+      TestCard(5, SuitKind::kDiamonds),
+      TestCard(4, SuitKind::kClubs),
+      TestCard(3, SuitKind::kSpades),
+      TestCard(2, SuitKind::kHearts),
+  };
+
+  HandEvaluation wheel_eval = evaluator.evaluate(wheel);
+  Expect(wheel_eval.rank == HandRank::STRAIGHT,
+         "wheel should rank as straight");
+  Expect(wheel_eval.kicker_count == 1 && wheel_eval.kickers[0] == 5,
+         "wheel straight should be five-high");
+  Expect(evaluator.evaluate(six_high) > wheel_eval,
+         "six-high straight should beat wheel straight");
+
+  const std::array<CardId, 5> wheel_flush = {
+      TestCard(14, SuitKind::kHearts),
+      TestCard(5, SuitKind::kHearts),
+      TestCard(4, SuitKind::kHearts),
+      TestCard(3, SuitKind::kHearts),
+      TestCard(2, SuitKind::kHearts),
+  };
+  HandEvaluation wheel_flush_eval = evaluator.evaluate(wheel_flush);
+  Expect(wheel_flush_eval.rank == HandRank::STRAIGHT_FLUSH,
+         "suited wheel should rank as straight flush");
+  Expect(wheel_flush_eval.kicker_count == 1 &&
+             wheel_flush_eval.kickers[0] == 5,
+         "wheel straight flush should be five-high");
+}
+
 void CheckSevenCardBestHand() {
   ComboId hand = TestCombo(14, SuitKind::kHearts, 14, SuitKind::kSpades);
   GameState board;
@@ -92,6 +132,22 @@ void CheckSevenCardBestHand() {
   Expect(evaluation.kicker_count == 2, "full house should have two kickers");
   Expect(evaluation.kickers[0] == 14 && evaluation.kickers[1] == 13,
          "full house should be aces full of kings");
+}
+
+void CheckCactusWheelOrdering() {
+  HandEvaluator evaluator;
+  const GameState straight_board =
+      TestBoard({TestCard(14, SuitKind::kClubs),
+                 TestCard(5, SuitKind::kDiamonds),
+                 TestCard(4, SuitKind::kHearts),
+                 TestCard(3, SuitKind::kSpades),
+                 TestCard(9, SuitKind::kClubs)});
+  const ComboId wheel =
+      TestCombo(2, SuitKind::kHearts, 13, SuitKind::kClubs);
+  const ComboId six_high =
+      TestCombo(6, SuitKind::kHearts, 2, SuitKind::kClubs);
+  Expect(evaluator.compare_hands(six_high, wheel, straight_board) > 0,
+         "Cactus compare should score wheel lower than six-high straight");
 }
 
 void CheckCompactAndGameStateComparisonMatch() {
@@ -236,7 +292,9 @@ void CheckCactusCompareRandomParity() {
 
 int main() {
   poker::CheckFiveCardEvaluation();
+  poker::CheckWheelStraightIsFiveHigh();
   poker::CheckSevenCardBestHand();
+  poker::CheckCactusWheelOrdering();
   poker::CheckCompactAndGameStateComparisonMatch();
   poker::CheckCactusCompareRepresentativeParity();
   poker::CheckCactusCompareRandomParity();

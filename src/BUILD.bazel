@@ -48,6 +48,7 @@ cc_library(
     deps = [
         ":combo",
         ":poker_types",
+        "@abseil-cpp//absl/types:span",
     ],
     visibility = ["//visibility:public"],
 )

@@ -99,10 +99,40 @@ void CheckStringRangesAndViews() {
          "disjoint hands should have disjoint masks");
 }
 
+void CheckExplicitHandTypeParsing() {
+  poker::HandRange any_ace_king;
+  any_ace_king.set_from_string("AK");
+  Expect(any_ace_king.get_all_weighted_combos().size() == 16,
+         "unsuffixed non-pair should include suited and offsuit combos");
+  Expect(poker::HandRange::string_to_index("AK") == -1,
+         "unsuffixed non-pair should not map to a single hand-type index");
+
+  poker::HandRange suited_ace_king;
+  suited_ace_king.set_from_string("AKs");
+  Expect(suited_ace_king.get_all_weighted_combos().size() == 4,
+         "suited non-pair should include four combos");
+
+  poker::HandRange offsuit_ace_king;
+  offsuit_ace_king.set_from_string("AKo");
+  Expect(offsuit_ace_king.get_all_weighted_combos().size() == 12,
+         "offsuit non-pair should include twelve combos");
+
+  poker::HandRange aces;
+  aces.set_from_string("AA");
+  Expect(aces.get_all_weighted_combos().size() == 6,
+         "pair should include six combos");
+
+  poker::HandRange unsupported_plus;
+  unsupported_plus.set_from_string("89s+");
+  Expect(unsupported_plus.get_all_weighted_combos().empty(),
+         "unsupported suited-plus notation should not add hands");
+}
+
 }  // namespace
 
 int main() {
   CheckWeightedRangeInvariants();
   CheckStringRangesAndViews();
+  CheckExplicitHandTypeParsing();
   return 0;
 }

@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 
+#include "absl/types/span.h"
 #include "src/combo.h"
 #include "src/poker_types.h"
 
@@ -84,7 +85,7 @@ public:
   
 private:
   // Find the best 5-card hand from a set of cards
-  HandEvaluation find_best_hand(const CardId* cards, size_t card_count) const;
+  HandEvaluation find_best_hand(absl::Span<const CardId> cards) const;
 };
 
 } // namespace poker

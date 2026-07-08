@@ -1,13 +1,132 @@
 #include "src/hand_range.h"
 
 #include <algorithm>
-#include <cmath>
-#include <regex>
+#include <optional>
 #include <sstream>
+#include <string_view>
 
 namespace poker {
 
 namespace {
+
+constexpr int kHandTypeCount = 169;
+
+struct HandType {
+  enum class Shape {
+    kPair,
+    kSuited,
+    kOffsuit,
+    kAnyNonPair,
+  };
+
+  int high_rank = 0;
+  int low_rank = 0;
+  Shape shape = Shape::kPair;
+};
+
+std::optional<int> RankFromChar(char rank) {
+  switch (rank) {
+    case 'A':
+      return 14;
+    case 'K':
+      return 13;
+    case 'Q':
+      return 12;
+    case 'J':
+      return 11;
+    case 'T':
+      return 10;
+    case '9':
+    case '8':
+    case '7':
+    case '6':
+    case '5':
+    case '4':
+    case '3':
+    case '2':
+      return rank - '0';
+  }
+  return std::nullopt;
+}
+
+char RankToChar(int rank) {
+  switch (rank) {
+    case 14:
+      return 'A';
+    case 13:
+      return 'K';
+    case 12:
+      return 'Q';
+    case 11:
+      return 'J';
+    case 10:
+      return 'T';
+    case 9:
+    case 8:
+    case 7:
+    case 6:
+    case 5:
+    case 4:
+    case 3:
+    case 2:
+      return static_cast<char>('0' + rank);
+  }
+  return '?';
+}
+
+bool IsValidRank(int rank) {
+  return rank >= 2 && rank <= 14;
+}
+
+int NonPairOffset(int high_rank, int low_rank) {
+  const int high = high_rank - 2;
+  const int low = low_rank - 2;
+  return (high * (high - 1) / 2) + low;
+}
+
+std::optional<HandType> DecodeHandTypeIndex(int index) {
+  if (index < 0 || index >= kHandTypeCount) {
+    return std::nullopt;
+  }
+  if (index < 13) {
+    const int rank = index + 2;
+    return HandType{rank, rank, HandType::Shape::kPair};
+  }
+
+  const bool suited = index < 91;
+  int offset = suited ? index - 13 : index - 91;
+  int high = 1;
+  while (offset >= (high * (high + 1) / 2)) {
+    ++high;
+  }
+  const int low = offset - (high * (high - 1) / 2);
+  return HandType{high + 2, low + 2,
+                  suited ? HandType::Shape::kSuited
+                         : HandType::Shape::kOffsuit};
+}
+
+std::optional<int> EncodeHandTypeIndex(HandType type) {
+  if (!IsValidRank(type.high_rank) || !IsValidRank(type.low_rank)) {
+    return std::nullopt;
+  }
+  if (type.high_rank < type.low_rank) {
+    std::swap(type.high_rank, type.low_rank);
+  }
+  if (type.high_rank == type.low_rank) {
+    return type.shape == HandType::Shape::kPair
+               ? std::optional<int>(type.high_rank - 2)
+               : std::nullopt;
+  }
+
+  const int offset = NonPairOffset(type.high_rank, type.low_rank);
+  if (type.shape == HandType::Shape::kSuited) {
+    return 13 + offset;
+  }
+  if (type.shape == HandType::Shape::kOffsuit) {
+    return 91 + offset;
+  }
+  return std::nullopt;
+}
 
 ComboId MakeCombo(int first_rank, SuitKind first_suit, int second_rank,
                   SuitKind second_suit) {
@@ -41,40 +160,111 @@ std::string ExactHandKey(ComboId combo_id) {
   return oss.str();
 }
 
-std::vector<ComboId> ExpandIndexToCombos(int index) {
+std::vector<ComboId> ExpandHandType(HandType type) {
   std::vector<ComboId> combos;
   const SuitKind suits[] = {SuitKind::kHearts, SuitKind::kDiamonds,
                             SuitKind::kClubs, SuitKind::kSpades};
 
-  if (index < 0 || index >= 169) {
+  if (!IsValidRank(type.high_rank) || !IsValidRank(type.low_rank)) {
     return combos;
   }
 
-  if (index < 13) {
-    int rank = index + 2;
+  if (type.high_rank < type.low_rank) {
+    std::swap(type.high_rank, type.low_rank);
+  }
+
+  if (type.high_rank == type.low_rank) {
     for (int i = 0; i < 4; ++i) {
       for (int j = i + 1; j < 4; ++j) {
-        combos.push_back(MakeCombo(rank, suits[i], rank, suits[j]));
+        combos.push_back(MakeCombo(type.high_rank, suits[i], type.high_rank,
+                                   suits[j]));
       }
     }
     return combos;
   }
 
-  bool is_suited = index < 91;
-  int offset = is_suited ? index - 13 : index - 91;
-  int r1 = static_cast<int>(std::sqrt(2 * offset + 0.25) + 0.5);
-  int r2 = offset - (r1 * (r1 - 1) / 2);
-  int rank1 = r1 + 2;
-  int rank2 = r2 + 2;
-
   for (SuitKind first_suit : suits) {
     for (SuitKind second_suit : suits) {
-      if ((first_suit == second_suit) == is_suited) {
-        combos.push_back(MakeCombo(rank1, first_suit, rank2, second_suit));
+      const bool suited = first_suit == second_suit;
+      if (type.shape == HandType::Shape::kAnyNonPair ||
+          (type.shape == HandType::Shape::kSuited && suited) ||
+          (type.shape == HandType::Shape::kOffsuit && !suited)) {
+        combos.push_back(MakeCombo(type.high_rank, first_suit, type.low_rank,
+                                   second_suit));
       }
     }
   }
   return combos;
+}
+
+std::vector<ComboId> ExpandHandTypeIndex(int index) {
+  const std::optional<HandType> type = DecodeHandTypeIndex(index);
+  return type.has_value() ? ExpandHandType(*type) : std::vector<ComboId>();
+}
+
+std::string FormatHandType(HandType type) {
+  if (type.high_rank < type.low_rank) {
+    std::swap(type.high_rank, type.low_rank);
+  }
+
+  std::string key;
+  key += RankToChar(type.high_rank);
+  key += RankToChar(type.low_rank);
+  if (type.high_rank != type.low_rank) {
+    if (type.shape == HandType::Shape::kSuited) {
+      key += 's';
+    } else if (type.shape == HandType::Shape::kOffsuit) {
+      key += 'o';
+    }
+  }
+  return key;
+}
+
+std::optional<HandType> ParseHandType(std::string_view text) {
+  if (text.size() != 2 && text.size() != 3) {
+    return std::nullopt;
+  }
+
+  std::optional<int> first_rank = RankFromChar(text[0]);
+  std::optional<int> second_rank = RankFromChar(text[1]);
+  if (!first_rank.has_value() || !second_rank.has_value()) {
+    return std::nullopt;
+  }
+
+  HandType type{std::max(*first_rank, *second_rank),
+                std::min(*first_rank, *second_rank),
+                HandType::Shape::kPair};
+  if (type.high_rank == type.low_rank) {
+    return text.size() == 2 ? std::optional<HandType>(type) : std::nullopt;
+  }
+  if (text.size() == 2) {
+    type.shape = HandType::Shape::kAnyNonPair;
+    return type;
+  }
+  if (text[2] == 's') {
+    type.shape = HandType::Shape::kSuited;
+    return type;
+  }
+  if (text[2] == 'o') {
+    type.shape = HandType::Shape::kOffsuit;
+    return type;
+  }
+  return std::nullopt;
+}
+
+std::optional<ComboId> RepresentativeComboForHandTypeIndex(int index) {
+  std::optional<HandType> type = DecodeHandTypeIndex(index);
+  if (!type.has_value()) {
+    return std::nullopt;
+  }
+  if (type->shape == HandType::Shape::kPair) {
+    return MakeCombo(type->high_rank, SuitKind::kSpades, type->high_rank,
+                     SuitKind::kHearts);
+  }
+  return MakeCombo(type->high_rank, SuitKind::kSpades, type->low_rank,
+                   type->shape == HandType::Shape::kSuited
+                       ? SuitKind::kSpades
+                       : SuitKind::kHearts);
 }
 
 }  // namespace
@@ -104,7 +294,7 @@ void HandRange::add_combo(ComboId combo_id, double weight) {
 }
 
 void HandRange::add_hand_by_index(int index, double weight) {
-  if (index < 0 || index >= 169 || weight <= 0.0) {
+  if (index < 0 || index >= kHandTypeCount || weight <= 0.0) {
     return;
   }
   
@@ -142,7 +332,7 @@ double HandRange::get_probability(ComboId combo_id) const {
   if (index >= 0) {
     for (const auto& pair : hand_weights_) {
       if (pair.first == index) {
-        std::vector<ComboId> combos = ExpandIndexToCombos(index);
+        std::vector<ComboId> combos = ExpandHandTypeIndex(index);
         if (!combos.empty()) {
           hand_weight += pair.second / combos.size();
         }
@@ -166,7 +356,7 @@ const WeightedHandRange& HandRange::get_all_weighted_combos() const {
   }
 
   for (const auto& hand_weight : hand_weights_) {
-    std::vector<ComboId> combos = ExpandIndexToCombos(hand_weight.first);
+    std::vector<ComboId> combos = ExpandHandTypeIndex(hand_weight.first);
     if (combos.empty()) {
       continue;
     }
@@ -192,10 +382,10 @@ void HandRange::set_uniform_range() {
   // Clear current range
   clear();
   
-  // Assign uniform weight to all 169 hand types
-  double weight = 1.0 / 169.0;
+  // Assign uniform weight to all 169 hand types, not exact combos.
+  double weight = 1.0 / kHandTypeCount;
   
-  for (int i = 0; i < 169; ++i) {
+  for (int i = 0; i < kHandTypeCount; ++i) {
     add_hand_by_index(i, weight);
   }
 }
@@ -247,7 +437,10 @@ std::string HandRange::to_string() const {
       oss << ",";
     }
     
-    oss << combo_to_string(index_to_combo(index));
+    std::optional<HandType> type = DecodeHandTypeIndex(index);
+    if (type.has_value()) {
+      oss << FormatHandType(*type);
+    }
     needs_separator = true;
   }
 
@@ -296,66 +489,16 @@ int HandRange::combo_to_index(ComboId combo_id) {
   SuitKind suit1 = SuitFromCardId(combo.card0);
   SuitKind suit2 = SuitFromCardId(combo.card1);
   
-  // Normalize ranks (2-14) to 0-12
-  int r1 = rank1 - 2;
-  int r2 = rank2 - 2;
-  
-  // Ensure r1 >= r2
-  if (r1 < r2) {
-    std::swap(r1, r2);
-    std::swap(suit1, suit2);
-  }
-  
-  // Calculate index:
-  // - Pairs: 0-12 (13 total)
-  // - Suited: 13-90 (78 total)
-  // - Offsuit: 91-168 (78 total)
-  if (r1 == r2) {
-    // Pair
-    return r1;
-  } else if (suit1 == suit2) {
-    // Suited
-    return 13 + (r1 * (r1 - 1) / 2) + r2;
-  } else {
-    // Offsuit
-    return 91 + (r1 * (r1 - 1) / 2) + r2;
-  }
+  HandType type{std::max(rank1, rank2), std::min(rank1, rank2),
+                rank1 == rank2
+                    ? HandType::Shape::kPair
+                    : (suit1 == suit2 ? HandType::Shape::kSuited
+                                       : HandType::Shape::kOffsuit)};
+  return EncodeHandTypeIndex(type).value_or(-1);
 }
 
 ComboId HandRange::index_to_combo(int index) {
-  if (index < 0 || index >= 169) {
-    return 0;
-  }
-  
-  int r1, r2;
-  bool is_suited;
-  
-  if (index < 13) {
-    // Pair
-    r1 = r2 = index;
-    is_suited = false;
-  } else if (index < 91) {
-    // Suited
-    index -= 13;
-    // Solve for r1: (r1 * (r1 - 1) / 2) + r2 = index
-    r1 = static_cast<int>(std::sqrt(2 * index + 0.25) + 0.5);
-    r2 = index - (r1 * (r1 - 1) / 2);
-    is_suited = true;
-  } else {
-    // Offsuit
-    index -= 91;
-    // Solve for r1: (r1 * (r1 - 1) / 2) + r2 = index
-    r1 = static_cast<int>(std::sqrt(2 * index + 0.25) + 0.5);
-    r2 = index - (r1 * (r1 - 1) / 2);
-    is_suited = false;
-  }
-  
-  // Convert back to ranks (2-14)
-  int rank1 = r1 + 2;
-  int rank2 = r2 + 2;
-  
-  return MakeCombo(rank1, SuitKind::kSpades, rank2,
-                   is_suited ? SuitKind::kSpades : SuitKind::kHearts);
+  return RepresentativeComboForHandTypeIndex(index).value_or(0);
 }
 
 std::string HandRange::combo_to_string(ComboId combo_id) {
@@ -375,132 +518,59 @@ std::string HandRange::combo_to_string(ComboId combo_id) {
     std::swap(suit1, suit2);
   }
   
-  // Convert ranks to characters
-  char rank1_char, rank2_char;
-  
-  if (rank1 == 14) rank1_char = 'A';
-  else if (rank1 == 13) rank1_char = 'K';
-  else if (rank1 == 12) rank1_char = 'Q';
-  else if (rank1 == 11) rank1_char = 'J';
-  else if (rank1 == 10) rank1_char = 'T';
-  else rank1_char = '0' + rank1;
-  
-  if (rank2 == 14) rank2_char = 'A';
-  else if (rank2 == 13) rank2_char = 'K';
-  else if (rank2 == 12) rank2_char = 'Q';
-  else if (rank2 == 11) rank2_char = 'J';
-  else if (rank2 == 10) rank2_char = 'T';
-  else rank2_char = '0' + rank2;
-  
-  // Create the key
-  std::string key;
-  key += rank1_char;
-  key += rank2_char;
-  
-  // Add suited/offsuit suffix
-  if (suit1 == suit2 && rank1 != rank2) {
-    key += 's'; // suited
-  } else if (rank1 != rank2) {
-    key += 'o'; // offsuit
-  }
-  
-  return key;
+  const HandType type{rank1, rank2,
+                      rank1 == rank2
+                          ? HandType::Shape::kPair
+                          : (suit1 == suit2 ? HandType::Shape::kSuited
+                                             : HandType::Shape::kOffsuit)};
+  return FormatHandType(type);
 }
 
 int HandRange::string_to_index(const std::string& hand_str) {
-  if (hand_str.length() < 2) {
+  const std::optional<HandType> type = ParseHandType(hand_str);
+  if (!type.has_value()) {
     return -1;
   }
-  
-  // Parse the key
-  char rank1_char = hand_str[0];
-  char rank2_char = hand_str[1];
-  bool is_suited = (hand_str.length() > 2 && hand_str[2] == 's');
-  
-  // Convert characters to ranks
-  int rank1, rank2;
-  
-  if (rank1_char == 'A') rank1 = 14;
-  else if (rank1_char == 'K') rank1 = 13;
-  else if (rank1_char == 'Q') rank1 = 12;
-  else if (rank1_char == 'J') rank1 = 11;
-  else if (rank1_char == 'T') rank1 = 10;
-  else rank1 = rank1_char - '0';
-  
-  if (rank2_char == 'A') rank2 = 14;
-  else if (rank2_char == 'K') rank2 = 13;
-  else if (rank2_char == 'Q') rank2 = 12;
-  else if (rank2_char == 'J') rank2 = 11;
-  else if (rank2_char == 'T') rank2 = 10;
-  else rank2 = rank2_char - '0';
-  
-  // Ensure rank1 >= rank2
-  if (rank1 < rank2) {
-    std::swap(rank1, rank2);
-  }
-  
-  // Normalize ranks (2-14) to 0-12
-  int r1 = rank1 - 2;
-  int r2 = rank2 - 2;
-  
-  // Calculate index:
-  if (r1 == r2) {
-    // Pair
-    return r1;
-  } else if (is_suited) {
-    // Suited
-    return 13 + (r1 * (r1 - 1) / 2) + r2;
-  } else {
-    // Offsuit or unspecified (treat as offsuit)
-    return 91 + (r1 * (r1 - 1) / 2) + r2;
-  }
+  return EncodeHandTypeIndex(*type).value_or(-1);
 }
 
 void HandRange::parse_range_component(const std::string& component) {
-  // Check for pocket pairs with a plus (e.g., "QQ+")
-  std::regex pair_plus_regex("([AKQJT98765432])(\\1)\\+");
-  std::smatch pair_plus_match;
-  
-  if (std::regex_match(component, pair_plus_match, pair_plus_regex)) {
-    char rank_char = pair_plus_match[1].str()[0];
-    int start_rank;
-    
-    if (rank_char == 'A') start_rank = 14;
-    else if (rank_char == 'K') start_rank = 13;
-    else if (rank_char == 'Q') start_rank = 12;
-    else if (rank_char == 'J') start_rank = 11;
-    else if (rank_char == 'T') start_rank = 10;
-    else start_rank = rank_char - '0';
-    
+  if (component.size() == 3 && component[0] == component[1] &&
+      component[2] == '+') {
+    std::optional<int> start_rank = RankFromChar(component[0]);
+    if (!start_rank.has_value()) {
+      return;
+    }
+
     // Add all pairs from the specified rank up to AA
-    for (int rank = start_rank; rank <= 14; ++rank) {
-      int r = rank - 2; // Normalize to 0-12
-      add_hand_by_index(r, 1.0);
+    for (int rank = *start_rank; rank <= 14; ++rank) {
+      add_hand_by_index(rank - 2, 1.0);
     }
-    
     return;
   }
-  
-  // Check for suited connectors with a plus (e.g., "89s+")
-  std::regex suited_plus_regex("([AKQJT98765432])([AKQJT98765432])s\\+");
-  std::smatch suited_plus_match;
-  
-  if (std::regex_match(component, suited_plus_match, suited_plus_regex)) {
-    // Not implemented in this simplified version
+
+  if (component.find('+') != std::string::npos) {
     return;
   }
-  
-  // Check for simple hand (e.g., "AK", "QJs", "T9o")
-  std::regex simple_hand_regex("([AKQJT98765432])([AKQJT98765432])(s|o)?");
-  std::smatch simple_hand_match;
-  
-  if (std::regex_match(component, simple_hand_match, simple_hand_regex)) {
-    std::string hand_str = component;
-    int index = string_to_index(hand_str);
-    
-    if (index >= 0) {
-      add_hand_by_index(index, 1.0);
-    }
+
+  const std::optional<HandType> type = ParseHandType(component);
+  if (!type.has_value()) {
+    return;
+  }
+
+  if (type->shape == HandType::Shape::kAnyNonPair) {
+    HandType suited = *type;
+    suited.shape = HandType::Shape::kSuited;
+    HandType offsuit = *type;
+    offsuit.shape = HandType::Shape::kOffsuit;
+    add_hand_by_index(EncodeHandTypeIndex(suited).value_or(-1), 1.0);
+    add_hand_by_index(EncodeHandTypeIndex(offsuit).value_or(-1), 1.0);
+    return;
+  }
+
+  const std::optional<int> index = EncodeHandTypeIndex(*type);
+  if (index.has_value()) {
+    add_hand_by_index(*index, 1.0);
   }
 }
 

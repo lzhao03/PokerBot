@@ -659,6 +659,8 @@ bool PublicStateGraph::prebuild_public_state_rows(
     if (entry.public_state_id >= rows().size()) {
       return false;
     }
+    // Copy before creating children; child creation can append to rows and
+    // invalidate references.
     const PublicStateRow row = rows()[entry.public_state_id];
     if (row.is_terminal) {
       continue;

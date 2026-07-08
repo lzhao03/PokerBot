@@ -7,6 +7,8 @@
 #include <utility>
 #include <vector>
 
+#include "absl/types/span.h"
+
 namespace poker {
 namespace {
 
@@ -50,48 +52,58 @@ HandEvaluation ToHandEvaluation(const EvaluationScore& score) {
   return evaluation;
 }
 
-size_t FillAllCards(ComboId hole_cards,
-                    const GameState& board_state,
-                    std::array<CardId, 7>& all_cards) {
-  const ComboInfo& combo = GetComboInfo(hole_cards);
-  all_cards[0] = combo.card0;
-  all_cards[1] = combo.card1;
-  size_t count = 2;
-  for (CardId card : board_state.board_cards) {
-    all_cards[count] = card;
-    ++count;
+class SevenCardHand {
+ public:
+  static SevenCardHand FromHoleAndBoard(ComboId hole_cards,
+                                        const GameState& board_state) {
+    SevenCardHand hand(hole_cards);
+    for (CardId card : board_state.board_cards) {
+      hand.append(card);
+    }
+    return hand;
   }
-  return count;
-}
 
-size_t FillAllCards(ComboId hole_cards,
-                    const CompactPublicState& board_state,
-                    std::array<CardId, 7>& all_cards) {
-  const ComboInfo& combo = GetComboInfo(hole_cards);
-  all_cards[0] = combo.card0;
-  all_cards[1] = combo.card1;
-  size_t count = 2;
-  for (uint8_t i = 0; i < board_state.board_count; ++i) {
-    all_cards[count] = board_state.board_cards[static_cast<size_t>(i)];
-    ++count;
+  static SevenCardHand FromHoleAndBoard(
+      ComboId hole_cards,
+      const CompactPublicState& board_state) {
+    SevenCardHand hand(hole_cards);
+    for (uint8_t i = 0; i < board_state.board_count; ++i) {
+      hand.append(board_state.board_cards[static_cast<size_t>(i)]);
+    }
+    return hand;
   }
-  return count;
-}
 
-size_t FillAllCards(ComboId hole_cards,
-                    const std::array<CardId, kMaxBoardCards>& board_cards,
-                    uint8_t board_count,
-                    std::array<CardId, 7>& all_cards) {
-  const ComboInfo& combo = GetComboInfo(hole_cards);
-  all_cards[0] = combo.card0;
-  all_cards[1] = combo.card1;
-  size_t count = 2;
-  for (uint8_t i = 0; i < board_count; ++i) {
-    all_cards[count] = board_cards[static_cast<size_t>(i)];
-    ++count;
+  static SevenCardHand FromHoleAndBoard(
+      ComboId hole_cards,
+      const std::array<CardId, kMaxBoardCards>& board_cards,
+      uint8_t board_count) {
+    SevenCardHand hand(hole_cards);
+    for (uint8_t i = 0; i < board_count; ++i) {
+      hand.append(board_cards[static_cast<size_t>(i)]);
+    }
+    return hand;
   }
-  return count;
-}
+
+  absl::Span<const CardId> cards() const {
+    return absl::Span<const CardId>(cards_.data(), count_);
+  }
+
+ private:
+  explicit SevenCardHand(ComboId hole_cards) {
+    const ComboInfo& combo = GetComboInfo(hole_cards);
+    cards_[0] = combo.card0;
+    cards_[1] = combo.card1;
+    count_ = 2;
+  }
+
+  void append(CardId card) {
+    cards_[count_] = card;
+    ++count_;
+  }
+
+  std::array<CardId, 7> cards_ = {};
+  size_t count_ = 0;
+};
 
 EvaluationScore EvaluateFiveCardScore(const std::array<CardId, 5>& cards) {
   std::array<int, 5> ranks;
@@ -123,6 +135,7 @@ EvaluationScore EvaluateFiveCardScore(const std::array<CardId, 5>& cards) {
       }
     }
   }
+  const int straight_high_rank = wheel_straight ? 5 : ranks[0];
 
   if (flush && ranks[0] == 14 && ranks[1] == 13 && ranks[2] == 12 &&
       ranks[3] == 11 && ranks[4] == 10) {
@@ -130,7 +143,7 @@ EvaluationScore EvaluateFiveCardScore(const std::array<CardId, 5>& cards) {
   }
 
   if (flush && straight) {
-    return MakeScore(HandRank::STRAIGHT_FLUSH, {ranks[0]});
+    return MakeScore(HandRank::STRAIGHT_FLUSH, {straight_high_rank});
   }
 
   std::array<int, 15> rank_counts = {};
@@ -173,7 +186,7 @@ EvaluationScore EvaluateFiveCardScore(const std::array<CardId, 5>& cards) {
   }
 
   if (straight) {
-    return MakeScore(HandRank::STRAIGHT, {ranks[0]});
+    return MakeScore(HandRank::STRAIGHT, {straight_high_rank});
   }
 
   if (three_of_a_kind_rank != -1) {
@@ -309,6 +322,8 @@ struct CactusLookupRecord {
   int key = 0;
 };
 
+// Tables are generated once from the slow five-card scorer. Lower lookup
+// value means stronger hand, matching Cactus Kev convention.
 struct CactusTables {
   CactusTables() {
     std::vector<CactusLookupRecord> records;
@@ -421,30 +436,30 @@ uint16_t EvalFiveCactus(const std::array<int, 5>& cards) {
   return ProductRank(tables, product);
 }
 
-uint16_t EvalBestCactus(const CardId* cards, size_t card_count) {
-  if (card_count < 5) {
+uint16_t EvalBestCactus(absl::Span<const CardId> cards) {
+  if (cards.size() < 5) {
     throw std::invalid_argument("Need at least 5 cards to find best hand");
   }
-  if (card_count > 7) {
+  if (cards.size() > 7) {
     throw std::invalid_argument("Cannot evaluate more than seven cards");
   }
 
   std::array<int, 7> cactus_cards = {};
-  for (size_t i = 0; i < card_count; ++i) {
+  for (size_t i = 0; i < cards.size(); ++i) {
     cactus_cards[i] = CactusCard(cards[i]);
   }
 
   uint16_t best = std::numeric_limits<uint16_t>::max();
   std::array<int, 5> combo;
-  for (size_t a = 0; a + 4 < card_count; ++a) {
+  for (size_t a = 0; a + 4 < cards.size(); ++a) {
     combo[0] = cactus_cards[a];
-    for (size_t b = a + 1; b + 3 < card_count; ++b) {
+    for (size_t b = a + 1; b + 3 < cards.size(); ++b) {
       combo[1] = cactus_cards[b];
-      for (size_t c = b + 1; c + 2 < card_count; ++c) {
+      for (size_t c = b + 1; c + 2 < cards.size(); ++c) {
         combo[2] = cactus_cards[c];
-        for (size_t d = c + 1; d + 1 < card_count; ++d) {
+        for (size_t d = c + 1; d + 1 < cards.size(); ++d) {
           combo[3] = cactus_cards[d];
-          for (size_t e = d + 1; e < card_count; ++e) {
+          for (size_t e = d + 1; e < cards.size(); ++e) {
             combo[4] = cactus_cards[e];
             best = std::min(best, EvalFiveCactus(combo));
           }
@@ -455,12 +470,10 @@ uint16_t EvalBestCactus(const CardId* cards, size_t card_count) {
   return best;
 }
 
-int CompareCactusHands(const CardId* first_cards,
-                       size_t first_count,
-                       const CardId* second_cards,
-                       size_t second_count) {
-  const uint16_t first = EvalBestCactus(first_cards, first_count);
-  const uint16_t second = EvalBestCactus(second_cards, second_count);
+int CompareCactusHands(absl::Span<const CardId> first_cards,
+                       absl::Span<const CardId> second_cards) {
+  const uint16_t first = EvalBestCactus(first_cards);
+  const uint16_t second = EvalBestCactus(second_cards);
   if (first < second) {
     return 1;
   }
@@ -470,22 +483,22 @@ int CompareCactusHands(const CardId* first_cards,
   return 0;
 }
 
-EvaluationScore FindBestHandScore(const CardId* cards, size_t card_count) {
-  if (card_count < 5) {
+EvaluationScore FindBestHandScore(absl::Span<const CardId> cards) {
+  if (cards.size() < 5) {
     throw std::invalid_argument("Need at least 5 cards to find best hand");
   }
 
   EvaluationScore bestEval;
   std::array<CardId, 5> combo;
-  for (size_t a = 0; a + 4 < card_count; ++a) {
+  for (size_t a = 0; a + 4 < cards.size(); ++a) {
     combo[0] = cards[a];
-    for (size_t b = a + 1; b + 3 < card_count; ++b) {
+    for (size_t b = a + 1; b + 3 < cards.size(); ++b) {
       combo[1] = cards[b];
-      for (size_t c = b + 1; c + 2 < card_count; ++c) {
+      for (size_t c = b + 1; c + 2 < cards.size(); ++c) {
         combo[2] = cards[c];
-        for (size_t d = c + 1; d + 1 < card_count; ++d) {
+        for (size_t d = c + 1; d + 1 < cards.size(); ++d) {
           combo[3] = cards[d];
-          for (size_t e = d + 1; e < card_count; ++e) {
+          for (size_t e = d + 1; e < cards.size(); ++e) {
             combo[4] = cards[e];
             EvaluationScore currentEval = EvaluateFiveCardScore(combo);
             if (bestEval < currentEval) {
@@ -510,41 +523,39 @@ HandEvaluation HandEvaluator::evaluate(
 HandEvaluation HandEvaluator::evaluate_hand(
     ComboId hole_cards,
     const GameState& board_state) const {
-  std::array<CardId, 7> all_cards;
-  const size_t card_count = FillAllCards(hole_cards, board_state, all_cards);
-  return find_best_hand(all_cards.data(), card_count);
+  const SevenCardHand cards =
+      SevenCardHand::FromHoleAndBoard(hole_cards, board_state);
+  return find_best_hand(cards.cards());
 }
 
 HandEvaluation HandEvaluator::evaluate_hand(
     ComboId hole_cards,
     const CompactPublicState& board_state) const {
-  std::array<CardId, 7> all_cards;
-  const size_t card_count = FillAllCards(hole_cards, board_state, all_cards);
-  return find_best_hand(all_cards.data(), card_count);
+  const SevenCardHand cards =
+      SevenCardHand::FromHoleAndBoard(hole_cards, board_state);
+  return find_best_hand(cards.cards());
 }
 
 int HandEvaluator::compare_hands(
     ComboId hand1,
     ComboId hand2,
     const GameState& board_state) const {
-  std::array<CardId, 7> first_cards;
-  std::array<CardId, 7> second_cards;
-  const size_t first_count = FillAllCards(hand1, board_state, first_cards);
-  const size_t second_count = FillAllCards(hand2, board_state, second_cards);
-  return CompareCactusHands(first_cards.data(), first_count,
-                            second_cards.data(), second_count);
+  const SevenCardHand first =
+      SevenCardHand::FromHoleAndBoard(hand1, board_state);
+  const SevenCardHand second =
+      SevenCardHand::FromHoleAndBoard(hand2, board_state);
+  return CompareCactusHands(first.cards(), second.cards());
 }
 
 int HandEvaluator::compare_hands(
     ComboId hand1,
     ComboId hand2,
     const CompactPublicState& board_state) const {
-  std::array<CardId, 7> first_cards;
-  std::array<CardId, 7> second_cards;
-  const size_t first_count = FillAllCards(hand1, board_state, first_cards);
-  const size_t second_count = FillAllCards(hand2, board_state, second_cards);
-  return CompareCactusHands(first_cards.data(), first_count,
-                            second_cards.data(), second_count);
+  const SevenCardHand first =
+      SevenCardHand::FromHoleAndBoard(hand1, board_state);
+  const SevenCardHand second =
+      SevenCardHand::FromHoleAndBoard(hand2, board_state);
+  return CompareCactusHands(first.cards(), second.cards());
 }
 
 int HandEvaluator::compare_hands(
@@ -552,19 +563,16 @@ int HandEvaluator::compare_hands(
     ComboId hand2,
     const std::array<CardId, kMaxBoardCards>& board_cards,
     uint8_t board_count) const {
-  std::array<CardId, 7> first_cards;
-  std::array<CardId, 7> second_cards;
-  const size_t first_count =
-      FillAllCards(hand1, board_cards, board_count, first_cards);
-  const size_t second_count =
-      FillAllCards(hand2, board_cards, board_count, second_cards);
-  return CompareCactusHands(first_cards.data(), first_count,
-                            second_cards.data(), second_count);
+  const SevenCardHand first =
+      SevenCardHand::FromHoleAndBoard(hand1, board_cards, board_count);
+  const SevenCardHand second =
+      SevenCardHand::FromHoleAndBoard(hand2, board_cards, board_count);
+  return CompareCactusHands(first.cards(), second.cards());
 }
 
-HandEvaluation HandEvaluator::find_best_hand(const CardId* cards,
-                                             size_t card_count) const {
-  return ToHandEvaluation(FindBestHandScore(cards, card_count));
+HandEvaluation HandEvaluator::find_best_hand(
+    absl::Span<const CardId> cards) const {
+  return ToHandEvaluation(FindBestHandScore(cards));
 }
 
 } // namespace poker
