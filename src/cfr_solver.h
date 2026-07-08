@@ -173,6 +173,11 @@ class CFRSolver {
     kRequirePresent,
   };
 
+  enum class CfrTraversalMode {
+    kNormal,
+    kFrozenRegretOnly,
+  };
+
   struct NodeRef {
     uint32_t public_state_id = GameTree::kInvalidPublicStateId;
     ExactBoardState exact_board;
@@ -476,6 +481,10 @@ class CFRSolver {
       NodeRef node,
       TraversalContext& ctx,
       NodeGraph& graph);
+  template <CfrTraversalMode mode>
+  double cfr_traversal(NodeRef node,
+                       TraversalContext& ctx,
+                       NodeGraph& graph);
   double cfr_frozen_regret_only(
       NodeRef node,
       TraversalContext& ctx,

@@ -1768,35 +1768,59 @@ void CFRSolver::run_frozen_iterations(
   iterations_run_ += completed_iterations;
 }
 
-double CFRSolver::cfr_with_ranges(
+template <CFRSolver::CfrTraversalMode mode>
+double CFRSolver::cfr_traversal(
     NodeRef node,
     TraversalContext& ctx,
     NodeGraph& graph) {
-  const std::optional<NodeCursor> node_cursor = cursor(node);
-  if (!node_cursor.has_value()) {
-    return 0.0;
-  }
   const uint32_t public_state_id = node.public_state_id;
-  const PublicStateRow& row = node_cursor->row();
+  std::optional<NodeCursor> node_cursor;
+  const PublicStateRow* row_ptr = nullptr;
+  if constexpr (mode == CfrTraversalMode::kNormal) {
+    node_cursor = cursor(node);
+    if (!node_cursor.has_value()) {
+      return 0.0;
+    }
+    row_ptr = &node_cursor->row();
+  } else {
+    const auto& public_state_rows = storage_.frozen_ref().public_state_rows;
+    if (public_state_id >= public_state_rows.size()) {
+      return 0.0;
+    }
+    row_ptr = &public_state_rows[public_state_id];
+  }
+  const PublicStateRow& row = *row_ptr;
 
   if (row.is_terminal) {
-    const CompactPublicState& state = node_cursor->exact_state();
-    record_terminal_utility(state.folded_player < 0);
-    if (!ctx.use_terminal_cache() || ctx.max_depth() > 0) {
-      return uncached_utility(state, ctx.cards(0), ctx.cards(1));
+    if constexpr (mode == CfrTraversalMode::kNormal) {
+      const CompactPublicState& state = node_cursor->exact_state();
+      record_terminal_utility(state.folded_player < 0);
+      if (!ctx.use_terminal_cache() || ctx.max_depth() > 0) {
+        return uncached_utility(state, ctx.cards(0), ctx.cards(1));
+      }
+      return utility(state, ctx.cards(0), ctx.cards(1));
+    } else {
+      record_terminal_utility(row.state.folded_player < 0);
+      return frozen_utility(row, node.exact_board, ctx.cards(0),
+                            ctx.cards(1));
     }
-    return utility(state, ctx.cards(0), ctx.cards(1));
   }
 
   if (row.is_chance_node) {
-    return chance_sampling_cfr(node, ctx, graph);
+    if constexpr (mode == CfrTraversalMode::kNormal) {
+      return chance_sampling_cfr(node, ctx, graph);
+    } else {
+      return chance_sampling_frozen_regret_only(node, ctx, graph);
+    }
   }
 
-  if (ctx.depth_limited()) {
-    const CompactPublicState& state = node_cursor->exact_state();
-    return game_tree_->is_betting_round_over(state)
-               ? uncached_utility(state, ctx.cards(0), ctx.cards(1))
-               : 0.0;
+  if constexpr (mode == CfrTraversalMode::kNormal) {
+    if (ctx.depth_limited()) {
+      const CompactPublicState& state = node_cursor->exact_state();
+      return game_tree_->is_betting_round_over(state)
+                 ? uncached_utility(state, ctx.cards(0), ctx.cards(1))
+                 : 0.0;
+    }
   }
 
   const int player = row.player_to_act;
@@ -1806,17 +1830,24 @@ double CFRSolver::cfr_with_ranges(
   const StreetKind street = row.state.street;
   const PrivateCards& player_cards = ctx.cards(player);
 
-  const InfoSetAddress info_set_address{
-      public_state_id, player,
-      card_abstraction_.private_bucket(player_cards.combo, row.state)};
   const bool is_update_player = ctx.is_update_player(player);
   const size_t action_count = row.action_count;
   const absl::Span<const int> legal_action_ids(row.action_ids.data(),
                                                action_count);
-  std::optional<ActionBlock> action_block =
-      is_update_player
-          ? strategy_store_.get_or_create(info_set_address, legal_action_ids)
-          : strategy_store_.find(info_set_address, action_count);
+  std::optional<ActionBlock> action_block;
+  if constexpr (mode == CfrTraversalMode::kNormal) {
+    const InfoSetAddress info_set_address{
+        public_state_id, player,
+        card_abstraction_.private_bucket(player_cards.combo, row.state)};
+    action_block =
+        is_update_player
+            ? strategy_store_.get_or_create(info_set_address, legal_action_ids)
+            : strategy_store_.find(info_set_address, action_count);
+  } else {
+    action_block =
+        strategy_store_.find_frozen(public_state_id, player,
+                                    player_cards.combo, action_count);
+  }
 
   ActionScratch action_scratch;
   absl::Span<double> action_probabilities =
@@ -1827,8 +1858,11 @@ double CFRSolver::cfr_with_ranges(
       action_probabilities);
 
   double node_value = 0.0;
-  const ActionRangeConditioning range_conditioning(
-      *this, ctx, *node_cursor, public_state_id, player, legal_action_ids);
+  std::optional<ActionRangeConditioning> range_conditioning;
+  if constexpr (mode == CfrTraversalMode::kNormal) {
+    range_conditioning.emplace(
+        *this, ctx, *node_cursor, public_state_id, player, legal_action_ids);
+  }
 
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     const ChildResult child =
@@ -1842,14 +1876,18 @@ double CFRSolver::cfr_with_ranges(
       auto reach_scope =
           ctx.enter_action(player, action_probabilities[action_index]);
       auto depth_scope = ctx.descend();
-      if (range_conditioning.enabled()) {
-        auto range_scope =
-            ctx.set_ranges(
-                range_conditioning.player_a_range_for(action_index),
-                range_conditioning.player_b_range_for(action_index));
-        action_value = cfr_with_ranges(child.node, ctx, graph);
+      if constexpr (mode == CfrTraversalMode::kNormal) {
+        if (range_conditioning->enabled()) {
+          auto range_scope =
+              ctx.set_ranges(
+                  range_conditioning->player_a_range_for(action_index),
+                  range_conditioning->player_b_range_for(action_index));
+          action_value = cfr_traversal<mode>(child.node, ctx, graph);
+        } else {
+          action_value = cfr_traversal<mode>(child.node, ctx, graph);
+        }
       } else {
-        action_value = cfr_with_ranges(child.node, ctx, graph);
+        action_value = cfr_traversal<mode>(child.node, ctx, graph);
       }
     }
     action_values[action_index] = action_value;
@@ -1873,14 +1911,23 @@ double CFRSolver::cfr_with_ranges(
           action_index, static_cast<float>(regret), regret_update_options);
     }
 
-    if (ctx.options().write_average_strategy) {
-      action_block->add_average_strategy(
-          action_probabilities, ctx.average_strategy_weight(player),
-          ctx.options().regret_update_mode);
+    if constexpr (mode == CfrTraversalMode::kNormal) {
+      if (ctx.options().write_average_strategy) {
+        action_block->add_average_strategy(
+            action_probabilities, ctx.average_strategy_weight(player),
+            ctx.options().regret_update_mode);
+      }
     }
   }
 
   return node_value;
+}
+
+double CFRSolver::cfr_with_ranges(
+    NodeRef node,
+    TraversalContext& ctx,
+    NodeGraph& graph) {
+  return cfr_traversal<CfrTraversalMode::kNormal>(node, ctx, graph);
 }
 
 double CFRSolver::chance_sampling_cfr(
@@ -1942,80 +1989,8 @@ double CFRSolver::cfr_frozen_regret_only(
     NodeRef node,
     TraversalContext& ctx,
     NodeGraph& graph) {
-  const auto& public_state_rows = storage_.frozen_ref().public_state_rows;
-  const uint32_t public_state_id = node.public_state_id;
-  const ExactBoardState& exact_board = node.exact_board;
-  if (public_state_id >= public_state_rows.size()) {
-    return 0.0;
-  }
-  const PublicStateRow& row = public_state_rows[public_state_id];
-
-  if (row.is_terminal) {
-    record_terminal_utility(row.state.folded_player < 0);
-    return frozen_utility(row, exact_board, ctx.cards(0), ctx.cards(1));
-  }
-
-  if (row.is_chance_node) {
-    return chance_sampling_frozen_regret_only(node, ctx, graph);
-  }
-
-  const int player = row.player_to_act;
-  if (!IsPlayer(player) || row.action_count == 0) {
-    return 0.0;
-  }
-  const StreetKind street = row.state.street;
-  const PrivateCards& player_cards = ctx.cards(player);
-  const size_t action_count = row.action_count;
-  std::optional<ActionBlock> action_block =
-      strategy_store_.find_frozen(public_state_id, player, player_cards.combo,
-                                  action_count);
-
-  ActionScratch action_scratch;
-  absl::Span<double> action_probabilities =
-      action_scratch.probs(action_count);
-  absl::Span<double> action_values = action_scratch.vals(action_count);
-  strategy_store_.regret_matching_or_uniform(
-      action_block, action_count, ctx.options().regret_load_mode,
-      action_probabilities);
-
-  double node_value = 0.0;
-  for (size_t action_index = 0; action_index < action_count; ++action_index) {
-    const ChildResult child =
-        graph.action_child(node, static_cast<int>(action_index));
-    if (child.status != ChildStatus::kOk) {
-      continue;
-    }
-
-    double action_value = 0.0;
-    {
-      auto reach_scope =
-          ctx.enter_action(player, action_probabilities[action_index]);
-      auto depth_scope = ctx.descend();
-      action_value = cfr_frozen_regret_only(child.node, ctx, graph);
-    }
-    action_values[action_index] = action_value;
-    node_value += action_probabilities[action_index] * action_value;
-  }
-
-  ++cfr_update_count_;
-  record_cfr_update(street, ctx.depth());
-
-  if (action_block.has_value() && ctx.is_update_player(player)) {
-    const double opponent_reach_prob = ctx.opponent_reach(player);
-    const RegretUpdateOptions regret_update_options =
-        ctx.regret_update_options();
-    for (size_t action_index = 0; action_index < action_count; ++action_index) {
-      const double utility_sign = player == 0 ? 1.0 : -1.0;
-      const double regret =
-          opponent_reach_prob * utility_sign *
-          (action_values[action_index] - node_value);
-
-      action_block->add_cfr_plus_regret(
-          action_index, static_cast<float>(regret), regret_update_options);
-    }
-  }
-
-  return node_value;
+  return cfr_traversal<CfrTraversalMode::kFrozenRegretOnly>(
+      node, ctx, graph);
 }
 
 double CFRSolver::chance_sampling_frozen_regret_only(
