@@ -424,8 +424,8 @@ uint16_t ProductRank(const CactusTables& tables, int product) {
   return it->second;
 }
 
-uint16_t EvalFiveCactus(const std::array<int, 5>& cards) {
-  const CactusTables& tables = GetCactusTables();
+uint16_t EvalFiveCactus(const CactusTables& tables,
+                        const std::array<int, 5>& cards) {
   const int rank_mask =
       (cards[0] | cards[1] | cards[2] | cards[3] | cards[4]) >> 16;
   if ((cards[0] & cards[1] & cards[2] & cards[3] & cards[4] & 0xF000) != 0) {
@@ -440,7 +440,8 @@ uint16_t EvalFiveCactus(const std::array<int, 5>& cards) {
   return ProductRank(tables, product);
 }
 
-uint16_t EvalBestCactus(absl::Span<const CardId> cards) {
+uint16_t EvalBestCactus(const CactusTables& tables,
+                        absl::Span<const CardId> cards) {
   if (cards.size() < 5) {
     throw std::invalid_argument("Need at least 5 cards to find best hand");
   }
@@ -465,13 +466,17 @@ uint16_t EvalBestCactus(absl::Span<const CardId> cards) {
           combo[3] = cactus_cards[d];
           for (size_t e = d + 1; e < cards.size(); ++e) {
             combo[4] = cactus_cards[e];
-            best = std::min(best, EvalFiveCactus(combo));
+            best = std::min(best, EvalFiveCactus(tables, combo));
           }
         }
       }
     }
   }
   return best;
+}
+
+uint16_t EvalBestCactus(absl::Span<const CardId> cards) {
+  return EvalBestCactus(GetCactusTables(), cards);
 }
 
 int CompareCactusHands(absl::Span<const CardId> first_cards,
@@ -489,7 +494,7 @@ int CompareCactusHands(absl::Span<const CardId> first_cards,
 
 EvaluationScore FindBestHandScore(absl::Span<const CardId> cards) {
   const CactusTables& tables = GetCactusTables();
-  return tables.scores[EvalBestCactus(cards)];
+  return tables.scores[EvalBestCactus(tables, cards)];
 }
 
 }  // namespace
