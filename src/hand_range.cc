@@ -497,8 +497,8 @@ int HandRange::combo_to_index(ComboId combo_id) {
   return EncodeHandTypeIndex(type).value_or(-1);
 }
 
-ComboId HandRange::index_to_combo(int index) {
-  return RepresentativeComboForHandTypeIndex(index).value_or(0);
+std::optional<ComboId> HandRange::index_to_combo(int index) {
+  return RepresentativeComboForHandTypeIndex(index);
 }
 
 std::string HandRange::combo_to_string(ComboId combo_id) {

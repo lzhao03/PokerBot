@@ -844,27 +844,14 @@ void CFRSolver::run_frozen_iterations(
 template <CFRSolver::CfrTraversalMode mode>
 double CFRSolver::CfrTraversal<mode>::value(NodeRef node) {
   const uint32_t public_state_id = node.public_state_id;
-  std::optional<NodeCursor> node_cursor;
-  const PublicStateRow* row_ptr = nullptr;
-  if constexpr (mode == CfrTraversalMode::kNormal) {
-    node_cursor = solver_.cursor(node);
-    if (!node_cursor.has_value()) {
-      return 0.0;
-    }
-    row_ptr = &node_cursor->row();
-  } else {
-    const auto& public_state_rows = solver_.rows();
-    if (public_state_id >= public_state_rows.size()) {
-      return 0.0;
-    }
-    row_ptr = &public_state_rows[public_state_id];
+  const auto& public_state_rows = solver_.rows();
+  if (public_state_id >= public_state_rows.size()) {
+    return 0.0;
   }
-  const PublicStateRow& row = *row_ptr;
-  const NodeCursor* cursor_ptr =
-      node_cursor.has_value() ? &*node_cursor : nullptr;
+  const PublicStateRow& row = public_state_rows[public_state_id];
 
   if (row.is_terminal) {
-    return terminal(node, row, cursor_ptr);
+    return terminal(node, row);
   }
 
   if (row.is_chance_node) {
@@ -873,19 +860,26 @@ double CFRSolver::CfrTraversal<mode>::value(NodeRef node) {
 
   if constexpr (mode == CfrTraversalMode::kNormal) {
     if (ctx_.depth_limited()) {
-      return depth_limit_value(*cursor_ptr);
+      std::optional<NodeCursor> node_cursor = solver_.cursor(node);
+      if (!node_cursor.has_value()) {
+        return 0.0;
+      }
+      return depth_limit_value(*node_cursor);
     }
   }
 
-  return decision(node, row, cursor_ptr);
+  return decision(node, row);
 }
 
 template <CFRSolver::CfrTraversalMode mode>
 double CFRSolver::CfrTraversal<mode>::terminal(
     NodeRef node,
-    const PublicStateRow& row,
-    const NodeCursor* node_cursor) {
+    const PublicStateRow& row) {
   if constexpr (mode == CfrTraversalMode::kNormal) {
+    std::optional<NodeCursor> node_cursor = solver_.cursor(node);
+    if (!node_cursor.has_value()) {
+      return 0.0;
+    }
     const CompactPublicState& state = node_cursor->exact_state();
     solver_.traversal_stats_.record_terminal(state.folded_player < 0);
     if (!ctx_.use_terminal_cache() || ctx_.max_depth() > 0) {
@@ -957,8 +951,7 @@ double CFRSolver::CfrTraversal<mode>::depth_limit_value(
 template <CFRSolver::CfrTraversalMode mode>
 double CFRSolver::CfrTraversal<mode>::decision(
     NodeRef node,
-    const PublicStateRow& row,
-    const NodeCursor* node_cursor) {
+    const PublicStateRow& row) {
   const DecisionFrame decision = solver_.make_decision_frame(node, row);
   const int player = decision.player;
   if (!IsPlayer(player) || decision.action_count == 0) {
@@ -996,9 +989,18 @@ double CFRSolver::CfrTraversal<mode>::decision(
   double node_value = 0.0;
   std::optional<ActionRangeConditioning> range_conditioning;
   if constexpr (mode == CfrTraversalMode::kNormal) {
-    range_conditioning.emplace(
-        solver_, ctx_, *node_cursor, decision.public_state_id, player,
-        legal_action_ids);
+    const bool needs_range_conditioning =
+        (player == 0 && ctx_.range(0).has_value()) ||
+        (player == 1 && ctx_.range(1).has_value());
+    if (needs_range_conditioning) {
+      std::optional<NodeCursor> node_cursor = solver_.cursor(node);
+      if (!node_cursor.has_value()) {
+        return 0.0;
+      }
+      range_conditioning.emplace(
+          solver_, ctx_, *node_cursor, decision.public_state_id, player,
+          legal_action_ids);
+    }
   }
 
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
@@ -1014,7 +1016,8 @@ double CFRSolver::CfrTraversal<mode>::decision(
           ctx_.enter_action(player, action_probabilities[action_index]);
       auto depth_scope = ctx_.descend();
       if constexpr (mode == CfrTraversalMode::kNormal) {
-        if (range_conditioning->enabled()) {
+        if (range_conditioning.has_value() &&
+            range_conditioning->enabled()) {
           auto range_scope =
               ctx_.set_ranges(
                   range_conditioning->player_a_range_for(action_index),

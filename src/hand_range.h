@@ -149,8 +149,8 @@ public:
   // Convert a combo to its canonical hand-class index (0-168)
   static int combo_to_index(ComboId combo_id);
   
-  // Convert an index to a representative combo
-  static ComboId index_to_combo(int index);
+  // Convert an index to a representative combo, or nullopt for invalid input.
+  static std::optional<ComboId> index_to_combo(int index);
   
   // Convert a combo to a string representation (for display only)
   static std::string combo_to_string(ComboId combo_id);

@@ -437,14 +437,10 @@ class CFRSolver {
     double value(NodeRef node);
 
    private:
-    double terminal(NodeRef node,
-                    const PublicStateRow& row,
-                    const NodeCursor* node_cursor);
+    double terminal(NodeRef node, const PublicStateRow& row);
     double chance(NodeRef node);
     double depth_limit_value(const NodeCursor& node_cursor);
-    double decision(NodeRef node,
-                    const PublicStateRow& row,
-                    const NodeCursor* node_cursor);
+    double decision(NodeRef node, const PublicStateRow& row);
 
     CFRSolver& solver_;
     TraversalContext& ctx_;

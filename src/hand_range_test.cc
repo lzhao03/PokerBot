@@ -128,11 +128,26 @@ void CheckExplicitHandTypeParsing() {
          "unsupported suited-plus notation should not add hands");
 }
 
+void CheckRepresentativeComboIndexing() {
+  const int aces = poker::HandRange::string_to_index("AA");
+  const std::optional<poker::ComboId> representative =
+      poker::HandRange::index_to_combo(aces);
+  Expect(representative.has_value(),
+         "valid hand-type index should have a representative combo");
+  Expect(poker::HandRange::combo_to_index(*representative) == aces,
+         "representative combo should map back to the same hand type");
+  Expect(!poker::HandRange::index_to_combo(-1).has_value(),
+         "negative hand-type index should be invalid");
+  Expect(!poker::HandRange::index_to_combo(169).has_value(),
+         "out-of-range hand-type index should be invalid");
+}
+
 }  // namespace
 
 int main() {
   CheckWeightedRangeInvariants();
   CheckStringRangesAndViews();
   CheckExplicitHandTypeParsing();
+  CheckRepresentativeComboIndexing();
   return 0;
 }
