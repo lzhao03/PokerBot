@@ -379,12 +379,11 @@ void HandRange::clear() {
 }
 
 void HandRange::set_uniform_range() {
-  // Clear current range
   clear();
-  
+
   // Assign uniform weight to all 169 hand types, not exact combos.
   double weight = 1.0 / kHandTypeCount;
-  
+
   for (int i = 0; i < kHandTypeCount; ++i) {
     add_hand_by_index(i, weight);
   }
@@ -392,22 +391,19 @@ void HandRange::set_uniform_range() {
 
 void HandRange::set_from_string(const std::string& range_str) {
   clear();
-  
-  // Split the range string by commas
+
   std::istringstream iss(range_str);
   std::string component;
-  
+
   while (std::getline(iss, component, ',')) {
-    // Trim whitespace
     component.erase(0, component.find_first_not_of(" \t"));
     component.erase(component.find_last_not_of(" \t") + 1);
-    
+
     if (!component.empty()) {
       parse_range_component(component);
     }
   }
-  
-  // Normalize the weights
+
   normalize();
 }
 
@@ -461,8 +457,7 @@ void HandRange::normalize() {
   if (total_weight_ <= 0.0) {
     return;
   }
-  
-  // Normalize weights in the vector
+
   for (auto& pair : hand_weights_) {
     pair.second /= total_weight_;
   }
@@ -502,14 +497,13 @@ std::string HandRange::combo_to_string(ComboId combo_id) {
   if (combo_id >= kComboCount) {
     return "";
   }
-  
+
   const ComboInfo& combo = GetComboInfo(combo_id);
   int rank1 = RankFromCardId(combo.card0);
   int rank2 = RankFromCardId(combo.card1);
   SuitKind suit1 = SuitFromCardId(combo.card0);
   SuitKind suit2 = SuitFromCardId(combo.card1);
-  
-  // Ensure rank1 >= rank2
+
   if (rank1 < rank2) {
     std::swap(rank1, rank2);
     std::swap(suit1, suit2);
@@ -539,7 +533,6 @@ void HandRange::parse_range_component(const std::string& component) {
       return;
     }
 
-    // Add all pairs from the specified rank up to AA
     for (int rank = *start_rank; rank <= 14; ++rank) {
       add_hand_by_index(rank - 2, 1.0);
     }
