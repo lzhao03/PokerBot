@@ -154,11 +154,6 @@ class CFRSolver {
     CardMask mask = 0;
   };
 
-  struct SampledFrozenChanceTransition {
-    uint32_t child_public_state_id = GameTree::kInvalidPublicStateId;
-    ExactBoardState child_board;
-  };
-
   using OptionalTrainingRange =
       std::optional<std::reference_wrapper<const TrainingRangeView>>;
   using StrategyProbabilities = absl::InlinedVector<double, 8>;
@@ -172,28 +167,28 @@ class CFRSolver {
     kRequirePresent,
   };
 
-  // TraversalNode::public_state_id indexes FrozenStrategyTables::public_state_rows.
-  //
-  // TraversalNode::state is the exact state for this sampled traversal path.
-  // PublicStateRow::state remains the canonical stored row state used for legal
-  // actions, action ids, public buckets, and infoset addressing.
-  //
-  // Action children copy the exact board from their parent state. Chance
-  // children copy the sampled exact board from the chance transition.
-  struct TraversalNode {
+  struct NodeRef {
     uint32_t public_state_id = GameTree::kInvalidPublicStateId;
-    CompactPublicState state;
+    ExactBoardState exact_board;
+  };
+
+  struct NodeView {
+    NodeRef ref;
+    PublicStateRow row;
+
+    CompactPublicState exact_state() const;
+    CardMask board_mask() const { return ref.exact_board.mask; }
   };
 
   class ChildResolver {
    public:
     ChildResolver(CFRSolver& solver, ChildResolverMode mode);
 
-    std::optional<TraversalNode> action_child(
-        const TraversalNode& parent,
+    std::optional<NodeRef> action_child(
+        NodeRef parent,
         int action_index);
-    std::optional<TraversalNode> sample_chance_child(
-        const TraversalNode& parent,
+    std::optional<NodeRef> sample_chance_child(
+        NodeRef parent,
         CardMask known_private_cards);
 
    private:
@@ -267,9 +262,15 @@ class CFRSolver {
                              const RangeSampler& range_sampler,
                              const TrainingRange& player_a_training_range,
                              const TrainingRange& player_b_training_range);
+  static ExactBoardState ExactBoardFromState(
+      const CompactPublicState& state);
+  static void ApplyExactBoard(CompactPublicState& state,
+                              const ExactBoardState& board);
+  std::optional<NodeView> view(NodeRef node) const;
+  std::optional<NodeRef> root_node_ref(uint32_t root_public_state_id) const;
   ChildResolverMode default_child_resolver_mode() const;
   double cfr_with_ranges(
-      const TraversalNode& node,
+      NodeRef node,
       const PrivateCards& player_a_cards,
       const PrivateCards& player_b_cards,
       std::array<double, 2>& reach_probabilities,
@@ -282,8 +283,7 @@ class CFRSolver {
       OptionalTrainingRange player_b_range,
       ChildResolver& children);
   double cfr_frozen_regret_only(
-      uint32_t public_state_id,
-      const ExactBoardState& exact_board,
+      NodeRef node,
       const PrivateCards& player_a_cards,
       const PrivateCards& player_b_cards,
       std::array<double, 2>& reach_probabilities,
@@ -291,7 +291,7 @@ class CFRSolver {
       int depth,
       bool use_atomic_updates);
   double chance_sampling_cfr(
-      const TraversalNode& node,
+      NodeRef node,
       const PrivateCards& player_a_cards,
       const PrivateCards& player_b_cards,
       std::array<double, 2>& reach_probabilities,
@@ -304,8 +304,7 @@ class CFRSolver {
       OptionalTrainingRange player_b_range,
       ChildResolver& children);
   double chance_sampling_frozen_regret_only(
-      uint32_t public_state_id,
-      const ExactBoardState& exact_board,
+      NodeRef node,
       const PrivateCards& player_a_cards,
       const PrivateCards& player_b_cards,
       std::array<double, 2>& reach_probabilities,
@@ -440,7 +439,7 @@ class CFRSolver {
   double uncached_utility(const CompactPublicState& state,
                           const PrivateCards& player_a_cards,
                           const PrivateCards& player_b_cards);
-  double evaluate_strategy_node(const TraversalNode& node,
+  double evaluate_strategy_node(NodeRef node,
                                 const PrivateCards& player_a_cards,
                                 const PrivateCards& player_b_cards,
                                 ChildResolver& children);
@@ -470,10 +469,9 @@ class CFRSolver {
                                     bool has_info_set_row,
                                     bool use_atomic_loads,
                                     double* action_probabilities);
-  SampledFrozenChanceTransition sample_frozen_chance_transition(
-      uint32_t public_state_id,
+  NodeRef sample_frozen_chance_transition(
+      NodeRef parent,
       const PublicStateRow& row,
-      const ExactBoardState& exact_board,
       CardMask known_private_cards);
   void record_action_entry_touches(int64_t count = 1);
   void record_cfr_update(StreetKind street, int depth);
