@@ -1811,29 +1811,8 @@ double CFRSolver::cfr_with_ranges(
       action_probabilities);
 
   double node_value = 0.0;
-  const OptionalTrainingRange player_a_range = ctx.range(0);
-  const OptionalTrainingRange player_b_range = ctx.range(1);
-  const bool condition_player_a_range =
-      player == 0 && player_a_range.has_value();
-  const bool condition_player_b_range =
-      player == 1 && player_b_range.has_value();
-  const bool ranges_changed =
-      condition_player_a_range || condition_player_b_range;
-  std::vector<TrainingRangeView>* conditioned_player_ranges = nullptr;
-  if (ranges_changed) {
-    conditioned_player_ranges = &ctx.scratch_frame().conditioned_ranges;
-  }
-  if (condition_player_a_range) {
-    const CompactPublicState& state = node_cursor->exact_state();
-    condition_ranges_for_actions(player_a_range->get(), state,
-                                 public_state_id, player, legal_action_ids,
-                                 *conditioned_player_ranges);
-  } else if (condition_player_b_range) {
-    const CompactPublicState& state = node_cursor->exact_state();
-    condition_ranges_for_actions(player_b_range->get(), state,
-                                 public_state_id, player, legal_action_ids,
-                                 *conditioned_player_ranges);
-  }
+  const ActionRangeConditioning range_conditioning(
+      *this, ctx, *node_cursor, public_state_id, player, legal_action_ids);
 
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     const ChildResult child =
@@ -1842,24 +1821,16 @@ double CFRSolver::cfr_with_ranges(
       continue;
     }
 
-    OptionalTrainingRange child_player_a_range = player_a_range;
-    OptionalTrainingRange child_player_b_range = player_b_range;
-    if (condition_player_a_range) {
-      child_player_a_range =
-          std::cref((*conditioned_player_ranges)[action_index]);
-    } else if (condition_player_b_range) {
-      child_player_b_range =
-          std::cref((*conditioned_player_ranges)[action_index]);
-    }
-
     double action_value = 0.0;
     {
       auto reach_scope =
           ctx.enter_action(player, action_probabilities[action_index]);
       auto depth_scope = ctx.descend();
-      if (ranges_changed) {
+      if (range_conditioning.enabled()) {
         auto range_scope =
-            ctx.set_ranges(child_player_a_range, child_player_b_range);
+            ctx.set_ranges(
+                range_conditioning.player_a_range_for(action_index),
+                range_conditioning.player_b_range_for(action_index));
         action_value = cfr_with_ranges(child.node, ctx, graph);
       } else {
         action_value = cfr_with_ranges(child.node, ctx, graph);
@@ -2064,6 +2035,54 @@ double CFRSolver::average_sampled_chance(
   }
 
   return evaluated > 0 ? value / evaluated : 0.0;
+}
+
+CFRSolver::ActionRangeConditioning::ActionRangeConditioning(
+    CFRSolver& solver,
+    TraversalContext& ctx,
+    const NodeCursor& node_cursor,
+    uint32_t public_state_id,
+    int player,
+    absl::Span<const int> legal_action_ids)
+    : original_player_a_range_(ctx.range(0)),
+      original_player_b_range_(ctx.range(1)),
+      condition_player_a_(player == 0 &&
+                          original_player_a_range_.has_value()),
+      condition_player_b_(player == 1 &&
+                          original_player_b_range_.has_value()) {
+  if (!enabled()) {
+    return;
+  }
+
+  conditioned_ranges_ = &ctx.scratch_frame().conditioned_ranges;
+  const CompactPublicState& state = node_cursor.exact_state();
+  if (condition_player_a_) {
+    solver.condition_ranges_for_actions(
+        original_player_a_range_->get(), state, public_state_id, player,
+        legal_action_ids, *conditioned_ranges_);
+  } else {
+    solver.condition_ranges_for_actions(
+        original_player_b_range_->get(), state, public_state_id, player,
+        legal_action_ids, *conditioned_ranges_);
+  }
+}
+
+CFRSolver::OptionalTrainingRange
+CFRSolver::ActionRangeConditioning::player_a_range_for(
+    size_t action_index) const {
+  if (condition_player_a_) {
+    return std::cref((*conditioned_ranges_)[action_index]);
+  }
+  return original_player_a_range_;
+}
+
+CFRSolver::OptionalTrainingRange
+CFRSolver::ActionRangeConditioning::player_b_range_for(
+    size_t action_index) const {
+  if (condition_player_b_) {
+    return std::cref((*conditioned_ranges_)[action_index]);
+  }
+  return original_player_b_range_;
 }
 
 void CFRSolver::condition_ranges_for_actions(

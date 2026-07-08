@@ -402,6 +402,30 @@ class CFRSolver {
     int depth_ = 0;
   };
 
+  class ActionRangeConditioning {
+   public:
+    ActionRangeConditioning(CFRSolver& solver,
+                            TraversalContext& ctx,
+                            const NodeCursor& node_cursor,
+                            uint32_t public_state_id,
+                            int player,
+                            absl::Span<const int> legal_action_ids);
+
+    bool enabled() const {
+      return condition_player_a_ || condition_player_b_;
+    }
+
+    OptionalTrainingRange player_a_range_for(size_t action_index) const;
+    OptionalTrainingRange player_b_range_for(size_t action_index) const;
+
+   private:
+    OptionalTrainingRange original_player_a_range_;
+    OptionalTrainingRange original_player_b_range_;
+    std::vector<TrainingRangeView>* conditioned_ranges_ = nullptr;
+    bool condition_player_a_ = false;
+    bool condition_player_b_ = false;
+  };
+
   CFRSolver(const SolverConfig& config,
             std::shared_ptr<TerminalUtilityCache> utility_cache);
   CFRSolver(const SolverConfig& config,
