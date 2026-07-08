@@ -130,36 +130,19 @@ void ActionBlock::average_strategy(bool regret_only_training,
 StrategyStore::StrategyStore(
     const SolverConfig& config,
     const CardAbstraction& card_abstraction,
-    std::shared_ptr<const FrozenStrategyTables>* frozen_tables,
-    std::shared_ptr<FrozenStrategyTables>* mutable_tables,
-    std::shared_ptr<MutableCumulativeArrays>* cumulative,
-    bool* frozen,
+    SolverStorage& storage,
     TraversalStats* stats)
     : config_(config),
       card_abstraction_(card_abstraction),
-      frozen_tables_owner_(frozen_tables),
-      mutable_tables_owner_(mutable_tables),
-      cumulative_owner_(cumulative),
-      frozen_(frozen),
-      stats_(stats) {
-  bind_tables();
-}
-
-void StrategyStore::bind_tables() {
-  frozen_tables_ = frozen_tables_owner_->get();
-  mutable_tables_ = mutable_tables_owner_->get();
-  cumulative_ = cumulative_owner_->get();
-}
+      storage_(storage),
+      stats_(stats) {}
 
 FrozenStrategyTables& StrategyStore::mutable_tables() {
   return tables_for_growth();
 }
 
 FrozenStrategyTables& StrategyStore::tables_for_growth() {
-  if (*frozen_ || mutable_tables_ == nullptr) {
-    throw std::logic_error("Strategy tables are frozen");
-  }
-  return *mutable_tables_;
+  return storage_.mutable_ref();
 }
 
 ActionBlock StrategyStore::block_for_row(const InfoSetRow& row) {
@@ -264,7 +247,7 @@ void StrategyStore::regret_matching_for_bucket(
 }
 
 bool StrategyStore::prebuild_private_bucket_rows() {
-  if (*frozen_) {
+  if (storage_.frozen) {
     return true;
   }
 
@@ -293,7 +276,7 @@ bool StrategyStore::prebuild_private_bucket_rows() {
 }
 
 bool StrategyStore::prebuild_frozen_info_set_action_offsets() {
-  if (*frozen_) {
+  if (storage_.frozen) {
     return true;
   }
 
@@ -424,9 +407,10 @@ const StrategyStore::InfoSetRow* StrategyStore::get_or_create_info_set_row(
     return row;
   }
 
-  if (*frozen_ || (config_.max_info_sets > 0 &&
-                   static_cast<int>(frozen_tables().info_set_count) >=
-                       config_.max_info_sets)) {
+  if (storage_.frozen ||
+      (config_.max_info_sets > 0 &&
+       static_cast<int>(frozen_tables().info_set_count) >=
+           config_.max_info_sets)) {
     return nullptr;
   }
 

@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <utility>
 
 #include "absl/types/span.h"
 #include "src/build_flags.h"
@@ -91,12 +92,6 @@ struct RegretUpdateOptions {
   bool record_atomic_retry_stats = false;
 };
 
-struct ActionBlockOptions {
-  RegretLoadMode regret_load_mode = RegretLoadMode::kAtomic;
-  RegretUpdateMode update_mode = RegretUpdateMode::kAtomic;
-  bool record_atomic_retry_stats = false;
-};
-
 struct TraversalStats {
   int64_t cfr_updates = 0;
   int64_t preflop_updates = 0;
@@ -155,6 +150,48 @@ class ActionBlock {
   uint16_t action_count_ = 0;
 };
 
+struct SolverStorage {
+  std::shared_ptr<FrozenStrategyTables> mutable_tables =
+      std::make_shared<FrozenStrategyTables>();
+  std::shared_ptr<const FrozenStrategyTables> frozen_tables = mutable_tables;
+  std::shared_ptr<MutableCumulativeArrays> cumulative =
+      std::make_shared<MutableCumulativeArrays>();
+  bool frozen = false;
+
+  FrozenStrategyTables& mutable_ref() {
+    if (frozen || mutable_tables == nullptr) {
+      throw std::logic_error("Strategy tables are frozen");
+    }
+    return *mutable_tables;
+  }
+
+  const FrozenStrategyTables& frozen_ref() const {
+    return *frozen_tables;
+  }
+
+  MutableCumulativeArrays& cumulative_ref() {
+    return *cumulative;
+  }
+
+  const MutableCumulativeArrays& cumulative_ref() const {
+    return *cumulative;
+  }
+
+  void freeze() {
+    frozen_tables = mutable_tables;
+    mutable_tables.reset();
+    frozen = true;
+  }
+
+  void bind_frozen(std::shared_ptr<const FrozenStrategyTables> frozen_in,
+                   std::shared_ptr<MutableCumulativeArrays> cumulative_in) {
+    mutable_tables.reset();
+    frozen_tables = std::move(frozen_in);
+    cumulative = std::move(cumulative_in);
+    frozen = true;
+  }
+};
+
 class StrategyStore {
  public:
   using PrivateBucketId = FrozenStrategyTables::PrivateBucketId;
@@ -169,13 +206,9 @@ class StrategyStore {
   StrategyStore(
       const SolverConfig& config,
       const CardAbstraction& card_abstraction,
-      std::shared_ptr<const FrozenStrategyTables>* frozen_tables,
-      std::shared_ptr<FrozenStrategyTables>* mutable_tables,
-      std::shared_ptr<MutableCumulativeArrays>* cumulative,
-      bool* frozen,
+      SolverStorage& storage,
       TraversalStats* stats);
 
-  void bind_tables();
   FrozenStrategyTables& mutable_tables();
 
   std::optional<ActionBlock> find(InfoSetAddress address,
@@ -243,26 +276,20 @@ class StrategyStore {
 
   const SolverConfig& config_;
   const CardAbstraction& card_abstraction_;
-  std::shared_ptr<const FrozenStrategyTables>* frozen_tables_owner_;
-  std::shared_ptr<FrozenStrategyTables>* mutable_tables_owner_;
-  std::shared_ptr<MutableCumulativeArrays>* cumulative_owner_;
-  const FrozenStrategyTables* frozen_tables_ = nullptr;
-  FrozenStrategyTables* mutable_tables_ = nullptr;
-  MutableCumulativeArrays* cumulative_ = nullptr;
-  bool* frozen_;
+  SolverStorage& storage_;
   TraversalStats* stats_;
 };
 
 inline const FrozenStrategyTables& StrategyStore::frozen_tables() const {
-  return *frozen_tables_;
+  return storage_.frozen_ref();
 }
 
 inline MutableCumulativeArrays& StrategyStore::cumulative() {
-  return *cumulative_;
+  return storage_.cumulative_ref();
 }
 
 inline const MutableCumulativeArrays& StrategyStore::cumulative() const {
-  return *cumulative_;
+  return storage_.cumulative_ref();
 }
 
 inline void StrategyStore::record_action_entry_touches(int64_t count) const {

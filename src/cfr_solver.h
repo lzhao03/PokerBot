@@ -78,9 +78,11 @@ class CFRSolver {
   double get_expected_value(int player_id) const;
   int get_iterations_run() const { return iterations_run_; }
   int64_t get_cfr_update_count() const { return cfr_update_count_; }
-  size_t get_info_set_count() const { return frozen_tables_->info_set_count; }
+  size_t get_info_set_count() const {
+    return storage_.frozen_ref().info_set_count;
+  }
   size_t get_public_state_count() const {
-    return frozen_tables_->public_state_rows.size();
+    return storage_.frozen_ref().public_state_rows.size();
   }
   TraversalStats get_traversal_stats() const { return traversal_stats_; }
   TrainingRunStats get_last_training_run_stats() const {
@@ -543,11 +545,8 @@ class CFRSolver {
   std::shared_ptr<TerminalUtilityCache> utility_cache_;
   CardAbstraction card_abstraction_;
   BettingAbstraction betting_abstraction_;
-  bool frozen_ = false;
   bool require_frozen_children_ = false;
-  std::shared_ptr<FrozenStrategyTables> mutable_tables_;
-  std::shared_ptr<const FrozenStrategyTables> frozen_tables_;
-  std::shared_ptr<MutableCumulativeArrays> cumulative_;
+  SolverStorage storage_;
   StrategyStore strategy_store_;
 };
 

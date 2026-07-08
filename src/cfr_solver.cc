@@ -241,12 +241,8 @@ CFRSolver::CFRSolver(
     rng_(12345),
     cumulative_root_utility_(0.0),
     utility_cache_(std::move(utility_cache)),
-    mutable_tables_(std::make_shared<FrozenStrategyTables>()),
-    frozen_tables_(mutable_tables_),
-    cumulative_(std::make_shared<MutableCumulativeArrays>()),
-    strategy_store_(config_, card_abstraction_, &frozen_tables_,
-                    &mutable_tables_, &cumulative_, &frozen_,
-                    &traversal_stats_) {
+    storage_(),
+    strategy_store_(config_, card_abstraction_, storage_, &traversal_stats_) {
   // Pre-allocate strategy table storage when limits are known upfront.
   // This gives fully deterministic peak memory: no reallocation after init.
   if (config_.max_info_sets > 0) {
@@ -254,22 +250,23 @@ CFRSolver::CFRSolver(
     constexpr int kAvgActionsPerInfoSet = 4;
     const size_t info_set_cap = static_cast<size_t>(config_.max_info_sets);
     const size_t action_cap = info_set_cap * kAvgActionsPerInfoSet;
-    mutable_tables_->action_ids.reserve(action_cap);
-    cumulative_->cumulative_regrets.reserve(action_cap);
-    cumulative_->cumulative_strategies.reserve(action_cap);
+    storage_.mutable_ref().action_ids.reserve(action_cap);
+    storage_.cumulative_ref().cumulative_regrets.reserve(action_cap);
+    storage_.cumulative_ref().cumulative_strategies.reserve(action_cap);
   }
   if (config_.max_public_states > 0) {
     const size_t public_state_cap =
         static_cast<size_t>(config_.max_public_states);
-    mutable_tables_->public_state_ids.reserve(public_state_cap);
-    mutable_tables_->public_state_rows.reserve(public_state_cap);
-    mutable_tables_->public_chance_child_ids.reserve(public_state_cap);
-    mutable_tables_->chance_child_entries.reserve(public_state_cap);
-    mutable_tables_->private_bucket_rows.reserve(public_state_cap);
-    mutable_tables_->frozen_info_set_action_offsets.reserve(public_state_cap);
-    mutable_tables_->public_info_set_slabs.reserve(public_state_cap);
-    mutable_tables_->betting_history_ids.reserve(public_state_cap);
-    mutable_tables_->betting_history_rows.reserve(public_state_cap);
+    storage_.mutable_ref().public_state_ids.reserve(public_state_cap);
+    storage_.mutable_ref().public_state_rows.reserve(public_state_cap);
+    storage_.mutable_ref().public_chance_child_ids.reserve(public_state_cap);
+    storage_.mutable_ref().chance_child_entries.reserve(public_state_cap);
+    storage_.mutable_ref().private_bucket_rows.reserve(public_state_cap);
+    storage_.mutable_ref().frozen_info_set_action_offsets.reserve(
+        public_state_cap);
+    storage_.mutable_ref().public_info_set_slabs.reserve(public_state_cap);
+    storage_.mutable_ref().betting_history_ids.reserve(public_state_cap);
+    storage_.mutable_ref().betting_history_rows.reserve(public_state_cap);
   }
 }
 
@@ -361,10 +358,10 @@ CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
 std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
     uint32_t betting_history_id,
     CompactPublicState state) {
-  if (frozen_) {
-    auto existing = frozen_tables_->public_state_ids.find(
+  if (storage_.frozen) {
+    auto existing = storage_.frozen_ref().public_state_ids.find(
         make_public_state_key(betting_history_id, state));
-    if (existing == frozen_tables_->public_state_ids.end()) {
+    if (existing == storage_.frozen_ref().public_state_ids.end()) {
       return std::nullopt;
     }
     return existing->second;
@@ -398,11 +395,11 @@ std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
 
 std::optional<uint32_t> CFRSolver::get_or_create_public_state_row(
     const CompactPublicState& state) {
-  if (frozen_) {
+  if (storage_.frozen) {
     BettingHistoryKey key = make_betting_history_key(state);
     const auto betting_history =
-        frozen_tables_->betting_history_ids.find(key);
-    if (betting_history == frozen_tables_->betting_history_ids.end()) {
+        storage_.frozen_ref().betting_history_ids.find(key);
+    if (betting_history == storage_.frozen_ref().betting_history_ids.end()) {
       return std::nullopt;
     }
     return get_or_create_public_state_row(betting_history->second, state);
@@ -519,7 +516,7 @@ void CFRSolver::cache_betting_history_actions(
 std::optional<uint32_t> CFRSolver::action_child_public_state(
     uint32_t public_state_id,
     int action_index) const {
-  const auto& rows = frozen_tables_->public_state_rows;
+  const auto& rows = storage_.frozen_ref().public_state_rows;
   if (public_state_id >= rows.size()) {
     return std::nullopt;
   }
@@ -539,14 +536,14 @@ std::optional<uint32_t> CFRSolver::action_child_public_state(
 std::optional<uint32_t> CFRSolver::chance_child_public_state(
     uint32_t public_state_id,
     const CompactPublicState& child_state) const {
-  const auto& rows = frozen_tables_->public_state_rows;
+  const auto& rows = storage_.frozen_ref().public_state_rows;
   if (public_state_id >= rows.size()) {
     return std::nullopt;
   }
   const PublicStateRow& row = rows[public_state_id];
   const size_t begin = row.chance_child_offset;
   const size_t end = begin + row.chance_child_count;
-  const auto& entries = frozen_tables_->chance_child_entries;
+  const auto& entries = storage_.frozen_ref().chance_child_entries;
   if (begin > entries.size() || end > entries.size()) {
     return std::nullopt;
   }
@@ -570,7 +567,7 @@ std::optional<uint32_t> CFRSolver::chance_child_public_state(
 std::optional<uint32_t> CFRSolver::chance_child_public_state(
     uint32_t public_state_id,
     absl::Span<const CardId> cards) const {
-  const auto& rows = frozen_tables_->public_state_rows;
+  const auto& rows = storage_.frozen_ref().public_state_rows;
   if (public_state_id >= rows.size()) {
     return std::nullopt;
   }
@@ -614,7 +611,7 @@ PublicBucketId CFRSolver::chance_outcome_id(
 std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
     uint32_t public_state_id,
     int action_index) {
-  const auto& rows = frozen_tables_->public_state_rows;
+  const auto& rows = storage_.frozen_ref().public_state_rows;
   if (public_state_id >= rows.size()) {
     return std::nullopt;
   }
@@ -635,7 +632,7 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
   }
 
   const uint32_t parent_betting_history_id = read_row.betting_history_id;
-  const auto& betting_history_rows = frozen_tables_->betting_history_rows;
+  const auto& betting_history_rows = storage_.frozen_ref().betting_history_rows;
   if (parent_betting_history_id < betting_history_rows.size()) {
     const BettingHistoryRow& parent_betting_history =
         betting_history_rows[parent_betting_history_id];
@@ -650,9 +647,10 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
             read_row.public_bucket,
         };
         auto existing_public_child =
-            frozen_tables_->public_state_ids.find(child_key);
-        if (existing_public_child != frozen_tables_->public_state_ids.end()) {
-          if (!frozen_) {
+            storage_.frozen_ref().public_state_ids.find(child_key);
+        if (existing_public_child !=
+            storage_.frozen_ref().public_state_ids.end()) {
+          if (!storage_.frozen) {
             mutable_tables()
                 .public_state_rows[public_state_id]
                 .action_child_ids[action_slot] = existing_public_child->second;
@@ -663,12 +661,12 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
       }
     }
   }
-  if (frozen_) {
+  if (storage_.frozen) {
     record_betting_history_transition_miss();
     return std::nullopt;
   }
   if (config_.max_public_states > 0 &&
-      static_cast<int>(frozen_tables_->public_state_rows.size()) >=
+      static_cast<int>(storage_.frozen_ref().public_state_rows.size()) >=
           config_.max_public_states) {
     mutable_tables()
         .public_state_rows[public_state_id]
@@ -678,9 +676,12 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
   }
 
   const GameAction action =
-      frozen_tables_->public_state_rows[public_state_id].actions[action_slot];
+      storage_.frozen_ref()
+          .public_state_rows[public_state_id]
+          .actions[action_slot];
   CompactPublicState child_state = game_tree_->apply_action(
-      frozen_tables_->public_state_rows[public_state_id].state, action);
+      storage_.frozen_ref().public_state_rows[public_state_id].state,
+      action);
   const uint32_t child_betting_history_id =
       get_or_create_action_child_betting_history_id(
           parent_betting_history_id, action_index, child_state);
@@ -706,14 +707,14 @@ std::optional<uint32_t> CFRSolver::get_or_create_action_child_public_state(
 std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
     uint32_t public_state_id,
     const CompactPublicState& child_state) {
-  const auto& rows = frozen_tables_->public_state_rows;
+  const auto& rows = storage_.frozen_ref().public_state_rows;
   if (public_state_id >= rows.size()) {
     return std::nullopt;
   }
   const PublicStateRow& row = rows[public_state_id];
   const PublicBucketId outcome_id = chance_outcome_id(child_state);
   const ChanceTransitionKey transition_key{public_state_id, outcome_id};
-  const auto& chance_children = frozen_tables_->public_chance_child_ids;
+  const auto& chance_children = storage_.frozen_ref().public_chance_child_ids;
   auto existing = chance_children.find(transition_key);
   if (existing != chance_children.end()) {
     record_betting_history_transition_hit();
@@ -721,7 +722,7 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
   }
   if constexpr (kCoarsePublicBuckets) {
     const uint32_t cached_parent_betting_history_id = row.betting_history_id;
-    const auto& betting_history_rows = frozen_tables_->betting_history_rows;
+    const auto& betting_history_rows = storage_.frozen_ref().betting_history_rows;
     if (cached_parent_betting_history_id < betting_history_rows.size()) {
       const uint32_t child_betting_history_id =
           betting_history_rows[cached_parent_betting_history_id].chance_child_id;
@@ -731,9 +732,10 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
             outcome_id,
         };
         auto existing_public_child =
-            frozen_tables_->public_state_ids.find(child_public_key);
-        if (existing_public_child != frozen_tables_->public_state_ids.end()) {
-          if (!frozen_) {
+            storage_.frozen_ref().public_state_ids.find(child_public_key);
+        if (existing_public_child !=
+            storage_.frozen_ref().public_state_ids.end()) {
+          if (!storage_.frozen) {
             mutable_tables().public_chance_child_ids.emplace(
                 transition_key, existing_public_child->second);
           }
@@ -743,12 +745,12 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
       }
     }
   }
-  if (frozen_) {
+  if (storage_.frozen) {
     record_betting_history_transition_miss();
     return std::nullopt;
   }
   if (config_.max_public_states > 0 &&
-      static_cast<int>(frozen_tables_->public_state_rows.size()) >=
+      static_cast<int>(storage_.frozen_ref().public_state_rows.size()) >=
           config_.max_public_states) {
     record_betting_history_transition_miss();
     return std::nullopt;
@@ -777,7 +779,7 @@ std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
 std::optional<uint32_t> CFRSolver::get_or_create_chance_child_public_state(
     uint32_t public_state_id,
     absl::Span<const CardId> cards) {
-  const auto& rows = frozen_tables_->public_state_rows;
+  const auto& rows = storage_.frozen_ref().public_state_rows;
   if (public_state_id >= rows.size()) {
     return std::nullopt;
   }
@@ -809,7 +811,7 @@ CompactPublicState CFRSolver::NodeView::exact_state() const {
 }
 
 std::optional<CFRSolver::NodeView> CFRSolver::view(NodeRef node) const {
-  const auto& rows = frozen_tables_->public_state_rows;
+  const auto& rows = storage_.frozen_ref().public_state_rows;
   if (node.public_state_id >= rows.size()) {
     return std::nullopt;
   }
@@ -818,7 +820,7 @@ std::optional<CFRSolver::NodeView> CFRSolver::view(NodeRef node) const {
 
 std::optional<CFRSolver::NodeRef> CFRSolver::root_node_ref(
     uint32_t root_public_state_id) const {
-  const auto& rows = frozen_tables_->public_state_rows;
+  const auto& rows = storage_.frozen_ref().public_state_rows;
   if (root_public_state_id >= rows.size()) {
     return std::nullopt;
   }
@@ -827,7 +829,7 @@ std::optional<CFRSolver::NodeRef> CFRSolver::root_node_ref(
 }
 
 CFRSolver::NodeGraphMode CFRSolver::default_node_graph_mode() const {
-  if (!frozen_) {
+  if (!storage_.frozen) {
     return NodeGraphMode::kGrow;
   }
   return require_frozen_children_ ? NodeGraphMode::kRequirePresent
@@ -855,7 +857,7 @@ CFRSolver::NodeGraph::action_child(NodeRef parent,
       break;
   }
 
-  const auto& rows = solver_.frozen_tables_->public_state_rows;
+  const auto& rows = solver_.storage_.frozen_ref().public_state_rows;
   ChildStatus status = ChildStatus::kOk;
   if (!child_id.has_value() ||
       *child_id == GameTree::kInvalidPublicStateId) {
@@ -904,7 +906,7 @@ CFRSolver::NodeGraph::sample_chance_child(
       break;
   }
 
-  const auto& rows = solver_.frozen_tables_->public_state_rows;
+  const auto& rows = solver_.storage_.frozen_ref().public_state_rows;
   ChildStatus status = ChildStatus::kOk;
   if (!child_id.has_value() ||
       *child_id == GameTree::kInvalidPublicStateId) {
@@ -926,10 +928,10 @@ CFRSolver::NodeGraph::sample_chance_child(
 
 bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
                                            int max_depth) {
-  if (frozen_) {
+  if (storage_.frozen) {
     return true;
   }
-  if (root_public_state_id >= frozen_tables_->public_state_rows.size()) {
+  if (root_public_state_id >= storage_.frozen_ref().public_state_rows.size()) {
     return false;
   }
 
@@ -941,7 +943,7 @@ bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
   std::vector<QueueEntry> queue;
   std::vector<char> queued;
   queue.reserve(1024);
-  queued.resize(frozen_tables_->public_state_rows.size(), 0);
+  queued.resize(storage_.frozen_ref().public_state_rows.size(), 0);
   queue.push_back({root_public_state_id, 0});
   queued[root_public_state_id] = 1;
 
@@ -957,11 +959,11 @@ bool CFRSolver::prebuild_public_state_rows(uint32_t root_public_state_id,
 
   for (size_t cursor = 0; cursor < queue.size(); ++cursor) {
     const QueueEntry entry = queue[cursor];
-    if (entry.public_state_id >= frozen_tables_->public_state_rows.size()) {
+    if (entry.public_state_id >= storage_.frozen_ref().public_state_rows.size()) {
       return false;
     }
     const PublicStateRow row =
-        frozen_tables_->public_state_rows[entry.public_state_id];
+        storage_.frozen_ref().public_state_rows[entry.public_state_id];
     if (row.is_terminal) {
       continue;
     }
@@ -1065,8 +1067,8 @@ bool CFRSolver::validate_prebuilt_transitions(
     uint32_t root_public_state_id,
     int max_depth,
     TrainingRunStats& stats) const {
-  const auto& rows = frozen_tables_->public_state_rows;
-  const auto& history_rows = frozen_tables_->betting_history_rows;
+  const auto& rows = storage_.frozen_ref().public_state_rows;
+  const auto& history_rows = storage_.frozen_ref().betting_history_rows;
   if (root_public_state_id >= rows.size()) {
     return false;
   }
@@ -1218,7 +1220,7 @@ bool CFRSolver::validate_prebuilt_transitions(
 bool CFRSolver::prebuild_info_set_rows(
     const TrainingRangeView& player_a_range,
     const TrainingRangeView& player_b_range) {
-  if (frozen_) {
+  if (storage_.frozen) {
     return true;
   }
 
@@ -1226,10 +1228,10 @@ bool CFRSolver::prebuild_info_set_rows(
   uint32_t seen_generation = 1;
 
   for (uint32_t public_state_id = 0;
-       public_state_id < frozen_tables_->public_state_rows.size();
+       public_state_id < storage_.frozen_ref().public_state_rows.size();
        ++public_state_id) {
     const PublicStateRow& row =
-        frozen_tables_->public_state_rows[public_state_id];
+        storage_.frozen_ref().public_state_rows[public_state_id];
     const int player = row.player_to_act;
     if (row.is_terminal || row.is_chance_node || row.action_count == 0 ||
         !IsPlayer(player)) {
@@ -1407,7 +1409,7 @@ void CFRSolver::run_iterations(int iterations,
   }
   VLOG(1) << "Compact root row has "
           << static_cast<int>(
-                 frozen_tables_->public_state_rows[*root_public_state_id].action_count)
+                 storage_.frozen_ref().public_state_rows[*root_public_state_id].action_count)
           << " legal actions";
 
   const int num_threads =
@@ -1420,7 +1422,7 @@ void CFRSolver::run_iterations(int iterations,
       *root_public_state_id, num_threads, max_depth, can_use_frozen_regret_only,
       player_a_hands_view, player_b_hands_view);
   const CompactPublicState root_state =
-      frozen_tables_->public_state_rows[*root_public_state_id].state;
+      storage_.frozen_ref().public_state_rows[*root_public_state_id].state;
   const int completed_warmup = run_warmup_phase(
       iterations, *root_public_state_id, root_state, range_sampler,
       player_a_hands_view, player_b_hands_view, max_depth,
@@ -1445,7 +1447,7 @@ bool CFRSolver::prepare_frozen_training(
     const TrainingRangeView& player_b_hands_view) {
   TrainingRunStats& stats = last_training_run_stats_;
   const bool should_prebuild_public_states =
-      !frozen_ && (num_threads > 1 || can_use_frozen_regret_only) &&
+      !storage_.frozen && (num_threads > 1 || can_use_frozen_regret_only) &&
       (config_.max_public_states > 0 || max_depth > 0);
   if (!should_prebuild_public_states) {
     return false;
@@ -1455,12 +1457,13 @@ bool CFRSolver::prepare_frozen_training(
     stats.prebuild_public_states =
         static_cast<int64_t>(get_public_state_count());
     stats.prebuild_betting_histories =
-        static_cast<int64_t>(frozen_tables_->betting_history_rows.size());
+        static_cast<int64_t>(storage_.frozen_ref().betting_history_rows.size());
   };
   auto record_action_counts = [&] {
     stats.prebuild_info_sets = static_cast<int64_t>(get_info_set_count());
     stats.prebuild_action_entries =
-        static_cast<int64_t>(cumulative_->cumulative_regrets.size());
+        static_cast<int64_t>(
+            storage_.cumulative_ref().cumulative_regrets.size());
   };
 
   VLOG(1) << "Prebuilding compact public-state rows...";
@@ -1500,7 +1503,7 @@ bool CFRSolver::prepare_frozen_training(
     return false;
   }
   stats.prebuild_private_bucket_rows =
-      static_cast<int64_t>(frozen_tables_->private_bucket_rows.size());
+      static_cast<int64_t>(storage_.frozen_ref().private_bucket_rows.size());
 
   stats.frozen_info_set_lookup_prebuild_complete =
       strategy_store_.prebuild_frozen_info_set_action_offsets();
@@ -1509,7 +1512,7 @@ bool CFRSolver::prepare_frozen_training(
   }
   stats.prebuild_frozen_info_set_lookup_rows =
       static_cast<int64_t>(
-          frozen_tables_->frozen_info_set_action_offsets.size());
+          storage_.frozen_ref().frozen_info_set_action_offsets.size());
   return true;
 }
 
@@ -1524,9 +1527,9 @@ int CFRSolver::run_warmup_phase(
     bool should_run_frozen_phase,
     bool can_use_frozen_regret_only) {
   const bool auto_warmup =
-      should_run_frozen_phase && !frozen_ && config_.warmup_iterations <= 0;
+      should_run_frozen_phase && !storage_.frozen && config_.warmup_iterations <= 0;
   int warmup_count = iterations;
-  if (should_run_frozen_phase && !frozen_ &&
+  if (should_run_frozen_phase && !storage_.frozen &&
       config_.warmup_iterations > 0) {
     const int requested_warmup =
         can_use_frozen_regret_only
@@ -1627,10 +1630,7 @@ void CFRSolver::maybe_run_frozen_phase(
     return;
   }
 
-  frozen_tables_ = mutable_tables_;
-  mutable_tables_.reset();
-  frozen_ = true;
-  strategy_store_.bind_tables();
+  storage_.freeze();
   require_frozen_children_ = true;
   LOG(INFO) << "Frozen after warmup: " << get_info_set_count()
             << " info sets, " << iterations_run_
@@ -1659,11 +1659,12 @@ void CFRSolver::run_frozen_iterations(
   // Each worker shares the frozen strategy tables and writes to the same
   // regret/strategy arrays.
   // Workers use their own RNG and TraversalScratch; no locks needed.
-  std::shared_ptr<const FrozenStrategyTables> frozen_tables = frozen_tables_;
-  std::shared_ptr<MutableCumulativeArrays> cumulative = cumulative_;
+  std::shared_ptr<const FrozenStrategyTables> frozen_tables =
+      storage_.frozen_tables;
+  std::shared_ptr<MutableCumulativeArrays> cumulative = storage_.cumulative;
   const bool use_frozen_regret_only =
-      frozen_ && require_frozen_children_ && config_.regret_only_training &&
-      config_.max_depth == 0;
+      storage_.frozen && require_frozen_children_ &&
+      config_.regret_only_training && config_.max_depth == 0;
   const bool use_atomic_updates = num_threads > 1;
 
   ThreadPoolExecutor executor(num_threads);
@@ -1696,11 +1697,7 @@ void CFRSolver::run_frozen_iterations(
          &player_b_training_range]() mutable {
           // Build a lightweight worker that shares frozen tables.
           CFRSolver worker(config_, utility_cache_);
-          worker.mutable_tables_.reset();
-          worker.frozen_tables_ = frozen_tables;
-          worker.cumulative_ = cumulative;
-          worker.frozen_ = true;
-          worker.strategy_store_.bind_tables();
+          worker.storage_.bind_frozen(frozen_tables, cumulative);
           worker.require_frozen_children_ = true;
           worker.rng_.seed(seed);
 
@@ -1719,7 +1716,8 @@ void CFRSolver::run_frozen_iterations(
 
           double local_utility = 0.0;
           const CompactPublicState root_state =
-              worker.frozen_tables_->public_state_rows[root_public_state_id]
+              worker.storage_.frozen_ref()
+                  .public_state_rows[root_public_state_id]
                   .state;
           NodeGraph graph(worker, NodeGraphMode::kRequirePresent);
           const NodeRef root_node{root_public_state_id,
@@ -1928,7 +1926,7 @@ double CFRSolver::chance_sampling_cfr(
     NodeRef node,
     TraversalContext& ctx,
     NodeGraph& graph) {
-  const auto& rows = frozen_tables_->public_state_rows;
+  const auto& rows = storage_.frozen_ref().public_state_rows;
   if (node.public_state_id >= rows.size()) {
     return 0.0;
   }
@@ -1983,7 +1981,7 @@ double CFRSolver::cfr_frozen_regret_only(
     NodeRef node,
     TraversalContext& ctx,
     NodeGraph& graph) {
-  const auto& public_state_rows = frozen_tables_->public_state_rows;
+  const auto& public_state_rows = storage_.frozen_ref().public_state_rows;
   const uint32_t public_state_id = node.public_state_id;
   const ExactBoardState& exact_board = node.exact_board;
   if (public_state_id >= public_state_rows.size()) {
@@ -2138,7 +2136,7 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
     return 0.0;
   }
   const CompactPublicState root_state =
-      frozen_tables_->public_state_rows[*root_public_state_id].state;
+      storage_.frozen_ref().public_state_rows[*root_public_state_id].state;
   const NodeRef root_node{*root_public_state_id,
                           ExactBoardFromState(root_state)};
   NodeGraph graph(*this, default_node_graph_mode());
@@ -2186,8 +2184,9 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   }
 
   SolverConfig config = config_;
-  std::shared_ptr<const FrozenStrategyTables> frozen_tables = frozen_tables_;
-  std::shared_ptr<MutableCumulativeArrays> cumulative = cumulative_;
+  std::shared_ptr<const FrozenStrategyTables> frozen_tables =
+      storage_.frozen_tables;
+  std::shared_ptr<MutableCumulativeArrays> cumulative = storage_.cumulative;
   std::vector<std::future<std::pair<double, int64_t>>> futures;
   futures.reserve(worker_count);
   int samples_remaining = samples;
@@ -2201,11 +2200,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
                                        frozen_tables, cumulative,
                                        shard_samples, seed]() mutable {
       CFRSolver worker(config, std::make_shared<TerminalUtilityCache>());
-      worker.mutable_tables_.reset();
-      worker.frozen_tables_ = frozen_tables;
-      worker.cumulative_ = cumulative;
-      worker.frozen_ = true;
-      worker.strategy_store_.bind_tables();
+      worker.storage_.bind_frozen(frozen_tables, cumulative);
       worker.rng_.seed(seed);
       const double value = worker.evaluate_strategy_samples(
           shard_samples, root_public_state_id, range_sampler);
