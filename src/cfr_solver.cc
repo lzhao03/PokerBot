@@ -215,7 +215,8 @@ CoarseChanceTransitionMap BuildCoarseChanceTransitions(StreetKind street) {
   return transitions;
 }
 
-const CoarseChanceTransitionMap& CoarseChanceTransitions(StreetKind street) {
+[[maybe_unused]] const CoarseChanceTransitionMap& CoarseChanceTransitions(
+    StreetKind street) {
   static const CoarseChanceTransitionMap preflop =
       BuildCoarseChanceTransitions(StreetKind::kPreflop);
   static const CoarseChanceTransitionMap flop =
@@ -616,10 +617,10 @@ std::optional<uint32_t> CFRSolver::chance_child_public_state(
   return entries[low].public_state_id;
 }
 
+template <typename Callback>
 bool CFRSolver::for_each_required_chance_transition(
     const PublicStateRow& row,
-    const std::function<bool(const CompactPublicState&,
-                             absl::Span<const CardId>)>& callback) const {
+    Callback&& callback) const {
   if constexpr (kCoarsePublicBuckets) {
     const auto& transitions = CoarseChanceTransitions(row.state.street);
     const auto existing = transitions.find(row.public_bucket);

@@ -4,7 +4,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <optional>
 #include <random>
@@ -528,10 +527,10 @@ class CFRSolver {
   std::optional<uint32_t> chance_child_public_state(
       uint32_t public_state_id,
       const CompactPublicState& child_state) const;
+  template <typename Callback>
   bool for_each_required_chance_transition(
       const PublicStateRow& row,
-      const std::function<bool(const CompactPublicState&,
-                               absl::Span<const CardId>)>& callback) const;
+      Callback&& callback) const;
   PublicBucketId chance_outcome_id(
       const CompactPublicState& child_state) const;
   std::optional<uint32_t> get_or_create_action_child_public_state(
