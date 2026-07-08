@@ -18,9 +18,6 @@ absl::InlinedVector<CardId, 5> SampleStreetCards(
     CardMask board_mask,
     CardMask known_private_cards,
     std::mt19937& rng);
-absl::InlinedVector<CardId, 5> SampleStreetCards(const GameState& state,
-                                                 CardMask known_private_cards,
-                                                 std::mt19937& rng);
 absl::InlinedVector<CardId, 5> SampleStreetCards(
     const CompactPublicState& state,
     CardMask known_private_cards,

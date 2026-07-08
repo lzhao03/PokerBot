@@ -75,7 +75,7 @@ void CheckSampledStreetCardsAvoidKnownCards() {
   known_private_cards |= CardBit(MakeCardId(12, SuitKind::kHearts));
   known_private_cards |= CardBit(MakeCardId(11, SuitKind::kHearts));
 
-  GameState state;
+  CompactPublicState state;
   state.street = StreetKind::kFlop;
   AddBoardCard(state, MakeCardId(2, SuitKind::kClubs));
   AddBoardCard(state, MakeCardId(3, SuitKind::kDiamonds));
@@ -142,7 +142,7 @@ void CheckOneCardSamplingReturnsOnlyUnblockedCard() {
     }
   }
 
-  GameState state;
+  CompactPublicState state;
   state.street = StreetKind::kFlop;
 
   std::mt19937 rng(12345);
@@ -159,7 +159,7 @@ void CheckSampledFlopCardsAreUniqueAndAvoidKnownCards() {
   known_private_cards |= CardBit(MakeCardId(12, SuitKind::kHearts));
   known_private_cards |= CardBit(MakeCardId(11, SuitKind::kHearts));
 
-  GameState state;
+  CompactPublicState state;
   state.street = StreetKind::kPreflop;
 
   std::mt19937 rng(12345);
@@ -180,7 +180,7 @@ void CheckSamplingThrowsWhenDeckIsTooSmall() {
     known_private_cards |= CardBit(deck[i]);
   }
 
-  GameState state;
+  CompactPublicState state;
   state.street = StreetKind::kPreflop;
 
   std::mt19937 rng(12345);
