@@ -1,7 +1,6 @@
 #include "src/hand_evaluator.h"
 #include <algorithm>
 #include <cstdint>
-#include <initializer_list>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -25,15 +24,14 @@ struct EvaluationScore {
   }
 };
 
-EvaluationScore MakeScore(HandRank rank, std::initializer_list<int> kickers) {
+template <typename... Kickers>
+EvaluationScore MakeScore(HandRank rank, Kickers... kickers) {
+  static_assert(sizeof...(Kickers) <= 5);
+
   EvaluationScore score;
   score.rank = rank;
-  score.kicker_count = kickers.size();
-  size_t index = 0;
-  for (int kicker : kickers) {
-    score.kickers[index] = kicker;
-    ++index;
-  }
+  score.kickers = {static_cast<int>(kickers)...};
+  score.kicker_count = sizeof...(Kickers);
   return score;
 }
 
@@ -132,11 +130,11 @@ EvaluationScore EvaluateFiveCardScore(const std::array<CardId, 5>& cards) {
 
   if (flush && ranks[0] == 14 && ranks[1] == 13 && ranks[2] == 12 &&
       ranks[3] == 11 && ranks[4] == 10) {
-    return MakeScore(HandRank::ROYAL_FLUSH, {});
+    return MakeScore(HandRank::ROYAL_FLUSH);
   }
 
   if (flush && straight) {
-    return MakeScore(HandRank::STRAIGHT_FLUSH, {straight_high_rank});
+    return MakeScore(HandRank::STRAIGHT_FLUSH, straight_high_rank);
   }
 
   std::array<int, 15> rank_counts = {};
@@ -153,8 +151,8 @@ EvaluationScore EvaluateFiveCardScore(const std::array<CardId, 5>& cards) {
           break;
         }
       }
-      return MakeScore(HandRank::FOUR_OF_A_KIND,
-                       {static_cast<int>(i), kicker});
+      return MakeScore(HandRank::FOUR_OF_A_KIND, static_cast<int>(i),
+                       kicker);
     }
   }
 
@@ -169,17 +167,16 @@ EvaluationScore EvaluateFiveCardScore(const std::array<CardId, 5>& cards) {
   }
 
   if (three_of_a_kind_rank != -1 && pair_rank != -1) {
-    return MakeScore(HandRank::FULL_HOUSE,
-                     {three_of_a_kind_rank, pair_rank});
+    return MakeScore(HandRank::FULL_HOUSE, three_of_a_kind_rank, pair_rank);
   }
 
   if (flush) {
-    return MakeScore(HandRank::FLUSH,
-                     {ranks[0], ranks[1], ranks[2], ranks[3], ranks[4]});
+    return MakeScore(HandRank::FLUSH, ranks[0], ranks[1], ranks[2], ranks[3],
+                     ranks[4]);
   }
 
   if (straight) {
-    return MakeScore(HandRank::STRAIGHT, {straight_high_rank});
+    return MakeScore(HandRank::STRAIGHT, straight_high_rank);
   }
 
   if (three_of_a_kind_rank != -1) {
@@ -191,8 +188,8 @@ EvaluationScore EvaluateFiveCardScore(const std::array<CardId, 5>& cards) {
         ++kicker_count;
       }
     }
-    return MakeScore(HandRank::THREE_OF_A_KIND,
-                     {kickers[0], kickers[1], kickers[2]});
+    return MakeScore(HandRank::THREE_OF_A_KIND, kickers[0], kickers[1],
+                     kickers[2]);
   }
 
   std::array<int, 2> pairs = {};
@@ -214,7 +211,7 @@ EvaluationScore EvaluateFiveCardScore(const std::array<CardId, 5>& cards) {
         break;
       }
     }
-    return MakeScore(HandRank::TWO_PAIR, {high_pair, low_pair, kicker});
+    return MakeScore(HandRank::TWO_PAIR, high_pair, low_pair, kicker);
   }
 
   if (pair_count > 0) {
@@ -226,12 +223,12 @@ EvaluationScore EvaluateFiveCardScore(const std::array<CardId, 5>& cards) {
         ++kicker_count;
       }
     }
-    return MakeScore(HandRank::PAIR,
-                     {kickers[0], kickers[1], kickers[2], kickers[3]});
+    return MakeScore(HandRank::PAIR, kickers[0], kickers[1], kickers[2],
+                     kickers[3]);
   }
 
-  return MakeScore(HandRank::HIGH_CARD,
-                   {ranks[0], ranks[1], ranks[2], ranks[3], ranks[4]});
+  return MakeScore(HandRank::HIGH_CARD, ranks[0], ranks[1], ranks[2],
+                   ranks[3], ranks[4]);
 }
 
 int CompareScores(const EvaluationScore& first, const EvaluationScore& second) {
