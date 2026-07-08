@@ -1,4 +1,6 @@
 #include "src/hand_evaluator.h"
+#include "src/hand_evaluator_table_builder.h"
+#include "src/hand_evaluator_tables.h"
 
 #include <algorithm>
 #include <array>
@@ -36,8 +38,17 @@ GameState TestBoard(std::initializer_list<CardId> cards) {
   return board;
 }
 
+HandEvaluation ToHandEvaluation(
+    const hand_evaluator_generation::EvaluationScore& score) {
+  HandEvaluation evaluation;
+  evaluation.rank = score.rank;
+  evaluation.kickers = score.kickers;
+  evaluation.kicker_count = score.kicker_count;
+  return evaluation;
+}
+
 HandEvaluation ReferenceBestHandFromFiveCardEvaluation(
-    const HandEvaluator& evaluator, ComboId hand, const GameState& board) {
+    ComboId hand, const GameState& board) {
   std::array<CardId, 7> cards = {};
   const ComboInfo& combo = GetComboInfo(hand);
   cards[0] = combo.card0;
@@ -64,7 +75,8 @@ HandEvaluation ReferenceBestHandFromFiveCardEvaluation(
           subset[3] = cards[d];
           for (size_t e = d + 1; e < count; ++e) {
             subset[4] = cards[e];
-            const HandEvaluation current = evaluator.evaluate(subset);
+            const HandEvaluation current = ToHandEvaluation(
+                hand_evaluator_generation::EvaluateFiveCardScore(subset));
             if (best < current) {
               best = current;
             }
@@ -76,14 +88,13 @@ HandEvaluation ReferenceBestHandFromFiveCardEvaluation(
   return best;
 }
 
-int ReferenceCompare(const HandEvaluator& evaluator,
-                     ComboId first,
+int ReferenceCompare(ComboId first,
                      ComboId second,
                      const GameState& board) {
   const HandEvaluation first_eval =
-      ReferenceBestHandFromFiveCardEvaluation(evaluator, first, board);
+      ReferenceBestHandFromFiveCardEvaluation(first, board);
   const HandEvaluation second_eval =
-      ReferenceBestHandFromFiveCardEvaluation(evaluator, second, board);
+      ReferenceBestHandFromFiveCardEvaluation(second, board);
   if (first_eval > second_eval) {
     return 1;
   }
@@ -99,8 +110,30 @@ void CheckCompareMatchesReference(ComboId first,
                                   const char* message) {
   HandEvaluator evaluator;
   Expect(evaluator.compare_hands(first, second, board) ==
-             ReferenceCompare(evaluator, first, second, board),
+             ReferenceCompare(first, second, board),
          message);
+}
+
+void CheckGeneratedCactusTablesMatchReference() {
+  const auto reference = hand_evaluator_generation::BuildCactusTables();
+  Expect(reference.flushes == hand_evaluator_tables::kCactusFlushes,
+         "generated Cactus flush table should match reference builder");
+  Expect(reference.unique5 == hand_evaluator_tables::kCactusUnique5,
+         "generated Cactus unique-rank table should match reference builder");
+  Expect(reference.products.size() ==
+             hand_evaluator_tables::kCactusProducts.size(),
+         "generated Cactus product table size should match reference builder");
+  for (size_t i = 0; i < reference.products.size(); ++i) {
+    Expect(reference.products[i] == hand_evaluator_tables::kCactusProducts[i],
+           "generated Cactus product table should match reference builder");
+  }
+  for (size_t i = 0; i < reference.scores.size(); ++i) {
+    const auto& expected = reference.scores[i];
+    const auto& actual = hand_evaluator_tables::kCactusScores[i];
+    Expect(expected.rank == actual.rank && expected.kickers == actual.kickers &&
+               expected.kicker_count == actual.kicker_count,
+           "generated Cactus score table should match reference builder");
+  }
 }
 
 void CheckFiveCardEvaluation() {
@@ -169,8 +202,7 @@ void CheckSevenCardBestHand() {
 
   HandEvaluator evaluator;
   HandEvaluation evaluation = evaluator.evaluate_hand(hand, board);
-  Expect(evaluation == ReferenceBestHandFromFiveCardEvaluation(evaluator, hand,
-                                                              board),
+  Expect(evaluation == ReferenceBestHandFromFiveCardEvaluation(hand, board),
          "seven-card evaluation should match five-card reference");
   Expect(evaluation.rank == HandRank::FULL_HOUSE,
          "seven-card evaluation should choose full house");
@@ -370,6 +402,7 @@ void CheckCactusCompareRandomParity() {
 }  // namespace poker
 
 int main() {
+  poker::CheckGeneratedCactusTablesMatchReference();
   poker::CheckFiveCardEvaluation();
   poker::CheckWheelStraightIsFiveHigh();
   poker::CheckSevenCardBestHand();

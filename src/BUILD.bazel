@@ -44,7 +44,10 @@ cc_library(
 cc_library(
     name = "hand_evaluator",
     srcs = ["hand_evaluator.cc"],
-    hdrs = ["hand_evaluator.h"],
+    hdrs = [
+        "hand_evaluator.h",
+        "hand_evaluator_tables.h",
+    ],
     deps = [
         ":combo",
         ":poker_types",
@@ -53,9 +56,25 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+cc_binary(
+    name = "hand_evaluator_table_generator",
+    srcs = [
+        "hand_evaluator.h",
+        "hand_evaluator_table_builder.h",
+        "hand_evaluator_table_generator.cc",
+    ],
+    deps = [
+        ":combo",
+        ":poker_types",
+    ],
+)
+
 cc_test(
     name = "hand_evaluator_test",
-    srcs = ["hand_evaluator_test.cc"],
+    srcs = [
+        "hand_evaluator_table_builder.h",
+        "hand_evaluator_test.cc",
+    ],
     deps = [
         ":hand_evaluator",
     ],
