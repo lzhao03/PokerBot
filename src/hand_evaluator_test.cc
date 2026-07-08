@@ -224,6 +224,35 @@ void CheckCompactAndGameStateComparisonMatch() {
              evaluator.compare_hands(aces, kings, compact_state.board_cards,
                                      compact_state.board_count),
          "explicit-board showdown comparison should match GameState");
+
+  const auto compare_values = [](uint16_t first, uint16_t second) {
+    return static_cast<int>(first < second) -
+           static_cast<int>(first > second);
+  };
+
+  const int game_state_value_compare = compare_values(
+      evaluator.hand_value(aces, game_state),
+      evaluator.hand_value(kings, game_state));
+  Expect(evaluator.compare_hands(aces, kings, game_state) ==
+             game_state_value_compare,
+         "GameState comparison should match cached hand values");
+
+  const int compact_value_compare = compare_values(
+      evaluator.hand_value(aces, compact_state),
+      evaluator.hand_value(kings, compact_state));
+  Expect(evaluator.compare_hands(aces, kings, compact_state) ==
+             compact_value_compare,
+         "compact comparison should match cached hand values");
+
+  const int explicit_board_value_compare = compare_values(
+      evaluator.hand_value(aces, compact_state.board_cards,
+                           compact_state.board_count),
+      evaluator.hand_value(kings, compact_state.board_cards,
+                           compact_state.board_count));
+  Expect(evaluator.compare_hands(aces, kings, compact_state.board_cards,
+                                 compact_state.board_count) ==
+             explicit_board_value_compare,
+         "explicit-board comparison should match cached hand values");
 }
 
 void CheckCactusCompareRepresentativeParity() {

@@ -471,10 +471,7 @@ uint16_t EvalBestCactus(absl::Span<const CardId> cards) {
   return EvalBestCactus(GetCactusTables(), cards);
 }
 
-int CompareCactusHands(absl::Span<const CardId> first_cards,
-                       absl::Span<const CardId> second_cards) {
-  const uint16_t first = EvalBestCactus(first_cards);
-  const uint16_t second = EvalBestCactus(second_cards);
+int CompareCactusValues(uint16_t first, uint16_t second) {
   if (first < second) {
     return 1;
   }
@@ -512,15 +509,35 @@ HandEvaluation HandEvaluator::evaluate_hand(
   return find_best_hand(cards.cards());
 }
 
+uint16_t HandEvaluator::hand_value(
+    ComboId hand,
+    const GameState& board_state) const {
+  const SevenCardHand cards =
+      SevenCardHand::FromHoleAndBoard(hand, board_state);
+  return EvalBestCactus(cards.cards());
+}
+
+uint16_t HandEvaluator::hand_value(
+    ComboId hand,
+    const CompactPublicState& board_state) const {
+  return hand_value(hand, board_state.board_cards, board_state.board_count);
+}
+
+uint16_t HandEvaluator::hand_value(
+    ComboId hand,
+    const std::array<CardId, kMaxBoardCards>& board_cards,
+    uint8_t board_count) const {
+  const SevenCardHand cards =
+      SevenCardHand::FromHoleAndBoard(hand, board_cards, board_count);
+  return EvalBestCactus(cards.cards());
+}
+
 int HandEvaluator::compare_hands(
     ComboId hand1,
     ComboId hand2,
     const GameState& board_state) const {
-  const SevenCardHand first =
-      SevenCardHand::FromHoleAndBoard(hand1, board_state);
-  const SevenCardHand second =
-      SevenCardHand::FromHoleAndBoard(hand2, board_state);
-  return CompareCactusHands(first.cards(), second.cards());
+  return CompareCactusValues(hand_value(hand1, board_state),
+                             hand_value(hand2, board_state));
 }
 
 int HandEvaluator::compare_hands(
@@ -536,11 +553,8 @@ int HandEvaluator::compare_hands(
     ComboId hand2,
     const std::array<CardId, kMaxBoardCards>& board_cards,
     uint8_t board_count) const {
-  const SevenCardHand first =
-      SevenCardHand::FromHoleAndBoard(hand1, board_cards, board_count);
-  const SevenCardHand second =
-      SevenCardHand::FromHoleAndBoard(hand2, board_cards, board_count);
-  return CompareCactusHands(first.cards(), second.cards());
+  return CompareCactusValues(hand_value(hand1, board_cards, board_count),
+                             hand_value(hand2, board_cards, board_count));
 }
 
 HandEvaluation HandEvaluator::find_best_hand(
