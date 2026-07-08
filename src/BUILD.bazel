@@ -35,15 +35,6 @@ cc_library(
 )
 
 cc_library(
-    name = "card",
-    hdrs = ["card.h"],
-    deps = [
-        ":poker_cc_proto",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "hand_evaluator",
     srcs = ["hand_evaluator.cc"],
     hdrs = [
@@ -196,7 +187,6 @@ cc_test(
     name = "hand_range_test",
     srcs = ["hand_range_test.cc"],
     deps = DOCTEST_DEPS + [
-        ":card",
         ":hand_range",
     ],
 )
