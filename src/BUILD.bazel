@@ -238,6 +238,59 @@ cc_library(
 )
 
 cc_library(
+    name = "strategy_store",
+    srcs = ["strategy_store.cc"],
+    hdrs = ["strategy_store.h"],
+    deps = [
+        ":build_flags",
+        ":card_abstraction",
+        ":poker_types",
+        ":strategy_tables",
+        "@abseil-cpp//absl/types:span",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "strategy_store_no_stats",
+    srcs = ["strategy_store.cc"],
+    hdrs = ["strategy_store.h"],
+    copts = ["-DPOKER_ENABLE_TRAVERSAL_STATS=0"],
+    deps = [
+        ":build_flags",
+        ":card_abstraction",
+        ":poker_types",
+        ":strategy_tables",
+        "@abseil-cpp//absl/types:span",
+    ],
+)
+
+cc_library(
+    name = "strategy_store_coarse_buckets_no_stats",
+    srcs = ["strategy_store.cc"],
+    hdrs = ["strategy_store.h"],
+    copts = [
+        "-DPOKER_ENABLE_TRAVERSAL_STATS=0",
+        "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
+    ],
+    deps = [
+        ":build_flags",
+        ":card_abstraction",
+        ":poker_types",
+        ":strategy_tables",
+        "@abseil-cpp//absl/types:span",
+    ],
+)
+
+cc_test(
+    name = "strategy_store_test",
+    srcs = ["strategy_store_test.cc"],
+    deps = [
+        ":strategy_store",
+    ],
+)
+
+cc_library(
     name = "cfr_solver_proto_adapter",
     srcs = ["cfr_solver_proto_adapter.cc"],
     hdrs = ["cfr_solver_proto_adapter.h"],
@@ -273,7 +326,7 @@ cc_library(
     hdrs = [
         "cfr_solver.h",
     ],
-    deps = CFR_SOLVER_DEPS,
+    deps = CFR_SOLVER_DEPS + [":strategy_store"],
     visibility = ["//visibility:public"],
 )
 
@@ -286,7 +339,7 @@ cc_library(
         "cfr_solver.h",
     ],
     copts = ["-DPOKER_ENABLE_TRAVERSAL_STATS=0"],
-    deps = CFR_SOLVER_DEPS,
+    deps = CFR_SOLVER_DEPS + [":strategy_store_no_stats"],
 )
 
 cc_library(
@@ -301,7 +354,7 @@ cc_library(
         "-DPOKER_ENABLE_TRAVERSAL_STATS=0",
         "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
     ],
-    deps = CFR_SOLVER_DEPS,
+    deps = CFR_SOLVER_DEPS + [":strategy_store_coarse_buckets_no_stats"],
 )
 
 cc_test(

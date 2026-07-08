@@ -17,6 +17,7 @@
 #include "src/game_tree.h"
 #include "src/hand_range.h"
 #include "src/poker_types.h"
+#include "src/strategy_store.h"
 #include "src/strategy_tables.h"
 #include "src/training_range.h"
 
@@ -26,23 +27,7 @@ class TerminalUtilityCache;
 
 class CFRSolver {
  public:
-  struct TraversalStats {
-    int64_t cfr_updates = 0;
-    int64_t preflop_updates = 0;
-    int64_t flop_updates = 0;
-    int64_t turn_updates = 0;
-    int64_t river_updates = 0;
-    int max_decision_depth = 0;
-    int64_t child_nodes_created = 0;
-    int64_t chance_samples = 0;
-    int64_t terminal_utility_calls = 0;
-    int64_t fold_utility_calls = 0;
-    int64_t showdown_utility_calls = 0;
-    int64_t action_entry_touches = 0;
-    int64_t atomic_regret_update_retries = 0;
-    int64_t betting_history_transition_hits = 0;
-    int64_t betting_history_transition_misses = 0;
-  };
+  using TraversalStats = poker::TraversalStats;
 
   struct UtilityCacheStats {
     int64_t hits = 0;
@@ -112,34 +97,8 @@ class CFRSolver {
   using PublicStateKey = FrozenStrategyTables::PublicStateKey;
   using ChanceTransitionKey = FrozenStrategyTables::ChanceTransitionKey;
   using BettingHistoryRow = FrozenStrategyTables::BettingHistoryRow;
-  using InfoSetRow = FrozenStrategyTables::InfoSetRow;
   using InfoSetAddress = FrozenStrategyTables::InfoSetAddress;
   using PublicStateRow = FrozenStrategyTables::PublicStateRow;
-  using PrivateRowChunk = FrozenStrategyTables::PrivateRowChunk;
-  using PublicInfoSetSlabPlayer = FrozenStrategyTables::PublicInfoSetSlabPlayer;
-  using PublicInfoSetSlab = FrozenStrategyTables::PublicInfoSetSlab;
-  static constexpr int kPrivateBucketChunkSize =
-      FrozenStrategyTables::kPrivateBucketChunkSize;
-
-  struct InfoSetHandle {
-    uint32_t action_offset = 0;
-    uint16_t action_count = 0;
-  };
-
-  enum class RegretLoadMode {
-    kPlain,
-    kAtomic,
-  };
-
-  enum class RegretUpdateMode {
-    kPlain,
-    kAtomic,
-  };
-
-  struct RegretUpdateOptions {
-    RegretUpdateMode mode = RegretUpdateMode::kPlain;
-    bool record_atomic_retry_stats = false;
-  };
 
   struct PrivateCards {
     static PrivateCards FromCombo(ComboId combo_id);
@@ -525,53 +484,6 @@ class CFRSolver {
       TrainingRunStats& stats) const;
   bool prebuild_info_set_rows(const TrainingRangeView& player_a_range,
                               const TrainingRangeView& player_b_range);
-  bool prebuild_private_bucket_rows();
-  bool prebuild_frozen_info_set_action_offsets();
-  PrivateBucketId private_bucket_for_frozen_row(uint32_t public_state_id,
-                                                ComboId combo_id) const;
-  uint32_t frozen_info_set_action_offset(uint32_t public_state_id,
-                                         int player,
-                                         PrivateBucketId private_bucket) const;
-  const InfoSetRow* get_or_create_info_set_row(
-      InfoSetAddress address,
-      absl::Span<const int> action_ids);
-  std::optional<InfoSetHandle> make_info_set_handle(
-      const InfoSetRow* row,
-      size_t expected_action_count) const;
-  std::optional<InfoSetHandle> find_info_set_handle(
-      InfoSetAddress address,
-      size_t expected_action_count) const;
-  std::optional<InfoSetHandle> get_or_create_info_set_handle(
-      InfoSetAddress address,
-      absl::Span<const int> action_ids);
-  std::optional<InfoSetHandle> find_frozen_info_set_handle(
-      uint32_t public_state_id,
-      int player,
-      ComboId combo_id,
-      size_t expected_action_count) const;
-  InfoSetRow append_info_set_actions(absl::Span<const int> action_ids);
-  PublicInfoSetSlab& get_or_create_public_info_set_slab(
-      uint32_t public_state_id);
-  const PublicInfoSetSlab* public_info_set_slab(
-      uint32_t public_state_id) const;
-  const InfoSetRow* find_info_set_row(InfoSetAddress address) const;
-  static const InfoSetRow* find_info_set_row(
-      const PublicInfoSetSlabPlayer& player_slab,
-      PrivateBucketId private_bucket);
-  static int32_t& get_or_create_private_row_slot(
-      PublicInfoSetSlabPlayer& player_slab,
-      PrivateBucketId private_bucket);
-  void average_strategy_probabilities(
-      uint32_t public_state_id,
-      const PublicStateRow& row,
-      int player,
-      const PrivateCards& private_cards,
-      StrategyProbabilities& probabilities);
-  void average_strategy_probabilities(
-      const InfoSetRow& info_set_row,
-      const PublicStateRow& public_state_row,
-      double fallback_probability,
-      StrategyProbabilities& probabilities);
   void condition_ranges_for_actions(
       const TrainingRangeView& range,
       const CompactPublicState& state,
@@ -579,10 +491,6 @@ class CFRSolver {
       int player,
       absl::Span<const int> action_ids,
       std::vector<TrainingRangeView>& conditioned_ranges);
-  void fill_regret_matched_strategy_for_row(
-      const InfoSetRow& row,
-      absl::Span<const int> action_ids,
-      double* action_probabilities);
   double utility(const CompactPublicState& state,
                  const PrivateCards& player_a_cards,
                  const PrivateCards& player_b_cards);
@@ -600,28 +508,6 @@ class CFRSolver {
       int samples,
       uint32_t root_public_state_id,
       RangeSampler range_sampler);
-  void fill_regret_matching(
-      std::optional<InfoSetHandle> info_set,
-      size_t legal_action_count,
-      RegretLoadMode load_mode,
-      absl::Span<double> action_probabilities);
-  void add_cfr_plus_regret(InfoSetHandle info_set,
-                           size_t action_index,
-                           float delta,
-                           RegretUpdateOptions options);
-  void add_average_strategy(InfoSetHandle info_set,
-                            absl::Span<const double> action_probabilities,
-                            double reach_weight,
-                            RegretUpdateMode update_mode);
-  void update_strategy(size_t action_offset,
-                       const double* action_probabilities,
-                       size_t action_count,
-                       double reach_prob);
-  void fill_regret_matched_strategy(size_t action_offset,
-                                    size_t action_count,
-                                    bool has_info_set_row,
-                                    bool use_atomic_loads,
-                                    double* action_probabilities);
   NodeRef sample_frozen_chance_transition(
       NodeRef parent,
       const PublicStateRow& row,
@@ -652,6 +538,7 @@ class CFRSolver {
   std::shared_ptr<FrozenStrategyTables> mutable_tables_;
   std::shared_ptr<const FrozenStrategyTables> frozen_tables_;
   std::shared_ptr<MutableCumulativeArrays> cumulative_;
+  StrategyStore strategy_store_;
 };
 
 }  // namespace poker

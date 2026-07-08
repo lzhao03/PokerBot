@@ -15,7 +15,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
-#include <cstring>
 #include <random>
 #include <future>
 #include <limits>
@@ -32,64 +31,6 @@ namespace {
 
 constexpr int kParallelEvaluationSampleThreshold = 32;
 constexpr int kAutoWarmupNoGrowthLimit = 100;
-
-// Atomically add `delta` to `*target` using a CAS loop.
-// Safe to call from multiple threads concurrently. Relaxed ordering is
-// sufficient: CFR+ convergence is robust to the bounded noise from concurrent
-// stale reads (equivalent to async-regret MCCFR).
-inline void AtomicFloatAdd(float* target, float delta) {
-  static_assert(sizeof(float) == sizeof(int32_t), "float must be 32-bit");
-  int32_t old_bits, new_bits;
-  do {
-    old_bits = __atomic_load_n(reinterpret_cast<int32_t*>(target),
-                               __ATOMIC_RELAXED);
-    float new_val;
-    std::memcpy(&new_val, &old_bits, sizeof(float));
-    new_val += delta;
-    std::memcpy(&new_bits, &new_val, sizeof(float));
-  } while (!__atomic_compare_exchange_n(
-      reinterpret_cast<int32_t*>(target), &old_bits, new_bits,
-      /*weak=*/true, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
-}
-
-// Atomically apply CFR+ regret update: new = max(0, old + delta).
-// Uses the same CAS loop as AtomicFloatAdd but clips at zero.
-inline int64_t AtomicCFRPlusRegretUpdate(float* target, float delta) {
-  static_assert(sizeof(float) == sizeof(int32_t), "float must be 32-bit");
-  int32_t old_bits, new_bits;
-  bool exchanged = false;
-  int64_t retries = 0;
-  do {
-    old_bits = __atomic_load_n(reinterpret_cast<int32_t*>(target),
-                               __ATOMIC_RELAXED);
-    float old_val;
-    std::memcpy(&old_val, &old_bits, sizeof(float));
-    float new_val = std::max(0.0f, old_val + delta);
-    std::memcpy(&new_bits, &new_val, sizeof(float));
-    exchanged = __atomic_compare_exchange_n(
-        reinterpret_cast<int32_t*>(target), &old_bits, new_bits,
-        /*weak=*/true, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
-    if constexpr (kCasRetryStatsEnabled) {
-      if (!exchanged) {
-        ++retries;
-      }
-    }
-  } while (!exchanged);
-  if constexpr (kCasRetryStatsEnabled) {
-    return retries;
-  }
-  return 0;
-}
-
-// Relaxed atomic load of a float (naturally-aligned 32-bit load is atomic
-// on all supported architectures, but we use __atomic_load_n for clarity).
-inline float AtomicFloatLoad(const float* src) {
-  int32_t bits = __atomic_load_n(reinterpret_cast<const int32_t*>(src),
-                                 __ATOMIC_RELAXED);
-  float val;
-  std::memcpy(&val, &bits, sizeof(float));
-  return val;
-}
 
 std::optional<double> UtilityBeforeShowdown(const CompactPublicState& state,
                                             uint8_t board_count) {
@@ -302,7 +243,10 @@ CFRSolver::CFRSolver(
     utility_cache_(std::move(utility_cache)),
     mutable_tables_(std::make_shared<FrozenStrategyTables>()),
     frozen_tables_(mutable_tables_),
-    cumulative_(std::make_shared<MutableCumulativeArrays>()) {
+    cumulative_(std::make_shared<MutableCumulativeArrays>()),
+    strategy_store_(config_, card_abstraction_, &frozen_tables_,
+                    &mutable_tables_, &cumulative_, &frozen_,
+                    &traversal_stats_) {
   // Pre-allocate strategy table storage when limits are known upfront.
   // This gives fully deterministic peak memory: no reallocation after init.
   if (config_.max_info_sets > 0) {
@@ -330,10 +274,7 @@ CFRSolver::CFRSolver(
 }
 
 FrozenStrategyTables& CFRSolver::mutable_tables() {
-  if (frozen_ || mutable_tables_ == nullptr) {
-    throw std::logic_error("Strategy tables are frozen");
-  }
-  return *mutable_tables_;
+  return strategy_store_.mutable_tables();
 }
 
 CFRSolver::PrivateCards CFRSolver::PrivateCards::FromCombo(
@@ -414,43 +355,6 @@ CFRSolver::PublicStateRow CFRSolver::make_public_state_row(
     }
   }
 
-  return row;
-}
-
-CFRSolver::InfoSetRow CFRSolver::append_info_set_actions(
-    absl::Span<const int> action_ids) {
-  FrozenStrategyTables& tables = mutable_tables();
-  // Keep each real infoset action block on a cache-line boundary to reduce
-  // false sharing between worker CAS updates.
-  const size_t padding =
-      (kCumulativeActionBlockAlignment -
-       tables.action_ids.size() % kCumulativeActionBlockAlignment) %
-      kCumulativeActionBlockAlignment;
-  InfoSetRow row;
-  row.action_offset = static_cast<uint32_t>(tables.action_ids.size() + padding);
-  row.action_count = static_cast<uint16_t>(action_ids.size());
-  const size_t required_action_capacity =
-      tables.action_ids.size() + padding + action_ids.size();
-  if (required_action_capacity > tables.action_ids.capacity()) {
-    const size_t new_capacity =
-        std::max(required_action_capacity,
-                 tables.action_ids.empty() ? size_t{4096}
-                                           : tables.action_ids.capacity() * 2);
-    tables.action_ids.reserve(new_capacity);
-    cumulative_->cumulative_regrets.reserve(new_capacity);
-    cumulative_->cumulative_strategies.reserve(new_capacity);
-  }
-  for (size_t i = 0; i < padding; ++i) {
-    tables.action_ids.push_back(0);
-    cumulative_->cumulative_regrets.push_back(0.0f);
-    cumulative_->cumulative_strategies.push_back(0.0f);
-  }
-  for (int action_id : action_ids) {
-    tables.action_ids.push_back(action_id);
-    cumulative_->cumulative_regrets.push_back(0.0f);
-    cumulative_->cumulative_strategies.push_back(0.0f);
-    record_action_entry_touches();
-  }
   return row;
 }
 
@@ -1363,253 +1267,16 @@ bool CFRSolver::prebuild_info_set_rows(
         continue;
       }
       seen_buckets[private_bucket] = generation;
-      if (get_or_create_info_set_row(
-              {public_state_id, player, private_bucket}, action_ids) ==
-          nullptr) {
+      if (!strategy_store_
+               .get_or_create({public_state_id, player, private_bucket},
+                              action_ids)
+               .has_value()) {
         return false;
       }
     }
   }
 
   return true;
-}
-
-bool CFRSolver::prebuild_private_bucket_rows() {
-  if (frozen_) {
-    return true;
-  }
-
-  FrozenStrategyTables& tables = mutable_tables();
-  tables.private_bucket_rows.resize(tables.public_state_rows.size());
-  for (size_t public_state_id = 0;
-       public_state_id < tables.public_state_rows.size(); ++public_state_id) {
-    const PublicStateRow& row = tables.public_state_rows[public_state_id];
-    const uint32_t bucket_count =
-        card_abstraction_.private_bucket_count(row.state);
-    if (bucket_count == 0 || bucket_count > kComboCount) {
-      return false;
-    }
-    auto& bucket_row = tables.private_bucket_rows[public_state_id];
-    for (int combo = 0; combo < kComboCount; ++combo) {
-      const PrivateBucketId private_bucket =
-          card_abstraction_.private_bucket(static_cast<ComboId>(combo),
-                                           row.state);
-      if (private_bucket >= bucket_count) {
-        return false;
-      }
-      bucket_row[static_cast<size_t>(combo)] = private_bucket;
-    }
-  }
-  return true;
-}
-
-bool CFRSolver::prebuild_frozen_info_set_action_offsets() {
-  if (frozen_) {
-    return true;
-  }
-
-  FrozenStrategyTables& tables = mutable_tables();
-  tables.frozen_info_set_action_offsets.resize(tables.public_state_rows.size());
-  for (auto& offset_row : tables.frozen_info_set_action_offsets) {
-    for (auto& player_offsets : offset_row) {
-      player_offsets.fill(FrozenStrategyTables::kInvalidActionOffset);
-    }
-  }
-
-  for (size_t public_state_id = 0;
-       public_state_id < tables.public_state_rows.size(); ++public_state_id) {
-    const PublicStateRow& public_row = tables.public_state_rows[public_state_id];
-    const PublicInfoSetSlab* slab =
-        public_info_set_slab(static_cast<uint32_t>(public_state_id));
-    if (slab == nullptr) {
-      continue;
-    }
-
-    auto& offset_row =
-        tables.frozen_info_set_action_offsets[public_state_id];
-    for (int player = 0; player < kPlayerCount; ++player) {
-      const PublicInfoSetSlabPlayer& player_slab = slab->players[player];
-      auto& player_offsets = offset_row[player];
-      for (int bucket = 0; bucket < kComboCount; ++bucket) {
-        const InfoSetRow* info_set_row = find_info_set_row(
-            player_slab, static_cast<PrivateBucketId>(bucket));
-        if (info_set_row == nullptr) {
-          continue;
-        }
-        if (info_set_row->action_count != public_row.action_count) {
-          return false;
-        }
-        player_offsets[static_cast<size_t>(bucket)] =
-            info_set_row->action_offset;
-      }
-    }
-  }
-
-  return true;
-}
-
-FrozenStrategyTables::PrivateBucketId
-CFRSolver::private_bucket_for_frozen_row(uint32_t public_state_id,
-                                         ComboId combo_id) const {
-  return frozen_tables_->private_bucket_rows[public_state_id][combo_id];
-}
-
-uint32_t CFRSolver::frozen_info_set_action_offset(
-    uint32_t public_state_id,
-    int player,
-    PrivateBucketId private_bucket) const {
-  return frozen_tables_->frozen_info_set_action_offsets[public_state_id][player]
-                                                        [private_bucket];
-}
-
-CFRSolver::PublicInfoSetSlab& CFRSolver::get_or_create_public_info_set_slab(
-    uint32_t public_state_id) {
-  FrozenStrategyTables& tables = mutable_tables();
-  if (tables.public_info_set_slabs.size() <= public_state_id) {
-    tables.public_info_set_slabs.resize(static_cast<size_t>(public_state_id) + 1);
-  }
-  std::unique_ptr<PublicInfoSetSlab>& slab =
-      tables.public_info_set_slabs[public_state_id];
-  if (slab == nullptr) {
-    slab = std::make_unique<PublicInfoSetSlab>();
-  }
-  return *slab;
-}
-
-const CFRSolver::PublicInfoSetSlab* CFRSolver::public_info_set_slab(
-    uint32_t public_state_id) const {
-  const auto& slabs = frozen_tables_->public_info_set_slabs;
-  if (public_state_id >= slabs.size()) {
-    return nullptr;
-  }
-  return slabs[public_state_id].get();
-}
-
-const CFRSolver::InfoSetRow* CFRSolver::find_info_set_row(
-    InfoSetAddress address) const {
-  if (address.player < 0 || address.player >= kPlayerCount ||
-      address.private_bucket >= kComboCount) {
-    return nullptr;
-  }
-  const PublicInfoSetSlab* slab = public_info_set_slab(address.public_state_id);
-  if (slab == nullptr) {
-    return nullptr;
-  }
-  const PublicInfoSetSlabPlayer& player_slab = slab->players[address.player];
-  return find_info_set_row(player_slab, address.private_bucket);
-}
-
-const CFRSolver::InfoSetRow* CFRSolver::find_info_set_row(
-    const PublicInfoSetSlabPlayer& player_slab,
-    PrivateBucketId private_bucket) {
-  if (private_bucket >= kComboCount) {
-    return nullptr;
-  }
-  const size_t chunk_index = private_bucket / kPrivateBucketChunkSize;
-  const size_t chunk_offset = private_bucket % kPrivateBucketChunkSize;
-  const std::unique_ptr<PrivateRowChunk>& chunk =
-      player_slab.private_row_chunks[chunk_index];
-  if (chunk == nullptr) {
-    return nullptr;
-  }
-  const int32_t row_id = chunk->rows[chunk_offset];
-  if (row_id < 0 ||
-      static_cast<size_t>(row_id) >= player_slab.rows.size()) {
-    return nullptr;
-  }
-  return &player_slab.rows[row_id];
-}
-
-int32_t& CFRSolver::get_or_create_private_row_slot(
-    PublicInfoSetSlabPlayer& player_slab,
-    PrivateBucketId private_bucket) {
-  const size_t chunk_index = private_bucket / kPrivateBucketChunkSize;
-  const size_t chunk_offset = private_bucket % kPrivateBucketChunkSize;
-  std::unique_ptr<PrivateRowChunk>& chunk =
-      player_slab.private_row_chunks[chunk_index];
-  if (chunk == nullptr) {
-    chunk = std::make_unique<PrivateRowChunk>();
-  }
-  return chunk->rows[chunk_offset];
-}
-
-const CFRSolver::InfoSetRow* CFRSolver::get_or_create_info_set_row(
-    InfoSetAddress address,
-    absl::Span<const int> action_ids) {
-  if (address.player < 0 || address.player >= kPlayerCount ||
-      address.private_bucket >= kComboCount) {
-    return nullptr;
-  }
-
-  if (const InfoSetRow* row = find_info_set_row(address)) {
-    return row;
-  }
-
-  if (frozen_ || (config_.max_info_sets > 0 &&
-                  static_cast<int>(frozen_tables_->info_set_count) >= config_.max_info_sets)) {
-    return nullptr;
-  }
-
-  InfoSetRow row = append_info_set_actions(action_ids);
-  PublicInfoSetSlab& slab =
-      get_or_create_public_info_set_slab(address.public_state_id);
-  PublicInfoSetSlabPlayer& player_slab = slab.players[address.player];
-  int32_t& row_id =
-      get_or_create_private_row_slot(player_slab, address.private_bucket);
-  row_id = static_cast<int32_t>(player_slab.rows.size());
-  player_slab.rows.push_back(row);
-  ++mutable_tables().info_set_count;
-  return &player_slab.rows.back();
-}
-
-std::optional<CFRSolver::InfoSetHandle> CFRSolver::make_info_set_handle(
-    const InfoSetRow* row,
-    size_t expected_action_count) const {
-  if (row == nullptr ||
-      static_cast<size_t>(row->action_count) != expected_action_count) {
-    return std::nullopt;
-  }
-  return InfoSetHandle{row->action_offset, row->action_count};
-}
-
-std::optional<CFRSolver::InfoSetHandle> CFRSolver::find_info_set_handle(
-    InfoSetAddress address,
-    size_t expected_action_count) const {
-  return make_info_set_handle(find_info_set_row(address),
-                              expected_action_count);
-}
-
-std::optional<CFRSolver::InfoSetHandle>
-CFRSolver::get_or_create_info_set_handle(InfoSetAddress address,
-                                         absl::Span<const int> action_ids) {
-  return make_info_set_handle(get_or_create_info_set_row(address, action_ids),
-                              action_ids.size());
-}
-
-std::optional<CFRSolver::InfoSetHandle>
-CFRSolver::find_frozen_info_set_handle(uint32_t public_state_id,
-                                       int player,
-                                       ComboId combo_id,
-                                       size_t expected_action_count) const {
-  if (player < 0 || player >= kPlayerCount ||
-      public_state_id >= frozen_tables_->private_bucket_rows.size() ||
-      public_state_id >=
-          frozen_tables_->frozen_info_set_action_offsets.size()) {
-    return std::nullopt;
-  }
-  if (expected_action_count > std::numeric_limits<uint16_t>::max()) {
-    throw std::logic_error("infoset action count exceeds uint16_t");
-  }
-
-  const PrivateBucketId private_bucket =
-      private_bucket_for_frozen_row(public_state_id, combo_id);
-  const uint32_t action_offset =
-      frozen_info_set_action_offset(public_state_id, player, private_bucket);
-  if (action_offset == FrozenStrategyTables::kInvalidActionOffset) {
-    return std::nullopt;
-  }
-  return InfoSetHandle{action_offset,
-                       static_cast<uint16_t>(expected_action_count)};
 }
 
 void CFRSolver::add_traversal_stats(const TraversalStats& stats) {
@@ -1819,7 +1486,8 @@ bool CFRSolver::prepare_frozen_training(
     return false;
   }
 
-  stats.private_bucket_prebuild_complete = prebuild_private_bucket_rows();
+  stats.private_bucket_prebuild_complete =
+      strategy_store_.prebuild_private_bucket_rows();
   if (!stats.private_bucket_prebuild_complete) {
     return false;
   }
@@ -1827,7 +1495,7 @@ bool CFRSolver::prepare_frozen_training(
       static_cast<int64_t>(frozen_tables_->private_bucket_rows.size());
 
   stats.frozen_info_set_lookup_prebuild_complete =
-      prebuild_frozen_info_set_action_offsets();
+      strategy_store_.prebuild_frozen_info_set_action_offsets();
   if (!stats.frozen_info_set_lookup_prebuild_complete) {
     return false;
   }
@@ -1954,6 +1622,7 @@ void CFRSolver::maybe_run_frozen_phase(
   frozen_tables_ = mutable_tables_;
   mutable_tables_.reset();
   frozen_ = true;
+  strategy_store_.bind_tables();
   require_frozen_children_ = true;
   LOG(INFO) << "Frozen after warmup: " << get_info_set_count()
             << " info sets, " << iterations_run_
@@ -2023,6 +1692,7 @@ void CFRSolver::run_frozen_iterations(
           worker.frozen_tables_ = frozen_tables;
           worker.cumulative_ = cumulative;
           worker.frozen_ = true;
+          worker.strategy_store_.bind_tables();
           worker.require_frozen_children_ = true;
           worker.rng_.seed(seed);
 
@@ -2146,18 +1816,18 @@ double CFRSolver::cfr_with_ranges(
   const size_t action_count = row.action_count;
   const absl::Span<const int> legal_action_ids(row.action_ids.data(),
                                                action_count);
-  std::optional<InfoSetHandle> info_set =
+  std::optional<ActionBlock> action_block =
       is_update_player
-          ? get_or_create_info_set_handle(info_set_address, legal_action_ids)
-          : find_info_set_handle(info_set_address, action_count);
+          ? strategy_store_.get_or_create(info_set_address, legal_action_ids)
+          : strategy_store_.find(info_set_address, action_count);
 
   double action_probabilities[GameTree::kMaxActionsPerNode];
   double action_values[GameTree::kMaxActionsPerNode];
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     action_values[action_index] = 0.0;
   }
-  fill_regret_matching(
-      info_set, action_count, ctx.options().regret_load_mode,
+  strategy_store_.regret_matching_or_uniform(
+      action_block, action_count, ctx.options().regret_load_mode,
       absl::Span<double>(action_probabilities, action_count));
 
   double node_value = 0.0;
@@ -2220,7 +1890,7 @@ double CFRSolver::cfr_with_ranges(
   ++cfr_update_count_;
   record_cfr_update(street, ctx.depth());
 
-  if (info_set.has_value() && is_update_player) {
+  if (action_block.has_value() && is_update_player) {
     const double opponent_reach_prob = ctx.opponent_reach(player);
     const RegretUpdateOptions regret_update_options =
         ctx.regret_update_options();
@@ -2230,15 +1900,13 @@ double CFRSolver::cfr_with_ranges(
           opponent_reach_prob * utility_sign *
           (action_values[action_index] - node_value);
 
-      add_cfr_plus_regret(*info_set, action_index,
-                          static_cast<float>(regret),
-                          regret_update_options);
+      action_block->add_cfr_plus_regret(
+          action_index, static_cast<float>(regret), regret_update_options);
     }
 
     if (ctx.options().write_average_strategy) {
-      add_average_strategy(
-          *info_set, absl::Span<const double>(action_probabilities,
-                                              action_count),
+      action_block->add_average_strategy(
+          absl::Span<const double>(action_probabilities, action_count),
           ctx.average_strategy_weight(player),
           ctx.options().regret_update_mode);
     }
@@ -2373,8 +2041,8 @@ double CFRSolver::cfr_frozen_regret_only(
   const StreetKind street = row.state.street;
   const PrivateCards& player_cards = ctx.cards(player);
   const size_t action_count = row.action_count;
-  std::optional<InfoSetHandle> info_set =
-      find_frozen_info_set_handle(public_state_id, player, player_cards.combo,
+  std::optional<ActionBlock> action_block =
+      strategy_store_.find_frozen(public_state_id, player, player_cards.combo,
                                   action_count);
 
   double action_probabilities[GameTree::kMaxActionsPerNode];
@@ -2382,8 +2050,8 @@ double CFRSolver::cfr_frozen_regret_only(
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     action_values[action_index] = 0.0;
   }
-  fill_regret_matching(
-      info_set, action_count, ctx.options().regret_load_mode,
+  strategy_store_.regret_matching_or_uniform(
+      action_block, action_count, ctx.options().regret_load_mode,
       absl::Span<double>(action_probabilities, action_count));
 
   double node_value = 0.0;
@@ -2406,7 +2074,7 @@ double CFRSolver::cfr_frozen_regret_only(
   ++cfr_update_count_;
   record_cfr_update(street, ctx.depth());
 
-  if (info_set.has_value() && ctx.is_update_player(player)) {
+  if (action_block.has_value() && ctx.is_update_player(player)) {
     const double opponent_reach_prob = ctx.opponent_reach(player);
     const RegretUpdateOptions regret_update_options =
         ctx.regret_update_options();
@@ -2416,9 +2084,8 @@ double CFRSolver::cfr_frozen_regret_only(
           opponent_reach_prob * utility_sign *
           (action_values[action_index] - node_value);
 
-      add_cfr_plus_regret(*info_set, action_index,
-                          static_cast<float>(regret),
-                          regret_update_options);
+      action_block->add_cfr_plus_regret(
+          action_index, static_cast<float>(regret), regret_update_options);
     }
   }
 
@@ -2442,105 +2109,6 @@ double CFRSolver::chance_sampling_frozen_regret_only(
   }
 
   return samples > 0 ? value / samples : 0.0;
-}
-
-void CFRSolver::average_strategy_probabilities(
-    uint32_t public_state_id,
-    const PublicStateRow& row,
-    int player,
-    const PrivateCards& private_cards,
-    StrategyProbabilities& probabilities) {
-  probabilities.clear();
-  probabilities.resize(row.action_count, 0.0);
-  if (row.action_count == 0) {
-    return;
-  }
-
-  const double uniform_probability = 1.0 / row.action_count;
-  const PrivateBucketId private_bucket =
-      card_abstraction_.private_bucket(private_cards.combo, row.state);
-  const InfoSetRow* info_set_row =
-      find_info_set_row({public_state_id, player, private_bucket});
-  if (info_set_row == nullptr) {
-    std::fill(probabilities.begin(), probabilities.end(), uniform_probability);
-    return;
-  }
-
-  average_strategy_probabilities(
-      *info_set_row, row, uniform_probability, probabilities);
-}
-
-void CFRSolver::average_strategy_probabilities(
-    const InfoSetRow& info_set_row,
-    const PublicStateRow& public_state_row,
-    double fallback_probability,
-    StrategyProbabilities& probabilities) {
-  const int num_actions = public_state_row.action_count;
-  probabilities.clear();
-  probabilities.resize(num_actions, 0.0);
-  double probability_sum = 0.0;
-  const size_t action_offset = info_set_row.action_offset;
-  const std::vector<int>& action_ids = frozen_tables_->action_ids;
-  const auto& cumulative_regrets = cumulative_->cumulative_regrets;
-  const auto& cumulative_strategies = cumulative_->cumulative_strategies;
-
-  const bool aligned_action_ids =
-      num_actions == info_set_row.action_count &&
-      [&]() {
-        for (int i = 0; i < num_actions; ++i) {
-          if (public_state_row.action_ids[static_cast<size_t>(i)] !=
-              action_ids[action_offset + i]) {
-            return false;
-          }
-        }
-        return true;
-      }();
-  if (aligned_action_ids) {
-    for (int i = 0; i < num_actions; ++i) {
-      record_action_entry_touches();
-      const size_t table_index = action_offset + i;
-      probabilities[i] =
-          config_.regret_only_training
-              ? std::max(0.0,
-                         static_cast<double>(
-                             AtomicFloatLoad(&cumulative_regrets[table_index])))
-              : static_cast<double>(
-                    AtomicFloatLoad(&cumulative_strategies[table_index]));
-      probability_sum += probabilities[i];
-    }
-  } else {
-    for (int legal_action_index = 0; legal_action_index < num_actions;
-         ++legal_action_index) {
-      const int legal_action_id =
-          public_state_row.action_ids[static_cast<size_t>(legal_action_index)];
-      for (uint16_t action_index = 0;
-           action_index < info_set_row.action_count; ++action_index) {
-        record_action_entry_touches();
-        const size_t table_index = action_offset + action_index;
-        if (action_ids[table_index] == legal_action_id) {
-          probabilities[legal_action_index] =
-              config_.regret_only_training
-                  ? std::max(
-                        0.0,
-                        static_cast<double>(
-                            AtomicFloatLoad(&cumulative_regrets[table_index])))
-                  : static_cast<double>(
-                        AtomicFloatLoad(&cumulative_strategies[table_index]));
-          probability_sum += probabilities[legal_action_index];
-          break;
-        }
-      }
-    }
-  }
-
-  if (probability_sum <= 0.0) {
-    std::fill(probabilities.begin(), probabilities.end(), fallback_probability);
-    return;
-  }
-
-  for (double& probability : probabilities) {
-    probability /= probability_sum;
-  }
 }
 
 void CFRSolver::condition_ranges_for_actions(
@@ -2567,10 +2135,6 @@ void CFRSolver::condition_ranges_for_actions(
   }
 
   const CardMask board_mask = state.board_mask;
-  const PublicInfoSetSlab* public_slab =
-      public_info_set_slab(public_state_id);
-  const PublicInfoSetSlabPlayer* player_slab =
-      public_slab != nullptr ? &public_slab->players[player] : nullptr;
   double action_probabilities[GameTree::kMaxActionsPerNode] = {};
   for (size_t i = 0; i < range_size; ++i) {
     const float range_weight = range.weight(i);
@@ -2581,18 +2145,9 @@ void CFRSolver::condition_ranges_for_actions(
 
     const PrivateBucketId private_bucket =
         card_abstraction_.private_bucket(combo_id, state);
-    const InfoSetRow* row =
-        player_slab == nullptr ? nullptr
-                               : find_info_set_row(*player_slab,
-                                                   private_bucket);
-    if (row == nullptr) {
-      const double uniform_probability = 1.0 / action_count;
-      std::fill(action_probabilities, action_probabilities + action_count,
-                uniform_probability);
-    } else {
-      fill_regret_matched_strategy_for_row(
-          *row, conditioned_action_ids, action_probabilities);
-    }
+    strategy_store_.regret_matching_for_bucket(
+        public_state_id, player, private_bucket, conditioned_action_ids,
+        absl::Span<double>(action_probabilities, action_count));
 
     for (size_t action_index = 0; action_index < action_count; ++action_index) {
       const double conditioned_weight =
@@ -2602,49 +2157,6 @@ void CFRSolver::condition_ranges_for_actions(
             combo_id, static_cast<float>(conditioned_weight));
       }
     }
-  }
-}
-
-void CFRSolver::fill_regret_matched_strategy_for_row(
-    const InfoSetRow& row,
-    absl::Span<const int> conditioned_action_ids,
-    double* action_probabilities) {
-  const size_t action_count = conditioned_action_ids.size();
-  if (action_count == 0) {
-    return;
-  }
-  const double fallback_probability = 1.0 / action_count;
-
-  const auto& action_ids = frozen_tables_->action_ids;
-  const auto& regrets = cumulative_->cumulative_regrets;
-  double positive_regret_sum = 0.0;
-  std::fill(action_probabilities, action_probabilities + action_count, 0.0);
-  const size_t info_set_action_count =
-      std::min(action_count, static_cast<size_t>(row.action_count));
-  for (size_t action_index = 0; action_index < info_set_action_count;
-       ++action_index) {
-    const size_t table_index = row.action_offset + action_index;
-    if (action_ids[table_index] != conditioned_action_ids[action_index]) {
-      continue;
-    }
-
-    record_action_entry_touches();
-    const double positive_regret =
-        std::max(
-            0.0,
-            static_cast<double>(AtomicFloatLoad(&regrets[table_index])));
-    action_probabilities[action_index] = positive_regret;
-    positive_regret_sum += positive_regret;
-  }
-
-  if (positive_regret_sum <= 0.0) {
-    std::fill(action_probabilities, action_probabilities + action_count,
-              fallback_probability);
-    return;
-  }
-
-  for (size_t action_index = 0; action_index < action_count; ++action_index) {
-    action_probabilities[action_index] /= positive_regret_sum;
   }
 }
 
@@ -2723,6 +2235,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
       worker.frozen_tables_ = frozen_tables;
       worker.cumulative_ = cumulative;
       worker.frozen_ = true;
+      worker.strategy_store_.bind_tables();
       worker.rng_.seed(seed);
       const double value = worker.evaluate_strategy_samples(
           shard_samples, root_public_state_id, range_sampler);
@@ -2808,8 +2321,12 @@ double CFRSolver::evaluate_strategy_node(
 
   const PrivateCards& player_cards = ctx.cards(player);
   StrategyProbabilities probabilities;
-  average_strategy_probabilities(
-      public_state_id, row, player, player_cards, probabilities);
+  probabilities.resize(row.action_count, 0.0);
+  const PrivateBucketId private_bucket =
+      card_abstraction_.private_bucket(player_cards.combo, row.state);
+  strategy_store_.average_strategy(
+      public_state_id, row, player, private_bucket,
+      config_.regret_only_training, absl::Span<double>(probabilities));
 
   double value = 0.0;
   const int action_count = row.action_count;
@@ -2887,148 +2404,6 @@ double CFRSolver::uncached_utility(const CompactPublicState& state,
 
   return game_tree_->get_utility(
       state, player_a_cards.combo, player_b_cards.combo);
-}
-
-void CFRSolver::fill_regret_matching(
-    std::optional<InfoSetHandle> info_set,
-    size_t legal_action_count,
-    RegretLoadMode load_mode,
-    absl::Span<double> action_probabilities) {
-  if (action_probabilities.size() != legal_action_count) {
-    throw std::logic_error("regret-matching probability span size mismatch");
-  }
-  if (legal_action_count == 0) {
-    return;
-  }
-
-  const bool has_info_set =
-      info_set.has_value() &&
-      static_cast<size_t>(info_set->action_count) == legal_action_count;
-  fill_regret_matched_strategy(
-      has_info_set ? info_set->action_offset : 0,
-      legal_action_count,
-      has_info_set,
-      load_mode == RegretLoadMode::kAtomic,
-      action_probabilities.data());
-}
-
-void CFRSolver::add_cfr_plus_regret(InfoSetHandle info_set,
-                                    size_t action_index,
-                                    float delta,
-                                    RegretUpdateOptions options) {
-  if (action_index >= static_cast<size_t>(info_set.action_count)) {
-    throw std::logic_error("regret update action index out of range");
-  }
-
-  const size_t table_index =
-      static_cast<size_t>(info_set.action_offset) + action_index;
-  auto& regrets = cumulative_->cumulative_regrets;
-  if (table_index >= regrets.size()) {
-    throw std::logic_error("regret update table index out of range");
-  }
-
-  record_action_entry_touches(2);
-  float* regret_entry = &regrets[table_index];
-  if (options.mode == RegretUpdateMode::kAtomic) {
-    const int64_t retries =
-        AtomicCFRPlusRegretUpdate(regret_entry, delta);
-    if (options.record_atomic_retry_stats) {
-      record_atomic_regret_update_retries(retries);
-    }
-    return;
-  }
-
-  *regret_entry = std::max(0.0f, *regret_entry + delta);
-}
-
-void CFRSolver::add_average_strategy(
-    InfoSetHandle info_set,
-    absl::Span<const double> action_probabilities,
-    double reach_weight,
-    RegretUpdateMode update_mode) {
-  if (action_probabilities.size() !=
-      static_cast<size_t>(info_set.action_count)) {
-    throw std::logic_error("average-strategy probability span size mismatch");
-  }
-
-  if (update_mode == RegretUpdateMode::kAtomic) {
-    update_strategy(info_set.action_offset, action_probabilities.data(),
-                    action_probabilities.size(), reach_weight);
-    return;
-  }
-
-  auto& strategies = cumulative_->cumulative_strategies;
-  for (size_t action_index = 0;
-       action_index < action_probabilities.size(); ++action_index) {
-    const size_t table_index =
-        static_cast<size_t>(info_set.action_offset) + action_index;
-    if (table_index >= strategies.size()) {
-      throw std::logic_error("average-strategy table index out of range");
-    }
-
-    record_action_entry_touches(2);
-    const float delta =
-        static_cast<float>(reach_weight * action_probabilities[action_index]);
-    strategies[table_index] += delta;
-  }
-}
-
-// Low-level storage helper. Prefer add_average_strategy from traversal code.
-void CFRSolver::update_strategy(size_t action_offset,
-                                const double* action_probabilities,
-                                size_t action_count,
-                                double reach_prob) {
-  auto& strategies = cumulative_->cumulative_strategies;
-  for (size_t action_index = 0; action_index < action_count; ++action_index) {
-    record_action_entry_touches(2);
-    const float delta = static_cast<float>(
-        reach_prob * action_probabilities[action_index]);
-    AtomicFloatAdd(&strategies[action_offset + action_index], delta);
-  }
-}
-
-// Low-level storage helper. Prefer fill_regret_matching from traversal code.
-void CFRSolver::fill_regret_matched_strategy(
-    size_t action_offset,
-    size_t action_count,
-    bool has_info_set_row,
-    bool use_atomic_loads,
-    double* action_probabilities) {
-  if (!has_info_set_row) {
-    const double uniform_prob = 1.0 / action_count;
-    for (size_t action_index = 0; action_index < action_count;
-         ++action_index) {
-      action_probabilities[action_index] = uniform_prob;
-    }
-    return;
-  }
-
-  const auto& regrets = cumulative_->cumulative_regrets;
-  double sum_positive_regrets = 0.0;
-  for (size_t action_index = 0; action_index < action_count; ++action_index) {
-    record_action_entry_touches();
-    const float raw_regret =
-        use_atomic_loads
-            ? AtomicFloatLoad(&regrets[action_offset + action_index])
-            : regrets[action_offset + action_index];
-    const double positive_regret =
-        std::max(0.0, static_cast<double>(raw_regret));
-    action_probabilities[action_index] = positive_regret;
-    sum_positive_regrets += positive_regret;
-  }
-
-  if (sum_positive_regrets > 0.0) {
-    for (size_t action_index = 0; action_index < action_count;
-         ++action_index) {
-      action_probabilities[action_index] /= sum_positive_regrets;
-    }
-    return;
-  }
-
-  const double uniform_prob = 1.0 / action_count;
-  for (size_t action_index = 0; action_index < action_count; ++action_index) {
-    action_probabilities[action_index] = uniform_prob;
-  }
 }
 
 } // namespace poker
