@@ -1,5 +1,7 @@
 #include "src/card_utils.h"
 
+#include "doctest/doctest.h"
+
 #include <algorithm>
 #include <random>
 #include <stdexcept>
@@ -8,67 +10,46 @@
 namespace poker {
 namespace {
 
-void Expect(bool condition, const char* message) {
-  if (!condition) {
-    throw std::runtime_error(message);
-  }
-}
-
 bool ContainsCard(const std::vector<CardId>& cards, CardId card) {
   return std::find(cards.begin(), cards.end(), card) != cards.end();
 }
 
 template <typename CardContainer>
-void ExpectUniqueCards(const CardContainer& cards, const char* message) {
+void CheckUniqueCards(const CardContainer& cards) {
   for (size_t i = 0; i < cards.size(); ++i) {
     for (size_t j = i + 1; j < cards.size(); ++j) {
-      Expect(cards[i] != cards[j], message);
+      CAPTURE(i);
+      CAPTURE(j);
+      CHECK(cards[i] != cards[j]);
     }
   }
 }
 
-void CheckBuildDeckHasUniqueCards() {
+TEST_CASE("deck contains every card once") {
   std::vector<CardId> deck = BuildDeck();
-  Expect(deck.size() == kDeckCardCount, "deck should contain 52 cards");
-  ExpectUniqueCards(deck, "deck should contain unique cards");
-  Expect(ContainsCard(deck, MakeCardId(14, SuitKind::kSpades)),
-         "deck should contain ace of spades");
+  CHECK(deck.size() == kDeckCardCount);
+  CheckUniqueCards(deck);
+  CHECK(ContainsCard(deck, MakeCardId(14, SuitKind::kSpades)));
 }
 
-void CheckCardsForNextStreet() {
-  Expect(CardsForNextStreet(StreetKind::kPreflop) == 3,
-         "preflop should deal three flop cards");
-  Expect(CardsForNextStreet(StreetKind::kFlop) == 1,
-         "flop should deal one turn card");
-  Expect(CardsForNextStreet(StreetKind::kTurn) == 1,
-         "turn should deal one river card");
-  Expect(CardsForNextStreet(StreetKind::kRiver) == 0,
-         "river should deal no cards");
+TEST_CASE("street helpers return expected card counts") {
+  CHECK(CardsForNextStreet(StreetKind::kPreflop) == 3);
+  CHECK(CardsForNextStreet(StreetKind::kFlop) == 1);
+  CHECK(CardsForNextStreet(StreetKind::kTurn) == 1);
+  CHECK(CardsForNextStreet(StreetKind::kRiver) == 0);
+
+  CHECK(StreetAfterChance(StreetKind::kPreflop) == StreetKind::kFlop);
+  CHECK(StreetAfterChance(StreetKind::kFlop) == StreetKind::kTurn);
+  CHECK(StreetAfterChance(StreetKind::kTurn) == StreetKind::kRiver);
+  CHECK(StreetAfterChance(StreetKind::kRiver) == StreetKind::kRiver);
+
+  CHECK(BoardCardsForStreet(StreetKind::kPreflop) == 0);
+  CHECK(BoardCardsForStreet(StreetKind::kFlop) == 3);
+  CHECK(BoardCardsForStreet(StreetKind::kTurn) == 4);
+  CHECK(BoardCardsForStreet(StreetKind::kRiver) == 5);
 }
 
-void CheckStreetAfterChance() {
-  Expect(StreetAfterChance(StreetKind::kPreflop) == StreetKind::kFlop,
-         "preflop chance should advance to flop");
-  Expect(StreetAfterChance(StreetKind::kFlop) == StreetKind::kTurn,
-         "flop chance should advance to turn");
-  Expect(StreetAfterChance(StreetKind::kTurn) == StreetKind::kRiver,
-         "turn chance should advance to river");
-  Expect(StreetAfterChance(StreetKind::kRiver) == StreetKind::kRiver,
-         "river chance should stay on river");
-}
-
-void CheckBoardCardsForStreet() {
-  Expect(BoardCardsForStreet(StreetKind::kPreflop) == 0,
-         "preflop should have no board cards");
-  Expect(BoardCardsForStreet(StreetKind::kFlop) == 3,
-         "flop should have three board cards");
-  Expect(BoardCardsForStreet(StreetKind::kTurn) == 4,
-         "turn should have four board cards");
-  Expect(BoardCardsForStreet(StreetKind::kRiver) == 5,
-         "river should have five board cards");
-}
-
-void CheckSampledStreetCardsAvoidKnownCards() {
+TEST_CASE("sampled turn card avoids private and board cards") {
   CardMask known_private_cards = 0;
   known_private_cards |= CardBit(MakeCardId(14, SuitKind::kSpades));
   known_private_cards |= CardBit(MakeCardId(13, SuitKind::kSpades));
@@ -83,14 +64,13 @@ void CheckSampledStreetCardsAvoidKnownCards() {
 
   std::mt19937 rng(12345);
   const auto sampled = SampleStreetCards(state, known_private_cards, rng);
-  Expect(sampled.size() == 1, "flop samples one turn card");
+  REQUIRE(sampled.size() == 1);
 
-  CardMask known_cards = known_private_cards | state.board_mask;
-  Expect((known_cards & CardBit(sampled[0])) == 0,
-         "sampled cards should avoid known cards");
+  const CardMask known_cards = known_private_cards | state.board_mask;
+  CHECK((known_cards & CardBit(sampled[0])) == 0);
 }
 
-void CheckCompactSampledStreetCardsAvoidKnownCards() {
+TEST_CASE("sampled river card avoids private and board cards") {
   CardMask known_private_cards = 0;
   known_private_cards |= CardBit(MakeCardId(14, SuitKind::kSpades));
   known_private_cards |= CardBit(MakeCardId(13, SuitKind::kSpades));
@@ -104,14 +84,13 @@ void CheckCompactSampledStreetCardsAvoidKnownCards() {
 
   std::mt19937 rng(12345);
   const auto sampled = SampleStreetCards(state, known_private_cards, rng);
-  Expect(sampled.size() == 1, "turn samples one river card");
+  REQUIRE(sampled.size() == 1);
 
   const CardMask known_cards = known_private_cards | state.board_mask;
-  Expect((known_cards & CardBit(sampled[0])) == 0,
-         "compact sampled cards should avoid known cards");
+  CHECK((known_cards & CardBit(sampled[0])) == 0);
 }
 
-void CheckPrimitiveSampledStreetCardsAvoidKnownCards() {
+TEST_CASE("primitive street sampling avoids private and board cards") {
   CardMask known_private_cards = 0;
   known_private_cards |= CardBit(MakeCardId(14, SuitKind::kSpades));
   known_private_cards |= CardBit(MakeCardId(13, SuitKind::kSpades));
@@ -125,14 +104,13 @@ void CheckPrimitiveSampledStreetCardsAvoidKnownCards() {
   std::mt19937 rng(12345);
   const auto sampled = SampleStreetCards(
       StreetKind::kTurn, 4, board_mask, known_private_cards, rng);
-  Expect(sampled.size() == 1, "primitive turn sampling returns one card");
+  REQUIRE(sampled.size() == 1);
 
   const CardMask known_cards = known_private_cards | board_mask;
-  Expect((known_cards & CardBit(sampled[0])) == 0,
-         "primitive sampled cards should avoid known cards");
+  CHECK((known_cards & CardBit(sampled[0])) == 0);
 }
 
-void CheckOneCardSamplingReturnsOnlyUnblockedCard() {
+TEST_CASE("one-card sampling returns the only unblocked card") {
   std::vector<CardId> deck = BuildDeck();
   const CardId legal_card = deck.back();
   CardMask known_private_cards = 0;
@@ -147,12 +125,11 @@ void CheckOneCardSamplingReturnsOnlyUnblockedCard() {
 
   std::mt19937 rng(12345);
   const auto sampled = SampleStreetCards(state, known_private_cards, rng);
-  Expect(sampled.size() == 1, "one-card sampling should return one card");
-  Expect(sampled[0] == legal_card,
-         "one-card sampling should return the only unblocked card");
+  REQUIRE(sampled.size() == 1);
+  CHECK(sampled[0] == legal_card);
 }
 
-void CheckSampledFlopCardsAreUniqueAndAvoidKnownCards() {
+TEST_CASE("sampled flop cards are unique and avoid private cards") {
   CardMask known_private_cards = 0;
   known_private_cards |= CardBit(MakeCardId(14, SuitKind::kSpades));
   known_private_cards |= CardBit(MakeCardId(13, SuitKind::kSpades));
@@ -164,16 +141,15 @@ void CheckSampledFlopCardsAreUniqueAndAvoidKnownCards() {
 
   std::mt19937 rng(12345);
   const auto sampled = SampleStreetCards(state, known_private_cards, rng);
-  Expect(sampled.size() == 3, "preflop samples three flop cards");
-  ExpectUniqueCards(sampled, "sampled flop cards should be unique");
+  REQUIRE(sampled.size() == 3);
+  CheckUniqueCards(sampled);
 
   for (CardId card : sampled) {
-    Expect((known_private_cards & CardBit(card)) == 0,
-           "sampled flop should avoid known cards");
+    CHECK((known_private_cards & CardBit(card)) == 0);
   }
 }
 
-void CheckSamplingThrowsWhenDeckIsTooSmall() {
+TEST_CASE("sampling throws when the deck is too small") {
   std::vector<CardId> deck = BuildDeck();
   CardMask known_private_cards = 0;
   for (int i = 0; i < 50; ++i) {
@@ -184,28 +160,9 @@ void CheckSamplingThrowsWhenDeckIsTooSmall() {
   state.street = StreetKind::kPreflop;
 
   std::mt19937 rng(12345);
-  bool threw = false;
-  try {
-    SampleStreetCards(state, known_private_cards, rng);
-  } catch (const std::runtime_error&) {
-    threw = true;
-  }
-  Expect(threw, "sampling should throw when too few cards remain");
+  CHECK_THROWS_AS(SampleStreetCards(state, known_private_cards, rng),
+                  std::runtime_error);
 }
 
 }  // namespace
 }  // namespace poker
-
-int main() {
-  poker::CheckBuildDeckHasUniqueCards();
-  poker::CheckCardsForNextStreet();
-  poker::CheckStreetAfterChance();
-  poker::CheckBoardCardsForStreet();
-  poker::CheckSampledStreetCardsAvoidKnownCards();
-  poker::CheckCompactSampledStreetCardsAvoidKnownCards();
-  poker::CheckPrimitiveSampledStreetCardsAvoidKnownCards();
-  poker::CheckOneCardSamplingReturnsOnlyUnblockedCard();
-  poker::CheckSampledFlopCardsAreUniqueAndAvoidKnownCards();
-  poker::CheckSamplingThrowsWhenDeckIsTooSmall();
-  return 0;
-}

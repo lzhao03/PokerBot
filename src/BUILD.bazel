@@ -2,6 +2,8 @@ load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 load("@protobuf//bazel:proto_library.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 
+DOCTEST_DEPS = ["@doctest//:main"]
+
 proto_library(
     name = "poker",
     srcs = ["poker.proto"],
@@ -75,7 +77,7 @@ cc_test(
         "hand_evaluator_table_builder.h",
         "hand_evaluator_test.cc",
     ],
-    deps = [
+    deps = DOCTEST_DEPS + [
         ":hand_evaluator",
     ],
 )
@@ -93,7 +95,7 @@ cc_library(
 cc_test(
     name = "card_utils_test",
     srcs = ["card_utils_test.cc"],
-    deps = [
+    deps = DOCTEST_DEPS + [
         ":card_utils",
     ],
 )
@@ -111,7 +113,7 @@ cc_library(
 cc_test(
     name = "combo_test",
     srcs = ["combo_test.cc"],
-    deps = [
+    deps = DOCTEST_DEPS + [
         ":combo",
     ],
 )
@@ -146,7 +148,7 @@ cc_library(
 cc_test(
     name = "card_abstraction_test",
     srcs = ["card_abstraction_test.cc"],
-    deps = [
+    deps = DOCTEST_DEPS + [
         ":card_abstraction",
     ],
 )
@@ -155,7 +157,7 @@ cc_test(
     name = "card_abstraction_coarse_test",
     srcs = ["card_abstraction_test.cc"],
     copts = ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
-    deps = [
+    deps = DOCTEST_DEPS + [
         ":card_abstraction",
     ],
 )
@@ -175,7 +177,7 @@ cc_library(
 cc_test(
     name = "game_tree_test",
     srcs = ["game_tree_test.cc"],
-    deps = [
+    deps = DOCTEST_DEPS + [
         ":game_tree",
     ],
 )
@@ -193,7 +195,7 @@ cc_library(
 cc_test(
     name = "hand_range_test",
     srcs = ["hand_range_test.cc"],
-    deps = [
+    deps = DOCTEST_DEPS + [
         ":card",
         ":hand_range",
     ],
@@ -213,7 +215,7 @@ cc_library(
 cc_test(
     name = "training_range_test",
     srcs = ["training_range_test.cc"],
-    deps = [
+    deps = DOCTEST_DEPS + [
         ":training_range",
     ],
 )
@@ -228,7 +230,7 @@ cc_library(
 cc_test(
     name = "thread_pool_test",
     srcs = ["thread_pool_test.cc"],
-    deps = [
+    deps = DOCTEST_DEPS + [
         ":thread_pool",
     ],
 )
@@ -331,7 +333,7 @@ cc_library(
 cc_test(
     name = "strategy_store_test",
     srcs = ["strategy_store_test.cc"],
-    deps = [
+    deps = DOCTEST_DEPS + [
         ":strategy_store",
     ],
 )
@@ -427,7 +429,7 @@ cc_library(
 cc_test(
     name = "cfr_solver_test",
     srcs = ["cfr_solver_test.cc"],
-    deps = [
+    deps = DOCTEST_DEPS + [
         ":combo",
         ":cfr_solver",
     ],
@@ -436,7 +438,7 @@ cc_test(
 cc_test(
     name = "cfr_traversal_guard_test",
     srcs = ["cfr_traversal_guard_test.cc"],
-    deps = [
+    deps = DOCTEST_DEPS + [
         ":combo",
         ":cfr_solver",
     ],
@@ -446,7 +448,7 @@ cc_test(
     name = "cfr_traversal_guard_coarse_test",
     srcs = ["cfr_traversal_guard_test.cc"],
     copts = ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
-    deps = [
+    deps = DOCTEST_DEPS + [
         ":combo",
         ":cfr_solver_coarse_buckets",
     ],
@@ -456,7 +458,7 @@ cc_test(
     name = "cfr_public_bucket_test",
     srcs = ["cfr_public_bucket_test.cc"],
     copts = ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
-    deps = [
+    deps = DOCTEST_DEPS + [
         ":combo",
         ":cfr_solver_coarse_buckets_no_stats",
         ":hand_range",

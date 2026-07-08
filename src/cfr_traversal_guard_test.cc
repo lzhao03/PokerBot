@@ -1,11 +1,9 @@
 #include "src/cfr_solver.h"
 
 #include "src/combo.h"
+#include "doctest/doctest.h"
 
 #include <cmath>
-#include <cstdlib>
-#include <iomanip>
-#include <iostream>
 
 namespace poker {
 namespace {
@@ -18,43 +16,16 @@ struct Metrics {
   int64_t action_entry_touches = 0;
 };
 
-void Expect(bool condition, const char* message) {
-  if (!condition) {
-    std::cerr << "FAILED: " << message << "\n";
-    std::exit(1);
-  }
-}
-
-void ExpectMetrics(const Metrics& actual,
-                   const Metrics& expected,
-                   const char* name) {
-  constexpr double kTolerance = 1e-9;
-  Expect(std::isfinite(actual.value), name);
-  const bool ok =
-      std::fabs(actual.value - expected.value) <= kTolerance &&
-      actual.info_sets == expected.info_sets &&
-      actual.public_states == expected.public_states &&
-      actual.cfr_updates == expected.cfr_updates &&
-      actual.action_entry_touches == expected.action_entry_touches;
-  if (ok) {
-    return;
-  }
-
-  std::cerr << std::setprecision(17)
-            << "FAILED: " << name << "\n"
-            << "  actual value=" << actual.value
-            << " info_sets=" << actual.info_sets
-            << " public_states=" << actual.public_states
-            << " cfr_updates=" << actual.cfr_updates
-            << " action_entry_touches=" << actual.action_entry_touches
-            << "\n"
-            << "  expected value=" << expected.value
-            << " info_sets=" << expected.info_sets
-            << " public_states=" << expected.public_states
-            << " cfr_updates=" << expected.cfr_updates
-            << " action_entry_touches=" << expected.action_entry_touches
-            << "\n";
-  std::exit(1);
+void CheckMetrics(const Metrics& actual,
+                  const Metrics& expected,
+                  const char* name) {
+  CAPTURE(name);
+  CHECK(std::isfinite(actual.value));
+  CHECK(actual.value == doctest::Approx(expected.value).epsilon(1e-9));
+  CHECK(actual.info_sets == expected.info_sets);
+  CHECK(actual.public_states == expected.public_states);
+  CHECK(actual.cfr_updates == expected.cfr_updates);
+  CHECK(actual.action_entry_touches == expected.action_entry_touches);
 }
 
 ComboId Combo(int first_rank,
@@ -94,7 +65,7 @@ Metrics TrainingMetrics(const CFRSolver& solver) {
 
 #if POKER_COARSE_PUBLIC_BUCKETS
 
-void CheckFrozenRegretOnlyGuard() {
+TEST_CASE("frozen regret-only traversal guard") {
   SolverConfig config = BaseConfig();
   config.starting_stack_size = 18;
   config.bet_sizes = {0.5, 1.0};
@@ -112,15 +83,12 @@ void CheckFrozenRegretOnlyGuard() {
   solver.run(4, player_a, player_b);
   const CFRSolver::TrainingRunStats stats =
       solver.get_last_training_run_stats();
-  Expect(stats.warmup_iterations == 0,
-         "frozen guard should skip growing iterations");
-  Expect(stats.frozen_iterations == 4,
-         "frozen guard should run fixed-storage iterations");
-  Expect(stats.frozen_cfr_updates > stats.frozen_iterations,
-         "frozen guard should do real CFR work");
-  ExpectMetrics(TrainingMetrics(solver),
-                Metrics{0.66192917573519394, 822, 2870, 120, 2480},
-                "frozen regret-only traversal");
+  CHECK(stats.warmup_iterations == 0);
+  CHECK(stats.frozen_iterations == 4);
+  CHECK(stats.frozen_cfr_updates > stats.frozen_iterations);
+  CheckMetrics(TrainingMetrics(solver),
+               Metrics{0.66192917573519394, 822, 2870, 120, 2480},
+               "frozen regret-only traversal");
 }
 
 #else
@@ -132,7 +100,7 @@ HandRange TwoComboRange(ComboId first, ComboId second) {
   return range;
 }
 
-void CheckWarmupFullCfrGuard() {
+TEST_CASE("warmup full CFR traversal guard") {
   SolverConfig config = BaseConfig();
   config.max_depth = 1;
   config.regret_only_training = false;
@@ -143,12 +111,12 @@ void CheckWarmupFullCfrGuard() {
                                         13, SuitKind::kSpades));
 
   solver.run(3, player_a, player_b);
-  ExpectMetrics(TrainingMetrics(solver),
-                Metrics{-1.0 / 12.0, 1, 5, 3, 60},
-                "warmup full CFR traversal");
+  CheckMetrics(TrainingMetrics(solver),
+               Metrics{-1.0 / 12.0, 1, 5, 3, 60},
+               "warmup full CFR traversal");
 }
 
-void CheckEvaluateStrategyGuard() {
+TEST_CASE("evaluate strategy traversal guard") {
   SolverConfig config = BaseConfig();
   config.max_depth = 1;
   config.regret_only_training = true;
@@ -167,18 +135,18 @@ void CheckEvaluateStrategyGuard() {
       solver.evaluate_strategy(player_a_combo, player_b_combo);
   const int64_t after_touches =
       solver.get_traversal_stats().action_entry_touches;
-  ExpectMetrics(Metrics{
-                    value,
-                    static_cast<int64_t>(solver.get_info_set_count()),
-                    static_cast<int64_t>(solver.get_public_state_count()),
-                    solver.get_cfr_update_count(),
-                    after_touches - before_touches,
-                },
-                Metrics{0.046839674465274539, 1, 232, 3, 4},
-                "evaluate strategy traversal");
+  CheckMetrics(Metrics{
+                   value,
+                   static_cast<int64_t>(solver.get_info_set_count()),
+                   static_cast<int64_t>(solver.get_public_state_count()),
+                   solver.get_cfr_update_count(),
+                   after_touches - before_touches,
+               },
+               Metrics{0.046839674465274539, 1, 232, 3, 4},
+               "evaluate strategy traversal");
 }
 
-void CheckMaxDepthRangeConditionedGuard() {
+TEST_CASE("max-depth range-conditioned traversal guard") {
   SolverConfig config = BaseConfig();
   config.max_depth = 2;
   config.regret_only_training = true;
@@ -191,23 +159,12 @@ void CheckMaxDepthRangeConditionedGuard() {
       Combo(11, SuitKind::kClubs, 11, SuitKind::kDiamonds));
 
   solver.run(4, player_a, player_b);
-  ExpectMetrics(TrainingMetrics(solver),
-                Metrics{4.4166666666666661, 4, 33, 16, 132},
-                "max-depth range-conditioned traversal");
+  CheckMetrics(TrainingMetrics(solver),
+               Metrics{4.4166666666666661, 4, 33, 16, 132},
+               "max-depth range-conditioned traversal");
 }
 
 #endif
 
 }  // namespace
 }  // namespace poker
-
-int main() {
-#if POKER_COARSE_PUBLIC_BUCKETS
-  poker::CheckFrozenRegretOnlyGuard();
-#else
-  poker::CheckWarmupFullCfrGuard();
-  poker::CheckEvaluateStrategyGuard();
-  poker::CheckMaxDepthRangeConditionedGuard();
-#endif
-  return 0;
-}

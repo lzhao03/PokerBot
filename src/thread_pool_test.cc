@@ -1,5 +1,7 @@
 #include "src/thread_pool.h"
 
+#include "doctest/doctest.h"
+
 #include <atomic>
 #include <future>
 #include <stdexcept>
@@ -8,13 +10,7 @@
 namespace poker {
 namespace {
 
-void Expect(bool condition, const char* message) {
-  if (!condition) {
-    throw std::runtime_error(message);
-  }
-}
-
-void CheckRunsTasks() {
+TEST_CASE("thread pool runs submitted tasks") {
   ThreadPoolExecutor executor(4);
 
   std::vector<std::future<int>> futures;
@@ -26,31 +22,24 @@ void CheckRunsTasks() {
   for (std::future<int>& future : futures) {
     sum += future.get();
   }
-  Expect(sum == 2470, "executor should run every submitted task");
+  CHECK(sum == 2470);
 }
 
-void CheckDefaultWorkerCountPositive() {
+TEST_CASE("default worker count is positive") {
   ThreadPoolExecutor executor(0);
-  Expect(executor.max_workers() >= 1,
-         "default executor should create at least one worker");
+  CHECK(executor.max_workers() >= 1);
 }
 
-void CheckExceptionPropagatesThroughFuture() {
+TEST_CASE("task exceptions propagate through futures") {
   ThreadPoolExecutor executor(2);
   std::future<int> future = executor.submit([]() -> int {
     throw std::runtime_error("task failed");
   });
 
-  bool threw = false;
-  try {
-    future.get();
-  } catch (const std::runtime_error&) {
-    threw = true;
-  }
-  Expect(threw, "future should propagate task exceptions");
+  CHECK_THROWS_AS((void)future.get(), std::runtime_error);
 }
 
-void CheckDestructorDrainsQueuedTasks() {
+TEST_CASE("thread pool destructor drains queued tasks") {
   std::atomic<int> completed = 0;
   {
     ThreadPoolExecutor executor(1);
@@ -58,16 +47,8 @@ void CheckDestructorDrainsQueuedTasks() {
       executor.submit([&completed]() { ++completed; });
     }
   }
-  Expect(completed == 5, "executor destructor should drain queued tasks");
+  CHECK(completed == 5);
 }
 
 }  // namespace
 }  // namespace poker
-
-int main() {
-  poker::CheckRunsTasks();
-  poker::CheckDefaultWorkerCountPositive();
-  poker::CheckExceptionPropagatesThroughFuture();
-  poker::CheckDestructorDrainsQueuedTasks();
-  return 0;
-}

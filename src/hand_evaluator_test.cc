@@ -2,6 +2,8 @@
 #include "src/hand_evaluator_table_builder.h"
 #include "src/hand_evaluator_tables.h"
 
+#include "doctest/doctest.h"
+
 #include <algorithm>
 #include <array>
 #include <random>
@@ -10,17 +12,13 @@
 namespace poker {
 namespace {
 
-void Expect(bool condition, const char* message) {
-  if (!condition) {
-    throw std::runtime_error(message);
-  }
-}
-
 CardId TestCard(int rank, SuitKind suit) {
   return MakeCardId(rank, suit);
 }
 
-ComboId TestCombo(int first_rank, SuitKind first_suit, int second_rank,
+ComboId TestCombo(int first_rank,
+                  SuitKind first_suit,
+                  int second_rank,
                   SuitKind second_suit) {
   return CardsToComboId(TestCard(first_rank, first_suit),
                         TestCard(second_rank, second_suit));
@@ -108,35 +106,33 @@ void CheckCompareMatchesReference(ComboId first,
                                   ComboId second,
                                   const CompactPublicState& board,
                                   const char* message) {
+  CAPTURE(message);
   HandEvaluator evaluator;
-  Expect(evaluator.compare_hands(first, second, board) ==
-             ReferenceCompare(first, second, board),
-         message);
+  CHECK(evaluator.compare_hands(first, second, board) ==
+        ReferenceCompare(first, second, board));
 }
 
-void CheckGeneratedCactusTablesMatchReference() {
+TEST_CASE("generated Cactus tables match reference builder") {
   const auto reference = hand_evaluator_generation::BuildCactusTables();
-  Expect(reference.flushes == hand_evaluator_tables::kCactusFlushes,
-         "generated Cactus flush table should match reference builder");
-  Expect(reference.unique5 == hand_evaluator_tables::kCactusUnique5,
-         "generated Cactus unique-rank table should match reference builder");
-  Expect(reference.products.size() ==
-             hand_evaluator_tables::kCactusProducts.size(),
-         "generated Cactus product table size should match reference builder");
+  CHECK(reference.flushes == hand_evaluator_tables::kCactusFlushes);
+  CHECK(reference.unique5 == hand_evaluator_tables::kCactusUnique5);
+  REQUIRE(reference.products.size() ==
+          hand_evaluator_tables::kCactusProducts.size());
   for (size_t i = 0; i < reference.products.size(); ++i) {
-    Expect(reference.products[i] == hand_evaluator_tables::kCactusProducts[i],
-           "generated Cactus product table should match reference builder");
+    CAPTURE(i);
+    CHECK(reference.products[i] == hand_evaluator_tables::kCactusProducts[i]);
   }
   for (size_t i = 0; i < reference.scores.size(); ++i) {
+    CAPTURE(i);
     const auto& expected = reference.scores[i];
     const auto& actual = hand_evaluator_tables::kCactusScores[i];
-    Expect(expected.rank == actual.rank && expected.kickers == actual.kickers &&
-               expected.kicker_count == actual.kicker_count,
-           "generated Cactus score table should match reference builder");
+    CHECK(expected.rank == actual.rank);
+    CHECK(expected.kickers == actual.kickers);
+    CHECK(expected.kicker_count == actual.kicker_count);
   }
 }
 
-void CheckFiveCardEvaluation() {
+TEST_CASE("five-card evaluation recognizes royal flush") {
   const std::array<CardId, 5> royal_flush = {
       TestCard(10, SuitKind::kHearts),
       TestCard(11, SuitKind::kHearts),
@@ -147,11 +143,10 @@ void CheckFiveCardEvaluation() {
 
   HandEvaluator evaluator;
   HandEvaluation evaluation = evaluator.evaluate(royal_flush);
-  Expect(evaluation.rank == HandRank::ROYAL_FLUSH,
-         "five-card royal flush should rank as royal flush");
+  CHECK(evaluation.rank == HandRank::ROYAL_FLUSH);
 }
 
-void CheckWheelStraightIsFiveHigh() {
+TEST_CASE("wheel straight is scored as five high") {
   HandEvaluator evaluator;
   const std::array<CardId, 5> wheel = {
       TestCard(14, SuitKind::kHearts),
@@ -169,12 +164,10 @@ void CheckWheelStraightIsFiveHigh() {
   };
 
   HandEvaluation wheel_eval = evaluator.evaluate(wheel);
-  Expect(wheel_eval.rank == HandRank::STRAIGHT,
-         "wheel should rank as straight");
-  Expect(wheel_eval.kicker_count == 1 && wheel_eval.kickers[0] == 5,
-         "wheel straight should be five-high");
-  Expect(evaluator.evaluate(six_high) > wheel_eval,
-         "six-high straight should beat wheel straight");
+  CHECK(wheel_eval.rank == HandRank::STRAIGHT);
+  CHECK(wheel_eval.kicker_count == 1);
+  CHECK(wheel_eval.kickers[0] == 5);
+  CHECK(evaluator.evaluate(six_high) > wheel_eval);
 
   const std::array<CardId, 5> wheel_flush = {
       TestCard(14, SuitKind::kHearts),
@@ -184,14 +177,12 @@ void CheckWheelStraightIsFiveHigh() {
       TestCard(2, SuitKind::kHearts),
   };
   HandEvaluation wheel_flush_eval = evaluator.evaluate(wheel_flush);
-  Expect(wheel_flush_eval.rank == HandRank::STRAIGHT_FLUSH,
-         "suited wheel should rank as straight flush");
-  Expect(wheel_flush_eval.kicker_count == 1 &&
-             wheel_flush_eval.kickers[0] == 5,
-         "wheel straight flush should be five-high");
+  CHECK(wheel_flush_eval.rank == HandRank::STRAIGHT_FLUSH);
+  CHECK(wheel_flush_eval.kicker_count == 1);
+  CHECK(wheel_flush_eval.kickers[0] == 5);
 }
 
-void CheckSevenCardBestHand() {
+TEST_CASE("seven-card evaluation chooses best hand") {
   ComboId hand = TestCombo(14, SuitKind::kHearts, 14, SuitKind::kSpades);
   CompactPublicState board;
   AddBoardCard(board, TestCard(14, SuitKind::kDiamonds));
@@ -202,16 +193,14 @@ void CheckSevenCardBestHand() {
 
   HandEvaluator evaluator;
   HandEvaluation evaluation = evaluator.evaluate_hand(hand, board);
-  Expect(evaluation == ReferenceBestHandFromFiveCardEvaluation(hand, board),
-         "seven-card evaluation should match five-card reference");
-  Expect(evaluation.rank == HandRank::FULL_HOUSE,
-         "seven-card evaluation should choose full house");
-  Expect(evaluation.kicker_count == 2, "full house should have two kickers");
-  Expect(evaluation.kickers[0] == 14 && evaluation.kickers[1] == 13,
-         "full house should be aces full of kings");
+  CHECK(evaluation == ReferenceBestHandFromFiveCardEvaluation(hand, board));
+  CHECK(evaluation.rank == HandRank::FULL_HOUSE);
+  CHECK(evaluation.kicker_count == 2);
+  CHECK(evaluation.kickers[0] == 14);
+  CHECK(evaluation.kickers[1] == 13);
 }
 
-void CheckCactusWheelOrdering() {
+TEST_CASE("Cactus comparison orders wheel below six-high straight") {
   HandEvaluator evaluator;
   const CompactPublicState straight_board =
       TestBoard({TestCard(14, SuitKind::kClubs),
@@ -223,16 +212,15 @@ void CheckCactusWheelOrdering() {
       TestCombo(2, SuitKind::kHearts, 13, SuitKind::kClubs);
   const ComboId six_high =
       TestCombo(6, SuitKind::kHearts, 2, SuitKind::kClubs);
-  Expect(evaluator.compare_hands(six_high, wheel, straight_board) > 0,
-         "Cactus compare should score wheel lower than six-high straight");
+  CHECK(evaluator.compare_hands(six_high, wheel, straight_board) > 0);
   const HandEvaluation wheel_eval = evaluator.evaluate_hand(wheel,
                                                             straight_board);
-  Expect(wheel_eval.rank == HandRank::STRAIGHT &&
-             wheel_eval.kicker_count == 1 && wheel_eval.kickers[0] == 5,
-         "seven-card wheel should evaluate as five-high straight");
+  CHECK(wheel_eval.rank == HandRank::STRAIGHT);
+  CHECK(wheel_eval.kicker_count == 1);
+  CHECK(wheel_eval.kickers[0] == 5);
 }
 
-void CheckCompactAndExplicitBoardComparisonMatch() {
+TEST_CASE("compact and explicit-board comparisons match hand values") {
   ComboId aces = TestCombo(14, SuitKind::kHearts, 14, SuitKind::kSpades);
   ComboId kings = TestCombo(13, SuitKind::kHearts, 13, SuitKind::kSpades);
 
@@ -244,10 +232,9 @@ void CheckCompactAndExplicitBoardComparisonMatch() {
   AddBoardCard(compact_state, TestCard(12, SuitKind::kClubs));
 
   HandEvaluator evaluator;
-  Expect(evaluator.compare_hands(aces, kings, compact_state) ==
-             evaluator.compare_hands(aces, kings, compact_state.board_cards,
-                                     compact_state.board_count),
-         "explicit-board showdown comparison should match compact state");
+  CHECK(evaluator.compare_hands(aces, kings, compact_state) ==
+        evaluator.compare_hands(aces, kings, compact_state.board_cards,
+                                compact_state.board_count));
 
   const auto compare_values = [](uint16_t first, uint16_t second) {
     return static_cast<int>(first < second) -
@@ -257,22 +244,20 @@ void CheckCompactAndExplicitBoardComparisonMatch() {
   const int compact_value_compare = compare_values(
       evaluator.hand_value(aces, compact_state),
       evaluator.hand_value(kings, compact_state));
-  Expect(evaluator.compare_hands(aces, kings, compact_state) ==
-             compact_value_compare,
-         "compact comparison should match cached hand values");
+  CHECK(evaluator.compare_hands(aces, kings, compact_state) ==
+        compact_value_compare);
 
   const int explicit_board_value_compare = compare_values(
       evaluator.hand_value(aces, compact_state.board_cards,
                            compact_state.board_count),
       evaluator.hand_value(kings, compact_state.board_cards,
                            compact_state.board_count));
-  Expect(evaluator.compare_hands(aces, kings, compact_state.board_cards,
-                                 compact_state.board_count) ==
-             explicit_board_value_compare,
-         "explicit-board comparison should match cached hand values");
+  CHECK(evaluator.compare_hands(aces, kings, compact_state.board_cards,
+                                compact_state.board_count) ==
+        explicit_board_value_compare);
 }
 
-void CheckCactusCompareRepresentativeParity() {
+TEST_CASE("representative Cactus comparisons match reference evaluator") {
   CheckCompareMatchesReference(
       TestCombo(14, SuitKind::kHearts, 13, SuitKind::kHearts),
       TestCombo(9, SuitKind::kHearts, 8, SuitKind::kHearts),
@@ -281,7 +266,7 @@ void CheckCactusCompareRepresentativeParity() {
                  TestCard(12, SuitKind::kHearts),
                  TestCard(2, SuitKind::kClubs),
                  TestCard(3, SuitKind::kDiamonds)}),
-      "royal and straight flush comparison should match reference");
+      "royal and straight flush comparison");
 
   CheckCompareMatchesReference(
       TestCombo(14, SuitKind::kSpades, 13, SuitKind::kSpades),
@@ -291,7 +276,7 @@ void CheckCactusCompareRepresentativeParity() {
                  TestCard(14, SuitKind::kClubs),
                  TestCard(2, SuitKind::kClubs),
                  TestCard(7, SuitKind::kDiamonds)}),
-      "quads comparison should match reference");
+      "quads comparison");
 
   CheckCompareMatchesReference(
       TestCombo(14, SuitKind::kClubs, 13, SuitKind::kDiamonds),
@@ -301,7 +286,7 @@ void CheckCactusCompareRepresentativeParity() {
                  TestCard(13, SuitKind::kClubs),
                  TestCard(2, SuitKind::kSpades),
                  TestCard(7, SuitKind::kHearts)}),
-      "full house comparison should match reference");
+      "full house comparison");
 
   CheckCompareMatchesReference(
       TestCombo(13, SuitKind::kHearts, 9, SuitKind::kHearts),
@@ -311,7 +296,7 @@ void CheckCactusCompareRepresentativeParity() {
                  TestCard(7, SuitKind::kHearts),
                  TestCard(12, SuitKind::kDiamonds),
                  TestCard(3, SuitKind::kClubs)}),
-      "flush comparison should match reference");
+      "flush comparison");
 
   CheckCompareMatchesReference(
       TestCombo(14, SuitKind::kHearts, 5, SuitKind::kDiamonds),
@@ -321,7 +306,7 @@ void CheckCactusCompareRepresentativeParity() {
                  TestCard(4, SuitKind::kHearts),
                  TestCard(9, SuitKind::kSpades),
                  TestCard(13, SuitKind::kClubs)}),
-      "wheel straight comparison should match reference");
+      "wheel straight comparison");
 
   CheckCompareMatchesReference(
       TestCombo(9, SuitKind::kSpades, 14, SuitKind::kHearts),
@@ -331,7 +316,7 @@ void CheckCactusCompareRepresentativeParity() {
                  TestCard(2, SuitKind::kClubs),
                  TestCard(5, SuitKind::kSpades),
                  TestCard(13, SuitKind::kClubs)}),
-      "trips kicker comparison should match reference");
+      "trips kicker comparison");
 
   CheckCompareMatchesReference(
       TestCombo(13, SuitKind::kClubs, 12, SuitKind::kHearts),
@@ -341,7 +326,7 @@ void CheckCactusCompareRepresentativeParity() {
                  TestCard(13, SuitKind::kSpades),
                  TestCard(2, SuitKind::kClubs),
                  TestCard(7, SuitKind::kDiamonds)}),
-      "two pair kicker comparison should match reference");
+      "two pair kicker comparison");
 
   CheckCompareMatchesReference(
       TestCombo(14, SuitKind::kClubs, 12, SuitKind::kHearts),
@@ -351,7 +336,7 @@ void CheckCactusCompareRepresentativeParity() {
                  TestCard(7, SuitKind::kSpades),
                  TestCard(4, SuitKind::kClubs),
                  TestCard(2, SuitKind::kDiamonds)}),
-      "pair kicker comparison should match reference");
+      "pair kicker comparison");
 
   CheckCompareMatchesReference(
       TestCombo(12, SuitKind::kClubs, 9, SuitKind::kHearts),
@@ -361,10 +346,10 @@ void CheckCactusCompareRepresentativeParity() {
                  TestCard(7, SuitKind::kSpades),
                  TestCard(4, SuitKind::kClubs),
                  TestCard(2, SuitKind::kDiamonds)}),
-      "high card comparison should match reference");
+      "high card comparison");
 }
 
-void CheckCactusCompareRandomParity() {
+TEST_CASE("random Cactus comparisons match reference evaluator") {
   std::array<CardId, kDeckCardCount> deck = {};
   for (int i = 0; i < kDeckCardCount; ++i) {
     deck[static_cast<size_t>(i)] = static_cast<CardId>(i);
@@ -372,6 +357,7 @@ void CheckCactusCompareRandomParity() {
 
   std::mt19937 rng(12345);
   for (int i = 0; i < 1000; ++i) {
+    CAPTURE(i);
     std::shuffle(deck.begin(), deck.end(), rng);
     const ComboId first = TestCombo(deck[0], deck[1]);
     const ComboId second = TestCombo(deck[2], deck[3]);
@@ -385,15 +371,3 @@ void CheckCactusCompareRandomParity() {
 
 }  // namespace
 }  // namespace poker
-
-int main() {
-  poker::CheckGeneratedCactusTablesMatchReference();
-  poker::CheckFiveCardEvaluation();
-  poker::CheckWheelStraightIsFiveHigh();
-  poker::CheckSevenCardBestHand();
-  poker::CheckCactusWheelOrdering();
-  poker::CheckCompactAndExplicitBoardComparisonMatch();
-  poker::CheckCactusCompareRepresentativeParity();
-  poker::CheckCactusCompareRandomParity();
-  return 0;
-}

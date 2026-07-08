@@ -1,27 +1,12 @@
 #include "src/game_tree.h"
 
+#include "doctest/doctest.h"
+
 #include <array>
-#include <stdexcept>
 #include <vector>
 
 namespace poker {
 namespace {
-
-void Expect(bool condition, const char* message) {
-  if (!condition) {
-    throw std::runtime_error(message);
-  }
-}
-
-template <typename Fn>
-void ExpectThrows(Fn fn, const char* message) {
-  try {
-    fn();
-  } catch (const std::exception&) {
-    return;
-  }
-  throw std::runtime_error(message);
-}
 
 GameAction MakeAction(ActionKind kind, int amount = 0) {
   return {kind, amount, -1};
@@ -114,7 +99,7 @@ std::vector<GameAction> LegalActions(const GameTree& tree,
                                  action_table.begin() + action_count);
 }
 
-void CheckLegalActionsPreserveStateInvariants() {
+TEST_CASE("legal actions preserve state invariants") {
   GameTree tree(TestConfig());
   std::vector<CompactPublicState> states;
   states.push_back(PreflopState());
@@ -127,89 +112,73 @@ void CheckLegalActionsPreserveStateInvariants() {
   for (const CompactPublicState& state : states) {
     const int total_chips = TotalChips(state);
     const std::vector<GameAction> actions = LegalActions(tree, state);
-    Expect(!actions.empty(), "active state should have legal actions");
+    REQUIRE(!actions.empty());
     for (const GameAction& action : actions) {
+      CAPTURE(action.kind);
+      CAPTURE(action.amount);
       const CompactPublicState next = tree.apply_action(state, action);
-      Expect(TotalChips(next) == total_chips,
-             "legal action should conserve chips");
-      Expect(next.stack[0] >= 0 && next.stack[1] >= 0 && next.pot >= 0,
-             "legal action should keep nonnegative chip counts");
-      Expect(next.history_size == state.history_size + 1,
-             "legal action should append history");
-      const GameAction last_action =
-          MakeGameAction(next.last_action);
-      Expect(last_action.kind == action.kind,
-             "applied action should preserve action kind");
-      Expect(last_action.player == state.player_to_act,
-             "applied action should record acting player");
+      CHECK(TotalChips(next) == total_chips);
+      CHECK(next.stack[0] >= 0);
+      CHECK(next.stack[1] >= 0);
+      CHECK(next.pot >= 0);
+      CHECK(next.history_size == state.history_size + 1);
+      const GameAction last_action = MakeGameAction(next.last_action);
+      CHECK(last_action.kind == action.kind);
+      CHECK(last_action.player == state.player_to_act);
       if (next.folded_player >= 0) {
-        Expect(tree.is_terminal(next), "folded state should be terminal");
-        Expect(next.player_to_act == -1,
-               "terminal fold should clear player to act");
+        CHECK(tree.is_terminal(next));
+        CHECK(next.player_to_act == -1);
       }
       if (tree.is_betting_round_over(next)) {
-        Expect(tree.get_player_to_act(next) == -1,
-               "closed betting round should have no player action");
+        CHECK(tree.get_player_to_act(next) == -1);
       }
     }
   }
 }
 
-void CheckActionAbstractionShapes() {
+TEST_CASE("legal action abstraction shapes match config") {
   GameTree tree(TestConfig());
   const std::vector<GameAction> preflop =
       LegalActions(tree, PreflopState());
-  Expect(HasAction(preflop, ActionKind::kFold),
-         "facing blind should allow fold");
-  Expect(HasAction(preflop, ActionKind::kCall, 1),
-         "facing blind should allow call");
-  Expect(HasAction(preflop, ActionKind::kRaise, 2),
-         "configured raise should be legal");
-  Expect(HasAction(preflop, ActionKind::kAllIn, 99),
-         "facing blind should allow all-in");
+  CHECK(HasAction(preflop, ActionKind::kFold));
+  CHECK(HasAction(preflop, ActionKind::kCall, 1));
+  CHECK(HasAction(preflop, ActionKind::kRaise, 2));
+  CHECK(HasAction(preflop, ActionKind::kAllIn, 99));
 
   SolverConfig dedup_config;
   dedup_config.bet_sizes = {0.5, 0.51};
   GameTree dedup_tree(dedup_config);
   const std::vector<GameAction> dedup_actions =
       LegalActions(dedup_tree, FlopState());
-  Expect(dedup_actions.size() == 3 &&
-             HasAction(dedup_actions, ActionKind::kBet, 2),
-         "duplicate concrete bet sizes should collapse");
+  CHECK(dedup_actions.size() == 3);
+  CHECK(HasAction(dedup_actions, ActionKind::kBet, 2));
 
   SolverConfig street_config;
   street_config.bet_sizes.push_back(0.5);
   street_config.flop_bet_sizes.push_back(1.0);
   GameTree street_tree(street_config);
-  Expect(HasAction(LegalActions(street_tree, FlopState()), ActionKind::kBet,
-                   4),
-         "street bet sizes should override global sizes");
+  CHECK(HasAction(LegalActions(street_tree, FlopState()), ActionKind::kBet,
+                  4));
 
-  ExpectThrows([&] { (void)GameTree::action_key(MakeAction(ActionKind::kCall,
-                                                           -1)); },
-               "action key should reject negative amounts");
-  ExpectThrows([&] { (void)GameTree::action_key(MakeAction(ActionKind::kCall,
-                                                           1000000)); },
-               "action key should reject colliding large amounts");
+  CHECK_THROWS((void)GameTree::action_key(MakeAction(ActionKind::kCall, -1)));
+  CHECK_THROWS((void)GameTree::action_key(
+      MakeAction(ActionKind::kCall, 1000000)));
 }
 
-void CheckTerminalUtilityAndChance() {
+TEST_CASE("terminal utility and chance transitions are correct") {
   GameTree tree(TestConfig());
   CompactPublicState raised = tree.apply_action(
       PreflopState(), MakeAction(ActionKind::kRaise, 4));
   CompactPublicState folded = tree.apply_action(
       raised, MakeAction(ActionKind::kFold));
-  Expect(tree.get_utility(folded, 0, 1) == 2,
-         "fold utility should be net chips for player A");
+  CHECK(tree.get_utility(folded, 0, 1) == 2);
 
   ComboId player_a =
       MakeCombo(14, SuitKind::kHearts, 14, SuitKind::kSpades);
   ComboId player_b =
       MakeCombo(13, SuitKind::kHearts, 13, SuitKind::kSpades);
-  Expect(tree.is_terminal(ShowdownState()),
-         "closed river action should be terminal");
-  Expect(tree.get_utility(ShowdownState(), player_a, player_b) == 10,
-         "showdown utility should score the best hand");
+  CHECK(tree.is_terminal(ShowdownState()));
+  CHECK(tree.get_utility(ShowdownState(), player_a, player_b) == 10);
 
   CompactPublicState closed_preflop = tree.apply_action(
       tree.apply_action(PreflopState(), MakeAction(ActionKind::kCall)),
@@ -220,14 +189,13 @@ void CheckTerminalUtilityAndChance() {
       MakeCardId(10, SuitKind::kSpades),
   };
   const CompactPublicState child = tree.apply_chance(closed_preflop, flop);
-  Expect(child.street == StreetKind::kFlop &&
-             child.board_count == 3 &&
-             child.history_size == 0 &&
-             child.player_to_act == 1,
-         "chance should advance street, add board, and reset action");
+  CHECK(child.street == StreetKind::kFlop);
+  CHECK(child.board_count == 3);
+  CHECK(child.history_size == 0);
+  CHECK(child.player_to_act == 1);
 }
 
-void CheckCompactHistoryCap() {
+TEST_CASE("compact history cap is enforced") {
   GameTree tree(TestConfig());
   CompactPublicState state;
   state.stack = {99, 98};
@@ -240,18 +208,8 @@ void CheckCompactHistoryCap() {
     AppendHistoryAction(state, {ActionKind::kCheck, 0, 0});
   }
 
-  ExpectThrows([&] {
-    (void)tree.apply_action(state, MakeAction(ActionKind::kCall));
-  }, "compact action append should enforce history cap");
+  CHECK_THROWS((void)tree.apply_action(state, MakeAction(ActionKind::kCall)));
 }
 
 }  // namespace
 }  // namespace poker
-
-int main() {
-  poker::CheckLegalActionsPreserveStateInvariants();
-  poker::CheckActionAbstractionShapes();
-  poker::CheckTerminalUtilityAndChance();
-  poker::CheckCompactHistoryCap();
-  return 0;
-}

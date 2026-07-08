@@ -1,17 +1,9 @@
 #include "src/card_abstraction.h"
 
-#include <cstdlib>
-#include <iostream>
+#include "doctest/doctest.h"
 
 namespace poker {
 namespace {
-
-void Expect(bool condition, const char* message) {
-  if (!condition) {
-    std::cerr << "FAILED: " << message << "\n";
-    std::exit(1);
-  }
-}
 
 CompactPublicState PublicState(StreetKind street,
                                CardId first,
@@ -43,7 +35,7 @@ ComboId ExactCombo(int first_rank,
                         MakeCardId(second_rank, second_suit));
 }
 
-void CheckExactPublicBucketsUseBoardMask() {
+TEST_CASE("exact public buckets use the board mask") {
   ExactPublicCardBuckets buckets;
   const CompactPublicState first =
       PublicState(StreetKind::kFlop,
@@ -56,13 +48,11 @@ void CheckExactPublicBucketsUseBoardMask() {
                   MakeCardId(2, SuitKind::kHearts),
                   MakeCardId(7, SuitKind::kDiamonds));
 
-  Expect(buckets.bucket(first) == first.board_mask,
-         "exact public buckets should use the board mask");
-  Expect(buckets.bucket(first) == buckets.bucket(reordered),
-         "exact public buckets should be order independent");
+  CHECK(buckets.bucket(first) == first.board_mask);
+  CHECK(buckets.bucket(first) == buckets.bucket(reordered));
 }
 
-void CheckTextureBucketsUseBoardTexture() {
+TEST_CASE("texture public buckets group by board texture") {
   BoardTexturePublicCardBuckets buckets;
   const CompactPublicState first_flop =
       PublicState(StreetKind::kFlop,
@@ -91,29 +81,23 @@ void CheckTextureBucketsUseBoardTexture() {
                   MakeCardId(11, SuitKind::kClubs),
                   MakeCardId(14, SuitKind::kSpades));
 
-  Expect(buckets.bucket(first_flop) == buckets.bucket(same_texture_flop),
-         "texture buckets should merge similar disconnected rainbow flops");
-  Expect(buckets.bucket(first_flop) != buckets.bucket(paired_flop),
-         "texture buckets should split paired flops");
-  Expect(buckets.bucket(first_flop) != buckets.bucket(monotone_flop),
-         "texture buckets should split monotone flops");
-  Expect(buckets.bucket(first_flop) != buckets.bucket(turn),
-         "texture buckets should include the street");
+  CHECK(buckets.bucket(first_flop) == buckets.bucket(same_texture_flop));
+  CHECK(buckets.bucket(first_flop) != buckets.bucket(paired_flop));
+  CHECK(buckets.bucket(first_flop) != buckets.bucket(monotone_flop));
+  CHECK(buckets.bucket(first_flop) != buckets.bucket(turn));
 }
 
-void CheckExactPrivateBucketsUseComboId() {
+TEST_CASE("exact private buckets use exact combo ids") {
   ExactPrivateBuckets buckets;
   const CompactPublicState state = PreflopState();
   const ComboId aces =
       ExactCombo(14, SuitKind::kSpades, 14, SuitKind::kHearts);
 
-  Expect(buckets.bucket(aces, state) == aces,
-         "exact private buckets should use exact combo ids");
-  Expect(buckets.bucket_count(state) == kComboCount,
-         "exact private bucket count should equal exact combo count");
+  CHECK(buckets.bucket(aces, state) == aces);
+  CHECK(buckets.bucket_count(state) == kComboCount);
 }
 
-void CheckCoarsePrivateBucketsMergeCombos() {
+TEST_CASE("coarse private buckets merge equivalent combos") {
   CoarsePrivateBuckets buckets;
   const CompactPublicState state = PreflopState();
   const ComboId ace_king_spades =
@@ -123,25 +107,13 @@ void CheckCoarsePrivateBucketsMergeCombos() {
   const ComboId ace_king_offsuit =
       ExactCombo(14, SuitKind::kSpades, 13, SuitKind::kHearts);
 
-  Expect(ace_king_spades != ace_king_hearts,
-         "fixture should use distinct exact combos");
-  Expect(buckets.bucket(ace_king_spades, state) ==
-             buckets.bucket(ace_king_hearts, state),
-         "coarse private buckets should merge equivalent suited combos");
-  Expect(buckets.bucket(ace_king_spades, state) !=
-             buckets.bucket(ace_king_offsuit, state),
-         "coarse private buckets should keep suitedness shape");
-  Expect(buckets.bucket_count(state) < kComboCount,
-         "coarse private bucket count should be smaller than exact combos");
+  CHECK(ace_king_spades != ace_king_hearts);
+  CHECK(buckets.bucket(ace_king_spades, state) ==
+        buckets.bucket(ace_king_hearts, state));
+  CHECK(buckets.bucket(ace_king_spades, state) !=
+        buckets.bucket(ace_king_offsuit, state));
+  CHECK(buckets.bucket_count(state) < kComboCount);
 }
 
 }  // namespace
 }  // namespace poker
-
-int main() {
-  poker::CheckExactPublicBucketsUseBoardMask();
-  poker::CheckTextureBucketsUseBoardTexture();
-  poker::CheckExactPrivateBucketsUseComboId();
-  poker::CheckCoarsePrivateBucketsMergeCombos();
-  return 0;
-}

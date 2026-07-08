@@ -1,6 +1,8 @@
 load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
+DOCTEST_DEPS = ["@doctest//:main"]
+
 cc_proto_library(
     name = "poker_cc_proto",
     deps = ["//src:poker"],
@@ -20,7 +22,7 @@ cc_library(
 cc_test(
     name = "simulator_test",
     srcs = ["simulator_test.cc"],
-    deps = [
+    deps = DOCTEST_DEPS + [
         ":simulator",
     ],
 )

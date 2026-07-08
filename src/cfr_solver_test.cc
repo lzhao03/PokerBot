@@ -1,21 +1,13 @@
 #include "src/cfr_solver.h"
 
 #include "src/combo.h"
+#include "doctest/doctest.h"
 
 #include <cmath>
-#include <cstdlib>
-#include <iostream>
 #include <stdexcept>
 
 namespace poker {
 namespace {
-
-void Expect(bool condition, const char* message) {
-  if (!condition) {
-    std::cerr << "FAILED: " << message << "\n";
-    std::exit(1);
-  }
-}
 
 SolverConfig SmallConfig() {
   SolverConfig config;
@@ -42,7 +34,7 @@ ComboId Combo(int first_rank,
                         MakeCardId(second_rank, second_suit));
 }
 
-void CheckRangeTrainingUpdatesCounters() {
+TEST_CASE("range training updates counters") {
   SolverConfig config = SmallConfig();
   config.max_depth = 1;
   CFRSolver solver(config);
@@ -54,16 +46,14 @@ void CheckRangeTrainingUpdatesCounters() {
   solver.run(3, player_a, player_b);
   const CFRSolver::TrainingRunStats stats =
       solver.get_last_training_run_stats();
-  Expect(solver.get_iterations_run() == 3, "range run should record iterations");
-  Expect(solver.get_cfr_update_count() > 0, "range run should visit CFR nodes");
-  Expect(solver.get_info_set_count() > 0, "range run should allocate infosets");
-  Expect(stats.warmup_iterations == 3,
-         "single-thread range run should use growing iterations");
-  Expect(stats.frozen_iterations == 0,
-         "single-thread range run should not use fixed-storage iterations");
+  CHECK(solver.get_iterations_run() == 3);
+  CHECK(solver.get_cfr_update_count() > 0);
+  CHECK(solver.get_info_set_count() > 0);
+  CHECK(stats.warmup_iterations == 3);
+  CHECK(stats.frozen_iterations == 0);
 }
 
-void CheckPublicStateCapPreventsFrozenPhase() {
+TEST_CASE("public-state cap prevents fixed-storage training") {
   SolverConfig config = SmallConfig();
   config.max_public_states = 1;
   config.max_info_sets = 500000;
@@ -77,17 +67,13 @@ void CheckPublicStateCapPreventsFrozenPhase() {
   solver.run(5, player_a, player_b);
   const CFRSolver::TrainingRunStats stats =
       solver.get_last_training_run_stats();
-  Expect(!stats.public_state_prebuild_complete,
-         "public-state cap should stop prebuild completion");
-  Expect(stats.warmup_iterations == 5,
-         "incomplete prebuild should fall back to growing iterations");
-  Expect(stats.frozen_iterations == 0,
-         "incomplete prebuild should skip frozen training");
-  Expect(solver.get_public_state_count() <= 1,
-         "public-state cap should bound allocation");
+  CHECK(!stats.public_state_prebuild_complete);
+  CHECK(stats.warmup_iterations == 5);
+  CHECK(stats.frozen_iterations == 0);
+  CHECK(solver.get_public_state_count() <= 1);
 }
 
-void CheckEvaluateStrategyReturnsFiniteValue() {
+TEST_CASE("strategy evaluation returns finite values") {
   SolverConfig config = SmallConfig();
   config.max_depth = 1;
   CFRSolver solver(config);
@@ -101,11 +87,11 @@ void CheckEvaluateStrategyReturnsFiniteValue() {
       Combo(14, SuitKind::kHearts, 2, SuitKind::kHearts),
       Combo(13, SuitKind::kClubs, 2, SuitKind::kClubs));
   const double range_value = solver.evaluate_strategy(3, player_a, player_b);
-  Expect(std::isfinite(exact_value), "exact evaluation should be finite");
-  Expect(std::isfinite(range_value), "range evaluation should be finite");
+  CHECK(std::isfinite(exact_value));
+  CHECK(std::isfinite(range_value));
 }
 
-void CheckFixedTerminalHandUtility() {
+TEST_CASE("fixed terminal run counts iteration and utility") {
   SolverConfig config = SmallConfig();
   CompactPublicState terminal;
   terminal.stack[0] = 0;
@@ -123,36 +109,19 @@ void CheckFixedTerminalHandUtility() {
   HandRange player_b = ExactRange(Combo(13, SuitKind::kHearts,
                                         13, SuitKind::kSpades));
   solver.run(1, player_a, player_b);
-  Expect(solver.get_iterations_run() == 1,
-         "fixed terminal run should still count the iteration");
-  Expect(solver.get_expected_value(0) == 5.0,
-         "fold utility should award half the pot to player A");
+  CHECK(solver.get_iterations_run() == 1);
+  CHECK(solver.get_expected_value(0) == doctest::Approx(5.0));
 }
 
-void CheckInvalidRangesAreRejected() {
+TEST_CASE("empty ranges are rejected") {
   SolverConfig config = SmallConfig();
   CFRSolver solver(config);
   HandRange empty;
   HandRange player_b = ExactRange(Combo(14, SuitKind::kHearts,
                                         14, SuitKind::kSpades));
 
-  bool threw = false;
-  try {
-    solver.run(1, empty, player_b);
-  } catch (const std::invalid_argument&) {
-    threw = true;
-  }
-  Expect(threw, "empty ranges should be rejected");
+  CHECK_THROWS_AS(solver.run(1, empty, player_b), std::invalid_argument);
 }
 
 }  // namespace
 }  // namespace poker
-
-int main() {
-  poker::CheckRangeTrainingUpdatesCounters();
-  poker::CheckPublicStateCapPreventsFrozenPhase();
-  poker::CheckEvaluateStrategyReturnsFiniteValue();
-  poker::CheckFixedTerminalHandUtility();
-  poker::CheckInvalidRangesAreRejected();
-  return 0;
-}
