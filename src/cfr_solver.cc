@@ -15,7 +15,6 @@
 #include <cstdint>
 #include <random>
 #include <future>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -95,16 +94,8 @@ CompactPublicState DefaultInitialState(const SolverConfig& config) {
 
 }  // namespace
 
-CompactPublicState CompactPublicStateFromGameState(const GameState& state);
-
 CFRSolver::CFRSolver(const SolverConfig& config)
     : CFRSolver(config, std::make_shared<TerminalUtilityCache>()) {
-}
-
-CFRSolver::CFRSolver(const SolverConfig& config,
-                     const GameState& initial_state)
-    : CFRSolver(config, std::make_shared<TerminalUtilityCache>(),
-                CompactPublicStateFromGameState(initial_state)) {
 }
 
 CFRSolver::CFRSolver(const SolverConfig& config,
@@ -172,37 +163,6 @@ CFRSolver::PrivateCards CFRSolver::PrivateCards::FromCombo(
 
 CardMask CFRSolver::PrivateCards::mask() const {
   return ComboMask(combo);
-}
-
-CompactPublicState
-CompactPublicStateFromGameState(const GameState& state) {
-  CompactPublicState compact;
-  compact.stack = {state.stack[0], state.stack[1]};
-  compact.pot = state.pot;
-  if (state.board_cards.size() > compact.board_cards.size()) {
-    throw std::logic_error("GameState has too many board cards");
-  }
-  compact.board_count = static_cast<uint8_t>(state.board_cards.size());
-  for (size_t i = 0; i < state.board_cards.size(); ++i) {
-    compact.board_cards[i] = state.board_cards[i];
-  }
-  compact.board_mask = state.board_mask;
-  if (state.history.size() > std::numeric_limits<uint16_t>::max()) {
-    throw std::logic_error("GameState history exceeds compact row capacity");
-  }
-  if (state.history.size() > CompactPublicState::kMaxHistoryActions) {
-    throw std::logic_error("GameState history exceeds compact inline capacity");
-  }
-  for (const GameAction& action : state.history) {
-    AppendHistoryAction(compact, action);
-  }
-  compact.street = state.street;
-  compact.all_in = state.all_in;
-  compact.folded_player = state.folded_player;
-  compact.player_to_act = state.player_to_act;
-  compact.player_contribution = state.player_contribution;
-  compact.player_contribution_count = state.player_contribution_count;
-  return compact;
 }
 
 CFRSolver::ExactBoardState CFRSolver::ExactBoardFromState(

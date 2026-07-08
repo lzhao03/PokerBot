@@ -107,7 +107,7 @@ void CheckEvaluateStrategyReturnsFiniteValue() {
 
 void CheckFixedTerminalHandUtility() {
   SolverConfig config = SmallConfig();
-  GameState terminal;
+  CompactPublicState terminal;
   terminal.stack[0] = 0;
   terminal.stack[1] = 0;
   terminal.pot = 10;

@@ -8,7 +8,6 @@ namespace poker {
 
 SolverConfig SolverConfigFromProto(const PokerConfig& config);
 PokerConfig SolverConfigToProto(const SolverConfig& config);
-GameState GameStateFromProto(const BoardState& state);
 CompactPublicState CompactPublicStateFromProto(const BoardState& state);
 GameAction GameActionFromProto(const Action& action);
 ComboId ComboIdFromProtoHand(const Hand& hand);

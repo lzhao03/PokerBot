@@ -38,7 +38,6 @@ class CFRSolver {
   };
 
   CFRSolver(const SolverConfig& config);
-  CFRSolver(const SolverConfig& config, const GameState& initial_state);
   CFRSolver(const SolverConfig& config,
             const CompactPublicState& initial_state);
 

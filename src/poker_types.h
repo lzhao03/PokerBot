@@ -7,8 +7,6 @@
 #include <stdexcept>
 #include <vector>
 
-#include "absl/container/inlined_vector.h"
-
 namespace poker {
 
 using CardId = uint8_t;
@@ -74,37 +72,6 @@ struct SolverConfig {
   // Deprecated. Training now chooses growing or prebuilt storage for the whole
   // run.
   int warmup_iterations = 0;
-};
-
-struct GameState {
-  int stack[2] = {0, 0};
-  int pot = 0;
-  absl::InlinedVector<CardId, kMaxBoardCards> board_cards;
-  CardMask board_mask = 0;
-  absl::InlinedVector<GameAction, 32> history;
-  StreetKind street = StreetKind::kPreflop;
-  bool all_in = false;
-  int folded_player = -1;
-  int player_to_act = 0;
-  std::array<int, 2> player_contribution = {0, 0};
-  int player_contribution_count = 0;
-
-  void set_stack_a(int value) { stack[0] = value; }
-  void set_stack_b(int value) { stack[1] = value; }
-  void set_pot(int value) { pot = value; }
-  template <typename StreetValue>
-  void set_street(StreetValue value) {
-    street = static_cast<StreetKind>(static_cast<int>(value));
-  }
-  void set_all_in(bool value) { all_in = value; }
-  void set_folded_player(int value) { folded_player = value; }
-  void set_player_to_act(int value) { player_to_act = value; }
-  void add_player_contribution(int value) {
-    if (player_contribution_count < 2) {
-      player_contribution[player_contribution_count] = value;
-      ++player_contribution_count;
-    }
-  }
 };
 
 struct CompactAction {
@@ -218,29 +185,6 @@ inline void CopyBoardFrom(CompactPublicState& state,
   state.board_cards = source.board_cards;
   state.board_count = source.board_count;
   state.board_mask = source.board_mask;
-}
-
-inline void AddBoardCard(GameState& state, CardId card_id) {
-  if (state.board_cards.size() >= kMaxBoardCards) {
-    throw std::invalid_argument("Board already has five cards");
-  }
-  if ((state.board_mask & CardBit(card_id)) != 0) {
-    throw std::invalid_argument("Duplicate board card");
-  }
-  state.board_cards.push_back(card_id);
-  state.board_mask |= CardBit(card_id);
-}
-
-inline int Stack(const GameState& state, int player) {
-  return state.stack[player];
-}
-
-inline void SetStack(GameState& state, int player, int stack) {
-  state.stack[player] = stack;
-}
-
-inline int Contribution(const GameState& state, int player) {
-  return state.player_contribution[player];
 }
 
 inline int EncodedCard(CardId card_id) {
