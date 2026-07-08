@@ -71,12 +71,9 @@ public:
   
   // Evaluate the best possible hand given hole cards and a board state
   HandEvaluation evaluate_hand(ComboId hole_cards,
-                               const GameState& board_state) const;
-  HandEvaluation evaluate_hand(ComboId hole_cards,
                                const CompactPublicState& board_state) const;
 
   // Return Cactus hand strength; lower values are stronger.
-  uint16_t hand_value(ComboId hand, const GameState& board_state) const;
   uint16_t hand_value(ComboId hand,
                       const CompactPublicState& board_state) const;
   uint16_t hand_value(
@@ -85,8 +82,6 @@ public:
       uint8_t board_count) const;
   
   // Compare two hands and return positive if hand1 wins, negative if hand2 wins, 0 if tie
-  int compare_hands(ComboId hand1, ComboId hand2,
-                    const GameState& board_state) const;
   int compare_hands(ComboId hand1, ComboId hand2,
                     const CompactPublicState& board_state) const;
   int compare_hands(ComboId hand1, ComboId hand2,

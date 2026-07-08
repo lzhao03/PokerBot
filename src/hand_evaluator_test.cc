@@ -30,8 +30,8 @@ ComboId TestCombo(CardId first, CardId second) {
   return CardsToComboId(first, second);
 }
 
-GameState TestBoard(std::initializer_list<CardId> cards) {
-  GameState board;
+CompactPublicState TestBoard(std::initializer_list<CardId> cards) {
+  CompactPublicState board;
   for (CardId card : cards) {
     AddBoardCard(board, card);
   }
@@ -48,14 +48,14 @@ HandEvaluation ToHandEvaluation(
 }
 
 HandEvaluation ReferenceBestHandFromFiveCardEvaluation(
-    ComboId hand, const GameState& board) {
+    ComboId hand, const CompactPublicState& board) {
   std::array<CardId, 7> cards = {};
   const ComboInfo& combo = GetComboInfo(hand);
   cards[0] = combo.card0;
   cards[1] = combo.card1;
   size_t count = 2;
-  for (CardId card : board.board_cards) {
-    cards[count] = card;
+  for (uint8_t i = 0; i < board.board_count; ++i) {
+    cards[count] = board.board_cards[i];
     ++count;
   }
 
@@ -90,7 +90,7 @@ HandEvaluation ReferenceBestHandFromFiveCardEvaluation(
 
 int ReferenceCompare(ComboId first,
                      ComboId second,
-                     const GameState& board) {
+                     const CompactPublicState& board) {
   const HandEvaluation first_eval =
       ReferenceBestHandFromFiveCardEvaluation(first, board);
   const HandEvaluation second_eval =
@@ -106,7 +106,7 @@ int ReferenceCompare(ComboId first,
 
 void CheckCompareMatchesReference(ComboId first,
                                   ComboId second,
-                                  const GameState& board,
+                                  const CompactPublicState& board,
                                   const char* message) {
   HandEvaluator evaluator;
   Expect(evaluator.compare_hands(first, second, board) ==
@@ -193,7 +193,7 @@ void CheckWheelStraightIsFiveHigh() {
 
 void CheckSevenCardBestHand() {
   ComboId hand = TestCombo(14, SuitKind::kHearts, 14, SuitKind::kSpades);
-  GameState board;
+  CompactPublicState board;
   AddBoardCard(board, TestCard(14, SuitKind::kDiamonds));
   AddBoardCard(board, TestCard(13, SuitKind::kHearts));
   AddBoardCard(board, TestCard(13, SuitKind::kClubs));
@@ -213,7 +213,7 @@ void CheckSevenCardBestHand() {
 
 void CheckCactusWheelOrdering() {
   HandEvaluator evaluator;
-  const GameState straight_board =
+  const CompactPublicState straight_board =
       TestBoard({TestCard(14, SuitKind::kClubs),
                  TestCard(5, SuitKind::kDiamonds),
                  TestCard(4, SuitKind::kHearts),
@@ -232,42 +232,27 @@ void CheckCactusWheelOrdering() {
          "seven-card wheel should evaluate as five-high straight");
 }
 
-void CheckCompactAndGameStateComparisonMatch() {
+void CheckCompactAndExplicitBoardComparisonMatch() {
   ComboId aces = TestCombo(14, SuitKind::kHearts, 14, SuitKind::kSpades);
   ComboId kings = TestCombo(13, SuitKind::kHearts, 13, SuitKind::kSpades);
 
-  GameState game_state;
-  AddBoardCard(game_state, TestCard(2, SuitKind::kDiamonds));
-  AddBoardCard(game_state, TestCard(7, SuitKind::kClubs));
-  AddBoardCard(game_state, TestCard(9, SuitKind::kHearts));
-  AddBoardCard(game_state, TestCard(11, SuitKind::kSpades));
-  AddBoardCard(game_state, TestCard(12, SuitKind::kClubs));
-
   CompactPublicState compact_state;
-  for (CardId card : game_state.board_cards) {
-    AddBoardCard(compact_state, card);
-  }
+  AddBoardCard(compact_state, TestCard(2, SuitKind::kDiamonds));
+  AddBoardCard(compact_state, TestCard(7, SuitKind::kClubs));
+  AddBoardCard(compact_state, TestCard(9, SuitKind::kHearts));
+  AddBoardCard(compact_state, TestCard(11, SuitKind::kSpades));
+  AddBoardCard(compact_state, TestCard(12, SuitKind::kClubs));
 
   HandEvaluator evaluator;
-  Expect(evaluator.compare_hands(aces, kings, game_state) ==
-             evaluator.compare_hands(aces, kings, compact_state),
-         "compact and GameState showdown comparison should match");
-  Expect(evaluator.compare_hands(aces, kings, game_state) ==
+  Expect(evaluator.compare_hands(aces, kings, compact_state) ==
              evaluator.compare_hands(aces, kings, compact_state.board_cards,
                                      compact_state.board_count),
-         "explicit-board showdown comparison should match GameState");
+         "explicit-board showdown comparison should match compact state");
 
   const auto compare_values = [](uint16_t first, uint16_t second) {
     return static_cast<int>(first < second) -
            static_cast<int>(first > second);
   };
-
-  const int game_state_value_compare = compare_values(
-      evaluator.hand_value(aces, game_state),
-      evaluator.hand_value(kings, game_state));
-  Expect(evaluator.compare_hands(aces, kings, game_state) ==
-             game_state_value_compare,
-         "GameState comparison should match cached hand values");
 
   const int compact_value_compare = compare_values(
       evaluator.hand_value(aces, compact_state),
@@ -390,7 +375,7 @@ void CheckCactusCompareRandomParity() {
     std::shuffle(deck.begin(), deck.end(), rng);
     const ComboId first = TestCombo(deck[0], deck[1]);
     const ComboId second = TestCombo(deck[2], deck[3]);
-    const GameState board =
+    const CompactPublicState board =
         TestBoard({deck[4], deck[5], deck[6], deck[7], deck[8]});
     CheckCompareMatchesReference(
         first, second, board,
@@ -407,7 +392,7 @@ int main() {
   poker::CheckWheelStraightIsFiveHigh();
   poker::CheckSevenCardBestHand();
   poker::CheckCactusWheelOrdering();
-  poker::CheckCompactAndGameStateComparisonMatch();
+  poker::CheckCompactAndExplicitBoardComparisonMatch();
   poker::CheckCactusCompareRepresentativeParity();
   poker::CheckCactusCompareRandomParity();
   return 0;
