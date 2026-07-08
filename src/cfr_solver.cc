@@ -2511,18 +2511,18 @@ void CFRSolver::condition_ranges_for_actions(
 
     const PrivateBucketId private_bucket =
         card_abstraction_.private_bucket(combo_id, state);
-    if (player_slab == nullptr) {
+    const InfoSetRow* row =
+        player_slab == nullptr ? nullptr
+                               : find_info_set_row(*player_slab,
+                                                   private_bucket);
+    if (row == nullptr) {
       fill_uniform_strategy();
-    } else if (const InfoSetRow* row =
-                   find_info_set_row(*player_slab, private_bucket)) {
+    } else {
       fill_regret_matched_strategy_for_row(
           *row, conditioned_action_ids, action_probabilities);
-    } else {
-      fill_uniform_strategy();
     }
 
-    for (size_t action_index = 0; action_index < action_count;
-         ++action_index) {
+    for (size_t action_index = 0; action_index < action_count; ++action_index) {
       const double conditioned_weight =
           range_weight * action_probabilities[action_index];
       if (conditioned_weight > 0.0) {
