@@ -121,6 +121,26 @@ class CFRSolver {
   static constexpr int kPrivateBucketChunkSize =
       FrozenStrategyTables::kPrivateBucketChunkSize;
 
+  struct InfoSetHandle {
+    uint32_t action_offset = 0;
+    uint16_t action_count = 0;
+  };
+
+  enum class RegretLoadMode {
+    kPlain,
+    kAtomic,
+  };
+
+  enum class RegretUpdateMode {
+    kPlain,
+    kAtomic,
+  };
+
+  struct RegretUpdateOptions {
+    RegretUpdateMode mode = RegretUpdateMode::kPlain;
+    bool record_atomic_retry_stats = false;
+  };
+
   struct PrivateCards {
     static PrivateCards FromCombo(ComboId combo_id);
     CardMask mask() const;
@@ -331,6 +351,20 @@ class CFRSolver {
   const InfoSetRow* get_or_create_info_set_row(
       InfoSetAddress address,
       absl::Span<const int> action_ids);
+  std::optional<InfoSetHandle> make_info_set_handle(
+      const InfoSetRow* row,
+      size_t expected_action_count) const;
+  std::optional<InfoSetHandle> find_info_set_handle(
+      InfoSetAddress address,
+      size_t expected_action_count) const;
+  std::optional<InfoSetHandle> get_or_create_info_set_handle(
+      InfoSetAddress address,
+      absl::Span<const int> action_ids);
+  std::optional<InfoSetHandle> find_frozen_info_set_handle(
+      uint32_t public_state_id,
+      int player,
+      ComboId combo_id,
+      size_t expected_action_count) const;
   InfoSetRow append_info_set_actions(absl::Span<const int> action_ids);
   PublicInfoSetSlab& get_or_create_public_info_set_slab(
       uint32_t public_state_id);
@@ -383,6 +417,19 @@ class CFRSolver {
       int samples,
       uint32_t root_public_state_id,
       RangeSampler range_sampler);
+  void fill_regret_matching(
+      std::optional<InfoSetHandle> info_set,
+      size_t legal_action_count,
+      RegretLoadMode load_mode,
+      absl::Span<double> action_probabilities);
+  void add_cfr_plus_regret(InfoSetHandle info_set,
+                           size_t action_index,
+                           float delta,
+                           RegretUpdateOptions options);
+  void add_average_strategy(InfoSetHandle info_set,
+                            absl::Span<const double> action_probabilities,
+                            double reach_weight,
+                            RegretUpdateMode update_mode);
   void update_strategy(size_t action_offset,
                        const double* action_probabilities,
                        size_t action_count,
