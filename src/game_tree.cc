@@ -24,24 +24,12 @@ int ContributionForState(const State& state, int player) {
   return state.player_contribution[player];
 }
 
-int BoardCardCount(const GameState& state) {
-  return static_cast<int>(state.board_cards.size());
-}
-
 int BoardCardCount(const CompactPublicState& state) {
   return state.board_count;
 }
 
-int HistorySize(const GameState& state) {
-  return static_cast<int>(state.history.size());
-}
-
 int HistorySize(const CompactPublicState& state) {
   return state.history_size;
-}
-
-GameAction LastAction(const GameState& state) {
-  return state.history.back();
 }
 
 GameAction LastAction(const CompactPublicState& state) {
@@ -241,16 +229,8 @@ uint8_t LegalActionsForState(
   return action_count;
 }
 
-void AppendStateHistory(GameState& state, const GameAction& action) {
-  state.history.push_back(action);
-}
-
 void AppendStateHistory(CompactPublicState& state, const GameAction& action) {
   AppendHistoryAction(state, action);
-}
-
-void ResetStateHistory(GameState& state) {
-  state.history.clear();
 }
 
 void ResetStateHistory(CompactPublicState& state) {
@@ -425,37 +405,15 @@ int GameTree::action_key(const GameAction& action) {
 }
 
 uint8_t GameTree::get_legal_actions(
-    const GameState& state,
-    std::array<GameAction, kMaxActionsPerNode>& actions) const {
-  return LegalActionsForState(config_, state, actions);
-}
-
-uint8_t GameTree::get_legal_actions(
     const CompactPublicState& state,
     std::array<GameAction, kMaxActionsPerNode>& actions) const {
   return LegalActionsForState(config_, state, actions);
-}
-
-GameState GameTree::apply_action(const GameState& state,
-                                 const GameAction& action) const {
-  return ApplyActionForState(state, action);
 }
 
 CompactPublicState GameTree::apply_action(
     const CompactPublicState& state,
     const GameAction& action) const {
   return ApplyActionForState(state, action);
-}
-
-GameState GameTree::apply_chance(const GameState& state,
-                                 absl::Span<const CardId> cards) const {
-  if (is_terminal(state) || get_player_to_act(state) != -1) {
-    throw std::invalid_argument("State is not a chance node");
-  }
-
-  GameState new_state = state;
-  AdvanceStreet(new_state, cards);
-  return new_state;
 }
 
 CompactPublicState GameTree::apply_chance(
@@ -470,13 +428,6 @@ CompactPublicState GameTree::apply_chance(
   return child;
 }
 
-double GameTree::get_utility(const GameState& state,
-                             ComboId player_a_hand,
-                             ComboId player_b_hand) const {
-  return UtilityForState(state, player_a_hand, player_b_hand,
-                         hand_evaluator_);
-}
-
 double GameTree::get_utility(const CompactPublicState& state,
                              ComboId player_a_hand,
                              ComboId player_b_hand) const {
@@ -484,24 +435,12 @@ double GameTree::get_utility(const CompactPublicState& state,
                          hand_evaluator_);
 }
 
-bool GameTree::is_terminal(const GameState& state) const {
-  return IsTerminal(state);
-}
-
 bool GameTree::is_terminal(const CompactPublicState& state) const {
   return IsTerminal(state);
 }
 
-int GameTree::get_player_to_act(const GameState& state) const {
-  return PlayerToAct(state);
-}
-
 int GameTree::get_player_to_act(const CompactPublicState& state) const {
   return PlayerToAct(state);
-}
-
-bool GameTree::is_betting_round_over(const GameState& state) const {
-  return IsBettingRoundOver(state);
 }
 
 bool GameTree::is_betting_round_over(
