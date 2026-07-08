@@ -520,6 +520,12 @@ class CFRSolver {
                              const RangeSampler& range_sampler,
                              const TrainingRange& player_a_training_range,
                              const TrainingRange& player_b_training_range);
+  template <typename WorkerFn, typename AccumulateFn>
+  void run_sharded(int work_count,
+                   int worker_count,
+                   int first_index,
+                   WorkerFn&& worker_fn,
+                   AccumulateFn&& accumulate_fn);
   static ExactBoardState ExactBoardFromState(
       const CompactPublicState& state);
   static void ApplyExactBoard(CompactPublicState& state,

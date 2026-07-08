@@ -1644,6 +1644,41 @@ void CFRSolver::maybe_run_frozen_phase(
       cfr_update_count_ - frozen_start_updates;
 }
 
+template <typename WorkerFn, typename AccumulateFn>
+void CFRSolver::run_sharded(int work_count,
+                            int worker_count,
+                            int first_index,
+                            WorkerFn&& worker_fn,
+                            AccumulateFn&& accumulate_fn) {
+  if (work_count <= 0 || worker_count <= 0) {
+    return;
+  }
+  const int shard_count = std::min(work_count, worker_count);
+  ThreadPoolExecutor executor(shard_count);
+  std::uniform_int_distribution<unsigned int> seed_dist;
+  using WorkerResult = decltype(worker_fn(0, 0, 0u));
+  std::vector<std::future<WorkerResult>> futures;
+  futures.reserve(shard_count);
+
+  int work_remaining = work_count;
+  int next_index = first_index;
+  for (int worker_index = 0; worker_index < shard_count; ++worker_index) {
+    const int shard = work_remaining / (shard_count - worker_index);
+    work_remaining -= shard;
+    const int begin = next_index;
+    next_index += shard;
+    const unsigned int seed = seed_dist(rng_);
+    auto worker = worker_fn;
+    futures.push_back(executor.submit([worker, begin, shard, seed]() mutable {
+      return worker(begin, shard, seed);
+    }));
+  }
+
+  for (std::future<WorkerResult>& future : futures) {
+    accumulate_fn(future.get());
+  }
+}
+
 void CFRSolver::run_frozen_iterations(
     int iterations,
     int num_threads,
@@ -1662,34 +1697,21 @@ void CFRSolver::run_frozen_iterations(
       config_.regret_only_training && config_.max_depth == 0;
   const bool use_atomic_updates = num_threads > 1;
 
-  ThreadPoolExecutor executor(num_threads);
-  std::uniform_int_distribution<unsigned int> seed_dist;
   struct WorkerResult {
     double utility = 0.0;
     TraversalStats traversal_stats;
     int64_t cfr_updates = 0;
     int iterations = 0;
   };
-  std::vector<std::future<WorkerResult>> futures;
-  futures.reserve(num_threads);
 
-  int iterations_remaining = iterations;
-  int next_iteration = iterations_run_;
-  for (int t = 0; t < num_threads; ++t) {
-    const int shard = iterations_remaining / (num_threads - t);
-    iterations_remaining -= shard;
-    if (shard <= 0) {
-      continue;
-    }
-    const int iteration_begin = next_iteration;
-    next_iteration += shard;
-
-    const unsigned int seed = seed_dist(rng_);
-    futures.push_back(executor.submit(
-        [this, shard, iteration_begin, seed, root_public_state_id,
-         &range_sampler, frozen_tables, cumulative, use_frozen_regret_only,
-         use_atomic_updates, &player_a_training_range,
-         &player_b_training_range]() mutable {
+  int completed_iterations = 0;
+  run_sharded(
+      iterations, num_threads, iterations_run_,
+      [this, root_public_state_id, &range_sampler, frozen_tables, cumulative,
+       use_frozen_regret_only, use_atomic_updates, &player_a_training_range,
+       &player_b_training_range](int iteration_begin,
+                                 int shard,
+                                 unsigned int seed) mutable {
           // Build a lightweight worker that shares frozen tables.
           CFRSolver worker(config_, utility_cache_);
           worker.storage_.bind_frozen(frozen_tables, cumulative);
@@ -1759,18 +1781,13 @@ void CFRSolver::run_frozen_iterations(
           }
           return WorkerResult{local_utility, worker.get_traversal_stats(),
                               worker.get_cfr_update_count(), shard};
-        }));
-  }
-
-  // Accumulate per-worker root utilities and traversal stats into the main solver.
-  int completed_iterations = 0;
-  for (std::future<WorkerResult>& f : futures) {
-    const WorkerResult result = f.get();
-    cumulative_root_utility_ += result.utility;
-    add_traversal_stats(result.traversal_stats);
-    cfr_update_count_ += result.cfr_updates;
-    completed_iterations += result.iterations;
-  }
+      },
+      [&](const WorkerResult& result) {
+        cumulative_root_utility_ += result.utility;
+        add_traversal_stats(result.traversal_stats);
+        cfr_update_count_ += result.cfr_updates;
+        completed_iterations += result.iterations;
+      });
   iterations_run_ += completed_iterations;
 }
 
@@ -2177,47 +2194,29 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
                                      range_sampler);
   }
 
-  ThreadPoolExecutor executor(worker_count);
-  std::uniform_int_distribution<unsigned int> seed_distribution;
-  std::vector<unsigned int> worker_seeds;
-  worker_seeds.reserve(worker_count);
-  for (int i = 0; i < worker_count; ++i) {
-    worker_seeds.push_back(seed_distribution(rng_));
-  }
-
   SolverConfig config = config_;
   std::shared_ptr<const FrozenStrategyTables> frozen_tables =
       storage_.frozen_tables;
   std::shared_ptr<MutableCumulativeArrays> cumulative = storage_.cumulative;
-  std::vector<std::future<std::pair<double, int64_t>>> futures;
-  futures.reserve(worker_count);
-  int samples_remaining = samples;
-  for (int i = 0; i < worker_count; ++i) {
-    int shard_samples = samples_remaining / (worker_count - i);
-    samples_remaining -= shard_samples;
-    unsigned int seed = worker_seeds[i];
-    futures.push_back(executor.submit([config, range_sampler,
-                                       root_public_state_id =
-                                           *root_public_state_id,
-                                       frozen_tables, cumulative,
-                                       shard_samples, seed]() mutable {
-      CFRSolver worker(config, std::make_shared<TerminalUtilityCache>());
-      worker.storage_.bind_frozen(frozen_tables, cumulative);
-      worker.rng_.seed(seed);
-      const double value = worker.evaluate_strategy_samples(
-          shard_samples, root_public_state_id, range_sampler);
-      return std::make_pair(
-          value * shard_samples,
-          worker.get_traversal_stats().action_entry_touches);
-    }));
-  }
-
   double total = 0.0;
-  for (std::future<std::pair<double, int64_t>>& future : futures) {
-    const std::pair<double, int64_t> result = future.get();
-    total += result.first;
-    record_action_entry_touches(result.second);
-  }
+  run_sharded(
+      samples, worker_count, 0,
+      [config, range_sampler, root_public_state_id = *root_public_state_id,
+       frozen_tables, cumulative](int, int shard_samples,
+                                  unsigned int seed) mutable {
+        CFRSolver worker(config, std::make_shared<TerminalUtilityCache>());
+        worker.storage_.bind_frozen(frozen_tables, cumulative);
+        worker.rng_.seed(seed);
+        const double value = worker.evaluate_strategy_samples(
+            shard_samples, root_public_state_id, range_sampler);
+        return std::make_pair(
+            value * shard_samples,
+            worker.get_traversal_stats().action_entry_touches);
+      },
+      [&](const std::pair<double, int64_t>& result) {
+        total += result.first;
+        record_action_entry_touches(result.second);
+      });
   return total / samples;
 }
 
