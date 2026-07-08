@@ -101,18 +101,6 @@ class CFRSolver {
     }
   };
 
-  struct ReachState {
-    std::array<double, kPlayerCount> probability = {1.0, 1.0};
-
-    double self(int player) const {
-      return probability[static_cast<size_t>(player)];
-    }
-
-    double opponent(int player) const {
-      return probability[static_cast<size_t>(1 - player)];
-    }
-  };
-
   struct TraversalOptions {
     int update_player = 0;
     int iteration = 0;
@@ -288,11 +276,11 @@ class CFRSolver {
     }
 
     double reach(int player) const {
-      return reach_.self(player);
+      return reach_[static_cast<size_t>(player)];
     }
 
     double opponent_reach(int player) const {
-      return reach_.opponent(player);
+      return reach_[static_cast<size_t>(1 - player)];
     }
 
     bool is_update_player(int player) const {
@@ -330,14 +318,14 @@ class CFRSolver {
      public:
       ReachScope(TraversalContext& ctx, int player, double probability)
           : ctx_(ctx), player_(player) {
-        previous_ = ctx_.reach_.probability[static_cast<size_t>(player_)];
-        ctx_.reach_.probability[static_cast<size_t>(player_)] =
-            previous_ * probability;
+        double& reach = ctx_.reach_[static_cast<size_t>(player_)];
+        previous_ = reach;
+        reach = previous_ * probability;
       }
       ReachScope(const ReachScope&) = delete;
       ReachScope& operator=(const ReachScope&) = delete;
       ~ReachScope() {
-        ctx_.reach_.probability[static_cast<size_t>(player_)] = previous_;
+        ctx_.reach_[static_cast<size_t>(player_)] = previous_;
       }
 
      private:
@@ -394,7 +382,7 @@ class CFRSolver {
     TraversalDeal deal_;
     TraversalOptions options_;
     TraversalScratch* scratch_ = nullptr;
-    ReachState reach_;
+    std::array<double, kPlayerCount> reach_ = {1.0, 1.0};
     std::array<OptionalTrainingRange, kPlayerCount> ranges_;
     int depth_ = 0;
   };
