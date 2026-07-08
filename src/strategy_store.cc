@@ -30,7 +30,7 @@ void ActionBlock::regret_matching(absl::Span<const int> legal_action_ids,
       continue;
     }
 
-    store_->record_action_entry_touches();
+    store_->stats_->record_action_entries();
     const double positive_regret =
         std::max(
             0.0,
@@ -78,7 +78,7 @@ void ActionBlock::average_strategy(bool regret_only_training,
 
   if (aligned_action_ids) {
     for (size_t i = 0; i < legal_action_ids.size(); ++i) {
-      store_->record_action_entry_touches();
+      store_->stats_->record_action_entries();
       const size_t table_index = static_cast<size_t>(action_offset_) + i;
       out[i] =
           regret_only_training
@@ -97,7 +97,7 @@ void ActionBlock::average_strategy(bool regret_only_training,
       const int legal_action_id = legal_action_ids[legal_action_index];
       for (uint16_t action_index = 0; action_index < action_count_;
            ++action_index) {
-        store_->record_action_entry_touches();
+        store_->stats_->record_action_entries();
         const size_t table_index =
             static_cast<size_t>(action_offset_) + action_index;
         if (ids[table_index] == legal_action_id) {
@@ -456,7 +456,7 @@ StrategyStore::InfoSetRow StrategyStore::append_info_set_actions(
     tables.action_ids.push_back(action_id);
     cumulative().cumulative_regrets.push_back(0.0f);
     cumulative().cumulative_strategies.push_back(0.0f);
-    record_action_entry_touches();
+    stats_->record_action_entries();
   }
   return row;
 }

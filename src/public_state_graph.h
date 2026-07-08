@@ -121,10 +121,6 @@ class PublicStateGraph {
       const CompactPublicState& child_state) const;
   void rebuild_chance_child_entries();
 
-  void record_child_node_created() const;
-  void record_betting_history_transition_hit() const;
-  void record_betting_history_transition_miss() const;
-
   const SolverConfig& config_;
   SolverStorage& storage_;
   GameTree& game_tree_;

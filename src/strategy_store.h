@@ -14,6 +14,7 @@
 #include "src/card_abstraction.h"
 #include "src/poker_types.h"
 #include "src/strategy_tables.h"
+#include "src/traversal_stats.h"
 
 namespace poker {
 namespace strategy_store_internal {
@@ -90,24 +91,6 @@ enum class RegretUpdateMode {
 struct RegretUpdateOptions {
   RegretUpdateMode mode = RegretUpdateMode::kPlain;
   bool record_atomic_retry_stats = false;
-};
-
-struct TraversalStats {
-  int64_t cfr_updates = 0;
-  int64_t preflop_updates = 0;
-  int64_t flop_updates = 0;
-  int64_t turn_updates = 0;
-  int64_t river_updates = 0;
-  int max_decision_depth = 0;
-  int64_t child_nodes_created = 0;
-  int64_t chance_samples = 0;
-  int64_t terminal_utility_calls = 0;
-  int64_t fold_utility_calls = 0;
-  int64_t showdown_utility_calls = 0;
-  int64_t action_entry_touches = 0;
-  int64_t atomic_regret_update_retries = 0;
-  int64_t betting_history_transition_hits = 0;
-  int64_t betting_history_transition_misses = 0;
 };
 
 class StrategyStore;
@@ -271,9 +254,6 @@ class StrategyStore {
       int player,
       PrivateBucketId private_bucket) const;
 
-  void record_action_entry_touches(int64_t count = 1) const;
-  void record_atomic_regret_update_retries(int64_t count) const;
-
   const SolverConfig& config_;
   const CardAbstraction& card_abstraction_;
   SolverStorage& storage_;
@@ -290,19 +270,6 @@ inline MutableCumulativeArrays& StrategyStore::cumulative() {
 
 inline const MutableCumulativeArrays& StrategyStore::cumulative() const {
   return storage_.cumulative_ref();
-}
-
-inline void StrategyStore::record_action_entry_touches(int64_t count) const {
-  if constexpr (kTraversalStatsEnabled) {
-    stats_->action_entry_touches += count;
-  }
-}
-
-inline void StrategyStore::record_atomic_regret_update_retries(
-    int64_t count) const {
-  if constexpr (kCasRetryStatsEnabled) {
-    stats_->atomic_regret_update_retries += count;
-  }
 }
 
 inline absl::Span<const int> ActionBlock::action_ids() const {
@@ -323,7 +290,7 @@ inline void ActionBlock::regret_matching(RegretLoadMode mode,
   const auto& regrets = store_->cumulative().cumulative_regrets;
   double sum_positive_regrets = 0.0;
   for (size_t action_index = 0; action_index < out.size(); ++action_index) {
-    store_->record_action_entry_touches();
+    store_->stats_->record_action_entries();
     const size_t table_index =
         static_cast<size_t>(action_offset_) + action_index;
     const float raw_regret =
@@ -360,14 +327,14 @@ inline void ActionBlock::add_cfr_plus_regret(
     throw std::logic_error("regret update table index out of range");
   }
 
-  store_->record_action_entry_touches(2);
+  store_->stats_->record_action_entries(2);
   float* regret_entry = &regrets[table_index];
   if (options.mode == RegretUpdateMode::kAtomic) {
     const int64_t retries =
         strategy_store_internal::AtomicCFRPlusRegretUpdate(regret_entry,
                                                            delta);
     if (options.record_atomic_retry_stats) {
-      store_->record_atomic_regret_update_retries(retries);
+      store_->stats_->record_atomic_retries(retries);
     }
     return;
   }
@@ -389,7 +356,7 @@ inline void ActionBlock::add_average_strategy(absl::Span<const double> probs,
       throw std::logic_error("average-strategy table index out of range");
     }
 
-    store_->record_action_entry_touches(2);
+    store_->stats_->record_action_entries(2);
     const float delta =
         static_cast<float>(reach_weight * probs[action_index]);
     if (mode == RegretUpdateMode::kAtomic) {

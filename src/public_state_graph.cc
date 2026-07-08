@@ -501,7 +501,7 @@ PublicStateGraph::get_or_create_action_child_public_state(
   const size_t action_slot = static_cast<size_t>(action_index);
   const uint32_t existing_child_id = read_row.action_child_ids[action_slot];
   if (existing_child_id != GameTree::kInvalidPublicStateId) {
-    record_betting_history_transition_hit();
+    stats_->record_transition_hit();
     if (existing_child_id == kCappedPublicStateId) {
       return std::nullopt;
     }
@@ -529,14 +529,14 @@ PublicStateGraph::get_or_create_action_child_public_state(
                 .public_state_rows[public_state_id]
                 .action_child_ids[action_slot] = existing_public_child->second;
           }
-          record_betting_history_transition_hit();
+          stats_->record_transition_hit();
           return existing_public_child->second;
         }
       }
     }
   }
   if (storage_.frozen) {
-    record_betting_history_transition_miss();
+    stats_->record_transition_miss();
     return std::nullopt;
   }
   if (config_.max_public_states > 0 &&
@@ -544,7 +544,7 @@ PublicStateGraph::get_or_create_action_child_public_state(
     mtables()
         .public_state_rows[public_state_id]
         .action_child_ids[action_slot] = kCappedPublicStateId;
-    record_betting_history_transition_miss();
+    stats_->record_transition_miss();
     return std::nullopt;
   }
 
@@ -561,15 +561,15 @@ PublicStateGraph::get_or_create_action_child_public_state(
     mtables()
         .public_state_rows[public_state_id]
         .action_child_ids[action_slot] = kCappedPublicStateId;
-    record_betting_history_transition_miss();
+    stats_->record_transition_miss();
     return std::nullopt;
   }
 
   mtables()
       .public_state_rows[public_state_id]
       .action_child_ids[action_slot] = *child_id;
-  record_betting_history_transition_miss();
-  record_child_node_created();
+  stats_->record_transition_miss();
+  stats_->record_child_node_created();
   return child_id;
 }
 
@@ -587,7 +587,7 @@ PublicStateGraph::get_or_create_chance_child_public_state(
   const auto& chance_children = tables().public_chance_child_ids;
   auto existing = chance_children.find(transition_key);
   if (existing != chance_children.end()) {
-    record_betting_history_transition_hit();
+    stats_->record_transition_hit();
     return existing->second;
   }
   if constexpr (kCoarsePublicBuckets) {
@@ -608,19 +608,19 @@ PublicStateGraph::get_or_create_chance_child_public_state(
             mtables().public_chance_child_ids.emplace(
                 transition_key, existing_public_child->second);
           }
-          record_betting_history_transition_hit();
+          stats_->record_transition_hit();
           return existing_public_child->second;
         }
       }
     }
   }
   if (storage_.frozen) {
-    record_betting_history_transition_miss();
+    stats_->record_transition_miss();
     return std::nullopt;
   }
   if (config_.max_public_states > 0 &&
       static_cast<int>(rows().size()) >= config_.max_public_states) {
-    record_betting_history_transition_miss();
+    stats_->record_transition_miss();
     return std::nullopt;
   }
 
@@ -633,13 +633,13 @@ PublicStateGraph::get_or_create_chance_child_public_state(
       get_or_create_public_state_row(child_betting_history_id,
                                      std::move(stored_child_state));
   if (!child_id.has_value()) {
-    record_betting_history_transition_miss();
+    stats_->record_transition_miss();
     return std::nullopt;
   }
 
   mtables().public_chance_child_ids.emplace(transition_key, *child_id);
-  record_betting_history_transition_miss();
-  record_child_node_created();
+  stats_->record_transition_miss();
+  stats_->record_child_node_created();
   return child_id;
 }
 
@@ -893,24 +893,6 @@ bool PublicStateGraph::validate_prebuilt_transitions(
   return stats.betting_history_transition_prebuild_complete &&
          stats.action_transition_prebuild_complete &&
          stats.chance_transition_prebuild_complete;
-}
-
-void PublicStateGraph::record_child_node_created() const {
-  if constexpr (kTraversalStatsEnabled) {
-    ++stats_->child_nodes_created;
-  }
-}
-
-void PublicStateGraph::record_betting_history_transition_hit() const {
-  if constexpr (kTraversalStatsEnabled) {
-    ++stats_->betting_history_transition_hits;
-  }
-}
-
-void PublicStateGraph::record_betting_history_transition_miss() const {
-  if constexpr (kTraversalStatsEnabled) {
-    ++stats_->betting_history_transition_misses;
-  }
 }
 
 }  // namespace poker

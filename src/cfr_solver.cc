@@ -418,74 +418,7 @@ bool CFRSolver::prebuild_info_set_rows(
 }
 
 void CFRSolver::add_traversal_stats(const TraversalStats& stats) {
-  traversal_stats_.cfr_updates += stats.cfr_updates;
-  traversal_stats_.preflop_updates += stats.preflop_updates;
-  traversal_stats_.flop_updates += stats.flop_updates;
-  traversal_stats_.turn_updates += stats.turn_updates;
-  traversal_stats_.river_updates += stats.river_updates;
-  traversal_stats_.child_nodes_created += stats.child_nodes_created;
-  traversal_stats_.chance_samples += stats.chance_samples;
-  traversal_stats_.terminal_utility_calls += stats.terminal_utility_calls;
-  traversal_stats_.fold_utility_calls += stats.fold_utility_calls;
-  traversal_stats_.showdown_utility_calls += stats.showdown_utility_calls;
-  traversal_stats_.action_entry_touches += stats.action_entry_touches;
-  traversal_stats_.atomic_regret_update_retries +=
-      stats.atomic_regret_update_retries;
-  traversal_stats_.betting_history_transition_hits +=
-      stats.betting_history_transition_hits;
-  traversal_stats_.betting_history_transition_misses +=
-      stats.betting_history_transition_misses;
-}
-
-inline void CFRSolver::record_action_entry_touches(int64_t count) {
-  if constexpr (kTraversalStatsEnabled) {
-    traversal_stats_.action_entry_touches += count;
-  }
-}
-
-inline void CFRSolver::record_cfr_update(StreetKind street, int depth) {
-  if constexpr (kTraversalStatsEnabled) {
-    ++traversal_stats_.cfr_updates;
-    traversal_stats_.max_decision_depth =
-        std::max(traversal_stats_.max_decision_depth, depth);
-    switch (street) {
-      case StreetKind::kPreflop:
-        ++traversal_stats_.preflop_updates;
-        break;
-      case StreetKind::kFlop:
-        ++traversal_stats_.flop_updates;
-        break;
-      case StreetKind::kTurn:
-        ++traversal_stats_.turn_updates;
-        break;
-      case StreetKind::kRiver:
-        ++traversal_stats_.river_updates;
-        break;
-    }
-  }
-}
-
-inline void CFRSolver::record_chance_samples(int64_t count) {
-  if constexpr (kTraversalStatsEnabled) {
-    traversal_stats_.chance_samples += count;
-  }
-}
-
-inline void CFRSolver::record_terminal_utility(bool showdown) {
-  if constexpr (kTraversalStatsEnabled) {
-    ++traversal_stats_.terminal_utility_calls;
-    if (showdown) {
-      ++traversal_stats_.showdown_utility_calls;
-    } else {
-      ++traversal_stats_.fold_utility_calls;
-    }
-  }
-}
-
-inline void CFRSolver::record_atomic_regret_update_retries(int64_t count) {
-  if constexpr (kTraversalStatsEnabled) {
-    traversal_stats_.atomic_regret_update_retries += count;
-  }
+  traversal_stats_.add(stats);
 }
 
 void CFRSolver::run(int iterations, const HandRange& player_a_range,
@@ -954,13 +887,13 @@ double CFRSolver::CfrTraversal<mode>::terminal(
     const NodeCursor* node_cursor) {
   if constexpr (mode == CfrTraversalMode::kNormal) {
     const CompactPublicState& state = node_cursor->exact_state();
-    solver_.record_terminal_utility(state.folded_player < 0);
+    solver_.traversal_stats_.record_terminal(state.folded_player < 0);
     if (!ctx_.use_terminal_cache() || ctx_.max_depth() > 0) {
       return solver_.uncached_utility(state, ctx_.cards(0), ctx_.cards(1));
     }
     return solver_.utility(state, ctx_.cards(0), ctx_.cards(1));
   } else {
-    solver_.record_terminal_utility(row.state.folded_player < 0);
+    solver_.traversal_stats_.record_terminal(row.state.folded_player < 0);
     return solver_.frozen_utility(row, node.exact_board, ctx_.cards(0),
                                   ctx_.cards(1));
   }
@@ -969,7 +902,7 @@ double CFRSolver::CfrTraversal<mode>::terminal(
 template <CFRSolver::CfrTraversalMode mode>
 double CFRSolver::CfrTraversal<mode>::chance(NodeRef node) {
   const int samples = ChanceSamples(solver_.config_);
-  solver_.record_chance_samples(samples);
+  solver_.traversal_stats_.record_chance_samples(samples);
   if constexpr (mode == CfrTraversalMode::kFrozenRegretOnly) {
     return solver_.sample_chance_children(
         samples, node, ctx_.known_private_cards(), graph_,
@@ -1099,7 +1032,7 @@ double CFRSolver::CfrTraversal<mode>::decision(
   }
 
   ++solver_.cfr_update_count_;
-  solver_.record_cfr_update(decision.street, ctx_.depth());
+  solver_.traversal_stats_.record_decision(decision.street, ctx_.depth());
 
   if (action_block.has_value() && is_update_player) {
     const double opponent_reach_prob = ctx_.opponent_reach(player);
@@ -1332,7 +1265,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
       },
       [&](const std::pair<double, int64_t>& result) {
         total += result.first;
-        record_action_entry_touches(result.second);
+        traversal_stats_.record_action_entries(result.second);
       });
   return total / samples;
 }

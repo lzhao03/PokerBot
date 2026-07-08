@@ -544,12 +544,6 @@ class CFRSolver {
       int samples,
       uint32_t root_public_state_id,
       RangeSampler range_sampler);
-  void record_action_entry_touches(int64_t count = 1);
-  void record_cfr_update(StreetKind street, int depth);
-  void record_chance_samples(int64_t count);
-  void record_terminal_utility(bool showdown);
-  void record_atomic_regret_update_retries(int64_t count);
-
   SolverConfig config_;
   CompactPublicState initial_state_;
   std::shared_ptr<GameTree> game_tree_;
