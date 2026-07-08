@@ -328,6 +328,7 @@ CFR_SOLVER_DEPS = [
     ":thread_pool",
     ":training_range",
     "@abseil-cpp//absl/container:flat_hash_map",
+    "@abseil-cpp//absl/container:flat_hash_set",
     "@abseil-cpp//absl/container:inlined_vector",
     "@abseil-cpp//absl/log:log",
 ]

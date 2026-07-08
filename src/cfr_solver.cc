@@ -1,6 +1,7 @@
 #include "src/cfr_solver.h"
 #include "absl/log/log.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/types/span.h"
 #include "src/build_flags.h"
@@ -183,7 +184,7 @@ CoarseChanceTransitionMap BuildCoarseChanceTransitions(StreetKind street) {
   }
 
   CardAbstraction abstraction;
-  absl::flat_hash_map<uint64_t, bool> seen;
+  absl::flat_hash_set<uint64_t> seen;
   ForEachCardCombination(board_count, 0, [&](absl::Span<const CardId> board) {
     CompactPublicState parent;
     parent.street = street;
@@ -200,10 +201,9 @@ CoarseChanceTransitionMap BuildCoarseChanceTransitions(StreetKind street) {
       }
       const PublicBucketId child_bucket = abstraction.public_bucket(child);
       const uint64_t seen_key = (parent_bucket << 32) | child_bucket;
-      if (seen.contains(seen_key)) {
+      if (!seen.insert(seen_key).second) {
         return true;
       }
-      seen.emplace(seen_key, true);
       CoarseChanceTransitionTemplate transition;
       transition.parent_board_state = parent;
       transition.cards.assign(cards.begin(), cards.end());
