@@ -1,6 +1,7 @@
 #include "src/public_state_graph.h"
 
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -110,7 +111,7 @@ bool ForEachNextStreetDeal(const CompactPublicState& state,
 
   const int available_cards =
       kDeckCardCount -
-      static_cast<int>(__builtin_popcountll(state.board_mask));
+      static_cast<int>(std::popcount(state.board_mask));
   if (available_cards < count) {
     throw std::runtime_error("Not enough cards to enumerate next street");
   }
