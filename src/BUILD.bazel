@@ -182,6 +182,7 @@ cc_library(
     hdrs = ["hand_range.h"],
     deps = [
         ":combo",
+        ":training_range",
     ],
     visibility = ["//visibility:public"],
 )
@@ -191,6 +192,7 @@ cc_test(
     srcs = ["hand_range_test.cc"],
     deps = DOCTEST_DEPS + [
         ":hand_range",
+        ":training_range",
     ],
 )
 
@@ -200,7 +202,6 @@ cc_library(
     hdrs = ["training_range.h"],
     deps = [
         ":combo",
-        ":hand_range",
     ],
     visibility = ["//visibility:public"],
 )
@@ -209,6 +210,7 @@ cc_test(
     name = "training_range_test",
     srcs = ["training_range_test.cc"],
     deps = DOCTEST_DEPS + [
+        ":hand_range",
         ":training_range",
     ],
 )
@@ -464,6 +466,7 @@ cc_binary(
         ":cfr_solver",
         ":hand_range",
         ":poker_config",
+        ":training_range",
         "@abseil-cpp//absl/log:initialize",
     ],
 )
@@ -479,6 +482,7 @@ cc_binary(
         ":cfr_solver_no_stats",
         ":hand_range",
         ":poker_config",
+        ":training_range",
         "@abseil-cpp//absl/log:initialize",
     ],
 )
@@ -495,6 +499,7 @@ cc_binary(
         ":cfr_solver_coarse_buckets_no_stats",
         ":hand_range",
         ":poker_config",
+        ":training_range",
         "@abseil-cpp//absl/log:initialize",
     ],
 )

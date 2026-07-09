@@ -2,6 +2,8 @@
 
 #include "doctest/doctest.h"
 
+#include "src/hand_range.h"
+
 namespace {
 
 ::poker::ComboId MakeCombo(int first_rank,
@@ -20,29 +22,17 @@ float TotalWeight(const poker::TrainingRange& range) {
   return total;
 }
 
-void CheckMatchesWeightedCombos(const poker::WeightedHandRange& combos,
-                                const poker::TrainingRange& range) {
-  CHECK(range.active_count == combos.size());
-  for (size_t i = 0; i < combos.size(); ++i) {
-    const poker::ComboId combo = combos.combos[i];
-    CAPTURE(i);
-    CHECK(range.active[i] == combo);
-    CHECK(range.weight(combo) ==
-          doctest::Approx(static_cast<float>(combos.weights[i])).epsilon(1e-6));
-  }
-}
-
-TEST_CASE("training range preserves weighted combos") {
+TEST_CASE("training range preserves hand range expansion") {
   poker::HandRange hand_range;
   hand_range.add_hand_by_index(poker::HandRange::string_to_index("AA"), 6.0);
   hand_range.add_hand_by_index(poker::HandRange::string_to_index("AKs"), 4.0);
-  hand_range.add_combo(
-      MakeCombo(14, poker::SuitKind::kSpades, 14, poker::SuitKind::kHearts),
-      2.0);
+  const poker::ComboId exact_aces =
+      MakeCombo(14, poker::SuitKind::kSpades, 14, poker::SuitKind::kHearts);
+  hand_range.add_combo(exact_aces, 2.0);
 
-  const poker::WeightedHandRange& combos = hand_range.get_all_weighted_combos();
   const poker::TrainingRange range = poker::BuildTrainingRange(hand_range);
-  CheckMatchesWeightedCombos(combos, range);
+  CHECK(range.active_count == 10);
+  CHECK(range.weight(exact_aces) == doctest::Approx(3.0f).epsilon(1e-6));
   CHECK(TotalWeight(range) ==
         doctest::Approx(static_cast<float>(hand_range.get_total_weight()))
             .epsilon(1e-6));
@@ -52,15 +42,14 @@ TEST_CASE("training range preserves weighted combos") {
 }
 
 TEST_CASE("training range view can reset and reuse filtered storage") {
-  poker::WeightedHandRange combos;
   const poker::ComboId aces =
       MakeCombo(14, poker::SuitKind::kSpades, 14, poker::SuitKind::kHearts);
   const poker::ComboId kings =
       MakeCombo(13, poker::SuitKind::kSpades, 13, poker::SuitKind::kHearts);
-  combos.add(aces, 1.0);
-  combos.add(kings, 2.0);
+  poker::TrainingRange range;
+  range.add(aces, 1.0f);
+  range.add(kings, 2.0f);
 
-  const poker::TrainingRange range = poker::BuildTrainingRange(combos);
   poker::TrainingRangeView view(range);
   CHECK(view.size() == 2);
 
@@ -89,10 +78,9 @@ TEST_CASE("training range view filters blocked cards into scratch") {
   const poker::ComboId kings =
       MakeCombo(13, poker::SuitKind::kSpades, 13, poker::SuitKind::kHearts);
 
-  poker::WeightedHandRange combos;
-  combos.add(aces, 1.0);
-  combos.add(kings, 2.0);
-  const poker::TrainingRange range = poker::BuildTrainingRange(combos);
+  poker::TrainingRange range;
+  range.add(aces, 1.0f);
+  range.add(kings, 2.0f);
   const poker::TrainingRangeView view(range);
   poker::TrainingRangeView scratch;
 

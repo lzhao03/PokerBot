@@ -5,6 +5,8 @@
 #include <optional>
 #include <vector>
 
+#include "src/training_range.h"
+
 namespace {
 
 ::poker::ComboId MakeCombo(int first_rank,
@@ -15,25 +17,26 @@ namespace {
                                poker::MakeCardId(second_rank, second_suit));
 }
 
-double TotalComboWeight(const poker::WeightedHandRange& combos) {
-  double total = 0.0;
-  for (double weight : combos.weights) {
-    total += weight;
+float TotalComboWeight(const poker::TrainingRange& range) {
+  float total = 0.0f;
+  for (uint16_t i = 0; i < range.active_count; ++i) {
+    total += range.weights[range.active[i]];
   }
   return total;
 }
 
 void CheckExpandedRangeInvariants(const poker::HandRange& range) {
-  const poker::WeightedHandRange& combos = range.get_all_weighted_combos();
+  const poker::TrainingRange combos = poker::BuildTrainingRange(range);
   CHECK(TotalComboWeight(combos) ==
-        doctest::Approx(range.get_total_weight()).epsilon(1e-6));
-  for (size_t i = 0; i < combos.size(); ++i) {
+        doctest::Approx(static_cast<float>(range.get_total_weight()))
+            .epsilon(1e-6));
+  for (uint16_t i = 0; i < combos.active_count; ++i) {
     CAPTURE(i);
-    CHECK(combos.combos[i] < poker::kComboCount);
-    CHECK(combos.masks[i] == poker::ComboMask(combos.combos[i]));
-    for (size_t j = i + 1; j < combos.size(); ++j) {
+    CHECK(combos.active[i] < poker::kComboCount);
+    CHECK(combos.weights[combos.active[i]] > 0.0f);
+    for (uint16_t j = i + 1; j < combos.active_count; ++j) {
       CAPTURE(j);
-      CHECK(combos.combos[i] != combos.combos[j]);
+      CHECK(combos.active[i] != combos.active[j]);
     }
   }
 }
@@ -49,7 +52,7 @@ TEST_CASE("weighted range invariants hold across class and exact combos") {
   range.add_hand_by_index(ace_king_suited, 4.0);
   range.add_combo(exact_aces, 2.0);
   CheckExpandedRangeInvariants(range);
-  CHECK(range.get_all_weighted_combos().size() == 10);
+  CHECK(poker::BuildTrainingRange(range).active_count == 10);
   CHECK(range.get_probability(exact_aces) == doctest::Approx(0.25));
 
   const poker::ComboId reversed_aces =
@@ -64,7 +67,7 @@ TEST_CASE("weighted range invariants hold across class and exact combos") {
   CHECK(range.get_total_weight() == doctest::Approx(1.0).epsilon(1e-6));
 }
 
-TEST_CASE("string ranges and weighted views expand consistently") {
+TEST_CASE("string ranges expand consistently") {
   std::vector<const char*> ranges = {"AA,KK", "AKs,AQo", "QQ+"};
   for (const char* text : ranges) {
     CAPTURE(text);
@@ -72,42 +75,29 @@ TEST_CASE("string ranges and weighted views expand consistently") {
     range.set_from_string(text);
     CheckExpandedRangeInvariants(range);
   }
-
-  poker::WeightedHandRange combos;
-  const poker::ComboId aces =
-      MakeCombo(14, poker::SuitKind::kSpades, 14, poker::SuitKind::kHearts);
-  const poker::ComboId kings =
-      MakeCombo(13, poker::SuitKind::kClubs, 13, poker::SuitKind::kDiamonds);
-  combos.add(aces, 2.0);
-  combos.add(kings, 3.0);
-
-  poker::WeightedHandRangeView view(combos);
-  CHECK(view.size() == combos.size());
-  CHECK(view.mask(1) == poker::ComboMask(kings));
-  CHECK((view.mask(0) & view.mask(1)) == 0);
 }
 
 TEST_CASE("hand type parser distinguishes suitedness shape") {
   poker::HandRange any_ace_king;
   any_ace_king.set_from_string("AK");
-  CHECK(any_ace_king.get_all_weighted_combos().size() == 16);
+  CHECK(poker::BuildTrainingRange(any_ace_king).active_count == 16);
   CHECK(poker::HandRange::string_to_index("AK") == -1);
 
   poker::HandRange suited_ace_king;
   suited_ace_king.set_from_string("AKs");
-  CHECK(suited_ace_king.get_all_weighted_combos().size() == 4);
+  CHECK(poker::BuildTrainingRange(suited_ace_king).active_count == 4);
 
   poker::HandRange offsuit_ace_king;
   offsuit_ace_king.set_from_string("AKo");
-  CHECK(offsuit_ace_king.get_all_weighted_combos().size() == 12);
+  CHECK(poker::BuildTrainingRange(offsuit_ace_king).active_count == 12);
 
   poker::HandRange aces;
   aces.set_from_string("AA");
-  CHECK(aces.get_all_weighted_combos().size() == 6);
+  CHECK(poker::BuildTrainingRange(aces).active_count == 6);
 
   poker::HandRange unsupported_plus;
   unsupported_plus.set_from_string("89s+");
-  CHECK(unsupported_plus.get_all_weighted_combos().empty());
+  CHECK(poker::BuildTrainingRange(unsupported_plus).empty());
 }
 
 TEST_CASE("representative hand-type combo indexes round-trip") {

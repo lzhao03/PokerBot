@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "src/combo.h"
-#include "src/hand_range.h"
 
 namespace poker {
 
@@ -15,6 +14,16 @@ struct TrainingRange {
   std::array<float, kComboCount> weights = {};
   std::array<ComboId, kComboCount> active = {};
   uint16_t active_count = 0;
+
+  void add(ComboId combo_id, float weight) {
+    if (combo_id >= kComboCount || weight <= 0.0f) {
+      return;
+    }
+    if (weights[combo_id] == 0.0f) {
+      active[active_count++] = combo_id;
+    }
+    weights[combo_id] += weight;
+  }
 
   bool empty() const { return active_count == 0; }
   float weight(ComboId combo_id) const { return weights[combo_id]; }
@@ -116,8 +125,5 @@ struct TrainingRangeView {
     active_count = 0;
   }
 };
-
-TrainingRange BuildTrainingRange(const HandRange& range);
-TrainingRange BuildTrainingRange(const WeightedHandRange& combos);
 
 }  // namespace poker

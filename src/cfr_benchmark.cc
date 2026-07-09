@@ -3,6 +3,7 @@
 #include "src/build_flags.h"
 #include "src/hand_range.h"
 #include "src/poker_config.h"
+#include "src/training_range.h"
 
 #include <chrono>
 #include <cstdint>
@@ -494,7 +495,7 @@ int main(int argc, char** argv) {
       int64_t combos = 0;
       for (int i = 0; i < options.eval_samples; ++i) {
         combos += static_cast<int64_t>(
-            player_a_range.get_all_weighted_combos().size());
+            poker::BuildTrainingRange(player_a_range).active_count);
       }
       return MakeBenchmarkResult(static_cast<double>(combos), combos, 0);
     });

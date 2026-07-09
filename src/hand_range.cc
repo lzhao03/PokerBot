@@ -5,6 +5,8 @@
 #include <sstream>
 #include <string_view>
 
+#include "src/training_range.h"
+
 namespace poker {
 
 namespace {
@@ -134,18 +136,6 @@ ComboId MakeCombo(int first_rank, SuitKind first_suit, int second_rank,
                         MakeCardId(second_rank, second_suit));
 }
 
-void AddWeightedCombo(WeightedHandRange& weighted_combos, ComboId combo_id,
-                      double weight) {
-  for (size_t i = 0; i < weighted_combos.size(); ++i) {
-    if (weighted_combos.combos[i] == combo_id) {
-      weighted_combos.weights[i] += weight;
-      return;
-    }
-  }
-
-  weighted_combos.add(combo_id, weight);
-}
-
 std::string ExactHandKey(ComboId combo_id) {
   const ComboInfo& combo = GetComboInfo(combo_id);
   std::ostringstream oss;
@@ -270,8 +260,7 @@ std::optional<ComboId> RepresentativeComboForHandTypeIndex(int index) {
 }  // namespace
 
 HandRange::HandRange() 
-  : weighted_combos_cache_valid_(false),
-    total_weight_(0.0) {
+  : total_weight_(0.0) {
 }
 
 void HandRange::add_combo(ComboId combo_id, double weight) {
@@ -283,14 +272,12 @@ void HandRange::add_combo(ComboId combo_id, double weight) {
     if (pair.first == combo_id) {
       total_weight_ += weight - pair.second;
       pair.second = weight;
-      invalidate_caches();
       return;
     }
   }
 
   exact_hand_weights_.emplace_back(combo_id, weight);
   total_weight_ += weight;
-  invalidate_caches();
 }
 
 void HandRange::add_hand_by_index(int index, double weight) {
@@ -312,8 +299,6 @@ void HandRange::add_hand_by_index(int index, double weight) {
     hand_weights_.emplace_back(index, weight);
     total_weight_ += weight;
   }
-  
-  invalidate_caches();
 }
 
 double HandRange::get_probability(ComboId combo_id) const {
@@ -344,38 +329,10 @@ double HandRange::get_probability(ComboId combo_id) const {
   return hand_weight / total_weight_;
 }
 
-const WeightedHandRange& HandRange::get_all_weighted_combos() const {
-  if (weighted_combos_cache_valid_) {
-    return cached_weighted_combos_;
-  }
-
-  cached_weighted_combos_.clear();
-  for (const auto& hand_weight : exact_hand_weights_) {
-    AddWeightedCombo(cached_weighted_combos_, hand_weight.first,
-                     hand_weight.second);
-  }
-
-  for (const auto& hand_weight : hand_weights_) {
-    std::vector<ComboId> combos = ExpandHandTypeIndex(hand_weight.first);
-    if (combos.empty()) {
-      continue;
-    }
-
-    double combo_weight = hand_weight.second / combos.size();
-    for (ComboId combo : combos) {
-      AddWeightedCombo(cached_weighted_combos_, combo, combo_weight);
-    }
-  }
-
-  weighted_combos_cache_valid_ = true;
-  return cached_weighted_combos_;
-}
-
 void HandRange::clear() {
   hand_weights_.clear();
   exact_hand_weights_.clear();
   total_weight_ = 0.0;
-  invalidate_caches();
 }
 
 void HandRange::set_uniform_range() {
@@ -467,7 +424,6 @@ void HandRange::normalize() {
   }
   
   total_weight_ = 1.0;
-  invalidate_caches();
 }
 
 int HandRange::combo_to_index(ComboId combo_id) {
@@ -564,9 +520,27 @@ void HandRange::parse_range_component(const std::string& component) {
   }
 }
 
-void HandRange::invalidate_caches() {
-  weighted_combos_cache_valid_ = false;
-  cached_weighted_combos_.clear();
+TrainingRange BuildTrainingRange(const HandRange& range) {
+  TrainingRange training_range;
+
+  for (const auto& [combo_id, weight] : range.exact_combo_weights()) {
+    training_range.add(combo_id, static_cast<float>(weight));
+  }
+
+  for (const auto& [hand_type_index, weight] : range.hand_type_weights()) {
+    const std::vector<ComboId> combos = ExpandHandTypeIndex(hand_type_index);
+    if (combos.empty()) {
+      continue;
+    }
+
+    const float combo_weight =
+        static_cast<float>(weight / combos.size());
+    for (ComboId combo_id : combos) {
+      training_range.add(combo_id, combo_weight);
+    }
+  }
+
+  return training_range;
 }
 
 } // namespace poker
