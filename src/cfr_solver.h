@@ -96,6 +96,7 @@ class CFRSolver {
     RegretLoadMode regret_load_mode = RegretLoadMode::kAtomic;
     RegretUpdateMode regret_update_mode = RegretUpdateMode::kAtomic;
     bool write_average_strategy = true;
+    bool use_fixed_infoset_lookup = false;
     bool record_atomic_retry_stats = false;
   };
 
@@ -112,11 +113,6 @@ class CFRSolver {
     kGrow,
     kSkipMissing,
     kRequirePresent,
-  };
-
-  enum class CfrTraversalMode {
-    kNormal,
-    kFrozenRegretOnly,
   };
 
   struct NodeRef {
@@ -313,7 +309,6 @@ class CFRSolver {
     bool condition_player_b_ = false;
   };
 
-  template <CfrTraversalMode mode>
   class CfrTraversal {
    public:
     CfrTraversal(CFRSolver& solver,
@@ -371,14 +366,7 @@ class CFRSolver {
   static std::optional<DecisionFrame> make_decision_frame(
       uint32_t node_id,
       const PublicStateRow& row);
-  double cfr_with_ranges(
-      NodeRef node,
-      TraversalContext& ctx,
-      NodeGraph& graph);
-  double cfr_frozen_regret_only(
-      NodeRef node,
-      TraversalContext& ctx,
-      NodeGraph& graph);
+  double cfr(NodeRef node, TraversalContext& ctx, NodeGraph& graph);
   template <typename EvalChild>
   double sample_chance_children(int samples,
                                 NodeRef node,
