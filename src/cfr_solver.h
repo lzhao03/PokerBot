@@ -198,20 +198,6 @@ class CFRSolver {
     std::vector<RangeScratchFrame> frames;
   };
 
-  struct ActionScratch {
-    std::array<double, kMaxActionsPerNode> probabilities{};
-    std::array<double, kMaxActionsPerNode> values{};
-
-    absl::Span<double> probs(size_t count) {
-      return absl::Span<double>(probabilities.data(), count);
-    }
-
-    absl::Span<double> vals(size_t count) {
-      std::fill_n(values.data(), count, 0.0);
-      return absl::Span<double>(values.data(), count);
-    }
-  };
-
   struct DecisionFrame {
     uint32_t public_state_id = kInvalidPublicStateId;
     Player player = Player::kA;

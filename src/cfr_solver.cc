@@ -838,10 +838,12 @@ double CFRSolver::CfrTraversal<mode>::decision(
         decision.public_state_id, player, player_cards.combo, action_count);
   }
 
-  ActionScratch action_scratch;
-  absl::Span<double> action_probabilities =
-      action_scratch.probs(action_count);
-  absl::Span<double> action_values = action_scratch.vals(action_count);
+  std::array<double, kMaxActionsPerNode> action_probabilities_storage{};
+  std::array<double, kMaxActionsPerNode> action_values_storage{};
+  absl::Span<double> action_probabilities(
+      action_probabilities_storage.data(), action_count);
+  absl::Span<double> action_values(action_values_storage.data(), action_count);
+  std::fill(action_values.begin(), action_values.end(), 0.0);
   solver_.strategy_store_.regret_matching_or_uniform(
       action_block, action_count, ctx_.options().regret_load_mode,
       action_probabilities);
@@ -1036,9 +1038,9 @@ absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
   }
 
   const CardMask board_mask = state.board_mask;
-  ActionScratch action_scratch;
-  absl::Span<double> action_probabilities =
-      action_scratch.probs(action_count);
+  std::array<double, kMaxActionsPerNode> action_probabilities_storage{};
+  absl::Span<double> action_probabilities(
+      action_probabilities_storage.data(), action_count);
   for (size_t i = 0; i < range_size; ++i) {
     const float range_weight = range.weight(i);
     const ComboId combo_id = range.combo(i);
@@ -1194,8 +1196,9 @@ double CFRSolver::evaluate_strategy_node(
   const int player = PlayerIndex(decision.player);
 
   const PrivateCards& player_cards = deal.player_cards(player);
-  ActionScratch action_scratch;
-  absl::Span<double> probabilities = action_scratch.probs(decision.action_count);
+  std::array<double, kMaxActionsPerNode> probabilities_storage{};
+  absl::Span<double> probabilities(
+      probabilities_storage.data(), decision.action_count);
   const PrivateBucketId private_bucket =
       card_abstraction_.private_bucket(player_cards.combo, row.state);
   strategy_store_.average_strategy(
