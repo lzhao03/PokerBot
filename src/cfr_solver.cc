@@ -1252,11 +1252,10 @@ double CFRSolver::evaluate_strategy_node(
 }
 
 double CFRSolver::get_expected_value(int player_id) const {
-  const int iters = iterations_run_;
-  if (iters == 0) {
+  if (iterations_run_ == 0) {
     return 0.0;
   }
-  double player_a_ev = cumulative_root_utility_ / iters;
+  const double player_a_ev = cumulative_root_utility_ / iterations_run_;
   return player_id == 0 ? player_a_ev : -player_a_ev;
 }
 
