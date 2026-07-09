@@ -79,7 +79,7 @@ int BettingAbstraction::BucketChips(int chips) {
 
 BettingAbstraction::Projection BettingAbstraction::Project(
     const CompactPublicState& state) {
-  const int contribution_gap =
+  const int gap =
       state.player_contribution[0] > state.player_contribution[1]
           ? state.player_contribution[0] - state.player_contribution[1]
           : state.player_contribution[1] - state.player_contribution[0];
@@ -87,7 +87,7 @@ BettingAbstraction::Projection BettingAbstraction::Project(
       static_cast<int>(state.street),
       BucketChips(state.pot),
       BucketChips(std::min(state.stack[0], state.stack[1])),
-      BucketChips(contribution_gap),
+      BucketChips(gap),
       state.all_in ? 1 : 0,
       state.folded_player,
       state.player_to_act,
@@ -166,9 +166,9 @@ void BettingAbstraction::AppendHistoryValue(BettingHistoryKey& key,
 
 void BettingAbstraction::AppendStateHistory(const CompactPublicState& state,
                                             BettingHistoryKey& key) {
-  const int history_value_count = state.history_size * 3;
-  if (history_value_count > BettingHistoryKey::kInlineHistoryValues) {
-    key.history_overflow.reserve(history_value_count -
+  const int value_count = state.history_size * 3;
+  if (value_count > BettingHistoryKey::kInlineHistoryValues) {
+    key.history_overflow.reserve(value_count -
                                  BettingHistoryKey::kInlineHistoryValues);
   }
   for (uint16_t i = 0; i < state.history_size; ++i) {
@@ -181,9 +181,9 @@ void BettingAbstraction::AppendStateHistory(const CompactPublicState& state,
 
 void BettingAbstraction::AppendRowHistory(const BettingHistoryRow& row,
                                           BettingHistoryKey& key) {
-  const int history_value_count = row.history_size + 3;
-  if (history_value_count > BettingHistoryKey::kInlineHistoryValues) {
-    key.history_overflow.reserve(history_value_count -
+  const int value_count = row.history_size + 3;
+  if (value_count > BettingHistoryKey::kInlineHistoryValues) {
+    key.history_overflow.reserve(value_count -
                                  BettingHistoryKey::kInlineHistoryValues);
   }
   for (int i = 0; i < row.history_size; ++i) {

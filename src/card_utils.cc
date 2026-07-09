@@ -50,22 +50,18 @@ absl::InlinedVector<CardId, 5> SampleStreetCards(
     CardMask board_mask,
     CardMask known_private_cards,
     std::mt19937& rng) {
-  const int remaining_board_slots =
-      std::max(0, kMaxBoardCards - board_count);
-  const int count = std::min(CardsForNextStreet(street),
-                             remaining_board_slots);
+  const int open_slots = std::max(0, kMaxBoardCards - board_count);
+  const int count = std::min(CardsForNextStreet(street), open_slots);
   if (count <= 0) {
     return {};
   }
 
-  const CardMask blocked_mask = known_private_cards | board_mask;
+  const CardMask blocked = known_private_cards | board_mask;
   if (count == 1) {
-    std::uniform_int_distribution<int> card_distribution(
-        0, kDeckCardCount - 1);
+    std::uniform_int_distribution<int> card_dist(0, kDeckCardCount - 1);
     for (int attempt = 0; attempt < kDeckCardCount; ++attempt) {
-      const CardId candidate =
-          static_cast<CardId>(card_distribution(rng));
-      if ((blocked_mask & CardBit(candidate)) == 0) {
+      const CardId candidate = static_cast<CardId>(card_dist(rng));
+      if ((blocked & CardBit(candidate)) == 0) {
         return {candidate};
       }
     }
@@ -75,7 +71,7 @@ absl::InlinedVector<CardId, 5> SampleStreetCards(
   int candidate_count = 0;
   for (int card_id = 0; card_id < kDeckCardCount; ++card_id) {
     const CardId candidate = static_cast<CardId>(card_id);
-    if ((blocked_mask & CardBit(candidate)) == 0) {
+    if ((blocked & CardBit(candidate)) == 0) {
       candidates[candidate_count] = candidate;
       ++candidate_count;
     }
@@ -88,9 +84,8 @@ absl::InlinedVector<CardId, 5> SampleStreetCards(
   absl::InlinedVector<CardId, 5> sampled;
   sampled.reserve(count);
   for (int i = 0; i < count; ++i) {
-    std::uniform_int_distribution<int> card_distribution(
-        i, candidate_count - 1);
-    const int chosen = card_distribution(rng);
+    std::uniform_int_distribution<int> card_dist(i, candidate_count - 1);
+    const int chosen = card_dist(rng);
     std::swap(candidates[i], candidates[chosen]);
     sampled.push_back(candidates[i]);
   }
