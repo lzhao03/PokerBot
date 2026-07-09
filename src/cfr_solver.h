@@ -24,18 +24,10 @@
 
 namespace poker {
 
-class TerminalUtilityCache;
-
 class CFRSolver {
  public:
   using TraversalStats = poker::TraversalStats;
   using TrainingRunStats = poker::TrainingRunStats;
-
-  struct UtilityCacheStats {
-    int64_t hits = 0;
-    int64_t misses = 0;
-    int64_t entries = 0;
-  };
 
   CFRSolver(const SolverConfig& config);
   CFRSolver(const SolverConfig& config,
@@ -61,7 +53,6 @@ class CFRSolver {
   TrainingRunStats get_last_training_run_stats() const {
     return last_training_run_stats_;
   }
-  UtilityCacheStats get_utility_cache_stats() const;
   static bool traversal_stats_enabled();
 
  private:
@@ -109,7 +100,6 @@ class CFRSolver {
     RegretUpdateMode regret_update_mode = RegretUpdateMode::kAtomic;
     bool write_average_strategy = true;
     bool record_atomic_retry_stats = false;
-    bool use_terminal_cache = true;
   };
 
   struct EvaluationContext {
@@ -310,8 +300,6 @@ class CFRSolver {
       return options_.max_depth > 0 && depth_ >= options_.max_depth;
     }
 
-    bool use_terminal_cache() const { return options_.use_terminal_cache; }
-
     RangeScratchFrame& scratch_frame() {
       return scratch_->frame(static_cast<size_t>(depth_));
     }
@@ -447,12 +435,6 @@ class CFRSolver {
     NodeGraph& graph_;
   };
 
-  CFRSolver(const SolverConfig& config,
-            std::shared_ptr<TerminalUtilityCache> utility_cache);
-  CFRSolver(const SolverConfig& config,
-            std::shared_ptr<TerminalUtilityCache> utility_cache,
-            CompactPublicState initial_state);
-
   bool should_use_prebuilt_training(
       int num_threads,
       int max_depth,
@@ -523,9 +505,6 @@ class CFRSolver {
                         const ExactBoardState& exact_board,
                         const PrivateCards& player_a_cards,
                         const PrivateCards& player_b_cards);
-  double uncached_utility(const CompactPublicState& state,
-                          const PrivateCards& player_a_cards,
-                          const PrivateCards& player_b_cards);
   double evaluate_strategy_node(NodeRef node,
                                 EvaluationContext& ctx,
                                 NodeGraph& graph);
@@ -542,7 +521,6 @@ class CFRSolver {
   int64_t cfr_update_count_ = 0;
   TraversalStats traversal_stats_;
   TrainingRunStats last_training_run_stats_;
-  std::shared_ptr<TerminalUtilityCache> utility_cache_;
   CardAbstraction card_abstraction_;
   BettingAbstraction betting_abstraction_;
   bool require_frozen_children_ = false;

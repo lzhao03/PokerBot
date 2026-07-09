@@ -45,7 +45,6 @@ struct BenchmarkResult {
   int64_t cfr_node_updates = 0;
   poker::CFRSolver::TrainingRunStats training_stats;
   poker::CFRSolver::TraversalStats traversal_stats;
-  poker::CFRSolver::UtilityCacheStats utility_cache_stats;
   int64_t info_sets = 0;
   int64_t public_states = 0;
   int max_info_sets = 0;
@@ -207,14 +206,12 @@ BenchmarkResult MakeBenchmarkResult(
     double result,
     int64_t hands,
     int64_t cfr_node_updates,
-    poker::CFRSolver::TraversalStats traversal_stats = {},
-    poker::CFRSolver::UtilityCacheStats utility_cache_stats = {}) {
+    poker::CFRSolver::TraversalStats traversal_stats = {}) {
   BenchmarkResult benchmark_result;
   benchmark_result.result = result;
   benchmark_result.hands = hands;
   benchmark_result.cfr_node_updates = cfr_node_updates;
   benchmark_result.traversal_stats = traversal_stats;
-  benchmark_result.utility_cache_stats = utility_cache_stats;
   return benchmark_result;
 }
 
@@ -229,13 +226,6 @@ BenchmarkResult WithSolverState(BenchmarkResult result,
   result.public_state_cap_hit =
       CapHit(result.public_states, result.max_public_states);
   return result;
-}
-
-poker::CFRSolver::UtilityCacheStats CacheDelta(
-    const poker::CFRSolver::UtilityCacheStats& after,
-    const poker::CFRSolver::UtilityCacheStats& before) {
-  return {after.hits - before.hits, after.misses - before.misses,
-          after.entries};
 }
 
 poker::CFRSolver::TraversalStats TraversalDelta(
@@ -367,10 +357,7 @@ void RunBenchmark(const std::string& name,
             << result.traversal_stats.chance_samples << "\t"
             << result.traversal_stats.terminal_utility_calls << "\t"
             << result.traversal_stats.fold_utility_calls << "\t"
-            << result.traversal_stats.showdown_utility_calls << "\t"
-            << result.utility_cache_stats.hits << "\t"
-            << result.utility_cache_stats.misses << "\t"
-            << result.utility_cache_stats.entries << "\n";
+            << result.traversal_stats.showdown_utility_calls << "\n";
 }
 
 ParsedOptions ParseOptions(int argc, char** argv) {
@@ -501,9 +488,7 @@ int main(int argc, char** argv) {
               << "\triver_updates\tmax_decision_depth"
               << "\tchild_nodes_created\tchance_samples"
               << "\tterminal_utility_calls\tfold_utility_calls"
-              << "\tshowdown_utility_calls"
-              << "\tutility_cache_hits\tutility_cache_misses"
-              << "\tutility_cache_entries\n";
+              << "\tshowdown_utility_calls\n";
 
     RunBenchmark("range_expand", [&] {
       int64_t combos = 0;
@@ -521,8 +506,8 @@ int main(int argc, char** argv) {
       int64_t updates = solver.get_cfr_update_count() - start_updates;
       BenchmarkResult result = WithSolverState(MakeBenchmarkResult(
           static_cast<double>(solver.get_info_set_count()),
-          options.iterations, updates, solver.get_traversal_stats(),
-          solver.get_utility_cache_stats()), config, solver);
+          options.iterations, updates, solver.get_traversal_stats()),
+          config, solver);
       result.training_stats = solver.get_last_training_run_stats();
       RequireCompleteFrozenPrebuild(config, result.training_stats);
       return result;
@@ -531,8 +516,6 @@ int main(int argc, char** argv) {
     poker::CFRSolver evaluate_solver(config);
     evaluate_solver.run(options.iterations, player_a_range, player_b_range);
     RunBenchmark("evaluate_range", [&] {
-      poker::CFRSolver::UtilityCacheStats before =
-          evaluate_solver.get_utility_cache_stats();
       poker::CFRSolver::TraversalStats traversal_before =
           evaluate_solver.get_traversal_stats();
       double value = evaluate_solver.evaluate_strategy(
@@ -540,8 +523,7 @@ int main(int argc, char** argv) {
       return WithSolverState(MakeBenchmarkResult(
           value, options.eval_samples, 0,
           TraversalDelta(evaluate_solver.get_traversal_stats(),
-                         traversal_before),
-          CacheDelta(evaluate_solver.get_utility_cache_stats(), before)),
+                         traversal_before)),
           config, evaluate_solver);
     });
   } catch (const std::exception& error) {

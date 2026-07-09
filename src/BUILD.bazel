@@ -226,17 +226,6 @@ cc_test(
 )
 
 cc_library(
-    name = "terminal_utility_cache",
-    srcs = ["terminal_utility_cache.cc"],
-    hdrs = ["terminal_utility_cache.h"],
-    deps = [
-        ":combo",
-        ":poker_types",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "strategy_tables",
     srcs = ["strategy_tables.cc"],
     hdrs = ["strategy_tables.h"],
@@ -336,7 +325,6 @@ CFR_SOLVER_DEPS = [
     ":game_tree",
     ":hand_range",
     ":strategy_tables",
-    ":terminal_utility_cache",
     ":thread_pool",
     ":training_range",
     "@abseil-cpp//absl/container:flat_hash_map",

@@ -7,7 +7,6 @@
 #include "src/game_tree.h"
 #include "src/hand_range.h"
 #include "src/strategy_tables.h"
-#include "src/terminal_utility_cache.h"
 #include "src/thread_pool.h"
 #include "src/training_range.h"
 #include <algorithm>
@@ -95,38 +94,24 @@ CompactPublicState DefaultInitialState(const SolverConfig& config) {
 }  // namespace
 
 CFRSolver::CFRSolver(const SolverConfig& config)
-    : CFRSolver(config, std::make_shared<TerminalUtilityCache>()) {
+    : CFRSolver(config, DefaultInitialState(config)) {
 }
 
 CFRSolver::CFRSolver(const SolverConfig& config,
                      const CompactPublicState& initial_state)
-    : CFRSolver(config, std::make_shared<TerminalUtilityCache>(),
-                initial_state) {
-}
-
-CFRSolver::CFRSolver(const SolverConfig& config,
-                     std::shared_ptr<TerminalUtilityCache> utility_cache)
-    : CFRSolver(config, std::move(utility_cache), DefaultInitialState(config)) {
-}
-
-CFRSolver::CFRSolver(
-    const SolverConfig& config,
-    std::shared_ptr<TerminalUtilityCache> utility_cache,
-    CompactPublicState initial_state)
-  : config_(config),
-    initial_state_(initial_state),
-    game_tree_(std::make_shared<GameTree>(config)),
-    rng_(12345),
-    cumulative_root_utility_(0.0),
-    utility_cache_(std::move(utility_cache)),
-    storage_(),
-    strategy_store_(config_, card_abstraction_, storage_, &traversal_stats_),
-    public_graph_(config_,
-                  storage_,
-                  *game_tree_,
-                  card_abstraction_,
-                  betting_abstraction_,
-                  traversal_stats_) {
+    : config_(config),
+      initial_state_(initial_state),
+      game_tree_(std::make_shared<GameTree>(config)),
+      rng_(12345),
+      cumulative_root_utility_(0.0),
+      storage_(),
+      strategy_store_(config_, card_abstraction_, storage_, &traversal_stats_),
+      public_graph_(config_,
+                    storage_,
+                    *game_tree_,
+                    card_abstraction_,
+                    betting_abstraction_,
+                    traversal_stats_) {
   // Pre-allocate strategy table storage when limits are known upfront.
   // This gives fully deterministic peak memory: no reallocation after init.
   if (config_.max_info_sets > 0) {
@@ -657,7 +642,7 @@ void CFRSolver::run_fixed_storage_iterations(
        &player_a_training_range, &player_b_training_range](
           int iteration_begin, int shard, unsigned int seed) mutable {
           // Build a lightweight worker that shares frozen tables.
-          CFRSolver worker(config_, utility_cache_);
+          CFRSolver worker(config_);
           worker.storage_.bind_frozen(fixed_tables, cumulative);
           worker.require_frozen_children_ = true;
           worker.rng_.seed(seed);
@@ -784,9 +769,6 @@ double CFRSolver::CfrTraversal<mode>::terminal(
     }
     const CompactPublicState& state = node_cursor->exact_state();
     solver_.traversal_stats_.record_terminal(state.folded_player < 0);
-    if (!ctx_.use_terminal_cache() || ctx_.max_depth() > 0) {
-      return solver_.uncached_utility(state, ctx_.cards(0), ctx_.cards(1));
-    }
     return solver_.utility(state, ctx_.cards(0), ctx_.cards(1));
   } else {
     solver_.traversal_stats_.record_terminal(row.state.folded_player < 0);
@@ -846,7 +828,7 @@ double CFRSolver::CfrTraversal<mode>::depth_limit_value(
     const NodeCursor& node_cursor) {
   const CompactPublicState& state = node_cursor.exact_state();
   return solver_.game_tree_->is_betting_round_over(state)
-             ? solver_.uncached_utility(state, ctx_.cards(0), ctx_.cards(1))
+             ? solver_.utility(state, ctx_.cards(0), ctx_.cards(1))
              : 0.0;
 }
 
@@ -1167,7 +1149,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
       [config, range_sampler, root_public_state_id = *root_public_state_id,
        frozen_tables, cumulative](int, int shard_samples,
                                   unsigned int seed) mutable {
-        CFRSolver worker(config, std::make_shared<TerminalUtilityCache>());
+        CFRSolver worker(config);
         worker.storage_.bind_frozen(frozen_tables, cumulative);
         worker.rng_.seed(seed);
         const double value = worker.evaluate_strategy_samples(
@@ -1274,11 +1256,6 @@ double CFRSolver::get_expected_value(int player_id) const {
   return player_id == 0 ? player_a_ev : -player_a_ev;
 }
 
-CFRSolver::UtilityCacheStats CFRSolver::get_utility_cache_stats() const {
-  TerminalUtilityCache::Stats stats = utility_cache_->stats();
-  return {stats.hits, stats.misses, stats.entries};
-}
-
 bool CFRSolver::traversal_stats_enabled() {
   return kTraversalStatsEnabled;
 }
@@ -1291,11 +1268,8 @@ double CFRSolver::utility(const CompactPublicState& state,
     return *utility;
   }
 
-  return utility_cache_->get_or_compute(
-      state, player_a_cards.combo, player_b_cards.combo, [&]() {
-        return game_tree_->get_utility(
-            state, player_a_cards.combo, player_b_cards.combo);
-      });
+  return game_tree_->get_utility(
+      state, player_a_cards.combo, player_b_cards.combo);
 }
 
 double CFRSolver::frozen_utility(const PublicStateRow& row,
@@ -1315,18 +1289,6 @@ double CFRSolver::frozen_utility(const PublicStateRow& row,
       evaluator.compare_hands(player_a_cards.combo, player_b_cards.combo,
                               exact_board.cards, exact_board.count);
   return ShowdownUtilityFromComparison(state, comparison);
-}
-
-double CFRSolver::uncached_utility(const CompactPublicState& state,
-                                   const PrivateCards& player_a_cards,
-                                   const PrivateCards& player_b_cards) {
-  if (const std::optional<double> utility =
-          UtilityBeforeShowdown(state, state.board_count)) {
-    return *utility;
-  }
-
-  return game_tree_->get_utility(
-      state, player_a_cards.combo, player_b_cards.combo);
 }
 
 } // namespace poker
