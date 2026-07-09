@@ -34,11 +34,11 @@ int ConcreteBetAmount(const CompactPublicState& state, double size) {
   return std::max(1, static_cast<int>(std::max(1, state.pot) * size));
 }
 
-void AddAction(std::array<GameAction, GameTree::kMaxActionsPerNode>& actions,
+void AddAction(std::array<GameAction, kMaxActionsPerNode>& actions,
                uint8_t& action_count,
                ActionKind kind,
                int amount) {
-  if (action_count >= GameTree::kMaxActionsPerNode) {
+  if (action_count >= kMaxActionsPerNode) {
     throw std::logic_error("Legal action table exceeded kMaxActionsPerNode");
   }
   actions[static_cast<size_t>(action_count)] = {kind, amount, -1};
@@ -46,7 +46,7 @@ void AddAction(std::array<GameAction, GameTree::kMaxActionsPerNode>& actions,
 }
 
 void AddActionIfMissing(
-    std::array<GameAction, GameTree::kMaxActionsPerNode>& actions,
+    std::array<GameAction, kMaxActionsPerNode>& actions,
     uint8_t& action_count,
     ActionKind kind,
     int amount) {
@@ -67,7 +67,7 @@ BettingAbstraction::BettingAbstraction(const SolverConfig& config)
 uint8_t BettingAbstraction::actions_for_betting_node(
     const CompactPublicState& state,
     int player,
-    std::array<GameAction, GameTree::kMaxActionsPerNode>& actions) const {
+    std::array<GameAction, kMaxActionsPerNode>& actions) const {
   uint8_t action_count = 0;
   const int stack = state.stack[player];
   if (stack <= 0) {

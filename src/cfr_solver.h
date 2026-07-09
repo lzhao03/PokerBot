@@ -231,8 +231,8 @@ class CFRSolver {
   };
 
   struct ActionScratch {
-    std::array<double, GameTree::kMaxActionsPerNode> probabilities{};
-    std::array<double, GameTree::kMaxActionsPerNode> values{};
+    std::array<double, kMaxActionsPerNode> probabilities{};
+    std::array<double, kMaxActionsPerNode> values{};
 
     absl::Span<double> probs(size_t count) {
       return absl::Span<double>(probabilities.data(), count);
@@ -249,7 +249,7 @@ class CFRSolver {
     int player = -1;
     StreetKind street = StreetKind::kPreflop;
     uint8_t action_count = 0;
-    std::array<int, GameTree::kMaxActionsPerNode> action_ids = {};
+    std::array<int, kMaxActionsPerNode> action_ids = {};
 
     absl::Span<const int> action_ids_span() const {
       return absl::Span<const int>(

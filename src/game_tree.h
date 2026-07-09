@@ -10,10 +10,6 @@ namespace poker {
 
 class GameTree {
 public:
-  // Maximum number of legal actions at any decision node.
-  // With 3 bet sizes: fold/call + 3 raises + all-in = 6 (facing bet),
-  // or check + 3 bets + all-in = 5 (no bet). 8 gives headroom.
-  static constexpr int kMaxActionsPerNode = 8;
   static constexpr uint32_t kInvalidPublicStateId =
       std::numeric_limits<uint32_t>::max();
   static constexpr uint32_t kInvalidBettingHistoryId =

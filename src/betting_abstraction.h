@@ -5,7 +5,6 @@
 #include <cstddef>
 
 #include "src/build_flags.h"
-#include "src/game_tree.h"
 #include "src/poker_types.h"
 #include "src/strategy_tables.h"
 
@@ -21,7 +20,7 @@ class BettingAbstraction {
   uint8_t actions_for_betting_node(
       const CompactPublicState& state,
       int player,
-      std::array<GameAction, GameTree::kMaxActionsPerNode>& actions) const;
+      std::array<GameAction, kMaxActionsPerNode>& actions) const;
 
   int action_key(const GameAction& action) const;
 

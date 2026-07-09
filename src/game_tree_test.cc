@@ -79,7 +79,7 @@ bool HasAction(const std::vector<GameAction>& actions,
 
 std::vector<GameAction> LegalActions(const BettingAbstraction& betting,
                                      const CompactPublicState& state) {
-  std::array<GameAction, GameTree::kMaxActionsPerNode> action_table = {};
+  std::array<GameAction, kMaxActionsPerNode> action_table = {};
   const uint8_t action_count = betting.actions_for_betting_node(
       state, state.player_to_act, action_table);
   return std::vector<GameAction>(action_table.begin(),

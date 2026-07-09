@@ -124,8 +124,8 @@ class StrategyTables {
     std::array<int, BettingHistoryKey::kInlineHistoryValues> history_values = {};
     std::vector<int> history_overflow;
     uint8_t action_count = 0;
-    std::array<int, GameTree::kMaxActionsPerNode> action_ids;
-    std::array<uint32_t, GameTree::kMaxActionsPerNode> action_child_ids;
+    std::array<int, kMaxActionsPerNode> action_ids;
+    std::array<uint32_t, kMaxActionsPerNode> action_child_ids;
     uint32_t chance_child_id = GameTree::kInvalidBettingHistoryId;
   };
 
@@ -158,9 +158,9 @@ class StrategyTables {
     bool is_chance_node = false;
     int player_to_act = -1;
     uint8_t action_count = 0;
-    std::array<GameAction, GameTree::kMaxActionsPerNode> actions = {};
-    std::array<int, GameTree::kMaxActionsPerNode> action_ids = {};
-    std::array<uint32_t, GameTree::kMaxActionsPerNode> action_child_ids = {};
+    std::array<GameAction, kMaxActionsPerNode> actions = {};
+    std::array<int, kMaxActionsPerNode> action_ids = {};
+    std::array<uint32_t, kMaxActionsPerNode> action_child_ids = {};
     uint32_t chance_child_offset = 0;
     uint32_t chance_child_count = 0;
   };
