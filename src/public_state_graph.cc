@@ -24,14 +24,14 @@ namespace {
 class PublicStateBfs {
  public:
   struct Entry {
-    uint32_t public_state_id = 0;
+    uint32_t node_id = 0;
     int depth = 0;
   };
 
-  PublicStateBfs(uint32_t root_public_state_id, size_t row_count) {
+  PublicStateBfs(uint32_t root_id, size_t row_count) {
     queue_.reserve(1024);
     queued_.resize(row_count, 0);
-    enqueue_growing(root_public_state_id, 0);
+    enqueue_growing(root_id, 0);
   }
 
   std::optional<Entry> next() {
@@ -41,30 +41,30 @@ class PublicStateBfs {
     return queue_[cursor_++];
   }
 
-  bool enqueue_existing(uint32_t public_state_id,
+  bool enqueue_existing(uint32_t node_id,
                         int depth,
                         size_t row_count) {
-    if (public_state_id >= row_count || public_state_id >= queued_.size()) {
+    if (node_id >= row_count || node_id >= queued_.size()) {
       return false;
     }
-    enqueue_known_index(public_state_id, depth);
+    enqueue_known_index(node_id, depth);
     return true;
   }
 
-  void enqueue_growing(uint32_t public_state_id, int depth) {
-    if (public_state_id >= queued_.size()) {
-      queued_.resize(static_cast<size_t>(public_state_id) + 1, 0);
+  void enqueue_growing(uint32_t node_id, int depth) {
+    if (node_id >= queued_.size()) {
+      queued_.resize(static_cast<size_t>(node_id) + 1, 0);
     }
-    enqueue_known_index(public_state_id, depth);
+    enqueue_known_index(node_id, depth);
   }
 
  private:
-  void enqueue_known_index(uint32_t public_state_id, int depth) {
-    if (queued_[public_state_id]) {
+  void enqueue_known_index(uint32_t node_id, int depth) {
+    if (queued_[node_id]) {
       return;
     }
-    queued_[public_state_id] = 1;
-    queue_.push_back({public_state_id, depth});
+    queued_[node_id] = 1;
+    queue_.push_back({node_id, depth});
   }
 
   std::vector<Entry> queue_;
@@ -508,39 +508,37 @@ std::optional<uint32_t> PublicStateGraph::find_or_cache_action_child(
     return row_child_id;
   }
 
-  const uint32_t parent_betting_history_id = row.betting_history_id;
-  const auto& betting_history_rows = tables().betting_history_rows;
-  if (parent_betting_history_id >= betting_history_rows.size()) {
+  const uint32_t parent_history_id = row.betting_history_id;
+  const auto& history_rows = tables().betting_history_rows;
+  if (parent_history_id >= history_rows.size()) {
     return std::nullopt;
   }
 
-  const BettingHistoryRow& parent_betting_history =
-      betting_history_rows[parent_betting_history_id];
-  if (action_index >= parent_betting_history.action_count) {
+  const BettingHistoryRow& parent_history = history_rows[parent_history_id];
+  if (action_index >= parent_history.action_count) {
     return std::nullopt;
   }
 
-  const uint32_t child_betting_history_id =
-      parent_betting_history.action_child_ids[action_slot];
-  if (child_betting_history_id == kInvalidBettingHistoryId) {
+  const uint32_t child_history_id = parent_history.action_child_ids[action_slot];
+  if (child_history_id == kInvalidBettingHistoryId) {
     return std::nullopt;
   }
 
   const PublicStateKey child_key{
-      child_betting_history_id,
+      child_history_id,
       row.public_bucket,
   };
-  auto existing_public_child = tables().public_state_ids.find(child_key);
-  if (existing_public_child == tables().public_state_ids.end()) {
+  auto child_id = tables().public_state_ids.find(child_key);
+  if (child_id == tables().public_state_ids.end()) {
     return std::nullopt;
   }
 
   if (!storage_.frozen) {
     mtables()
         .public_state_rows[parent_public_state_id]
-        .action_child_ids[action_slot] = existing_public_child->second;
+        .action_child_ids[action_slot] = child_id->second;
   }
-  return existing_public_child->second;
+  return child_id->second;
 }
 
 bool PublicStateGraph::row_limit_reached() const {
@@ -624,33 +622,31 @@ std::optional<uint32_t> PublicStateGraph::find_or_cache_chance_child(
   }
 
   if constexpr (kCoarsePublicBuckets) {
-    const uint32_t parent_betting_history_id = row.betting_history_id;
-    const auto& betting_history_rows = tables().betting_history_rows;
-    if (parent_betting_history_id >= betting_history_rows.size()) {
+    const uint32_t parent_history_id = row.betting_history_id;
+    const auto& history_rows = tables().betting_history_rows;
+    if (parent_history_id >= history_rows.size()) {
       return std::nullopt;
     }
 
-    const uint32_t child_betting_history_id =
-        betting_history_rows[parent_betting_history_id].chance_child_id;
-    if (child_betting_history_id == kInvalidBettingHistoryId) {
+    const uint32_t history_id = history_rows[parent_history_id].chance_child_id;
+    if (history_id == kInvalidBettingHistoryId) {
       return std::nullopt;
     }
 
     const PublicStateKey child_public_key{
-        child_betting_history_id,
+        history_id,
         outcome_id,
     };
-    auto existing_public_child =
-        tables().public_state_ids.find(child_public_key);
-    if (existing_public_child == tables().public_state_ids.end()) {
+    auto child_id = tables().public_state_ids.find(child_public_key);
+    if (child_id == tables().public_state_ids.end()) {
       return std::nullopt;
     }
 
     if (!storage_.frozen) {
       mtables().public_chance_child_ids.emplace(
-          transition_key, existing_public_child->second);
+          transition_key, child_id->second);
     }
-    return existing_public_child->second;
+    return child_id->second;
   }
 
   return std::nullopt;
@@ -678,12 +674,11 @@ PublicStateGraph::get_or_create_chance_child(
   }
 
   const PublicStateRow& parent_row = public_rows[parent_public_state_id];
-  CompactPublicState stored_child_state = exact_child_state;
+  CompactPublicState child_state = exact_child_state;
   const uint32_t parent_history_id = parent_row.betting_history_id;
   const uint32_t child_history_id = get_or_create_chance_history_child(
-      parent_history_id, stored_child_state);
-  auto child_id = get_or_create_row(child_history_id,
-                                    std::move(stored_child_state));
+      parent_history_id, child_state);
+  auto child_id = get_or_create_row(child_history_id, std::move(child_state));
   if (!child_id.has_value()) {
     stats_.record_transition_miss();
     return std::nullopt;
@@ -697,24 +692,24 @@ PublicStateGraph::get_or_create_chance_child(
 }
 
 bool PublicStateGraph::prebuild_reachable_rows(
-    uint32_t root_public_state_id,
+    uint32_t root_id,
     int max_depth) {
   if (storage_.frozen) {
     return true;
   }
-  if (root_public_state_id >= rows().size()) {
+  if (root_id >= rows().size()) {
     return false;
   }
 
-  PublicStateBfs bfs(root_public_state_id, rows().size());
+  PublicStateBfs bfs(root_id, rows().size());
   while (std::optional<PublicStateBfs::Entry> maybe_entry = bfs.next()) {
     const PublicStateBfs::Entry entry = *maybe_entry;
-    if (entry.public_state_id >= rows().size()) {
+    if (entry.node_id >= rows().size()) {
       return false;
     }
     // Copy before creating children; child creation can append to rows and
     // invalidate references.
-    const PublicStateRow row = rows()[entry.public_state_id];
+    const PublicStateRow row = rows()[entry.node_id];
     if (row.is_terminal) {
       continue;
     }
@@ -723,13 +718,11 @@ bool PublicStateGraph::prebuild_reachable_rows(
       const bool complete = for_each_required_chance_transition(
           row, [&](const CompactPublicState& child_state,
                    absl::Span<const CardId>) {
-            std::optional<uint32_t> child_public_state_id =
-                get_or_create_chance_child(entry.public_state_id,
-                                           child_state);
-            if (!child_public_state_id.has_value()) {
+            auto child_id = get_or_create_chance_child(entry.node_id, child_state);
+            if (!child_id.has_value()) {
               return false;
             }
-            bfs.enqueue_growing(*child_public_state_id, entry.depth);
+            bfs.enqueue_growing(*child_id, entry.depth);
             return true;
           });
       if (!complete) {
@@ -744,13 +737,11 @@ bool PublicStateGraph::prebuild_reachable_rows(
 
     for (int action_index = 0; action_index < row.action_count;
          ++action_index) {
-      std::optional<uint32_t> child_public_state_id =
-          get_or_create_action_child(entry.public_state_id,
-                                     action_index);
-      if (!child_public_state_id.has_value()) {
+      auto child_id = get_or_create_action_child(entry.node_id, action_index);
+      if (!child_id.has_value()) {
         return false;
       }
-      bfs.enqueue_growing(*child_public_state_id, entry.depth + 1);
+      bfs.enqueue_growing(*child_id, entry.depth + 1);
     }
   }
 
@@ -763,7 +754,7 @@ void PublicStateGraph::rebuild_chance_child_entries() {
   struct PendingChanceChild {
     uint32_t parent_id = 0;
     PublicBucketId outcome_id = 0;
-    uint32_t public_state_id = kInvalidPublicStateId;
+    uint32_t child_id = kInvalidPublicStateId;
 
     bool operator<(const PendingChanceChild& other) const {
       return std::tie(parent_id, outcome_id) <
@@ -796,7 +787,7 @@ void PublicStateGraph::rebuild_chance_child_entries() {
   tables.chance_child_entries.reserve(pending.size());
   uint32_t current_parent_id = kInvalidPublicStateId;
   for (const PendingChanceChild& child : pending) {
-    if (child.public_state_id >= tables.public_state_rows.size()) {
+    if (child.child_id >= tables.public_state_rows.size()) {
       continue;
     }
     if (child.parent_id != current_parent_id) {
@@ -806,42 +797,41 @@ void PublicStateGraph::rebuild_chance_child_entries() {
     }
     tables.chance_child_entries.push_back({
         child.outcome_id,
-        child.public_state_id,
+        child.child_id,
     });
     ++tables.public_state_rows[current_parent_id].chance_child_count;
   }
 }
 
 bool PublicStateGraph::validate_prebuilt_rows(
-    uint32_t root_public_state_id,
+    uint32_t root_id,
     int max_depth,
     TrainingRunStats& stats) const {
   const auto& public_rows = rows();
   const auto& history_rows = tables().betting_history_rows;
-  if (root_public_state_id >= public_rows.size()) {
+  if (root_id >= public_rows.size()) {
     return false;
   }
   stats.betting_history_transition_prebuild_complete = true;
   stats.action_transition_prebuild_complete = true;
   stats.chance_transition_prebuild_complete = true;
 
-  PublicStateBfs bfs(root_public_state_id, public_rows.size());
+  PublicStateBfs bfs(root_id, public_rows.size());
 
-  auto valid_public_child = [&](uint32_t public_state_id) {
-    return public_state_id != kInvalidPublicStateId &&
-           public_state_id != kCappedPublicStateId &&
-           public_state_id < public_rows.size();
+  auto valid_public_child = [&](uint32_t node_id) {
+    return node_id != kInvalidPublicStateId &&
+           node_id != kCappedPublicStateId &&
+           node_id < public_rows.size();
   };
   auto matching_betting_child = [&](bool valid_child,
-                                    uint32_t public_state_id,
-                                    uint32_t betting_history_id) {
-    return valid_child && betting_history_id != kInvalidBettingHistoryId &&
-           betting_history_id < history_rows.size() &&
-           public_rows[public_state_id].betting_history_id ==
-               betting_history_id;
+                                    uint32_t node_id,
+                                    uint32_t history_id) {
+    return valid_child && history_id != kInvalidBettingHistoryId &&
+           history_id < history_rows.size() &&
+           public_rows[node_id].betting_history_id == history_id;
   };
-  auto enqueue_child = [&](uint32_t public_state_id, int depth) {
-    return bfs.enqueue_existing(public_state_id, depth, public_rows.size());
+  auto enqueue_child = [&](uint32_t node_id, int depth) {
+    return bfs.enqueue_existing(node_id, depth, public_rows.size());
   };
   auto mark_missing_betting_history = [&] {
     ++stats.missing_betting_history_transitions;
@@ -858,13 +848,13 @@ bool PublicStateGraph::validate_prebuilt_rows(
 
   while (std::optional<PublicStateBfs::Entry> maybe_entry = bfs.next()) {
     const PublicStateBfs::Entry entry = *maybe_entry;
-    if (entry.public_state_id >= public_rows.size()) {
+    if (entry.node_id >= public_rows.size()) {
       stats.betting_history_transition_prebuild_complete = false;
       stats.action_transition_prebuild_complete = false;
       stats.chance_transition_prebuild_complete = false;
       return false;
     }
-    const PublicStateRow& row = public_rows[entry.public_state_id];
+    const PublicStateRow& row = public_rows[entry.node_id];
     if (row.is_terminal) {
       continue;
     }
@@ -882,10 +872,8 @@ bool PublicStateGraph::validate_prebuilt_rows(
                    absl::Span<const CardId>) {
         ++stats.prebuild_chance_transitions;
         ++stats.prebuild_betting_history_transitions;
-        const std::optional<uint32_t> child_public_state_id =
-            find_chance_child(entry.public_state_id, child_state);
-        const uint32_t child_id =
-            child_public_state_id.value_or(kInvalidPublicStateId);
+        const auto child = find_chance_child(entry.node_id, child_state);
+        const uint32_t child_id = child.value_or(kInvalidPublicStateId);
         const bool valid_child = valid_public_child(child_id);
         if (!valid_child) {
           mark_missing_chance();
@@ -919,22 +907,19 @@ bool PublicStateGraph::validate_prebuilt_rows(
       ++stats.prebuild_action_transitions;
       ++stats.prebuild_betting_history_transitions;
       const size_t action_slot = static_cast<size_t>(action_index);
-      const uint32_t child_betting_history_id =
-          history_row.action_child_ids[action_slot];
-      const uint32_t child_public_state_id = row.action_child_ids[action_slot];
-      const bool valid_action_child = valid_public_child(child_public_state_id);
-      if (!valid_action_child) {
+      const uint32_t history_id = history_row.action_child_ids[action_slot];
+      const uint32_t child_id = row.action_child_ids[action_slot];
+      const bool valid_child = valid_public_child(child_id);
+      if (!valid_child) {
         mark_missing_action();
       }
       const bool valid_betting_child =
           history_row.action_ids[action_slot] == row.action_ids[action_slot] &&
-          matching_betting_child(valid_action_child, child_public_state_id,
-                                 child_betting_history_id);
+          matching_betting_child(valid_child, child_id, history_id);
       if (!valid_betting_child) {
         mark_missing_betting_history();
       }
-      if (valid_action_child &&
-          !enqueue_child(child_public_state_id, entry.depth + 1)) {
+      if (valid_child && !enqueue_child(child_id, entry.depth + 1)) {
         mark_missing_action();
         mark_missing_betting_history();
       }

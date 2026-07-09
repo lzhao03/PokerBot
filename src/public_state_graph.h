@@ -66,9 +66,9 @@ class PublicStateGraph {
   std::optional<uint32_t> get_or_create_chance_child(
       uint32_t parent_public_state_id,
       const CompactPublicState& child_state);
-  bool prebuild_reachable_rows(uint32_t root_public_state_id,
+  bool prebuild_reachable_rows(uint32_t root_id,
                                int max_depth);
-  bool validate_prebuilt_rows(uint32_t root_public_state_id,
+  bool validate_prebuilt_rows(uint32_t root_id,
                               int max_depth,
                               TrainingRunStats& stats) const;
 
