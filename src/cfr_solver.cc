@@ -377,10 +377,8 @@ void CFRSolver::run(int iterations,
     return;
   }
 
-  const TrainingRange player_a_training_range =
-      BuildTrainingRange(player_a_range);
-  const TrainingRange player_b_training_range =
-      BuildTrainingRange(player_b_range);
+  const auto player_a_training_range = BuildTrainingRange(player_a_range);
+  const auto player_b_training_range = BuildTrainingRange(player_b_range);
   TrainingRangeView player_a_hands_view(player_a_training_range);
   TrainingRangeView player_b_hands_view(player_b_training_range);
   RangeSampler range_sampler(player_a_training_range, player_b_training_range);
@@ -449,8 +447,7 @@ bool CFRSolver::prepare_prebuilt_training(
   auto record_action_counts = [&] {
     stats.prebuild_info_sets = static_cast<int64_t>(get_info_set_count());
     stats.prebuild_action_entries =
-        static_cast<int64_t>(
-            arrays().cumulative_regrets.size());
+        static_cast<int64_t>(arrays().cumulative_regrets.size());
   };
 
   VLOG(1) << "Prebuilding compact public-state rows...";
@@ -499,8 +496,7 @@ bool CFRSolver::prepare_prebuilt_training(
     return false;
   }
   stats.prebuild_frozen_info_set_lookup_rows =
-      static_cast<int64_t>(
-          tables().frozen_info_set_action_offsets.size());
+      static_cast<int64_t>(tables().frozen_info_set_action_offsets.size());
   return true;
 }
 
