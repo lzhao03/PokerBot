@@ -39,12 +39,11 @@ CompactPublicState ShowdownState() {
 }
 
 TEST_CASE("terminal utility and chance transitions are correct") {
-  GameTree tree;
-  CompactPublicState raised = tree.apply_action(
+  CompactPublicState raised = ApplyAction(
       PreflopState(), {ActionKind::kRaise, 4, -1});
-  CompactPublicState folded = tree.apply_action(
+  CompactPublicState folded = ApplyAction(
       raised, {ActionKind::kFold, 0, -1});
-  CHECK(tree.get_utility(folded, 0, 1) == 2);
+  CHECK(GetUtility(folded, 0, 1) == 2);
 
   ComboId player_a =
       CardsToComboId(MakeCardId(14, SuitKind::kHearts),
@@ -52,18 +51,18 @@ TEST_CASE("terminal utility and chance transitions are correct") {
   ComboId player_b =
       CardsToComboId(MakeCardId(13, SuitKind::kHearts),
                      MakeCardId(13, SuitKind::kSpades));
-  CHECK(tree.is_terminal(ShowdownState()));
-  CHECK(tree.get_utility(ShowdownState(), player_a, player_b) == 10);
+  CHECK(IsTerminal(ShowdownState()));
+  CHECK(GetUtility(ShowdownState(), player_a, player_b) == 10);
 
-  CompactPublicState closed_preflop = tree.apply_action(
-      tree.apply_action(PreflopState(), {ActionKind::kCall, 0, -1}),
+  CompactPublicState closed_preflop = ApplyAction(
+      ApplyAction(PreflopState(), {ActionKind::kCall, 0, -1}),
       {ActionKind::kCheck, 0, -1});
   const std::array<CardId, 3> flop = {
       MakeCardId(8, SuitKind::kHearts),
       MakeCardId(9, SuitKind::kClubs),
       MakeCardId(10, SuitKind::kSpades),
   };
-  const CompactPublicState child = tree.apply_chance(closed_preflop, flop);
+  const CompactPublicState child = ApplyChance(closed_preflop, flop);
   CHECK(child.street == StreetKind::kFlop);
   CHECK(child.board_count == 3);
   CHECK(child.history_size == 0);
@@ -71,7 +70,6 @@ TEST_CASE("terminal utility and chance transitions are correct") {
 }
 
 TEST_CASE("compact history cap is enforced") {
-  GameTree tree;
   CompactPublicState state;
   state.stack = {99, 98};
   state.pot = 3;
@@ -83,7 +81,7 @@ TEST_CASE("compact history cap is enforced") {
     AppendHistoryAction(state, {ActionKind::kCheck, 0, 0});
   }
 
-  CHECK_THROWS((void)tree.apply_action(state, {ActionKind::kCall, 0, -1}));
+  CHECK_THROWS((void)ApplyAction(state, {ActionKind::kCall, 0, -1}));
 }
 
 }  // namespace

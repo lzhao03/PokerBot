@@ -68,13 +68,12 @@ std::vector<GameAction> LegalActions(const BettingAbstraction& betting,
 }
 
 TEST_CASE("generated betting actions preserve state invariants") {
-  GameTree tree;
   BettingAbstraction betting(TestConfig());
   const std::vector<CompactPublicState> states = {
       PreflopState(),
       FlopState(),
-      tree.apply_action(PreflopState(), {ActionKind::kRaise, 4, -1}),
-      tree.apply_action(FlopState(), {ActionKind::kCheck, 0, -1}),
+      ApplyAction(PreflopState(), {ActionKind::kRaise, 4, -1}),
+      ApplyAction(FlopState(), {ActionKind::kCheck, 0, -1}),
   };
 
   for (const CompactPublicState& state : states) {
@@ -84,7 +83,7 @@ TEST_CASE("generated betting actions preserve state invariants") {
     for (const GameAction& action : actions) {
       CAPTURE(action.kind);
       CAPTURE(action.amount);
-      const CompactPublicState next = tree.apply_action(state, action);
+      const CompactPublicState next = ApplyAction(state, action);
       CHECK(TotalChips(next) == total_chips);
       CHECK(next.stack[0] >= 0);
       CHECK(next.stack[1] >= 0);
@@ -94,11 +93,11 @@ TEST_CASE("generated betting actions preserve state invariants") {
       CHECK(last_action.kind == action.kind);
       CHECK(last_action.player == state.player_to_act);
       if (next.folded_player >= 0) {
-        CHECK(tree.is_terminal(next));
+        CHECK(IsTerminal(next));
         CHECK(next.player_to_act == -1);
       }
-      if (tree.is_betting_round_over(next)) {
-        CHECK(tree.get_player_to_act(next) == -1);
+      if (IsBettingRoundOver(next)) {
+        CHECK(GetPlayerToAct(next) == -1);
       }
     }
   }

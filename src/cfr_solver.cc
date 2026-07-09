@@ -5,6 +5,7 @@
 #include "src/card_abstraction.h"
 #include "src/card_utils.h"
 #include "src/game_tree.h"
+#include "src/hand_evaluator.h"
 #include "src/hand_range.h"
 #include "src/strategy_tables.h"
 #include "src/thread_pool.h"
@@ -101,7 +102,6 @@ CFRSolver::CFRSolver(const SolverConfig& config,
                      const CompactPublicState& initial_state)
     : config_(config),
       initial_state_(initial_state),
-      game_tree_(std::make_shared<GameTree>()),
       rng_(12345),
       cumulative_root_utility_(0.0),
       betting_abstraction_(config_),
@@ -109,7 +109,6 @@ CFRSolver::CFRSolver(const SolverConfig& config,
       strategy_store_(config_, card_abstraction_, storage_, &traversal_stats_),
       public_graph_(config_,
                     storage_,
-                    *game_tree_,
                     card_abstraction_,
                     betting_abstraction_,
                     traversal_stats_) {
@@ -268,8 +267,7 @@ CFRSolver::NodeGraph::sample_chance_child(
   const CompactPublicState& exact_parent_state = parent_cursor->exact_state();
   const auto cards =
       SampleStreetCards(exact_parent_state, known_private_cards, solver_.rng_);
-  CompactPublicState exact_child_state =
-      solver_.game_tree_->apply_chance(exact_parent_state, cards);
+  CompactPublicState exact_child_state = ApplyChance(exact_parent_state, cards);
   const ExactBoardState child_board =
       CFRSolver::ExactBoardFromState(exact_child_state);
   std::optional<uint32_t> child_id;
@@ -828,7 +826,7 @@ template <CFRSolver::CfrTraversalMode mode>
 double CFRSolver::CfrTraversal<mode>::depth_limit_value(
     const NodeCursor& node_cursor) {
   const CompactPublicState& state = node_cursor.exact_state();
-  return solver_.game_tree_->is_betting_round_over(state)
+  return IsBettingRoundOver(state)
              ? solver_.utility(state, ctx_.cards(0), ctx_.cards(1))
              : 0.0;
 }
@@ -1269,8 +1267,7 @@ double CFRSolver::utility(const CompactPublicState& state,
     return *utility;
   }
 
-  return game_tree_->get_utility(
-      state, player_a_cards.combo, player_b_cards.combo);
+  return GetUtility(state, player_a_cards.combo, player_b_cards.combo);
 }
 
 double CFRSolver::frozen_utility(const PublicStateRow& row,

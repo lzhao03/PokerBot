@@ -1,39 +1,20 @@
 #pragma once
 
 #include "absl/types/span.h"
-#include "src/hand_evaluator.h"
+#include "src/combo.h"
 #include "src/poker_types.h"
 
 namespace poker {
 
-class GameTree {
-public:
-  GameTree() = default;
-  
-  // Apply an action to a state to get the next state
-  CompactPublicState apply_action(const CompactPublicState& state,
-                                  const GameAction& action) const;
+CompactPublicState ApplyAction(const CompactPublicState& state,
+                               const GameAction& action);
+CompactPublicState ApplyChance(const CompactPublicState& state,
+                               absl::Span<const CardId> cards);
+double GetUtility(const CompactPublicState& state,
+                  ComboId player_a_hand,
+                  ComboId player_b_hand);
+bool IsTerminal(const CompactPublicState& state);
+int GetPlayerToAct(const CompactPublicState& state);
+bool IsBettingRoundOver(const CompactPublicState& state);
 
-  // Apply sampled public cards at a chance node to get the next state.
-  CompactPublicState apply_chance(
-      const CompactPublicState& state,
-      absl::Span<const CardId> cards) const;
-  
-  // Get the utility at a terminal state
-  double get_utility(const CompactPublicState& state, ComboId player_a_hand,
-                     ComboId player_b_hand) const;
-  
-  // Check if a state is terminal
-  bool is_terminal(const CompactPublicState& state) const;
-  
-  // Get the player to act at a given state
-  int get_player_to_act(const CompactPublicState& state) const;
-  
-  // Check if a betting round is over
-  bool is_betting_round_over(const CompactPublicState& state) const;
-  
-private:
-  HandEvaluator hand_evaluator_;
-};
-
-} // namespace poker
+}  // namespace poker

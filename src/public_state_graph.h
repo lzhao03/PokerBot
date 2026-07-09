@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <memory>
 #include <optional>
 #include <vector>
 
@@ -13,8 +12,6 @@
 #include "src/strategy_tables.h"
 
 namespace poker {
-
-class GameTree;
 
 struct TrainingRunStats {
   bool public_state_prebuild_complete = false;
@@ -52,7 +49,6 @@ class PublicStateGraph {
 
   PublicStateGraph(const SolverConfig& config,
                    SolverStorage& storage,
-                   GameTree& game_tree,
                    const CardAbstraction& card_abstraction,
                    const BettingAbstraction& betting_abstraction,
                    TraversalStats& stats);
@@ -133,7 +129,6 @@ class PublicStateGraph {
 
   const SolverConfig& config_;
   SolverStorage& storage_;
-  GameTree& game_tree_;
   const CardAbstraction& card_abstraction_;
   const BettingAbstraction& betting_abstraction_;
   TraversalStats& stats_;

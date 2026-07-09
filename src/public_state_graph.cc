@@ -195,13 +195,11 @@ CoarseChanceTransitionMap BuildCoarseChanceTransitions(StreetKind street) {
 PublicStateGraph::PublicStateGraph(
     const SolverConfig& config,
     SolverStorage& storage,
-    GameTree& game_tree,
     const CardAbstraction& card_abstraction,
     const BettingAbstraction& betting_abstraction,
     TraversalStats& stats)
     : config_(config),
       storage_(storage),
-      game_tree_(game_tree),
       card_abstraction_(card_abstraction),
       betting_abstraction_(betting_abstraction),
       stats_(stats) {}
@@ -243,8 +241,8 @@ PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
   PublicStateRow row;
   row.betting_history_id = betting_history_id;
   row.public_bucket = card_abstraction_.public_bucket(state);
-  row.is_terminal = game_tree_.is_terminal(state);
-  row.player_to_act = game_tree_.get_player_to_act(state);
+  row.is_terminal = IsTerminal(state);
+  row.player_to_act = GetPlayerToAct(state);
   row.state = std::move(state);
   row.is_chance_node = !row.is_terminal && row.player_to_act == -1;
 
@@ -473,7 +471,7 @@ bool PublicStateGraph::for_each_required_chance_transition(
       CompactPublicState parent_state = row.state;
       CopyBoardFrom(parent_state, transition.parent_board_state);
       const CompactPublicState child_state =
-          game_tree_.apply_chance(parent_state, transition.cards);
+          ApplyChance(parent_state, transition.cards);
       if (!callback(child_state, absl::Span<const CardId>(transition.cards))) {
         return false;
       }
@@ -481,7 +479,7 @@ bool PublicStateGraph::for_each_required_chance_transition(
     return true;
   } else {
     return ForEachNextStreetDeal(row.state, [&](absl::Span<const CardId> cards) {
-      return callback(game_tree_.apply_chance(row.state, cards), cards);
+      return callback(ApplyChance(row.state, cards), cards);
     });
   }
 }
@@ -590,7 +588,7 @@ PublicStateGraph::get_or_create_action_child(
 
   const uint32_t parent_betting_history_id = read_row.betting_history_id;
   CompactPublicState child_state =
-      game_tree_.apply_action(read_row.state, read_row.actions[action_slot]);
+      ApplyAction(read_row.state, read_row.actions[action_slot]);
   const uint32_t child_betting_history_id =
       get_or_create_action_betting_history_child(
           parent_betting_history_id, action_index, child_state);

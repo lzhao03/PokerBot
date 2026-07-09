@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <stdexcept>
 
+#include "src/hand_evaluator.h"
+
 namespace poker {
 
 namespace {
@@ -53,7 +55,7 @@ bool BoardComplete(const State& state) {
 }
 
 template <typename State>
-bool IsBettingRoundOver(const State& state) {
+bool IsBettingRoundOverForState(const State& state) {
   if (state.folded_player >= 0) {
     return true;
   }
@@ -79,20 +81,20 @@ bool IsBettingRoundOver(const State& state) {
 
 template <typename State>
 bool IsHandOver(const State& state) {
-  return BoardComplete(state) && IsBettingRoundOver(state);
+  return BoardComplete(state) && IsBettingRoundOverForState(state);
 }
 
 template <typename State>
-bool IsTerminal(const State& state) {
+bool IsTerminalForState(const State& state) {
   return state.folded_player >= 0 || IsHandOver(state);
 }
 
 template <typename State>
-int PlayerToAct(const State& state) {
-  if (IsTerminal(state)) {
+int PlayerToActForState(const State& state) {
+  if (IsTerminalForState(state)) {
     return -1;
   }
-  if (IsBettingRoundOver(state)) {
+  if (IsBettingRoundOverForState(state)) {
     return -1;
   }
   if (IsPlayer(state.player_to_act)) {
@@ -154,7 +156,7 @@ State ApplyActionForState(const State& state, const GameAction& action) {
 
   int player = new_state.player_to_act;
   if (!IsPlayer(player)) {
-    player = PlayerToAct(new_state);
+    player = PlayerToActForState(new_state);
   }
   if (!IsPlayer(player)) {
     throw std::invalid_argument("No player can act in this state");
@@ -267,16 +269,14 @@ double UtilityForState(const State& state,
 
 }  // namespace
 
-CompactPublicState GameTree::apply_action(
-    const CompactPublicState& state,
-    const GameAction& action) const {
+CompactPublicState ApplyAction(const CompactPublicState& state,
+                               const GameAction& action) {
   return ApplyActionForState(state, action);
 }
 
-CompactPublicState GameTree::apply_chance(
-    const CompactPublicState& state,
-    absl::Span<const CardId> cards) const {
-  if (is_terminal(state) || get_player_to_act(state) != -1) {
+CompactPublicState ApplyChance(const CompactPublicState& state,
+                               absl::Span<const CardId> cards) {
+  if (IsTerminalForState(state) || PlayerToActForState(state) != -1) {
     throw std::invalid_argument("State is not a chance node");
   }
 
@@ -285,24 +285,23 @@ CompactPublicState GameTree::apply_chance(
   return child;
 }
 
-double GameTree::get_utility(const CompactPublicState& state,
-                             ComboId player_a_hand,
-                             ComboId player_b_hand) const {
-  return UtilityForState(state, player_a_hand, player_b_hand,
-                         hand_evaluator_);
+double GetUtility(const CompactPublicState& state,
+                  ComboId player_a_hand,
+                  ComboId player_b_hand) {
+  static const HandEvaluator evaluator;
+  return UtilityForState(state, player_a_hand, player_b_hand, evaluator);
 }
 
-bool GameTree::is_terminal(const CompactPublicState& state) const {
-  return IsTerminal(state);
+bool IsTerminal(const CompactPublicState& state) {
+  return IsTerminalForState(state);
 }
 
-int GameTree::get_player_to_act(const CompactPublicState& state) const {
-  return PlayerToAct(state);
+int GetPlayerToAct(const CompactPublicState& state) {
+  return PlayerToActForState(state);
 }
 
-bool GameTree::is_betting_round_over(
-    const CompactPublicState& state) const {
-  return IsBettingRoundOver(state);
+bool IsBettingRoundOver(const CompactPublicState& state) {
+  return IsBettingRoundOverForState(state);
 }
 
 }  // namespace poker

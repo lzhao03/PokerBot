@@ -4,7 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
+#include <functional>
 #include <optional>
 #include <random>
 #include <stdexcept>
@@ -22,8 +22,6 @@
 #include "src/training_range.h"
 
 namespace poker {
-
-class GameTree;
 
 class CFRSolver {
  public:
@@ -513,7 +511,6 @@ class CFRSolver {
       RangeSampler range_sampler);
   SolverConfig config_;
   CompactPublicState initial_state_;
-  std::shared_ptr<GameTree> game_tree_;
   std::mt19937 rng_;
   double cumulative_root_utility_ = 0.0;
   int iterations_run_ = 0;
