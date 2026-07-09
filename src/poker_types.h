@@ -16,6 +16,15 @@ constexpr int kDeckCardCount = 52;
 constexpr int kMaxBoardCards = 5;
 constexpr int kPlayerCount = 2;
 
+enum class Player : uint8_t {
+  kA = 0,
+  kB = 1,
+};
+
+inline int PlayerIndex(Player player) {
+  return static_cast<int>(player);
+}
+
 enum class SuitKind : uint8_t {
   kHearts = 0,
   kDiamonds = 1,

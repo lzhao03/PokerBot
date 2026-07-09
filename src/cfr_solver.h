@@ -243,7 +243,7 @@ class CFRSolver {
 
   struct DecisionFrame {
     uint32_t public_state_id = kInvalidPublicStateId;
-    int player = -1;
+    Player player = Player::kA;
     StreetKind street = StreetKind::kPreflop;
     uint8_t action_count = 0;
     std::array<int, kMaxActionsPerNode> action_ids = {};
@@ -468,8 +468,8 @@ class CFRSolver {
                               const ExactBoardState& board);
   std::optional<NodeCursor> cursor(NodeRef node) const;
   std::optional<NodeRef> root_node_ref(uint32_t root_public_state_id) const;
-  static DecisionFrame make_decision_frame(
-      NodeRef node,
+  static std::optional<DecisionFrame> make_decision_frame(
+      uint32_t public_state_id,
       const PublicStateRow& row);
   double cfr_with_ranges(
       NodeRef node,

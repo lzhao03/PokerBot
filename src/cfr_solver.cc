@@ -193,12 +193,17 @@ std::optional<CFRSolver::NodeRef> CFRSolver::root_node_ref(
                  ExactBoardFromState(public_rows[root_public_state_id].state)};
 }
 
-CFRSolver::DecisionFrame CFRSolver::make_decision_frame(
-    NodeRef node,
+std::optional<CFRSolver::DecisionFrame> CFRSolver::make_decision_frame(
+    uint32_t public_state_id,
     const PublicStateRow& row) {
+  if (row.is_terminal || row.is_chance_node || row.action_count == 0 ||
+      !IsPlayer(row.player_to_act)) {
+    return std::nullopt;
+  }
+
   DecisionFrame frame;
-  frame.public_state_id = node.public_state_id;
-  frame.player = row.player_to_act;
+  frame.public_state_id = public_state_id;
+  frame.player = static_cast<Player>(row.player_to_act);
   frame.street = row.state.street;
   frame.action_count = static_cast<uint8_t>(row.action_count);
   std::copy_n(row.action_ids.begin(), row.action_count,
@@ -300,14 +305,14 @@ bool CFRSolver::prebuild_info_set_rows(
   for (uint32_t public_state_id = 0;
        public_state_id < rows().size();
        ++public_state_id) {
-    const PublicStateRow& row =
-        rows()[public_state_id];
-    const int player = row.player_to_act;
-    if (row.is_terminal || row.is_chance_node || row.action_count == 0 ||
-        !IsPlayer(player)) {
+    const PublicStateRow& row = rows()[public_state_id];
+    const std::optional<DecisionFrame> decision =
+        make_decision_frame(public_state_id, row);
+    if (!decision.has_value()) {
       continue;
     }
 
+    const int player = PlayerIndex(decision->player);
     const TrainingRangeView& range =
         player == 0 ? player_a_range : player_b_range;
     if (range.empty()) {
@@ -835,11 +840,13 @@ template <CFRSolver::CfrTraversalMode mode>
 double CFRSolver::CfrTraversal<mode>::decision(
     NodeRef node,
     const PublicStateRow& row) {
-  const DecisionFrame decision = solver_.make_decision_frame(node, row);
-  const int player = decision.player;
-  if (!IsPlayer(player) || decision.action_count == 0) {
+  const std::optional<DecisionFrame> maybe_decision =
+      solver_.make_decision_frame(node.public_state_id, row);
+  if (!maybe_decision.has_value()) {
     return 0.0;
   }
+  const DecisionFrame& decision = *maybe_decision;
+  const int player = PlayerIndex(decision.player);
   const PrivateCards& player_cards = ctx_.cards(player);
 
   const bool is_update_player = ctx_.is_update_player(player);
@@ -1213,19 +1220,17 @@ double CFRSolver::evaluate_strategy_node(
           return evaluate_strategy_node(child, ctx, graph);
         });
   }
-  if (row.action_count == 0) {
+  const std::optional<DecisionFrame> maybe_decision =
+      make_decision_frame(public_state_id, row);
+  if (!maybe_decision.has_value()) {
     return 0.0;
   }
-
-  const int player = row.player_to_act;
-  if (!IsPlayer(player)) {
-    return 0.0;
-  }
+  const DecisionFrame& decision = *maybe_decision;
+  const int player = PlayerIndex(decision.player);
 
   const PrivateCards& player_cards = ctx.cards(player);
   ActionScratch action_scratch;
-  absl::Span<double> probabilities =
-      action_scratch.probs(row.action_count);
+  absl::Span<double> probabilities = action_scratch.probs(decision.action_count);
   const PrivateBucketId private_bucket =
       card_abstraction_.private_bucket(player_cards.combo, row.state);
   strategy_store_.average_strategy(
@@ -1233,7 +1238,7 @@ double CFRSolver::evaluate_strategy_node(
       config_.regret_only_training, probabilities);
 
   double value = 0.0;
-  const int action_count = row.action_count;
+  const int action_count = decision.action_count;
   for (int action_index = 0; action_index < action_count; ++action_index) {
     const ChildResult child =
         graph.action_child(node, action_index);
