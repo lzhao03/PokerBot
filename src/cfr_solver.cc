@@ -1124,7 +1124,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
 double CFRSolver::evaluate_strategy_samples(
     int samples,
     uint32_t root_public_state_id,
-    RangeSampler range_sampler,
+    const RangeSampler& range_sampler,
     bool allow_parallel) {
   if (samples <= 0) {
     return 0.0;
@@ -1141,7 +1141,7 @@ double CFRSolver::evaluate_strategy_samples(
     double total = 0.0;
     run_sharded(
         samples, worker_count, 0,
-        [config, range_sampler, root_public_state_id,
+        [config, &range_sampler, root_public_state_id,
          frozen_tables, cumulative](int, int shard_samples,
                                     unsigned int seed) mutable {
           CFRSolver worker(config);
