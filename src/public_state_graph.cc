@@ -836,6 +836,17 @@ bool PublicStateGraph::validate_prebuilt_rows(
            public_state_id != kCappedPublicStateId &&
            public_state_id < public_rows.size();
   };
+  auto matching_betting_child = [&](bool valid_child,
+                                    uint32_t public_state_id,
+                                    uint32_t betting_history_id) {
+    return valid_child && betting_history_id != kInvalidBettingHistoryId &&
+           betting_history_id < history_rows.size() &&
+           public_rows[public_state_id].betting_history_id ==
+               betting_history_id;
+  };
+  auto enqueue_child = [&](uint32_t public_state_id, int depth) {
+    return bfs.enqueue_existing(public_state_id, depth, public_rows.size());
+  };
   auto mark_missing_betting_history = [&] {
     ++stats.missing_betting_history_transitions;
     stats.betting_history_transition_prebuild_complete = false;
@@ -877,25 +888,17 @@ bool PublicStateGraph::validate_prebuilt_rows(
         ++stats.prebuild_betting_history_transitions;
         const std::optional<uint32_t> child_public_state_id =
             find_chance_child(entry.public_state_id, child_state);
-        const bool valid_child = child_public_state_id.has_value() &&
-                                 valid_public_child(*child_public_state_id);
+        const uint32_t child_id =
+            child_public_state_id.value_or(kInvalidPublicStateId);
+        const bool valid_child = valid_public_child(child_id);
         if (!valid_child) {
           mark_missing_chance();
         }
-        const bool valid_betting_child =
-            valid_child &&
-            history_row.chance_child_id !=
-                kInvalidBettingHistoryId &&
-            history_row.chance_child_id < history_rows.size();
-        if (!valid_betting_child) {
-          mark_missing_betting_history();
-        } else if (public_rows[*child_public_state_id].betting_history_id !=
-                   history_row.chance_child_id) {
+        if (!matching_betting_child(valid_child, child_id,
+                                    history_row.chance_child_id)) {
           mark_missing_betting_history();
         }
-        if (valid_child &&
-            !bfs.enqueue_existing(
-                *child_public_state_id, entry.depth, public_rows.size())) {
+        if (valid_child && !enqueue_child(child_id, entry.depth)) {
           mark_missing_chance();
           mark_missing_betting_history();
         }
@@ -928,19 +931,14 @@ bool PublicStateGraph::validate_prebuilt_rows(
         mark_missing_action();
       }
       const bool valid_betting_child =
-          valid_action_child &&
           history_row.action_ids[action_slot] == row.action_ids[action_slot] &&
-          child_betting_history_id != kInvalidBettingHistoryId &&
-          child_betting_history_id < history_rows.size();
+          matching_betting_child(valid_action_child, child_public_state_id,
+                                 child_betting_history_id);
       if (!valid_betting_child) {
-        mark_missing_betting_history();
-      } else if (public_rows[child_public_state_id].betting_history_id !=
-                 child_betting_history_id) {
         mark_missing_betting_history();
       }
       if (valid_action_child &&
-          !bfs.enqueue_existing(
-              child_public_state_id, entry.depth + 1, public_rows.size())) {
+          !enqueue_child(child_public_state_id, entry.depth + 1)) {
         mark_missing_action();
         mark_missing_betting_history();
       }
