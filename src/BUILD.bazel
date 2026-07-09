@@ -49,27 +49,32 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
-cc_binary(
-    name = "hand_evaluator_table_generator",
-    srcs = [
+cc_library(
+    name = "hand_evaluator_table_builder",
+    srcs = ["hand_evaluator_table_builder.cc"],
+    hdrs = [
         "hand_evaluator.h",
         "hand_evaluator_table_builder.h",
-        "hand_evaluator_table_generator.cc",
     ],
     deps = [
         ":combo",
         ":poker_types",
+        "@abseil-cpp//absl/types:span",
     ],
+)
+
+cc_binary(
+    name = "hand_evaluator_table_generator",
+    srcs = ["hand_evaluator_table_generator.cc"],
+    deps = [":hand_evaluator_table_builder"],
 )
 
 cc_test(
     name = "hand_evaluator_test",
-    srcs = [
-        "hand_evaluator_table_builder.h",
-        "hand_evaluator_test.cc",
-    ],
+    srcs = ["hand_evaluator_test.cc"],
     deps = DOCTEST_DEPS + [
         ":hand_evaluator",
+        ":hand_evaluator_table_builder",
     ],
 )
 
