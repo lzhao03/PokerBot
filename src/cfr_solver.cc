@@ -768,11 +768,11 @@ double CFRSolver::CfrTraversal<mode>::terminal(
     }
     const CompactPublicState& state = node_cursor->exact_state();
     solver_.traversal_stats_.record_terminal(state.folded_player < 0);
-    return solver_.utility(state, ctx_.cards(0), ctx_.cards(1));
+    return solver_.terminal_utility(state, ctx_.cards(0), ctx_.cards(1));
   } else {
     solver_.traversal_stats_.record_terminal(row.state.folded_player < 0);
-    return solver_.frozen_utility(row, node.exact_board, ctx_.cards(0),
-                                  ctx_.cards(1));
+    return solver_.terminal_utility(row, node.exact_board, ctx_.cards(0),
+                                    ctx_.cards(1));
   }
 }
 
@@ -827,7 +827,7 @@ double CFRSolver::CfrTraversal<mode>::depth_limit_value(
     const NodeCursor& node_cursor) {
   const CompactPublicState& state = node_cursor.exact_state();
   return IsBettingRoundOver(state)
-             ? solver_.utility(state, ctx_.cards(0), ctx_.cards(1))
+             ? solver_.terminal_utility(state, ctx_.cards(0), ctx_.cards(1))
              : 0.0;
 }
 
@@ -1203,7 +1203,7 @@ double CFRSolver::evaluate_strategy_node(
 
   if (row.is_terminal) {
     const CompactPublicState& state = node_cursor->exact_state();
-    return utility(state, ctx.cards(0), ctx.cards(1));
+    return terminal_utility(state, ctx.cards(0), ctx.cards(1));
   }
   if (row.is_chance_node) {
     const int samples = ChanceSamples(config_);
@@ -1259,21 +1259,21 @@ bool CFRSolver::traversal_stats_enabled() {
   return kTraversalStatsEnabled;
 }
 
-double CFRSolver::utility(const CompactPublicState& state,
-                          const PrivateCards& player_a_cards,
-                          const PrivateCards& player_b_cards) {
+double CFRSolver::terminal_utility(const CompactPublicState& exact_state,
+                                   const PrivateCards& player_a_cards,
+                                   const PrivateCards& player_b_cards) {
   if (const std::optional<double> utility =
-          UtilityBeforeShowdown(state, state.board_count)) {
+          UtilityBeforeShowdown(exact_state, exact_state.board_count)) {
     return *utility;
   }
 
-  return GetUtility(state, player_a_cards.combo, player_b_cards.combo);
+  return GetUtility(exact_state, player_a_cards.combo, player_b_cards.combo);
 }
 
-double CFRSolver::frozen_utility(const PublicStateRow& row,
-                                 const ExactBoardState& exact_board,
-                                 const PrivateCards& player_a_cards,
-                                 const PrivateCards& player_b_cards) {
+double CFRSolver::terminal_utility(const PublicStateRow& row,
+                                   const ExactBoardState& exact_board,
+                                   const PrivateCards& player_a_cards,
+                                   const PrivateCards& player_b_cards) {
   const CompactPublicState& state = row.state;
   if (const std::optional<double> utility =
           UtilityBeforeShowdown(state, exact_board.count)) {

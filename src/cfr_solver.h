@@ -495,13 +495,13 @@ class CFRSolver {
       int player,
       absl::Span<const int> action_ids,
       RangeScratchFrame& scratch_frame);
-  double utility(const CompactPublicState& state,
-                 const PrivateCards& player_a_cards,
-                 const PrivateCards& player_b_cards);
-  double frozen_utility(const PublicStateRow& row,
-                        const ExactBoardState& exact_board,
-                        const PrivateCards& player_a_cards,
-                        const PrivateCards& player_b_cards);
+  double terminal_utility(const CompactPublicState& exact_state,
+                          const PrivateCards& player_a_cards,
+                          const PrivateCards& player_b_cards);
+  double terminal_utility(const PublicStateRow& row,
+                          const ExactBoardState& exact_board,
+                          const PrivateCards& player_a_cards,
+                          const PrivateCards& player_b_cards);
   double evaluate_strategy_node(NodeRef node,
                                 EvaluationContext& ctx,
                                 NodeGraph& graph);
