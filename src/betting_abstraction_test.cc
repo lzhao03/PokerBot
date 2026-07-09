@@ -2,7 +2,6 @@
 
 #include "doctest/doctest.h"
 
-#include <array>
 #include <vector>
 
 #include "src/game_tree.h"
@@ -60,11 +59,9 @@ bool HasAction(const std::vector<GameAction>& actions,
 
 std::vector<GameAction> LegalActions(const BettingAbstraction& betting,
                                      const CompactPublicState& state) {
-  std::array<GameAction, kMaxActionsPerNode> action_table = {};
-  const uint8_t action_count = betting.actions_for_betting_node(
-      state, state.player_to_act, action_table);
-  return std::vector<GameAction>(action_table.begin(),
-                                 action_table.begin() + action_count);
+  const auto menu = betting.actions_for_betting_node(state, state.player_to_act);
+  return std::vector<GameAction>(menu.actions.begin(),
+                                 menu.actions.begin() + menu.count);
 }
 
 TEST_CASE("generated betting actions preserve state invariants") {

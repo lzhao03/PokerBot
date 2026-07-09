@@ -142,6 +142,17 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+cc_library(
+    name = "betting_abstraction_coarse_buckets",
+    srcs = ["betting_abstraction.cc"],
+    hdrs = ["betting_abstraction.h"],
+    copts = ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
+    deps = [
+        ":build_flags",
+        ":strategy_tables",
+    ],
+)
+
 cc_test(
     name = "card_abstraction_test",
     srcs = ["card_abstraction_test.cc"],
@@ -334,7 +345,6 @@ cc_test(
 )
 
 CFR_SOLVER_DEPS = [
-    ":betting_abstraction",
     ":build_flags",
     ":card_abstraction",
     ":card_utils",
@@ -359,7 +369,10 @@ cc_library(
         "cfr_solver.h",
         "public_state_graph.h",
     ],
-    deps = CFR_SOLVER_DEPS + [":strategy_store"],
+    deps = CFR_SOLVER_DEPS + [
+        ":betting_abstraction",
+        ":strategy_store",
+    ],
     visibility = ["//visibility:public"],
 )
 
@@ -374,7 +387,10 @@ cc_library(
         "public_state_graph.h",
     ],
     copts = ["-DPOKER_ENABLE_TRAVERSAL_STATS=0"],
-    deps = CFR_SOLVER_DEPS + [":strategy_store_no_stats"],
+    deps = CFR_SOLVER_DEPS + [
+        ":betting_abstraction",
+        ":strategy_store_no_stats",
+    ],
 )
 
 cc_library(
@@ -388,7 +404,10 @@ cc_library(
         "public_state_graph.h",
     ],
     copts = ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
-    deps = CFR_SOLVER_DEPS + [":strategy_store_coarse_buckets"],
+    deps = CFR_SOLVER_DEPS + [
+        ":betting_abstraction_coarse_buckets",
+        ":strategy_store_coarse_buckets",
+    ],
 )
 
 cc_library(
@@ -405,7 +424,10 @@ cc_library(
         "-DPOKER_ENABLE_TRAVERSAL_STATS=0",
         "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
     ],
-    deps = CFR_SOLVER_DEPS + [":strategy_store_coarse_buckets_no_stats"],
+    deps = CFR_SOLVER_DEPS + [
+        ":betting_abstraction_coarse_buckets",
+        ":strategy_store_coarse_buckets_no_stats",
+    ],
 )
 
 cc_test(
