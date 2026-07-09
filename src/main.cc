@@ -96,6 +96,35 @@ void PrintUsage(const char* program) {
       << "  --log                           show INFO logs and VLOG(1) progress\n";
 }
 
+bool CapHit(size_t count, int cap) {
+  return cap > 0 && count >= static_cast<size_t>(cap);
+}
+
+void PrintRunSummary(const poker::CFRSolver& solver,
+                     const poker::SolverConfig& config,
+                     double seconds) {
+  const size_t info_sets = solver.get_info_set_count();
+  const size_t public_states = solver.get_public_state_count();
+  const int64_t touches = solver.get_traversal_stats().action_entry_touches;
+
+  std::cout << "iterations=" << solver.get_iterations_run() << "\n";
+  std::cout << "info_sets=" << info_sets << "\n";
+  std::cout << "max_info_sets=" << config.max_info_sets << "\n";
+  std::cout << "info_set_cap_hit=" << CapHit(info_sets, config.max_info_sets)
+            << "\n";
+  std::cout << "player_a_ev=" << solver.get_expected_value(0) << "\n";
+  std::cout << "seconds=" << seconds << "\n";
+  std::cout << "public_states=" << public_states << "\n";
+  std::cout << "max_public_states=" << config.max_public_states << "\n";
+  std::cout << "public_state_cap_hit="
+            << CapHit(public_states, config.max_public_states) << "\n";
+  std::cout << "action_entry_touches=" << touches << "\n";
+  if (seconds > 0.0) {
+    std::cout << "action_entry_touches_per_second="
+              << static_cast<double>(touches) / seconds << "\n";
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -176,45 +205,21 @@ int main(int argc, char** argv) {
       config.set_max_public_states(kDefaultMaxPublicStates);
     }
 
-    poker::HandRange player_a_range;
-    poker::HandRange player_b_range;
-    player_a_range.set_uniform_range();
-    player_b_range.set_uniform_range();
+    poker::HandRange a_range;
+    poker::HandRange b_range;
+    a_range.set_uniform_range();
+    b_range.set_uniform_range();
 
     const poker::SolverConfig native_config =
         poker::SolverConfigFromProto(config);
     SetMemoryLimit(memory_limit_mb);
     poker::CFRSolver solver(native_config);
     auto start = std::chrono::steady_clock::now();
-    solver.run(iterations, player_a_range, player_b_range);
+    solver.run(iterations, a_range, b_range);
     auto end = std::chrono::steady_clock::now();
 
     std::chrono::duration<double> elapsed = end - start;
-    const size_t info_sets = solver.get_info_set_count();
-    const size_t public_states = solver.get_public_state_count();
-    std::cout << "iterations=" << solver.get_iterations_run() << "\n";
-    std::cout << "info_sets=" << info_sets << "\n";
-    std::cout << "max_info_sets=" << native_config.max_info_sets << "\n";
-    std::cout << "info_set_cap_hit="
-              << (native_config.max_info_sets > 0 &&
-                  info_sets >= static_cast<size_t>(native_config.max_info_sets))
-              << "\n";
-    std::cout << "player_a_ev=" << solver.get_expected_value(0) << "\n";
-    std::cout << "seconds=" << elapsed.count() << "\n";
-    std::cout << "public_states=" << public_states << "\n";
-    std::cout << "max_public_states=" << native_config.max_public_states << "\n";
-    std::cout << "public_state_cap_hit="
-              << (native_config.max_public_states > 0 &&
-                  public_states >=
-                      static_cast<size_t>(native_config.max_public_states))
-              << "\n";
-    const int64_t touches =
-        solver.get_traversal_stats().action_entry_touches;
-    std::cout << "action_entry_touches=" << touches << "\n";
-    if (elapsed.count() > 0) {
-      std::cout << "action_entry_touches_per_second="
-                << static_cast<double>(touches) / elapsed.count() << "\n";
-    }
+    PrintRunSummary(solver, native_config, elapsed.count());
   } catch (const std::exception& error) {
     std::cerr << "Error: " << error.what() << "\n";
     PrintUsage(argv[0]);

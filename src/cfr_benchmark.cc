@@ -118,6 +118,54 @@ void PrintUsage(const char* program) {
       << "  --river-bet-size=X              solver config override\n";
 }
 
+void PrintBenchmarkHeader() {
+  std::cout << "case\tseconds\tresult"
+            << "\tprimary_cfr_phase"
+            << "\ttraversal_stats_enabled"
+            << "\tprimary_cfr_node_updates"
+            << "\tprimary_cfr_node_updates_per_second"
+            << "\tprimary_cfr_node_updates_per_hand"
+            << "\tcfr_node_updates\tcfr_node_updates_per_second"
+            << "\tcfr_node_updates_per_hand"
+            << "\tprebuild_seconds\tpublic_state_prebuild_complete"
+            << "\tprebuild_public_states\tprebuild_betting_histories"
+            << "\tbetting_history_transition_prebuild_complete"
+            << "\tprebuild_betting_history_transitions"
+            << "\tmissing_betting_history_transitions"
+            << "\taction_transition_prebuild_complete"
+            << "\tprebuild_action_transitions"
+            << "\tmissing_action_transitions"
+            << "\tchance_transition_prebuild_complete"
+            << "\tprebuild_chance_transitions"
+            << "\tmissing_chance_transitions"
+            << "\tinfo_set_prebuild_seconds"
+            << "\tinfo_set_prebuild_complete"
+            << "\tprebuild_info_sets\tprebuild_action_entries"
+            << "\tprivate_bucket_prebuild_complete"
+            << "\tprebuild_private_bucket_rows"
+            << "\tfrozen_info_set_lookup_prebuild_complete"
+            << "\tprebuild_frozen_info_set_lookup_rows"
+            << "\twarmup_seconds\twarmup_iterations"
+            << "\twarmup_cfr_node_updates"
+            << "\twarmup_cfr_node_updates_per_second"
+            << "\twarmup_cfr_node_updates_per_hand"
+            << "\tfrozen_seconds\tfrozen_iterations"
+            << "\tfrozen_cfr_node_updates"
+            << "\tfrozen_cfr_node_updates_per_second"
+            << "\tfrozen_cfr_node_updates_per_hand"
+            << "\thands\thands_per_second"
+            << "\tinfo_sets\tpublic_states"
+            << "\tmax_info_sets\tmax_public_states"
+            << "\tinfo_set_cap_hit\tpublic_state_cap_hit"
+            << "\taction_entry_touches\taction_entry_touches_per_second"
+            << "\tatomic_regret_update_retries"
+            << "\tpreflop_updates\tflop_updates\tturn_updates"
+            << "\triver_updates\tmax_decision_depth"
+            << "\tchild_nodes_created\tchance_samples"
+            << "\tterminal_utility_calls\tfold_utility_calls"
+            << "\tshowdown_utility_calls\n";
+}
+
 double RatePerSecond(int64_t count, double seconds) {
   if (count <= 0 || seconds <= 0.0) {
     return 0.0;
@@ -434,60 +482,16 @@ int main(int argc, char** argv) {
     ParsedOptions parsed = ParseOptions(argc, argv);
     Options options = parsed.benchmark;
     poker::SolverConfig config = poker::SolverConfigFromProto(parsed.config);
-    poker::HandRange player_a_range = BenchmarkRange(options);
-    poker::HandRange player_b_range = BenchmarkRange(options);
+    poker::HandRange a_range = BenchmarkRange(options);
+    poker::HandRange b_range = BenchmarkRange(options);
 
-    std::cout << "case\tseconds\tresult"
-              << "\tprimary_cfr_phase"
-              << "\ttraversal_stats_enabled"
-              << "\tprimary_cfr_node_updates"
-              << "\tprimary_cfr_node_updates_per_second"
-              << "\tprimary_cfr_node_updates_per_hand"
-              << "\tcfr_node_updates\tcfr_node_updates_per_second"
-              << "\tcfr_node_updates_per_hand"
-              << "\tprebuild_seconds\tpublic_state_prebuild_complete"
-              << "\tprebuild_public_states\tprebuild_betting_histories"
-              << "\tbetting_history_transition_prebuild_complete"
-              << "\tprebuild_betting_history_transitions"
-              << "\tmissing_betting_history_transitions"
-              << "\taction_transition_prebuild_complete"
-              << "\tprebuild_action_transitions"
-              << "\tmissing_action_transitions"
-              << "\tchance_transition_prebuild_complete"
-              << "\tprebuild_chance_transitions"
-              << "\tmissing_chance_transitions"
-              << "\tinfo_set_prebuild_seconds"
-              << "\tinfo_set_prebuild_complete"
-              << "\tprebuild_info_sets\tprebuild_action_entries"
-              << "\tprivate_bucket_prebuild_complete"
-              << "\tprebuild_private_bucket_rows"
-              << "\tfrozen_info_set_lookup_prebuild_complete"
-              << "\tprebuild_frozen_info_set_lookup_rows"
-              << "\twarmup_seconds\twarmup_iterations"
-              << "\twarmup_cfr_node_updates"
-              << "\twarmup_cfr_node_updates_per_second"
-              << "\twarmup_cfr_node_updates_per_hand"
-              << "\tfrozen_seconds\tfrozen_iterations"
-              << "\tfrozen_cfr_node_updates"
-              << "\tfrozen_cfr_node_updates_per_second"
-              << "\tfrozen_cfr_node_updates_per_hand"
-              << "\thands\thands_per_second"
-              << "\tinfo_sets\tpublic_states"
-              << "\tmax_info_sets\tmax_public_states"
-              << "\tinfo_set_cap_hit\tpublic_state_cap_hit"
-              << "\taction_entry_touches\taction_entry_touches_per_second"
-              << "\tatomic_regret_update_retries"
-              << "\tpreflop_updates\tflop_updates\tturn_updates"
-              << "\triver_updates\tmax_decision_depth"
-              << "\tchild_nodes_created\tchance_samples"
-              << "\tterminal_utility_calls\tfold_utility_calls"
-              << "\tshowdown_utility_calls\n";
+    PrintBenchmarkHeader();
 
     RunBenchmark("range_expand", [&] {
       int64_t combos = 0;
       for (int i = 0; i < options.eval_samples; ++i) {
         combos += static_cast<int64_t>(
-            poker::BuildTrainingRange(player_a_range).active_count);
+            poker::BuildTrainingRange(a_range).active_count);
       }
       return MakeBenchmarkResult(static_cast<double>(combos), combos, 0);
     });
@@ -495,7 +499,7 @@ int main(int argc, char** argv) {
     RunBenchmark("train_range", [&] {
       poker::CFRSolver solver(config);
       int64_t start_updates = solver.get_cfr_update_count();
-      solver.run(options.iterations, player_a_range, player_b_range);
+      solver.run(options.iterations, a_range, b_range);
       int64_t updates = solver.get_cfr_update_count() - start_updates;
       BenchmarkResult result = WithSolverState(MakeBenchmarkResult(
           static_cast<double>(solver.get_info_set_count()),
@@ -507,12 +511,12 @@ int main(int argc, char** argv) {
     });
 
     poker::CFRSolver evaluate_solver(config);
-    evaluate_solver.run(options.iterations, player_a_range, player_b_range);
+    evaluate_solver.run(options.iterations, a_range, b_range);
     RunBenchmark("evaluate_range", [&] {
       poker::CFRSolver::TraversalStats traversal_before =
           evaluate_solver.get_traversal_stats();
       double value = evaluate_solver.evaluate_strategy(
-          options.eval_samples, player_a_range, player_b_range);
+          options.eval_samples, a_range, b_range);
       return WithSolverState(MakeBenchmarkResult(
           value, options.eval_samples, 0,
           TraversalDelta(evaluate_solver.get_traversal_stats(),
