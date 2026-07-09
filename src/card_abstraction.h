@@ -1,5 +1,6 @@
 #pragma once
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
@@ -39,15 +40,9 @@ struct BoardTexturePublicCardBuckets {
       const int suit_index = SuitIndex(SuitFromCardId(card));
       ++rank_counts[rank_index];
       ++suit_counts[suit_index];
-      if (rank_counts[rank_index] > max_rank_count) {
-        max_rank_count = rank_counts[rank_index];
-      }
-      if (suit_counts[suit_index] > max_suit_count) {
-        max_suit_count = suit_counts[suit_index];
-      }
-      if (rank > max_rank) {
-        max_rank = rank;
-      }
+      max_rank_count = std::max(max_rank_count, rank_counts[rank_index]);
+      max_suit_count = std::max(max_suit_count, suit_counts[suit_index]);
+      max_rank = std::max(max_rank, rank);
       rank_mask |= static_cast<uint16_t>(1u << rank_index);
     }
 
@@ -82,27 +77,18 @@ struct BoardTexturePublicCardBuckets {
   static constexpr int kTextureBucketsPerStreet =
       3 * kSuitBuckets * kStraightBuckets * kHighBuckets;
 
-  static int CountBits(uint16_t value) {
-    int count = 0;
-    while (value != 0) {
-      count += value & 1u;
-      value >>= 1;
-    }
-    return count;
-  }
-
   static int BestStraightWindowDensity(uint16_t rank_mask) {
     int best = 0;
     for (int start = 0; start <= 8; ++start) {
-      const int count = CountBits(
-          static_cast<uint16_t>((rank_mask >> start) & 0x1F));
+      const int count =
+          std::popcount(static_cast<unsigned int>((rank_mask >> start) & 0x1F));
       if (count > best) {
         best = count;
       }
     }
     const uint16_t wheel_mask =
         static_cast<uint16_t>((1u << 12) | 0x0F);
-    const int wheel_count = CountBits(rank_mask & wheel_mask);
+    const int wheel_count = std::popcount(static_cast<unsigned int>(rank_mask & wheel_mask));
     return wheel_count > best ? wheel_count : best;
   }
 };
@@ -239,27 +225,18 @@ struct CoarsePrivateBuckets {
     return BestStraightWindowDensity(rank_mask) >= 4 ? 1 : 0;
   }
 
-  static int CountBits(uint16_t value) {
-    int count = 0;
-    while (value != 0) {
-      count += value & 1u;
-      value >>= 1;
-    }
-    return count;
-  }
-
   static int BestStraightWindowDensity(uint16_t rank_mask) {
     int best = 0;
     for (int start = 0; start <= 8; ++start) {
-      const int count = CountBits(
-          static_cast<uint16_t>((rank_mask >> start) & 0x1F));
+      const int count =
+          std::popcount(static_cast<unsigned int>((rank_mask >> start) & 0x1F));
       if (count > best) {
         best = count;
       }
     }
     const uint16_t wheel_mask =
         static_cast<uint16_t>((1u << 12) | 0x0F);
-    const int wheel_count = CountBits(rank_mask & wheel_mask);
+    const int wheel_count = std::popcount(static_cast<unsigned int>(rank_mask & wheel_mask));
     return wheel_count > best ? wheel_count : best;
   }
 };
