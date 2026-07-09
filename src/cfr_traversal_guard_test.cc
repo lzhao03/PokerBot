@@ -72,7 +72,6 @@ TEST_CASE("frozen regret-only traversal guard") {
   config.regret_only_training = true;
   config.max_info_sets = 500000;
   config.max_public_states = 200000;
-  config.warmup_iterations = 1;
   config.num_training_threads = 1;
   CFRSolver solver(config);
   HandRange player_a = ExactRange(Combo(14, SuitKind::kHearts,

@@ -74,9 +74,6 @@ struct SolverConfig {
   int max_public_states = 0;
   // Number of threads to use for parallel training. 0 or 1 = single-threaded.
   int num_training_threads = 0;
-  // Deprecated. Training now chooses growing or prebuilt storage for the whole
-  // run.
-  int warmup_iterations = 0;
 };
 
 struct CompactAction {

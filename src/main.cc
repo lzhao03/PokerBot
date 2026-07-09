@@ -91,7 +91,6 @@ void PrintUsage(const char* program) {
       << "  --max-public-states=N           cap public-state rows (default "
       << kDefaultMaxPublicStates << ", 0 = unlimited)\n"
       << "  --threads=N                     parallel training threads (0 or 1 = single-threaded)\n"
-      << "  --warmup-iterations=N           single-threaded warmup before frozen phase (0 = auto)\n"
       << "  --max-memory-mb=N                hard memory limit in MB (default "
       << kDefaultMemoryLimitMb << ", 0 = unlimited)\n"
       << "  --log                           show INFO logs and VLOG(1) progress\n";
@@ -164,8 +163,6 @@ int main(int argc, char** argv) {
         }
       } else if (ConsumePrefix(arg, "--threads=", &value)) {
         config.set_num_training_threads(ParseInt(value, "--threads"));
-      } else if (ConsumePrefix(arg, "--warmup-iterations=", &value)) {
-        config.set_warmup_iterations(ParseInt(value, "--warmup-iterations"));
       } else {
         throw std::invalid_argument("Unknown option: " + arg);
       }

@@ -21,8 +21,6 @@ using poker::kProdBenchmarkDefaults;
 constexpr int kDefaultIterations = kProdBenchmarkDefaults ? 5000 : 100;
 constexpr int kDefaultEvalSamples = kProdBenchmarkDefaults ? 1 : 100;
 constexpr int kDefaultMaxDepth = 0;
-constexpr int kDefaultWarmupIterations =
-    kProdBenchmarkDefaults && kCoarsePublicBuckets ? 1 : 0;
 constexpr int kDefaultMaxInfoSets = kProdBenchmarkDefaults ? 500000 : 0;
 constexpr int kDefaultMaxPublicStates = kProdBenchmarkDefaults ? 200000 : 0;
 constexpr const char* kDefaultRange =
@@ -112,7 +110,6 @@ void PrintUsage(const char* program) {
       << "  --max-public-states=N           solver config override"
       << " (default " << kDefaultMaxPublicStates << ")\n"
       << "  --threads=N                     solver config override\n"
-      << "  --warmup-iterations=N           solver config override\n"
       << "  --regret-only                   solver config override\n"
       << "  --bet-size=X                    replaces default global sizes on first use\n"
       << "  --preflop-bet-size=X            solver config override\n"
@@ -366,7 +363,6 @@ ParsedOptions ParseOptions(int argc, char** argv) {
   bool saw_global_bet_size = false;
   if (kProdBenchmarkDefaults) {
     parsed.config.set_max_depth(kDefaultMaxDepth);
-    parsed.config.set_warmup_iterations(kDefaultWarmupIterations);
     parsed.config.set_regret_only_training(true);
     parsed.config.set_max_info_sets(kDefaultMaxInfoSets);
     parsed.config.set_max_public_states(kDefaultMaxPublicStates);
@@ -404,9 +400,6 @@ ParsedOptions ParseOptions(int argc, char** argv) {
           ParseInt(value, "--max-public-states"));
     } else if (ConsumePrefix(arg, "--threads=", &value)) {
       parsed.config.set_num_training_threads(ParseInt(value, "--threads"));
-    } else if (ConsumePrefix(arg, "--warmup-iterations=", &value)) {
-      parsed.config.set_warmup_iterations(
-          ParseInt(value, "--warmup-iterations"));
     } else if (ConsumePrefix(arg, "--bet-size=", &value)) {
       if (!saw_global_bet_size) {
         parsed.config.clear_bet_sizes();

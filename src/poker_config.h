@@ -41,7 +41,6 @@ inline SolverConfig SolverConfigFromProto(const PokerConfig& config) {
   native.max_info_sets = static_cast<int>(config.max_info_sets());
   native.max_public_states = static_cast<int>(config.max_public_states());
   native.num_training_threads = config.num_training_threads();
-  native.warmup_iterations = config.warmup_iterations();
   return native;
 }
 

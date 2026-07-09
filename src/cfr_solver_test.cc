@@ -37,7 +37,6 @@ TEST_CASE("public-state cap prevents fixed-storage training") {
   SolverConfig config = SmallConfig();
   config.max_public_states = 1;
   config.max_info_sets = 500000;
-  config.warmup_iterations = 1;
   CFRSolver solver(config);
   HandRange player_a = ExactRange(Combo(14, SuitKind::kDiamonds,
                                         12, SuitKind::kDiamonds));
