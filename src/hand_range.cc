@@ -187,6 +187,32 @@ std::vector<ComboId> ExpandHandType(HandType type) {
   return combos;
 }
 
+int ComboCountForHandType(HandType type) {
+  if (!IsValidRank(type.high_rank) || !IsValidRank(type.low_rank)) {
+    return 0;
+  }
+  if (type.high_rank == type.low_rank) {
+    return type.shape == HandType::Shape::kPair ? 6 : 0;
+  }
+
+  switch (type.shape) {
+    case HandType::Shape::kSuited:
+      return 4;
+    case HandType::Shape::kOffsuit:
+      return 12;
+    case HandType::Shape::kAnyNonPair:
+      return 16;
+    case HandType::Shape::kPair:
+      return 0;
+  }
+  return 0;
+}
+
+int ComboCountForHandTypeIndex(int index) {
+  const std::optional<HandType> type = DecodeHandTypeIndex(index);
+  return type.has_value() ? ComboCountForHandType(*type) : 0;
+}
+
 std::vector<ComboId> ExpandHandTypeIndex(int index) {
   const std::optional<HandType> type = DecodeHandTypeIndex(index);
   return type.has_value() ? ExpandHandType(*type) : std::vector<ComboId>();
@@ -259,9 +285,7 @@ std::optional<ComboId> RepresentativeComboForHandTypeIndex(int index) {
 
 }  // namespace
 
-HandRange::HandRange() 
-  : total_weight_(0.0) {
-}
+HandRange::HandRange() : total_weight_(0.0) {}
 
 void HandRange::add_combo(ComboId combo_id, double weight) {
   if (combo_id >= kComboCount || weight <= 0.0) {
@@ -284,21 +308,17 @@ void HandRange::add_hand_by_index(int index, double weight) {
   if (index < 0 || index >= kHandTypeCount || weight <= 0.0) {
     return;
   }
-  
-  bool found = false;
+
   for (auto& pair : hand_weights_) {
     if (pair.first == index) {
       total_weight_ += weight - pair.second;
       pair.second = weight;
-      found = true;
-      break;
+      return;
     }
   }
-  
-  if (!found) {
-    hand_weights_.emplace_back(index, weight);
-    total_weight_ += weight;
-  }
+
+  hand_weights_.emplace_back(index, weight);
+  total_weight_ += weight;
 }
 
 double HandRange::get_probability(ComboId combo_id) const {
@@ -317,15 +337,15 @@ double HandRange::get_probability(ComboId combo_id) const {
   if (index >= 0) {
     for (const auto& pair : hand_weights_) {
       if (pair.first == index) {
-        std::vector<ComboId> combos = ExpandHandTypeIndex(index);
-        if (!combos.empty()) {
-          hand_weight += pair.second / combos.size();
+        const int combo_count = ComboCountForHandTypeIndex(index);
+        if (combo_count > 0) {
+          hand_weight += pair.second / combo_count;
         }
         break;
       }
     }
   }
-  
+
   return hand_weight / total_weight_;
 }
 
@@ -422,7 +442,7 @@ void HandRange::normalize() {
   for (auto& pair : exact_hand_weights_) {
     pair.second /= total_weight_;
   }
-  
+
   total_weight_ = 1.0;
 }
 
@@ -430,13 +450,13 @@ int HandRange::combo_to_index(ComboId combo_id) {
   if (combo_id >= kComboCount) {
     return -1;
   }
-  
+
   const ComboInfo& combo = GetComboInfo(combo_id);
   int rank1 = RankFromCardId(combo.card0);
   int rank2 = RankFromCardId(combo.card1);
   SuitKind suit1 = SuitFromCardId(combo.card0);
   SuitKind suit2 = SuitFromCardId(combo.card1);
-  
+
   HandType type{std::max(rank1, rank2), std::min(rank1, rank2),
                 rank1 == rank2
                     ? HandType::Shape::kPair
@@ -464,7 +484,7 @@ std::string HandRange::combo_to_string(ComboId combo_id) {
     std::swap(rank1, rank2);
     std::swap(suit1, suit2);
   }
-  
+
   const HandType type{rank1, rank2,
                       rank1 == rank2
                           ? HandType::Shape::kPair
@@ -533,8 +553,7 @@ TrainingRange BuildTrainingRange(const HandRange& range) {
       continue;
     }
 
-    const float combo_weight =
-        static_cast<float>(weight / combos.size());
+    const float combo_weight = static_cast<float>(weight / combos.size());
     for (ComboId combo_id : combos) {
       training_range.add(combo_id, combo_weight);
     }
@@ -543,4 +562,4 @@ TrainingRange BuildTrainingRange(const HandRange& range) {
   return training_range;
 }
 
-} // namespace poker
+}  // namespace poker
