@@ -1,10 +1,114 @@
 #include "src/strategy_store.h"
 
 #include <algorithm>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <vector>
+
+#include "src/build_flags.h"
 
 namespace poker {
+namespace {
+
+void AtomicFloatAdd(float* target, float delta) {
+  static_assert(sizeof(float) == sizeof(int32_t), "float must be 32-bit");
+  int32_t old_bits, new_bits;
+  do {
+    old_bits = __atomic_load_n(reinterpret_cast<int32_t*>(target),
+                               __ATOMIC_RELAXED);
+    float new_val;
+    std::memcpy(&new_val, &old_bits, sizeof(float));
+    new_val += delta;
+    std::memcpy(&new_bits, &new_val, sizeof(float));
+  } while (!__atomic_compare_exchange_n(
+      reinterpret_cast<int32_t*>(target), &old_bits, new_bits,
+      /*weak=*/true, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
+}
+
+int64_t AtomicCFRPlusRegretUpdate(float* target, float delta) {
+  static_assert(sizeof(float) == sizeof(int32_t), "float must be 32-bit");
+  int32_t old_bits, new_bits;
+  bool exchanged = false;
+  int64_t retries = 0;
+  do {
+    old_bits = __atomic_load_n(reinterpret_cast<int32_t*>(target),
+                               __ATOMIC_RELAXED);
+    float old_val;
+    std::memcpy(&old_val, &old_bits, sizeof(float));
+    const float new_val = std::max(0.0f, old_val + delta);
+    std::memcpy(&new_bits, &new_val, sizeof(float));
+    exchanged = __atomic_compare_exchange_n(
+        reinterpret_cast<int32_t*>(target), &old_bits, new_bits,
+        /*weak=*/true, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+    if constexpr (kCasRetryStatsEnabled) {
+      if (!exchanged) {
+        ++retries;
+      }
+    }
+  } while (!exchanged);
+  if constexpr (kCasRetryStatsEnabled) {
+    return retries;
+  }
+  return 0;
+}
+
+float AtomicFloatLoad(const float* src) {
+  const int32_t bits = __atomic_load_n(
+      reinterpret_cast<const int32_t*>(src), __ATOMIC_RELAXED);
+  float value;
+  std::memcpy(&value, &bits, sizeof(float));
+  return value;
+}
+
+void FillUniform(absl::Span<double> out) {
+  if (out.empty()) {
+    return;
+  }
+  std::fill(out.begin(), out.end(), 1.0 / out.size());
+}
+
+}  // namespace
+
+absl::Span<const int> ActionBlock::action_ids() const {
+  if (!valid()) {
+    return {};
+  }
+  const std::vector<int>& ids = store_->frozen_tables().action_ids;
+  return absl::Span<const int>(
+      ids.data() + static_cast<size_t>(action_offset_), action_count_);
+}
+
+void ActionBlock::regret_matching(RegretLoadMode mode,
+                                  absl::Span<double> out) const {
+  if (!valid() || out.size() != action_count_) {
+    throw std::logic_error("regret-matching action count mismatch");
+  }
+
+  const auto& regrets = store_->cumulative().cumulative_regrets;
+  double sum_positive_regrets = 0.0;
+  for (size_t action_index = 0; action_index < out.size(); ++action_index) {
+    store_->stats_->record_action_entries();
+    const size_t table_index =
+        static_cast<size_t>(action_offset_) + action_index;
+    const float raw_regret =
+        mode == RegretLoadMode::kAtomic
+            ? AtomicFloatLoad(&regrets[table_index])
+            : regrets[table_index];
+    const double positive_regret =
+        std::max(0.0, static_cast<double>(raw_regret));
+    out[action_index] = positive_regret;
+    sum_positive_regrets += positive_regret;
+  }
+
+  if (sum_positive_regrets <= 0.0) {
+    FillUniform(out);
+    return;
+  }
+  for (double& probability : out) {
+    probability /= sum_positive_regrets;
+  }
+}
 
 void ActionBlock::regret_matching(absl::Span<const int> legal_action_ids,
                                   absl::Span<double> out) const {
@@ -32,11 +136,8 @@ void ActionBlock::regret_matching(absl::Span<const int> legal_action_ids,
 
     store_->stats_->record_action_entries();
     const double positive_regret =
-        std::max(
-            0.0,
-            static_cast<double>(
-                strategy_store_internal::AtomicFloatLoad(
-                    &regrets[table_index])));
+        std::max(0.0,
+                 static_cast<double>(AtomicFloatLoad(&regrets[table_index])));
     out[action_index] = positive_regret;
     positive_regret_sum += positive_regret;
   }
@@ -47,6 +148,60 @@ void ActionBlock::regret_matching(absl::Span<const int> legal_action_ids,
   }
   for (double& probability : out) {
     probability /= positive_regret_sum;
+  }
+}
+
+void ActionBlock::add_cfr_plus_regret(
+    size_t action_index,
+    float delta,
+    RegretUpdateOptions options) const {
+  if (!valid() || action_index >= action_count_) {
+    throw std::logic_error("regret update action index out of range");
+  }
+
+  const size_t table_index =
+      static_cast<size_t>(action_offset_) + action_index;
+  auto& regrets = store_->cumulative().cumulative_regrets;
+  if (table_index >= regrets.size()) {
+    throw std::logic_error("regret update table index out of range");
+  }
+
+  store_->stats_->record_action_entries(2);
+  float* regret_entry = &regrets[table_index];
+  if (options.mode == RegretUpdateMode::kAtomic) {
+    const int64_t retries =
+        AtomicCFRPlusRegretUpdate(regret_entry, delta);
+    if (options.record_atomic_retry_stats) {
+      store_->stats_->record_atomic_retries(retries);
+    }
+    return;
+  }
+  *regret_entry = std::max(0.0f, *regret_entry + delta);
+}
+
+void ActionBlock::add_average_strategy(absl::Span<const double> probs,
+                                       double reach_weight,
+                                       RegretUpdateMode mode) const {
+  if (!valid() || probs.size() != action_count_) {
+    throw std::logic_error("average-strategy probability span size mismatch");
+  }
+
+  auto& strategies = store_->cumulative().cumulative_strategies;
+  for (size_t action_index = 0; action_index < probs.size(); ++action_index) {
+    const size_t table_index =
+        static_cast<size_t>(action_offset_) + action_index;
+    if (table_index >= strategies.size()) {
+      throw std::logic_error("average-strategy table index out of range");
+    }
+
+    store_->stats_->record_action_entries(2);
+    const float delta =
+        static_cast<float>(reach_weight * probs[action_index]);
+    if (mode == RegretUpdateMode::kAtomic) {
+      AtomicFloatAdd(&strategies[table_index], delta);
+    } else {
+      strategies[table_index] += delta;
+    }
   }
 }
 
@@ -83,12 +238,10 @@ void ActionBlock::average_strategy(bool regret_only_training,
       out[i] =
           regret_only_training
               ? std::max(0.0,
-                         static_cast<double>(
-                             strategy_store_internal::AtomicFloatLoad(
-                                 &cumulative_regrets[table_index])))
-              : static_cast<double>(
-                    strategy_store_internal::AtomicFloatLoad(
-                        &cumulative_strategies[table_index]));
+                         static_cast<double>(AtomicFloatLoad(
+                             &cumulative_regrets[table_index])))
+              : static_cast<double>(AtomicFloatLoad(
+                    &cumulative_strategies[table_index]));
       probability_sum += out[i];
     }
   } else {
@@ -105,12 +258,10 @@ void ActionBlock::average_strategy(bool regret_only_training,
               regret_only_training
                   ? std::max(
                         0.0,
-                        static_cast<double>(
-                            strategy_store_internal::AtomicFloatLoad(
-                                &cumulative_regrets[table_index])))
-                  : static_cast<double>(
-                        strategy_store_internal::AtomicFloatLoad(
-                            &cumulative_strategies[table_index]));
+                        static_cast<double>(AtomicFloatLoad(
+                            &cumulative_regrets[table_index])))
+                  : static_cast<double>(AtomicFloatLoad(
+                        &cumulative_strategies[table_index]));
           probability_sum += out[legal_action_index];
           break;
         }
@@ -141,8 +292,20 @@ StrategyTables& StrategyStore::mutable_tables() {
   return tables_for_growth();
 }
 
+const StrategyTables& StrategyStore::frozen_tables() const {
+  return storage_.frozen_ref();
+}
+
 StrategyTables& StrategyStore::tables_for_growth() {
   return storage_.mutable_ref();
+}
+
+MutableCumulativeArrays& StrategyStore::cumulative() {
+  return storage_.cumulative_ref();
+}
+
+const MutableCumulativeArrays& StrategyStore::cumulative() const {
+  return storage_.cumulative_ref();
 }
 
 ActionBlock StrategyStore::block_for_row(const InfoSetRow& row) {
@@ -198,6 +361,24 @@ std::optional<ActionBlock> StrategyStore::find_frozen(
                      static_cast<uint16_t>(expected_action_count));
 }
 
+void StrategyStore::regret_matching_or_uniform(
+    std::optional<ActionBlock> block,
+    size_t legal_action_count,
+    RegretLoadMode load_mode,
+    absl::Span<double> out) {
+  if (out.size() != legal_action_count) {
+    throw std::logic_error("regret-matching probability span size mismatch");
+  }
+  if (legal_action_count == 0) {
+    return;
+  }
+  if (!block.has_value() || block->action_count() != legal_action_count) {
+    FillUniform(out);
+    return;
+  }
+  block->regret_matching(load_mode, out);
+}
+
 void StrategyStore::average_strategy(uint32_t public_state_id,
                                      const PublicStateRow& row,
                                      int player,
@@ -240,7 +421,7 @@ void StrategyStore::regret_matching_for_bucket(
   std::optional<ActionBlock> block =
       find({public_state_id, player, private_bucket}, legal_action_ids.size());
   if (!block.has_value()) {
-    strategy_store_internal::FillUniform(out);
+    FillUniform(out);
     return;
   }
   block->regret_matching(legal_action_ids, out);

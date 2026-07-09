@@ -1,82 +1,19 @@
 #pragma once
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <utility>
 
 #include "absl/types/span.h"
-#include "src/build_flags.h"
 #include "src/card_abstraction.h"
 #include "src/poker_types.h"
 #include "src/strategy_tables.h"
 #include "src/traversal_stats.h"
 
 namespace poker {
-namespace strategy_store_internal {
-
-inline void AtomicFloatAdd(float* target, float delta) {
-  static_assert(sizeof(float) == sizeof(int32_t), "float must be 32-bit");
-  int32_t old_bits, new_bits;
-  do {
-    old_bits = __atomic_load_n(reinterpret_cast<int32_t*>(target),
-                               __ATOMIC_RELAXED);
-    float new_val;
-    std::memcpy(&new_val, &old_bits, sizeof(float));
-    new_val += delta;
-    std::memcpy(&new_bits, &new_val, sizeof(float));
-  } while (!__atomic_compare_exchange_n(
-      reinterpret_cast<int32_t*>(target), &old_bits, new_bits,
-      /*weak=*/true, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
-}
-
-inline int64_t AtomicCFRPlusRegretUpdate(float* target, float delta) {
-  static_assert(sizeof(float) == sizeof(int32_t), "float must be 32-bit");
-  int32_t old_bits, new_bits;
-  bool exchanged = false;
-  int64_t retries = 0;
-  do {
-    old_bits = __atomic_load_n(reinterpret_cast<int32_t*>(target),
-                               __ATOMIC_RELAXED);
-    float old_val;
-    std::memcpy(&old_val, &old_bits, sizeof(float));
-    const float new_val = std::max(0.0f, old_val + delta);
-    std::memcpy(&new_bits, &new_val, sizeof(float));
-    exchanged = __atomic_compare_exchange_n(
-        reinterpret_cast<int32_t*>(target), &old_bits, new_bits,
-        /*weak=*/true, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
-    if constexpr (kCasRetryStatsEnabled) {
-      if (!exchanged) {
-        ++retries;
-      }
-    }
-  } while (!exchanged);
-  if constexpr (kCasRetryStatsEnabled) {
-    return retries;
-  }
-  return 0;
-}
-
-inline float AtomicFloatLoad(const float* src) {
-  const int32_t bits = __atomic_load_n(
-      reinterpret_cast<const int32_t*>(src), __ATOMIC_RELAXED);
-  float value;
-  std::memcpy(&value, &bits, sizeof(float));
-  return value;
-}
-
-inline void FillUniform(absl::Span<double> out) {
-  if (out.empty()) {
-    return;
-  }
-  std::fill(out.begin(), out.end(), 1.0 / out.size());
-}
-
-}  // namespace strategy_store_internal
 
 enum class RegretLoadMode {
   kPlain,
@@ -259,130 +196,5 @@ class StrategyStore {
   SolverStorage& storage_;
   TraversalStats* stats_;
 };
-
-inline const StrategyTables& StrategyStore::frozen_tables() const {
-  return storage_.frozen_ref();
-}
-
-inline MutableCumulativeArrays& StrategyStore::cumulative() {
-  return storage_.cumulative_ref();
-}
-
-inline const MutableCumulativeArrays& StrategyStore::cumulative() const {
-  return storage_.cumulative_ref();
-}
-
-inline absl::Span<const int> ActionBlock::action_ids() const {
-  if (!valid()) {
-    return {};
-  }
-  const std::vector<int>& ids = store_->frozen_tables().action_ids;
-  return absl::Span<const int>(
-      ids.data() + static_cast<size_t>(action_offset_), action_count_);
-}
-
-inline void ActionBlock::regret_matching(RegretLoadMode mode,
-                                         absl::Span<double> out) const {
-  if (!valid() || out.size() != action_count_) {
-    throw std::logic_error("regret-matching action count mismatch");
-  }
-
-  const auto& regrets = store_->cumulative().cumulative_regrets;
-  double sum_positive_regrets = 0.0;
-  for (size_t action_index = 0; action_index < out.size(); ++action_index) {
-    store_->stats_->record_action_entries();
-    const size_t table_index =
-        static_cast<size_t>(action_offset_) + action_index;
-    const float raw_regret =
-        mode == RegretLoadMode::kAtomic
-            ? strategy_store_internal::AtomicFloatLoad(&regrets[table_index])
-            : regrets[table_index];
-    const double positive_regret =
-        std::max(0.0, static_cast<double>(raw_regret));
-    out[action_index] = positive_regret;
-    sum_positive_regrets += positive_regret;
-  }
-
-  if (sum_positive_regrets <= 0.0) {
-    strategy_store_internal::FillUniform(out);
-    return;
-  }
-  for (double& probability : out) {
-    probability /= sum_positive_regrets;
-  }
-}
-
-inline void ActionBlock::add_cfr_plus_regret(
-    size_t action_index,
-    float delta,
-    RegretUpdateOptions options) const {
-  if (!valid() || action_index >= action_count_) {
-    throw std::logic_error("regret update action index out of range");
-  }
-
-  const size_t table_index =
-      static_cast<size_t>(action_offset_) + action_index;
-  auto& regrets = store_->cumulative().cumulative_regrets;
-  if (table_index >= regrets.size()) {
-    throw std::logic_error("regret update table index out of range");
-  }
-
-  store_->stats_->record_action_entries(2);
-  float* regret_entry = &regrets[table_index];
-  if (options.mode == RegretUpdateMode::kAtomic) {
-    const int64_t retries =
-        strategy_store_internal::AtomicCFRPlusRegretUpdate(regret_entry,
-                                                           delta);
-    if (options.record_atomic_retry_stats) {
-      store_->stats_->record_atomic_retries(retries);
-    }
-    return;
-  }
-  *regret_entry = std::max(0.0f, *regret_entry + delta);
-}
-
-inline void ActionBlock::add_average_strategy(absl::Span<const double> probs,
-                                              double reach_weight,
-                                              RegretUpdateMode mode) const {
-  if (!valid() || probs.size() != action_count_) {
-    throw std::logic_error("average-strategy probability span size mismatch");
-  }
-
-  auto& strategies = store_->cumulative().cumulative_strategies;
-  for (size_t action_index = 0; action_index < probs.size(); ++action_index) {
-    const size_t table_index =
-        static_cast<size_t>(action_offset_) + action_index;
-    if (table_index >= strategies.size()) {
-      throw std::logic_error("average-strategy table index out of range");
-    }
-
-    store_->stats_->record_action_entries(2);
-    const float delta =
-        static_cast<float>(reach_weight * probs[action_index]);
-    if (mode == RegretUpdateMode::kAtomic) {
-      strategy_store_internal::AtomicFloatAdd(&strategies[table_index], delta);
-    } else {
-      strategies[table_index] += delta;
-    }
-  }
-}
-
-inline void StrategyStore::regret_matching_or_uniform(
-    std::optional<ActionBlock> block,
-    size_t legal_action_count,
-    RegretLoadMode load_mode,
-    absl::Span<double> out) {
-  if (out.size() != legal_action_count) {
-    throw std::logic_error("regret-matching probability span size mismatch");
-  }
-  if (legal_action_count == 0) {
-    return;
-  }
-  if (!block.has_value() || block->action_count() != legal_action_count) {
-    strategy_store_internal::FillUniform(out);
-    return;
-  }
-  block->regret_matching(load_mode, out);
-}
 
 }  // namespace poker
