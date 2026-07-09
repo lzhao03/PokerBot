@@ -101,18 +101,6 @@ class CFRSolver {
     bool record_atomic_retry_stats = false;
   };
 
-  struct EvaluationContext {
-    TraversalDeal deal;
-
-    const PrivateCards& cards(int player) const {
-      return deal.player_cards(player);
-    }
-
-    CardMask known_private_cards() const {
-      return deal.known_private_cards();
-    }
-  };
-
   struct ExactBoardState {
     std::array<CardId, kMaxBoardCards> cards = {};
     uint8_t count = 0;
@@ -508,7 +496,7 @@ class CFRSolver {
                           const PrivateCards& player_a_cards,
                           const PrivateCards& player_b_cards);
   double evaluate_strategy_node(NodeRef node,
-                                EvaluationContext& ctx,
+                                const TraversalDeal& deal,
                                 NodeGraph& graph);
   double evaluate_strategy_samples(
       int samples,

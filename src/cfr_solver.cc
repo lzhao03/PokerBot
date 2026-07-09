@@ -1080,11 +1080,11 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
                           ExactBoardFromState(root_state)};
   NodeGraph graph(*this, storage_.frozen ? NodeGraphMode::kSkipMissing
                                          : NodeGraphMode::kGrow);
-  EvaluationContext ctx{TraversalDeal{{
+  const TraversalDeal deal{{
       PrivateCards::FromCombo(player_a_hand),
       PrivateCards::FromCombo(player_b_hand),
-  }}};
-  return evaluate_strategy_node(root_node, ctx, graph);
+  }};
+  return evaluate_strategy_node(root_node, deal, graph);
 }
 
 double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range,
@@ -1155,18 +1155,18 @@ double CFRSolver::evaluate_strategy_samples(
                                          : NodeGraphMode::kGrow);
   for (int i = 0; i < samples; ++i) {
     const RangeDeal deal = range_sampler.sample(rng_);
-    EvaluationContext ctx{TraversalDeal{{
+    const TraversalDeal traversal_deal{{
         PrivateCards::FromCombo(deal.player_a_combo),
         PrivateCards::FromCombo(deal.player_b_combo),
-    }}};
-    total += evaluate_strategy_node(*root_node, ctx, graph);
+    }};
+    total += evaluate_strategy_node(*root_node, traversal_deal, graph);
   }
   return total / samples;
 }
 
 double CFRSolver::evaluate_strategy_node(
     NodeRef node,
-    EvaluationContext& ctx,
+    const TraversalDeal& deal,
     NodeGraph& graph) {
   const std::optional<NodeCursor> node_cursor = cursor(node);
   if (!node_cursor.has_value()) {
@@ -1177,14 +1177,14 @@ double CFRSolver::evaluate_strategy_node(
 
   if (row.is_terminal) {
     const CompactPublicState& state = node_cursor->exact_state();
-    return terminal_utility(state, ctx.cards(0), ctx.cards(1));
+    return terminal_utility(state, deal.player_cards(0), deal.player_cards(1));
   }
   if (row.is_chance_node) {
     const int samples = ChanceSamples(config_);
     return sample_chance_children(
-        samples, node, ctx.known_private_cards(), graph,
+        samples, node, deal.known_private_cards(), graph,
         [&](NodeRef child) {
-          return evaluate_strategy_node(child, ctx, graph);
+          return evaluate_strategy_node(child, deal, graph);
         });
   }
   const std::optional<DecisionFrame> maybe_decision =
@@ -1195,7 +1195,7 @@ double CFRSolver::evaluate_strategy_node(
   const DecisionFrame& decision = *maybe_decision;
   const int player = PlayerIndex(decision.player);
 
-  const PrivateCards& player_cards = ctx.cards(player);
+  const PrivateCards& player_cards = deal.player_cards(player);
   ActionScratch action_scratch;
   absl::Span<double> probabilities = action_scratch.probs(decision.action_count);
   const PrivateBucketId private_bucket =
@@ -1213,7 +1213,7 @@ double CFRSolver::evaluate_strategy_node(
       continue;
     }
     value += probabilities[action_index] *
-             evaluate_strategy_node(child.node, ctx, graph);
+             evaluate_strategy_node(child.node, deal, graph);
   }
   return value;
 }
