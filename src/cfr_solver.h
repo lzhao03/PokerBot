@@ -283,69 +283,63 @@ class CFRSolver {
                                  options_.record_atomic_retry_stats};
     }
 
-    class ReachScope {
+    class ChildTraversalScope {
      public:
-      ReachScope(TraversalContext& ctx, int player, double probability)
-          : ctx_(ctx), player_(player) {
-        double& reach = ctx_.reach_[static_cast<size_t>(player_)];
-        previous_ = reach;
-        reach = previous_ * probability;
-      }
-      ReachScope(const ReachScope&) = delete;
-      ReachScope& operator=(const ReachScope&) = delete;
-      ~ReachScope() {
-        ctx_.reach_[static_cast<size_t>(player_)] = previous_;
-      }
-
-     private:
-      TraversalContext& ctx_;
-      int player_;
-      double previous_;
-    };
-
-    class DepthScope {
-     public:
-      explicit DepthScope(TraversalContext& ctx) : ctx_(ctx) {
+      ChildTraversalScope(TraversalContext& ctx,
+                          int acting_player,
+                          double action_probability,
+                          OptionalTrainingRange player_a_range = {},
+                          OptionalTrainingRange player_b_range = {},
+                          bool override_ranges = false)
+          : ctx_(ctx),
+            player_(acting_player),
+            previous_reach_(
+                ctx_.reach_[static_cast<size_t>(acting_player)]),
+            previous_ranges_(ctx_.ranges_),
+            restore_reach_(true),
+            restore_depth_(true),
+            restore_ranges_(override_ranges) {
+        ctx_.reach_[static_cast<size_t>(acting_player)] *= action_probability;
         ++ctx_.depth_;
+        if (restore_ranges_) {
+          ctx_.ranges_[0] = player_a_range;
+          ctx_.ranges_[1] = player_b_range;
+        }
       }
-      DepthScope(const DepthScope&) = delete;
-      DepthScope& operator=(const DepthScope&) = delete;
-      ~DepthScope() { --ctx_.depth_; }
+
+      ChildTraversalScope(TraversalContext& ctx,
+                          OptionalTrainingRange player_a_range,
+                          OptionalTrainingRange player_b_range)
+          : ctx_(ctx),
+            previous_ranges_(ctx_.ranges_),
+            restore_ranges_(true) {
+        ctx_.ranges_[0] = player_a_range;
+        ctx_.ranges_[1] = player_b_range;
+      }
+
+      ChildTraversalScope(const ChildTraversalScope&) = delete;
+      ChildTraversalScope& operator=(const ChildTraversalScope&) = delete;
+      ~ChildTraversalScope() {
+        if (restore_depth_) {
+          --ctx_.depth_;
+        }
+        if (restore_reach_) {
+          ctx_.reach_[static_cast<size_t>(player_)] = previous_reach_;
+        }
+        if (restore_ranges_) {
+          ctx_.ranges_ = previous_ranges_;
+        }
+      }
 
      private:
       TraversalContext& ctx_;
+      int player_ = 0;
+      double previous_reach_ = 1.0;
+      std::array<OptionalTrainingRange, kPlayerCount> previous_ranges_;
+      bool restore_reach_ = false;
+      bool restore_depth_ = false;
+      bool restore_ranges_ = false;
     };
-
-    class RangeScope {
-     public:
-      RangeScope(TraversalContext& ctx,
-                 OptionalTrainingRange p0,
-                 OptionalTrainingRange p1)
-          : ctx_(ctx), previous_(ctx.ranges_) {
-        ctx_.ranges_[0] = p0;
-        ctx_.ranges_[1] = p1;
-      }
-      RangeScope(const RangeScope&) = delete;
-      RangeScope& operator=(const RangeScope&) = delete;
-      ~RangeScope() { ctx_.ranges_ = previous_; }
-
-     private:
-      TraversalContext& ctx_;
-      std::array<OptionalTrainingRange, kPlayerCount> previous_;
-    };
-
-    ReachScope enter_action(int player, double probability) {
-      return ReachScope(*this, player, probability);
-    }
-
-    DepthScope descend() {
-      return DepthScope(*this);
-    }
-
-    RangeScope set_ranges(OptionalTrainingRange p0,
-                          OptionalTrainingRange p1) {
-      return RangeScope(*this, p0, p1);
-    }
 
    private:
     TraversalDeal deal_;

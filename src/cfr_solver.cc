@@ -789,8 +789,8 @@ double CFRSolver::CfrTraversal<mode>::chance(NodeRef node) {
 
         if (child_player_a_range.has_value() ||
             child_player_b_range.has_value()) {
-          auto range_scope =
-              ctx_.set_ranges(child_player_a_range, child_player_b_range);
+          TraversalContext::ChildTraversalScope child_scope(
+              ctx_, child_player_a_range, child_player_b_range);
           return value(child);
         }
         return value(child);
@@ -874,23 +874,19 @@ double CFRSolver::CfrTraversal<mode>::decision(
 
     double action_value = 0.0;
     {
-      auto reach_scope =
-          ctx_.enter_action(player, action_probabilities[action_index]);
-      auto depth_scope = ctx_.descend();
-      if constexpr (mode == CfrTraversalMode::kNormal) {
-        if (range_conditioning.has_value() &&
-            range_conditioning->enabled()) {
-          auto range_scope =
-              ctx_.set_ranges(
-                  range_conditioning->player_a_range_for(action_index),
-                  range_conditioning->player_b_range_for(action_index));
-          action_value = value(child.node);
-        } else {
-          action_value = value(child.node);
-        }
-      } else {
-        action_value = value(child.node);
-      }
+      const bool override_ranges =
+          mode == CfrTraversalMode::kNormal &&
+          range_conditioning.has_value() && range_conditioning->enabled();
+      TraversalContext::ChildTraversalScope child_scope(
+          ctx_, player, action_probabilities[action_index],
+          override_ranges
+              ? range_conditioning->player_a_range_for(action_index)
+              : OptionalTrainingRange{},
+          override_ranges
+              ? range_conditioning->player_b_range_for(action_index)
+              : OptionalTrainingRange{},
+          override_ranges);
+      action_value = value(child.node);
     }
     action_values[action_index] = action_value;
     node_value += action_probabilities[action_index] * action_value;
