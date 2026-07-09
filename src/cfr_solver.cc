@@ -180,6 +180,96 @@ void CFRSolver::log_training_summary() const {
   LOG(INFO) << "Player A average EV: " << get_expected_value(0);
 }
 
+CFRSolver::TraversalScratch::TraversalScratch(size_t depth_count) {
+  frames.reserve(depth_count);
+}
+
+CFRSolver::RangeScratchFrame& CFRSolver::TraversalScratch::frame(
+    size_t depth) {
+  if (depth >= frames.capacity()) {
+    throw std::logic_error("TraversalScratch depth reserve exhausted");
+  }
+  while (frames.size() <= depth) {
+    frames.emplace_back();
+  }
+  return frames[depth];
+}
+
+CFRSolver::TraversalContext::TraversalContext(
+    TraversalDeal deal,
+    TraversalOptions options,
+    TraversalScratch& scratch,
+    OptionalTrainingRange player_a_range,
+    OptionalTrainingRange player_b_range)
+    : deal_(deal), options_(options), scratch_(&scratch) {
+  ranges_[0] = player_a_range;
+  ranges_[1] = player_b_range;
+}
+
+CFRSolver::OptionalTrainingRange
+CFRSolver::TraversalContext::range_without_mask(int player,
+                                                CardMask blocked_mask) {
+  OptionalTrainingRange current = range(player);
+  if (!current.has_value()) {
+    return {};
+  }
+  TrainingRangeView& scratch =
+      scratch_frame().public_player_ranges[static_cast<size_t>(player)];
+  return std::cref(
+      current->get().copy_without_mask_into(blocked_mask, scratch));
+}
+
+RegretUpdateOptions CFRSolver::TraversalContext::regret_update_options()
+    const {
+  return RegretUpdateOptions{options_.regret_update_mode,
+                             options_.record_atomic_retry_stats};
+}
+
+CFRSolver::TraversalContext::ChildTraversalScope::ChildTraversalScope(
+    TraversalContext& ctx,
+    int acting_player,
+    double action_probability,
+    OptionalTrainingRange player_a_range,
+    OptionalTrainingRange player_b_range,
+    bool override_ranges)
+    : ctx_(ctx),
+      player_(acting_player),
+      previous_reach_(ctx_.reach_[static_cast<size_t>(acting_player)]),
+      previous_ranges_(ctx_.ranges_),
+      restore_reach_(true),
+      restore_depth_(true),
+      restore_ranges_(override_ranges) {
+  ctx_.reach_[static_cast<size_t>(acting_player)] *= action_probability;
+  ++ctx_.depth_;
+  if (restore_ranges_) {
+    ctx_.ranges_[0] = player_a_range;
+    ctx_.ranges_[1] = player_b_range;
+  }
+}
+
+CFRSolver::TraversalContext::ChildTraversalScope::ChildTraversalScope(
+    TraversalContext& ctx,
+    OptionalTrainingRange player_a_range,
+    OptionalTrainingRange player_b_range)
+    : ctx_(ctx),
+      previous_ranges_(ctx_.ranges_),
+      restore_ranges_(true) {
+  ctx_.ranges_[0] = player_a_range;
+  ctx_.ranges_[1] = player_b_range;
+}
+
+CFRSolver::TraversalContext::ChildTraversalScope::~ChildTraversalScope() {
+  if (restore_depth_) {
+    --ctx_.depth_;
+  }
+  if (restore_reach_) {
+    ctx_.reach_[static_cast<size_t>(player_)] = previous_reach_;
+  }
+  if (restore_ranges_) {
+    ctx_.ranges_ = previous_ranges_;
+  }
+}
+
 CFRSolver::ExactBoardState CFRSolver::ExactBoardFromState(
     const CompactPublicState& state) {
   return ExactBoardState{

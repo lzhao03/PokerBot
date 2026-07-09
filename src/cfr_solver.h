@@ -1,13 +1,11 @@
 #pragma once
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
 #include <random>
-#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -181,19 +179,8 @@ class CFRSolver {
   };
 
   struct TraversalScratch {
-    explicit TraversalScratch(size_t depth_count) {
-      frames.reserve(depth_count);
-    }
-
-    RangeScratchFrame& frame(size_t depth) {
-      if (depth >= frames.capacity()) {
-        throw std::logic_error("TraversalScratch depth reserve exhausted");
-      }
-      while (frames.size() <= depth) {
-        frames.emplace_back();
-      }
-      return frames[depth];
-    }
+    explicit TraversalScratch(size_t depth_count);
+    RangeScratchFrame& frame(size_t depth);
 
     std::vector<RangeScratchFrame> frames;
   };
@@ -217,11 +204,7 @@ class CFRSolver {
                      TraversalOptions options,
                      TraversalScratch& scratch,
                      OptionalTrainingRange player_a_range = {},
-                     OptionalTrainingRange player_b_range = {})
-        : deal_(deal), options_(options), scratch_(&scratch) {
-      ranges_[0] = player_a_range;
-      ranges_[1] = player_b_range;
-    }
+                     OptionalTrainingRange player_b_range = {});
 
     const TraversalDeal& deal() const { return deal_; }
     const TraversalOptions& options() const { return options_; }
@@ -262,26 +245,13 @@ class CFRSolver {
       return ranges_[static_cast<size_t>(player)];
     }
 
-    OptionalTrainingRange range_without_mask(int player,
-                                             CardMask blocked_mask) {
-      OptionalTrainingRange current = range(player);
-      if (!current.has_value()) {
-        return {};
-      }
-      TrainingRangeView& scratch =
-          scratch_frame().public_player_ranges[static_cast<size_t>(player)];
-      return std::cref(
-          current->get().copy_without_mask_into(blocked_mask, scratch));
-    }
+    OptionalTrainingRange range_without_mask(int player, CardMask blocked_mask);
 
     double average_strategy_weight(int player) const {
       return reach(player) * static_cast<double>(options_.iteration + 1);
     }
 
-    RegretUpdateOptions regret_update_options() const {
-      return RegretUpdateOptions{options_.regret_update_mode,
-                                 options_.record_atomic_retry_stats};
-    }
+    RegretUpdateOptions regret_update_options() const;
 
     class ChildTraversalScope {
      public:
@@ -290,46 +260,15 @@ class CFRSolver {
                           double action_probability,
                           OptionalTrainingRange player_a_range = {},
                           OptionalTrainingRange player_b_range = {},
-                          bool override_ranges = false)
-          : ctx_(ctx),
-            player_(acting_player),
-            previous_reach_(
-                ctx_.reach_[static_cast<size_t>(acting_player)]),
-            previous_ranges_(ctx_.ranges_),
-            restore_reach_(true),
-            restore_depth_(true),
-            restore_ranges_(override_ranges) {
-        ctx_.reach_[static_cast<size_t>(acting_player)] *= action_probability;
-        ++ctx_.depth_;
-        if (restore_ranges_) {
-          ctx_.ranges_[0] = player_a_range;
-          ctx_.ranges_[1] = player_b_range;
-        }
-      }
+                          bool override_ranges = false);
 
       ChildTraversalScope(TraversalContext& ctx,
                           OptionalTrainingRange player_a_range,
-                          OptionalTrainingRange player_b_range)
-          : ctx_(ctx),
-            previous_ranges_(ctx_.ranges_),
-            restore_ranges_(true) {
-        ctx_.ranges_[0] = player_a_range;
-        ctx_.ranges_[1] = player_b_range;
-      }
+                          OptionalTrainingRange player_b_range);
 
       ChildTraversalScope(const ChildTraversalScope&) = delete;
       ChildTraversalScope& operator=(const ChildTraversalScope&) = delete;
-      ~ChildTraversalScope() {
-        if (restore_depth_) {
-          --ctx_.depth_;
-        }
-        if (restore_reach_) {
-          ctx_.reach_[static_cast<size_t>(player_)] = previous_reach_;
-        }
-        if (restore_ranges_) {
-          ctx_.ranges_ = previous_ranges_;
-        }
-      }
+      ~ChildTraversalScope();
 
      private:
       TraversalContext& ctx_;
