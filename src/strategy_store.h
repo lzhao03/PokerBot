@@ -4,8 +4,6 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <stdexcept>
-#include <utility>
 
 #include "absl/types/span.h"
 #include "src/card_abstraction.h"
@@ -78,38 +76,13 @@ struct SolverStorage {
       std::make_shared<MutableCumulativeArrays>();
   bool frozen = false;
 
-  StrategyTables& mutable_ref() {
-    if (frozen || mutable_tables == nullptr) {
-      throw std::logic_error("Strategy tables are frozen");
-    }
-    return *mutable_tables;
-  }
-
-  const StrategyTables& frozen_ref() const {
-    return *frozen_tables;
-  }
-
-  MutableCumulativeArrays& cumulative_ref() {
-    return *cumulative;
-  }
-
-  const MutableCumulativeArrays& cumulative_ref() const {
-    return *cumulative;
-  }
-
-  void freeze() {
-    frozen_tables = mutable_tables;
-    mutable_tables.reset();
-    frozen = true;
-  }
-
+  StrategyTables& mutable_ref();
+  const StrategyTables& frozen_ref() const;
+  MutableCumulativeArrays& cumulative_ref();
+  const MutableCumulativeArrays& cumulative_ref() const;
+  void freeze();
   void bind_frozen(std::shared_ptr<const StrategyTables> frozen_in,
-                   std::shared_ptr<MutableCumulativeArrays> cumulative_in) {
-    mutable_tables.reset();
-    frozen_tables = std::move(frozen_in);
-    cumulative = std::move(cumulative_in);
-    frozen = true;
-  }
+                   std::shared_ptr<MutableCumulativeArrays> cumulative_in);
 };
 
 class StrategyStore {

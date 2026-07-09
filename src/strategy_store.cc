@@ -4,6 +4,7 @@
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "src/build_flags.h"
@@ -69,6 +70,40 @@ void FillUniform(absl::Span<double> out) {
 }
 
 }  // namespace
+
+StrategyTables& SolverStorage::mutable_ref() {
+  if (frozen || mutable_tables == nullptr) {
+    throw std::logic_error("Strategy tables are frozen");
+  }
+  return *mutable_tables;
+}
+
+const StrategyTables& SolverStorage::frozen_ref() const {
+  return *frozen_tables;
+}
+
+MutableCumulativeArrays& SolverStorage::cumulative_ref() {
+  return *cumulative;
+}
+
+const MutableCumulativeArrays& SolverStorage::cumulative_ref() const {
+  return *cumulative;
+}
+
+void SolverStorage::freeze() {
+  frozen_tables = mutable_tables;
+  mutable_tables.reset();
+  frozen = true;
+}
+
+void SolverStorage::bind_frozen(
+    std::shared_ptr<const StrategyTables> frozen_in,
+    std::shared_ptr<MutableCumulativeArrays> cumulative_in) {
+  mutable_tables.reset();
+  frozen_tables = std::move(frozen_in);
+  cumulative = std::move(cumulative_in);
+  frozen = true;
+}
 
 absl::Span<const int> ActionBlock::action_ids() const {
   if (!valid()) {
