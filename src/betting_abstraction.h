@@ -1,8 +1,6 @@
 #pragma once
 
-#include <algorithm>
 #include <array>
-#include <cstddef>
 
 #include "src/build_flags.h"
 #include "src/poker_types.h"
@@ -43,20 +41,7 @@ class BettingAbstraction {
     return key;
   }
 
-  BettingHistoryRow make_history_row(const BettingHistoryKey& key) const {
-    BettingHistoryRow row;
-    row.street = key.street;
-    row.pot = key.pot;
-    row.stack = {key.stack_a, key.stack_b};
-    row.all_in = key.all_in;
-    row.folded_player = key.folded_player;
-    row.player_to_act = key.player_to_act;
-    row.player_contributions = key.player_contributions;
-    row.history_size = key.history_size;
-    row.history_values = key.history_values;
-    row.history_overflow = key.history_overflow;
-    return row;
-  }
+  BettingHistoryRow make_history_row(const BettingHistoryKey& key) const;
 
   CompactPublicState public_state_for_row(CompactPublicState state) const {
     ApplyProjection(state);
@@ -74,33 +59,8 @@ class BettingAbstraction {
     int player_to_act = 0;
   };
 
-  static int BucketChips(int chips) {
-    if (chips <= 0) {
-      return 0;
-    }
-    int bucket = 1;
-    while (chips > 1) {
-      chips >>= 1;
-      ++bucket;
-    }
-    return bucket;
-  }
-
-  static Projection Project(const CompactPublicState& state) {
-    const int contribution_gap =
-        state.player_contribution[0] > state.player_contribution[1]
-            ? state.player_contribution[0] - state.player_contribution[1]
-            : state.player_contribution[1] - state.player_contribution[0];
-    return {
-        static_cast<int>(state.street),
-        BucketChips(state.pot),
-        BucketChips(std::min(state.stack[0], state.stack[1])),
-        BucketChips(contribution_gap),
-        state.all_in ? 1 : 0,
-        state.folded_player,
-        state.player_to_act,
-    };
-  }
+  static int BucketChips(int chips);
+  static Projection Project(const CompactPublicState& state);
 
   static void ApplyProjection(const CompactPublicState& state,
                               BettingHistoryKey& key) {
@@ -152,49 +112,15 @@ class BettingAbstraction {
     return key;
   }
 
-  static void AppendHistoryValue(BettingHistoryKey& key, int value) {
-    if (key.history_size < BettingHistoryKey::kInlineHistoryValues) {
-      key.history_values[static_cast<size_t>(key.history_size)] = value;
-    } else {
-      key.history_overflow.push_back(value);
-    }
-    ++key.history_size;
-  }
+  static void AppendHistoryValue(BettingHistoryKey& key, int value);
 
   static void AppendStateHistory(const CompactPublicState& state,
-                                 BettingHistoryKey& key) {
-    const int history_value_count = state.history_size * 3;
-    if (history_value_count > BettingHistoryKey::kInlineHistoryValues) {
-      key.history_overflow.reserve(history_value_count -
-                                   BettingHistoryKey::kInlineHistoryValues);
-    }
-    for (uint16_t i = 0; i < state.history_size; ++i) {
-      const CompactAction action = CompactHistoryAction(state, i);
-      AppendHistoryValue(key, action.player);
-      AppendHistoryValue(key, static_cast<int>(action.kind));
-      AppendHistoryValue(key, action.amount);
-    }
-  }
+                                 BettingHistoryKey& key);
 
   static void AppendRowHistory(const BettingHistoryRow& row,
-                               BettingHistoryKey& key) {
-    const int history_value_count = row.history_size + 3;
-    if (history_value_count > BettingHistoryKey::kInlineHistoryValues) {
-      key.history_overflow.reserve(history_value_count -
-                                   BettingHistoryKey::kInlineHistoryValues);
-    }
-    for (int i = 0; i < row.history_size; ++i) {
-      AppendHistoryValue(key, RowHistoryValue(row, i));
-    }
-  }
+                               BettingHistoryKey& key);
 
-  static int RowHistoryValue(const BettingHistoryRow& row, int index) {
-    if (index < BettingHistoryKey::kInlineHistoryValues) {
-      return row.history_values[static_cast<size_t>(index)];
-    }
-    return row.history_overflow[
-        static_cast<size_t>(index - BettingHistoryKey::kInlineHistoryValues)];
-  }
+  static int RowHistoryValue(const BettingHistoryRow& row, int index);
 
   SolverConfig config_;
 };

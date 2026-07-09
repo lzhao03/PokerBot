@@ -1,6 +1,7 @@
 #include "src/betting_abstraction.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <stdexcept>
 #include <vector>
 
@@ -64,6 +65,35 @@ void AddActionIfMissing(
 BettingAbstraction::BettingAbstraction(const SolverConfig& config)
     : config_(config) {}
 
+int BettingAbstraction::BucketChips(int chips) {
+  if (chips <= 0) {
+    return 0;
+  }
+  int bucket = 1;
+  while (chips > 1) {
+    chips >>= 1;
+    ++bucket;
+  }
+  return bucket;
+}
+
+BettingAbstraction::Projection BettingAbstraction::Project(
+    const CompactPublicState& state) {
+  const int contribution_gap =
+      state.player_contribution[0] > state.player_contribution[1]
+          ? state.player_contribution[0] - state.player_contribution[1]
+          : state.player_contribution[1] - state.player_contribution[0];
+  return {
+      static_cast<int>(state.street),
+      BucketChips(state.pot),
+      BucketChips(std::min(state.stack[0], state.stack[1])),
+      BucketChips(contribution_gap),
+      state.all_in ? 1 : 0,
+      state.folded_player,
+      state.player_to_act,
+  };
+}
+
 uint8_t BettingAbstraction::actions_for_betting_node(
     const CompactPublicState& state,
     int player,
@@ -106,6 +136,68 @@ int BettingAbstraction::action_key(const GameAction& action) const {
     throw std::invalid_argument("Action amount is outside action-key range");
   }
   return static_cast<int>(action.kind) * kActionKeyMultiplier + action.amount;
+}
+
+BettingAbstraction::BettingHistoryRow BettingAbstraction::make_history_row(
+    const BettingHistoryKey& key) const {
+  BettingHistoryRow row;
+  row.street = key.street;
+  row.pot = key.pot;
+  row.stack = {key.stack_a, key.stack_b};
+  row.all_in = key.all_in;
+  row.folded_player = key.folded_player;
+  row.player_to_act = key.player_to_act;
+  row.player_contributions = key.player_contributions;
+  row.history_size = key.history_size;
+  row.history_values = key.history_values;
+  row.history_overflow = key.history_overflow;
+  return row;
+}
+
+void BettingAbstraction::AppendHistoryValue(BettingHistoryKey& key,
+                                            int value) {
+  if (key.history_size < BettingHistoryKey::kInlineHistoryValues) {
+    key.history_values[static_cast<size_t>(key.history_size)] = value;
+  } else {
+    key.history_overflow.push_back(value);
+  }
+  ++key.history_size;
+}
+
+void BettingAbstraction::AppendStateHistory(const CompactPublicState& state,
+                                            BettingHistoryKey& key) {
+  const int history_value_count = state.history_size * 3;
+  if (history_value_count > BettingHistoryKey::kInlineHistoryValues) {
+    key.history_overflow.reserve(history_value_count -
+                                 BettingHistoryKey::kInlineHistoryValues);
+  }
+  for (uint16_t i = 0; i < state.history_size; ++i) {
+    const CompactAction action = CompactHistoryAction(state, i);
+    AppendHistoryValue(key, action.player);
+    AppendHistoryValue(key, static_cast<int>(action.kind));
+    AppendHistoryValue(key, action.amount);
+  }
+}
+
+void BettingAbstraction::AppendRowHistory(const BettingHistoryRow& row,
+                                          BettingHistoryKey& key) {
+  const int history_value_count = row.history_size + 3;
+  if (history_value_count > BettingHistoryKey::kInlineHistoryValues) {
+    key.history_overflow.reserve(history_value_count -
+                                 BettingHistoryKey::kInlineHistoryValues);
+  }
+  for (int i = 0; i < row.history_size; ++i) {
+    AppendHistoryValue(key, RowHistoryValue(row, i));
+  }
+}
+
+int BettingAbstraction::RowHistoryValue(const BettingHistoryRow& row,
+                                        int index) {
+  if (index < BettingHistoryKey::kInlineHistoryValues) {
+    return row.history_values[static_cast<size_t>(index)];
+  }
+  return row.history_overflow[
+      static_cast<size_t>(index - BettingHistoryKey::kInlineHistoryValues)];
 }
 
 }  // namespace poker
