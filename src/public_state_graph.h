@@ -8,12 +8,13 @@
 #include "absl/types/span.h"
 #include "src/betting_abstraction.h"
 #include "src/card_abstraction.h"
-#include "src/game_tree.h"
 #include "src/poker_types.h"
 #include "src/strategy_store.h"
 #include "src/strategy_tables.h"
 
 namespace poker {
+
+class GameTree;
 
 struct TrainingRunStats {
   bool public_state_prebuild_complete = false;
@@ -48,9 +49,6 @@ struct TrainingRunStats {
 class PublicStateGraph {
  public:
   using PublicStateRow = StrategyTables::PublicStateRow;
-
-  static constexpr uint32_t kCappedPublicStateId =
-      GameTree::kInvalidPublicStateId - 1;
 
   PublicStateGraph(const SolverConfig& config,
                    SolverStorage& storage,

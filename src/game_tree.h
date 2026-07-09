@@ -1,7 +1,5 @@
 #pragma once
 
-#include <cstdint>
-#include <limits>
 #include "absl/types/span.h"
 #include "src/hand_evaluator.h"
 #include "src/poker_types.h"
@@ -10,11 +8,6 @@ namespace poker {
 
 class GameTree {
 public:
-  static constexpr uint32_t kInvalidPublicStateId =
-      std::numeric_limits<uint32_t>::max();
-  static constexpr uint32_t kInvalidBettingHistoryId =
-      std::numeric_limits<uint32_t>::max();
-  
   GameTree() = default;
   
   // Apply an action to a state to get the next state

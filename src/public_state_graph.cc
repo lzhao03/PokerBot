@@ -16,6 +16,7 @@
 #include "absl/container/inlined_vector.h"
 #include "src/build_flags.h"
 #include "src/card_utils.h"
+#include "src/game_tree.h"
 
 namespace poker {
 namespace {
@@ -337,7 +338,7 @@ uint32_t PublicStateGraph::get_or_create_action_betting_history_child(
     if (action_index >= 0 && action_index < parent_row.action_count) {
       const uint32_t child_id =
           parent_row.action_child_ids[static_cast<size_t>(action_index)];
-      if (child_id != GameTree::kInvalidBettingHistoryId) {
+      if (child_id != kInvalidBettingHistoryId) {
         return child_id;
       }
     }
@@ -377,7 +378,7 @@ uint32_t PublicStateGraph::get_or_create_chance_betting_history_child(
   if (parent_betting_history_id < tables.betting_history_rows.size()) {
     BettingHistoryRow& parent_row =
         tables.betting_history_rows[parent_betting_history_id];
-    if (parent_row.chance_child_id != GameTree::kInvalidBettingHistoryId) {
+    if (parent_row.chance_child_id != kInvalidBettingHistoryId) {
       return parent_row.chance_child_id;
     }
   }
@@ -421,7 +422,7 @@ std::optional<uint32_t> PublicStateGraph::find_action_child(
   }
   const uint32_t child_id =
       row.action_child_ids[static_cast<size_t>(action_index)];
-  if (child_id == GameTree::kInvalidPublicStateId ||
+  if (child_id == kInvalidPublicStateId ||
       child_id == kCappedPublicStateId) {
     return std::nullopt;
   }
@@ -505,7 +506,7 @@ std::optional<uint32_t> PublicStateGraph::find_or_cache_action_child(
 
   const size_t action_slot = static_cast<size_t>(action_index);
   const uint32_t row_child_id = row.action_child_ids[action_slot];
-  if (row_child_id != GameTree::kInvalidPublicStateId) {
+  if (row_child_id != kInvalidPublicStateId) {
     return row_child_id;
   }
 
@@ -523,7 +524,7 @@ std::optional<uint32_t> PublicStateGraph::find_or_cache_action_child(
 
   const uint32_t child_betting_history_id =
       parent_betting_history.action_child_ids[action_slot];
-  if (child_betting_history_id == GameTree::kInvalidBettingHistoryId) {
+  if (child_betting_history_id == kInvalidBettingHistoryId) {
     return std::nullopt;
   }
 
@@ -635,7 +636,7 @@ std::optional<uint32_t> PublicStateGraph::find_or_cache_chance_child(
 
     const uint32_t child_betting_history_id =
         betting_history_rows[parent_betting_history_id].chance_child_id;
-    if (child_betting_history_id == GameTree::kInvalidBettingHistoryId) {
+    if (child_betting_history_id == kInvalidBettingHistoryId) {
       return std::nullopt;
     }
 
@@ -766,7 +767,7 @@ void PublicStateGraph::rebuild_chance_child_entries() {
   struct PendingChanceChild {
     uint32_t parent_id = 0;
     PublicBucketId outcome_id = 0;
-    uint32_t public_state_id = GameTree::kInvalidPublicStateId;
+    uint32_t public_state_id = kInvalidPublicStateId;
 
     bool operator<(const PendingChanceChild& other) const {
       return std::tie(parent_id, outcome_id) <
@@ -797,7 +798,7 @@ void PublicStateGraph::rebuild_chance_child_entries() {
   }
   tables.chance_child_entries.clear();
   tables.chance_child_entries.reserve(pending.size());
-  uint32_t current_parent_id = GameTree::kInvalidPublicStateId;
+  uint32_t current_parent_id = kInvalidPublicStateId;
   for (const PendingChanceChild& child : pending) {
     if (child.public_state_id >= tables.public_state_rows.size()) {
       continue;
@@ -831,7 +832,7 @@ bool PublicStateGraph::validate_prebuilt_rows(
   PublicStateBfs bfs(root_public_state_id, public_rows.size());
 
   auto valid_public_child = [&](uint32_t public_state_id) {
-    return public_state_id != GameTree::kInvalidPublicStateId &&
+    return public_state_id != kInvalidPublicStateId &&
            public_state_id != kCappedPublicStateId &&
            public_state_id < public_rows.size();
   };
@@ -884,7 +885,7 @@ bool PublicStateGraph::validate_prebuilt_rows(
         const bool valid_betting_child =
             valid_child &&
             history_row.chance_child_id !=
-                GameTree::kInvalidBettingHistoryId &&
+                kInvalidBettingHistoryId &&
             history_row.chance_child_id < history_rows.size();
         if (!valid_betting_child) {
           mark_missing_betting_history();
@@ -929,7 +930,7 @@ bool PublicStateGraph::validate_prebuilt_rows(
       const bool valid_betting_child =
           valid_action_child &&
           history_row.action_ids[action_slot] == row.action_ids[action_slot] &&
-          child_betting_history_id != GameTree::kInvalidBettingHistoryId &&
+          child_betting_history_id != kInvalidBettingHistoryId &&
           child_betting_history_id < history_rows.size();
       if (!valid_betting_child) {
         mark_missing_betting_history();

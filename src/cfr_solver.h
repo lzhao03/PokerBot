@@ -14,7 +14,6 @@
 #include "absl/types/span.h"
 #include "src/betting_abstraction.h"
 #include "src/card_abstraction.h"
-#include "src/game_tree.h"
 #include "src/hand_range.h"
 #include "src/poker_types.h"
 #include "src/public_state_graph.h"
@@ -23,6 +22,8 @@
 #include "src/training_range.h"
 
 namespace poker {
+
+class GameTree;
 
 class CFRSolver {
  public:
@@ -122,8 +123,6 @@ class CFRSolver {
 
   using OptionalTrainingRange =
       std::optional<std::reference_wrapper<const TrainingRangeView>>;
-  static constexpr uint32_t kCappedPublicStateId =
-      PublicStateGraph::kCappedPublicStateId;
 
   enum class NodeGraphMode {
     kGrow,
@@ -137,7 +136,7 @@ class CFRSolver {
   };
 
   struct NodeRef {
-    uint32_t public_state_id = GameTree::kInvalidPublicStateId;
+    uint32_t public_state_id = kInvalidPublicStateId;
     ExactBoardState exact_board;
   };
 
@@ -245,7 +244,7 @@ class CFRSolver {
   };
 
   struct DecisionFrame {
-    uint32_t public_state_id = GameTree::kInvalidPublicStateId;
+    uint32_t public_state_id = kInvalidPublicStateId;
     int player = -1;
     StreetKind street = StreetKind::kPreflop;
     uint8_t action_count = 0;

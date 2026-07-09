@@ -219,7 +219,7 @@ CFRSolver::NodeGraph::make_child_result(
   const auto& public_rows = solver_.rows();
   ChildStatus status = ChildStatus::kOk;
   if (!child_id.has_value() ||
-      *child_id == GameTree::kInvalidPublicStateId) {
+      *child_id == kInvalidPublicStateId) {
     status = ChildStatus::kMissing;
   } else if (*child_id == kCappedPublicStateId) {
     status = ChildStatus::kCapped;

@@ -10,10 +10,15 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "src/combo.h"
-#include "src/game_tree.h"
 #include "src/poker_types.h"
 
 namespace poker {
+
+inline constexpr uint32_t kInvalidPublicStateId =
+    std::numeric_limits<uint32_t>::max();
+inline constexpr uint32_t kInvalidBettingHistoryId =
+    std::numeric_limits<uint32_t>::max();
+inline constexpr uint32_t kCappedPublicStateId = kInvalidPublicStateId - 1;
 
 inline constexpr size_t kCacheLineBytes = 64;
 inline constexpr size_t kCumulativeActionBlockAlignment =
@@ -109,7 +114,7 @@ class StrategyTables {
   struct BettingHistoryRow {
     BettingHistoryRow() {
       action_ids.fill(0);
-      action_child_ids.fill(GameTree::kInvalidBettingHistoryId);
+      action_child_ids.fill(kInvalidBettingHistoryId);
     }
 
     int street = 0;
@@ -126,7 +131,7 @@ class StrategyTables {
     uint8_t action_count = 0;
     std::array<int, kMaxActionsPerNode> action_ids;
     std::array<uint32_t, kMaxActionsPerNode> action_child_ids;
-    uint32_t chance_child_id = GameTree::kInvalidBettingHistoryId;
+    uint32_t chance_child_id = kInvalidBettingHistoryId;
   };
 
   struct InfoSetRow {
@@ -136,7 +141,7 @@ class StrategyTables {
 
   struct ChanceChildEntry {
     PublicBucketId outcome_id = 0;
-    uint32_t public_state_id = GameTree::kInvalidPublicStateId;
+    uint32_t public_state_id = kInvalidPublicStateId;
   };
 
   struct InfoSetAddress {
@@ -148,11 +153,11 @@ class StrategyTables {
   struct PublicStateRow {
     PublicStateRow() {
       action_ids.fill(0);
-      action_child_ids.fill(GameTree::kInvalidPublicStateId);
+      action_child_ids.fill(kInvalidPublicStateId);
     }
 
     CompactPublicState state;
-    uint32_t betting_history_id = GameTree::kInvalidBettingHistoryId;
+    uint32_t betting_history_id = kInvalidBettingHistoryId;
     PublicBucketId public_bucket = 0;
     bool is_terminal = false;
     bool is_chance_node = false;
