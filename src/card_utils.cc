@@ -7,15 +7,6 @@
 
 namespace poker {
 
-std::vector<CardId> BuildDeck() {
-  std::vector<CardId> deck;
-  deck.reserve(kDeckCardCount);
-  for (int card_id = 0; card_id < kDeckCardCount; ++card_id) {
-    deck.push_back(static_cast<CardId>(card_id));
-  }
-  return deck;
-}
-
 int CardsForNextStreet(StreetKind street) {
   switch (street) {
     case StreetKind::kPreflop:

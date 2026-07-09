@@ -1,14 +1,12 @@
 #pragma once
 
 #include <random>
-#include <vector>
 
 #include "absl/container/inlined_vector.h"
 #include "src/poker_types.h"
 
 namespace poker {
 
-std::vector<CardId> BuildDeck();
 int CardsForNextStreet(StreetKind street);
 StreetKind StreetAfterChance(StreetKind street);
 int BoardCardsForStreet(StreetKind street);
