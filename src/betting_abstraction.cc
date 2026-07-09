@@ -107,8 +107,7 @@ uint8_t BettingAbstraction::actions_for_betting_node(
   const int opponent_chips = state.player_contribution[Opponent(player)];
   const int player_chips = state.player_contribution[player];
   const int outstanding_call = std::max(0, opponent_chips - player_chips);
-  const bool facing_bet = outstanding_call > 0;
-  if (facing_bet) {
+  if (outstanding_call > 0) {
     const int call_amount = std::min(outstanding_call, stack);
     AddAction(actions, action_count, ActionKind::kFold, 0);
     AddAction(actions, action_count, ActionKind::kCall, call_amount);
@@ -116,7 +115,10 @@ uint8_t BettingAbstraction::actions_for_betting_node(
     AddAction(actions, action_count, ActionKind::kCheck, 0);
   }
 
-  const ActionKind sized_action = facing_bet ? ActionKind::kRaise : ActionKind::kBet;
+  ActionKind sized_action = ActionKind::kBet;
+  if (outstanding_call > 0) {
+    sized_action = ActionKind::kRaise;
+  }
   for (double bet_size : BetSizesForStreet(config_, state.street)) {
     const int amount = outstanding_call + ConcreteBetAmount(state, bet_size);
     if (amount < stack) {
@@ -124,7 +126,7 @@ uint8_t BettingAbstraction::actions_for_betting_node(
     }
   }
 
-  if (!facing_bet || stack > outstanding_call) {
+  if (outstanding_call == 0 || stack > outstanding_call) {
     AddAction(actions, action_count, ActionKind::kAllIn, stack);
   }
 
