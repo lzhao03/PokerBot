@@ -243,7 +243,6 @@ cc_library(
     hdrs = ["strategy_tables.h"],
     deps = [
         ":combo",
-        ":game_tree",
         ":poker_types",
         "@abseil-cpp//absl/container:flat_hash_map",
     ],
