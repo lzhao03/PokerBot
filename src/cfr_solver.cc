@@ -397,17 +397,18 @@ void CFRSolver::run(int iterations,
   const bool regret_only_fast_path =
       config_.regret_only_training && max_depth == 0;
 
-  bool use_prebuilt_storage = storage_.frozen;
-  if (!use_prebuilt_storage &&
-      should_use_prebuilt_training(num_threads, max_depth,
-                                   regret_only_fast_path)) {
+  const bool prebuilt_allowed =
+      storage_.frozen || ((num_threads > 1 || regret_only_fast_path) &&
+                          (config_.max_public_states > 0 || max_depth > 0));
+
+  bool use_prebuilt_storage = false;
+  if (prebuilt_allowed) {
     use_prebuilt_storage =
         prepare_prebuilt_training(*root_public_state_id, max_depth,
                                   player_a_hands_view, player_b_hands_view);
   }
 
   if (use_prebuilt_storage) {
-    seal_prebuilt_training();
     run_fixed_storage_iterations(iterations, num_threads,
                                  *root_public_state_id, range_sampler,
                                  player_a_training_range,
@@ -423,19 +424,6 @@ void CFRSolver::run(int iterations,
   LOG(INFO) << "Information sets: " << get_info_set_count();
   LOG(INFO) << "Public states: " << get_public_state_count();
   LOG(INFO) << "Player A average EV: " << get_expected_value(0);
-}
-
-bool CFRSolver::should_use_prebuilt_training(
-    int num_threads,
-    int max_depth,
-    bool regret_only_fast_path) const {
-  if (storage_.frozen) {
-    return true;
-  }
-  if (num_threads <= 1 && !regret_only_fast_path) {
-    return false;
-  }
-  return config_.max_public_states > 0 || max_depth > 0;
 }
 
 bool CFRSolver::prepare_prebuilt_training(
@@ -510,13 +498,6 @@ bool CFRSolver::prepare_prebuilt_training(
       static_cast<int64_t>(
           tables().frozen_info_set_action_offsets.size());
   return true;
-}
-
-void CFRSolver::seal_prebuilt_training() {
-  if (!storage_.frozen) {
-    storage_.freeze();
-  }
-  require_frozen_children_ = true;
 }
 
 void CFRSolver::run_growing_iterations(
@@ -615,6 +596,11 @@ void CFRSolver::run_fixed_storage_iterations(
     const RangeSampler& range_sampler,
     const TrainingRange& player_a_training_range,
     const TrainingRange& player_b_training_range) {
+  if (!storage_.frozen) {
+    storage_.freeze();
+  }
+  require_frozen_children_ = true;
+
   LOG(INFO) << "Starting fixed-storage CFR iterations ("
             << iterations << " iterations, " << num_threads << " workers)...";
   const int64_t frozen_start_updates = cfr_update_count_;

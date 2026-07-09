@@ -442,16 +442,11 @@ class CFRSolver {
     NodeGraph& graph_;
   };
 
-  bool should_use_prebuilt_training(
-      int num_threads,
-      int max_depth,
-      bool regret_only_fast_path) const;
   bool prepare_prebuilt_training(
       uint32_t root_public_state_id,
       int max_depth,
       const TrainingRangeView& player_a_hands_view,
       const TrainingRangeView& player_b_hands_view);
-  void seal_prebuilt_training();
   void run_growing_iterations(
       int iterations,
       uint32_t root_public_state_id,
