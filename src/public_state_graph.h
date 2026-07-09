@@ -100,12 +100,12 @@ class PublicStateGraph {
       const CompactPublicState& state);
   uint32_t get_or_create_betting_history(BettingHistoryKey key,
                                          BettingHistoryRow row);
-  uint32_t get_or_create_action_betting_history_child(
-      uint32_t parent_betting_history_id,
+  uint32_t get_or_create_action_history_child(
+      uint32_t parent_history_id,
       int action_index,
       const CompactPublicState& child_state);
-  uint32_t get_or_create_chance_betting_history_child(
-      uint32_t parent_betting_history_id,
+  uint32_t get_or_create_chance_history_child(
+      uint32_t parent_history_id,
       const CompactPublicState& child_state);
   void cache_betting_history_actions(uint32_t betting_history_id,
                                      const PublicStateRow& row);

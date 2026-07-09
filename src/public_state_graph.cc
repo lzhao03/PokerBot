@@ -325,14 +325,14 @@ uint32_t PublicStateGraph::get_or_create_betting_history(
   return betting_history_id;
 }
 
-uint32_t PublicStateGraph::get_or_create_action_betting_history_child(
-    uint32_t parent_betting_history_id,
+uint32_t PublicStateGraph::get_or_create_action_history_child(
+    uint32_t parent_history_id,
     int action_index,
     const CompactPublicState& child_state) {
   StrategyTables& tables = mtables();
-  if (parent_betting_history_id < tables.betting_history_rows.size()) {
+  if (parent_history_id < tables.betting_history_rows.size()) {
     BettingHistoryRow& parent_row =
-        tables.betting_history_rows[parent_betting_history_id];
+        tables.betting_history_rows[parent_history_id];
     if (action_index >= 0 && action_index < parent_row.action_count) {
       const uint32_t child_id =
           parent_row.action_child_ids[static_cast<size_t>(action_index)];
@@ -343,9 +343,9 @@ uint32_t PublicStateGraph::get_or_create_action_betting_history_child(
   }
 
   BettingHistoryKey child_key;
-  if (parent_betting_history_id < tables.betting_history_rows.size()) {
+  if (parent_history_id < tables.betting_history_rows.size()) {
     const BettingHistoryRow& parent_row =
-        tables.betting_history_rows[parent_betting_history_id];
+        tables.betting_history_rows[parent_history_id];
     if (action_index >= 0 && action_index < parent_row.action_count) {
       child_key = betting_abstraction_.make_action_child_history_key(
           parent_row, action_index, child_state);
@@ -358,9 +358,9 @@ uint32_t PublicStateGraph::get_or_create_action_betting_history_child(
   BettingHistoryRow child_row = make_betting_history_row(child_key);
   const uint32_t child_id = get_or_create_betting_history(
       std::move(child_key), std::move(child_row));
-  if (parent_betting_history_id < tables.betting_history_rows.size()) {
+  if (parent_history_id < tables.betting_history_rows.size()) {
     BettingHistoryRow& parent_row =
-        tables.betting_history_rows[parent_betting_history_id];
+        tables.betting_history_rows[parent_history_id];
     if (action_index >= 0 && action_index < parent_row.action_count) {
       parent_row.action_child_ids[static_cast<size_t>(action_index)] =
           child_id;
@@ -369,21 +369,21 @@ uint32_t PublicStateGraph::get_or_create_action_betting_history_child(
   return child_id;
 }
 
-uint32_t PublicStateGraph::get_or_create_chance_betting_history_child(
-    uint32_t parent_betting_history_id,
+uint32_t PublicStateGraph::get_or_create_chance_history_child(
+    uint32_t parent_history_id,
     const CompactPublicState& child_state) {
   StrategyTables& tables = mtables();
-  if (parent_betting_history_id < tables.betting_history_rows.size()) {
+  if (parent_history_id < tables.betting_history_rows.size()) {
     BettingHistoryRow& parent_row =
-        tables.betting_history_rows[parent_betting_history_id];
+        tables.betting_history_rows[parent_history_id];
     if (parent_row.chance_child_id != kInvalidBettingHistoryId) {
       return parent_row.chance_child_id;
     }
   }
 
   const uint32_t child_id = get_or_create_betting_history(child_state);
-  if (parent_betting_history_id < tables.betting_history_rows.size()) {
-    tables.betting_history_rows[parent_betting_history_id].chance_child_id =
+  if (parent_history_id < tables.betting_history_rows.size()) {
+    tables.betting_history_rows[parent_history_id].chance_child_id =
         child_id;
   }
   return child_id;
@@ -586,14 +586,12 @@ PublicStateGraph::get_or_create_action_child(
     return std::nullopt;
   }
 
-  const uint32_t parent_betting_history_id = read_row.betting_history_id;
+  const uint32_t parent_history_id = read_row.betting_history_id;
   CompactPublicState child_state =
       ApplyAction(read_row.state, read_row.actions[action_slot]);
-  const uint32_t child_betting_history_id =
-      get_or_create_action_betting_history_child(
-          parent_betting_history_id, action_index, child_state);
-  std::optional<uint32_t> child_id =
-      get_or_create_row(child_betting_history_id, std::move(child_state));
+  const uint32_t child_history_id = get_or_create_action_history_child(
+      parent_history_id, action_index, child_state);
+  auto child_id = get_or_create_row(child_history_id, std::move(child_state));
   if (!child_id.has_value()) {
     mtables()
         .public_state_rows[parent_public_state_id]
@@ -681,11 +679,11 @@ PublicStateGraph::get_or_create_chance_child(
 
   const PublicStateRow& parent_row = public_rows[parent_public_state_id];
   CompactPublicState stored_child_state = exact_child_state;
-  const uint32_t child_betting_history_id =
-      get_or_create_chance_betting_history_child(
-          parent_row.betting_history_id, stored_child_state);
-  std::optional<uint32_t> child_id = get_or_create_row(
-      child_betting_history_id, std::move(stored_child_state));
+  const uint32_t parent_history_id = parent_row.betting_history_id;
+  const uint32_t child_history_id = get_or_create_chance_history_child(
+      parent_history_id, stored_child_state);
+  auto child_id = get_or_create_row(child_history_id,
+                                    std::move(stored_child_state));
   if (!child_id.has_value()) {
     stats_.record_transition_miss();
     return std::nullopt;

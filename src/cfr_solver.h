@@ -355,9 +355,9 @@ class CFRSolver {
     ActionRangeConditioning(CFRSolver& solver,
                             TraversalContext& ctx,
                             const NodeCursor& node_cursor,
-                            uint32_t public_state_id,
+                            uint32_t node_id,
                             int player,
-                            absl::Span<const int> legal_action_ids);
+                            absl::Span<const int> action_ids);
 
     bool enabled() const {
       return condition_player_a_ || condition_player_b_;
@@ -396,24 +396,27 @@ class CFRSolver {
   };
 
   bool prepare_prebuilt_training(
-      uint32_t root_public_state_id,
+      uint32_t root_id,
       int max_depth,
-      const TrainingRangeView& player_a_hands_view,
-      const TrainingRangeView& player_b_hands_view);
+      const TrainingRangeView& a_view,
+      const TrainingRangeView& b_view);
   void run_growing_iterations(
       int iterations,
-      uint32_t root_public_state_id,
-      RangeSampler& range_sampler,
-      const TrainingRangeView& player_a_hands_view,
-      const TrainingRangeView& player_b_hands_view,
+      uint32_t root_id,
+      RangeSampler& sampler,
+      const TrainingRangeView& a_view,
+      const TrainingRangeView& b_view,
       int max_depth);
   void run_fixed_storage_iterations(
       int iterations,
       int num_threads,
-      uint32_t root_public_state_id,
-      const RangeSampler& range_sampler,
-      const TrainingRange& player_a_training_range,
-      const TrainingRange& player_b_training_range);
+      uint32_t root_id,
+      const RangeSampler& sampler,
+      const TrainingRange& a_range,
+      const TrainingRange& b_range);
+  TraversalDeal traversal_deal(RangeDeal deal) const;
+  TraversalOptions traversal_options(int iteration, int max_depth) const;
+  void log_training_summary() const;
   template <typename WorkerFn, typename AccumulateFn>
   void run_sharded(int work_count,
                    int worker_count,
@@ -425,9 +428,9 @@ class CFRSolver {
   static void ApplyExactBoard(CompactPublicState& state,
                               const ExactBoardState& board);
   std::optional<NodeCursor> cursor(NodeRef node) const;
-  std::optional<NodeRef> root_node_ref(uint32_t root_public_state_id) const;
+  std::optional<NodeRef> root_node_ref(uint32_t root_id) const;
   static std::optional<DecisionFrame> make_decision_frame(
-      uint32_t public_state_id,
+      uint32_t node_id,
       const PublicStateRow& row);
   double cfr_with_ranges(
       NodeRef node,
@@ -444,12 +447,12 @@ class CFRSolver {
                                 NodeGraph& graph,
                                 EvalChild&& eval_child);
 
-  bool prebuild_info_set_rows(const TrainingRangeView& player_a_range,
-                              const TrainingRangeView& player_b_range);
+  bool prebuild_info_set_rows(const TrainingRangeView& a_view,
+                              const TrainingRangeView& b_view);
   absl::Span<TrainingRangeView> condition_ranges_for_actions(
       const TrainingRangeView& range,
       const CompactPublicState& state,
-      uint32_t public_state_id,
+      uint32_t node_id,
       int player,
       absl::Span<const int> action_ids,
       RangeScratchFrame& scratch_frame);
@@ -465,8 +468,8 @@ class CFRSolver {
                                 NodeGraph& graph);
   double evaluate_strategy_samples(
       int samples,
-      uint32_t root_public_state_id,
-      const RangeSampler& range_sampler,
+      uint32_t root_id,
+      const RangeSampler& sampler,
       bool allow_parallel);
   SolverConfig config_;
   CompactPublicState initial_state_;

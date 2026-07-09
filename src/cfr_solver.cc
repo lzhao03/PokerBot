@@ -154,6 +154,32 @@ CardMask CFRSolver::PrivateCards::mask() const {
   return ComboMask(combo);
 }
 
+CFRSolver::TraversalDeal CFRSolver::traversal_deal(RangeDeal deal) const {
+  return TraversalDeal{{
+      PrivateCards::FromCombo(deal.player_a_combo),
+      PrivateCards::FromCombo(deal.player_b_combo),
+  }};
+}
+
+CFRSolver::TraversalOptions CFRSolver::traversal_options(
+    int iteration,
+    int max_depth) const {
+  TraversalOptions options;
+  options.update_player = iteration % kPlayerCount;
+  options.iteration = iteration;
+  options.max_depth = max_depth;
+  options.write_average_strategy = !config_.regret_only_training;
+  return options;
+}
+
+void CFRSolver::log_training_summary() const {
+  LOG(INFO) << "CFR iterations completed";
+  LOG(INFO) << "Iterations run: " << iterations_run_;
+  LOG(INFO) << "Information sets: " << get_info_set_count();
+  LOG(INFO) << "Public states: " << get_public_state_count();
+  LOG(INFO) << "Player A average EV: " << get_expected_value(0);
+}
+
 CFRSolver::ExactBoardState CFRSolver::ExactBoardFromState(
     const CompactPublicState& state) {
   return ExactBoardState{
@@ -344,7 +370,8 @@ bool CFRSolver::prebuild_info_set_rows(
       if ((ComboMask(combo_id) & board_mask) != 0) {
         continue;
       }
-      const PrivateBucketId bucket = card_abstraction_.private_bucket(combo_id, row.state);
+      const PrivateBucketId bucket =
+          card_abstraction_.private_bucket(combo_id, row.state);
       if (bucket >= bucket_count) {
         return false;
       }
@@ -364,15 +391,15 @@ bool CFRSolver::prebuild_info_set_rows(
 }
 
 void CFRSolver::run(int iterations,
-                    const HandRange& player_a_range,
-                    const HandRange& player_b_range) {
+                    const HandRange& a_range_spec,
+                    const HandRange& b_range_spec) {
   last_training_run_stats_ = {};
   if (iterations <= 0) {
     return;
   }
 
-  const auto a_range = BuildTrainingRange(player_a_range);
-  const auto b_range = BuildTrainingRange(player_b_range);
+  const auto a_range = BuildTrainingRange(a_range_spec);
+  const auto b_range = BuildTrainingRange(b_range_spec);
   TrainingRangeView a_view(a_range);
   TrainingRangeView b_view(b_range);
   RangeSampler sampler(a_range, b_range);
@@ -383,35 +410,31 @@ void CFRSolver::run(int iterations,
     return;
   }
   const uint32_t root_id = *maybe_root_id;
-  VLOG(1) << "Compact root row has "
-          << static_cast<int>(rows()[root_id].action_count)
-          << " legal actions";
+  const auto& root_row = rows()[root_id];
+  VLOG(1) << "Root row has "
+          << static_cast<int>(root_row.action_count)
+          << " actions";
 
+  const int threads = config_.num_training_threads;
   const int max_depth = config_.max_depth;
-  const bool threaded = config_.num_training_threads > 1;
+  const bool parallel = threads > 1;
   const bool regret_only = config_.regret_only_training && max_depth == 0;
-  const bool fixed_candidate = threaded || regret_only;
   const bool bounded = config_.max_public_states > 0 || max_depth > 0;
-  const bool prebuilt_allowed = storage_.frozen || (fixed_candidate && bounded);
 
-  bool fixed_storage = false;
-  if (prebuilt_allowed) {
+  bool fixed_storage = storage_.frozen;
+  if (!fixed_storage && (parallel || regret_only) && bounded) {
     fixed_storage = prepare_prebuilt_training(root_id, max_depth, a_view, b_view);
   }
 
   if (fixed_storage) {
-    run_fixed_storage_iterations(iterations, config_.num_training_threads,
-                                 root_id, sampler, a_range, b_range);
+    run_fixed_storage_iterations(
+        iterations, threads, root_id, sampler, a_range, b_range);
   } else {
     run_growing_iterations(iterations, root_id, sampler, a_view, b_view,
                            max_depth);
   }
 
-  LOG(INFO) << "CFR iterations completed";
-  LOG(INFO) << "Iterations run: " << iterations_run_;
-  LOG(INFO) << "Information sets: " << get_info_set_count();
-  LOG(INFO) << "Public states: " << get_public_state_count();
-  LOG(INFO) << "Player A average EV: " << get_expected_value(0);
+  log_training_summary();
 }
 
 bool CFRSolver::prepare_prebuilt_training(
@@ -510,11 +533,8 @@ void CFRSolver::run_growing_iterations(
   const auto warmup_start = std::chrono::steady_clock::now();
 
   for (int i = 0; i < iterations; ++i) {
-    const RangeDeal deal = sampler.sample(rng_);
-    const TraversalDeal traversal_deal{{
-        PrivateCards::FromCombo(deal.player_a_combo),
-        PrivateCards::FromCombo(deal.player_b_combo),
-    }};
+    const RangeDeal sampled = sampler.sample(rng_);
+    const TraversalDeal deal = traversal_deal(sampled);
 
     VLOG(2) << "Iteration " << i + 1 << "/" << iterations;
     const int cfr_iteration = iterations_run_;
@@ -524,12 +544,8 @@ void CFRSolver::run_growing_iterations(
       a_context = std::cref(a_view);
       b_context = std::cref(b_view);
     }
-    TraversalOptions options;
-    options.update_player = cfr_iteration % kPlayerCount;
-    options.iteration = cfr_iteration;
-    options.max_depth = max_depth;
-    options.write_average_strategy = !config_.regret_only_training;
-    TraversalContext ctx(traversal_deal, options, scratch, a_context, b_context);
+    TraversalOptions options = traversal_options(cfr_iteration, max_depth);
+    TraversalContext ctx(deal, options, scratch, a_context, b_context);
     const double dealt_value = cfr_with_ranges(root_node, ctx, graph);
 
     cumulative_root_utility_ += dealt_value;
@@ -646,11 +662,8 @@ void CFRSolver::run_fixed_storage_iterations(
           NodeGraph graph(worker, NodeGraphMode::kRequirePresent);
           const NodeRef root_node{root_id, ExactBoardFromState(root_state)};
           for (int i = 0; i < shard; ++i) {
-            const RangeDeal deal = sampler.sample(worker.rng_);
-            const TraversalDeal traversal_deal{{
-                PrivateCards::FromCombo(deal.player_a_combo),
-                PrivateCards::FromCombo(deal.player_b_combo),
-            }};
+            const RangeDeal sampled = sampler.sample(worker.rng_);
+            const TraversalDeal deal = worker.traversal_deal(sampled);
 
             const int cfr_iteration = iteration_begin + i;
             OptionalTrainingRange a_context;
@@ -659,11 +672,7 @@ void CFRSolver::run_fixed_storage_iterations(
               a_context = std::cref(a_view);
               b_context = std::cref(b_view);
             }
-            TraversalOptions options;
-            options.update_player = cfr_iteration % kPlayerCount;
-            options.iteration = cfr_iteration;
-            options.max_depth = max_depth;
-            options.write_average_strategy = !config_.regret_only_training;
+            auto options = worker.traversal_options(cfr_iteration, max_depth);
             if (regret_only) {
               if (use_atomic_updates) {
                 options.regret_load_mode = RegretLoadMode::kAtomic;
@@ -675,8 +684,7 @@ void CFRSolver::run_fixed_storage_iterations(
               options.write_average_strategy = false;
               options.record_atomic_retry_stats = use_atomic_updates;
             }
-            TraversalContext ctx(traversal_deal, options, scratch, a_context,
-                                 b_context);
+            TraversalContext ctx(deal, options, scratch, a_context, b_context);
             if (regret_only) {
               local_utility += worker.cfr_frozen_regret_only(root_node, ctx, graph);
               continue;
@@ -801,25 +809,24 @@ double CFRSolver::CfrTraversal<mode>::decision(
   }
   const DecisionFrame& decision = *maybe_decision;
   const int player = PlayerIndex(decision.player);
-  const PrivateCards& player_cards = ctx_.cards(player);
+  const PrivateCards& cards = ctx_.cards(player);
 
-  const bool is_update_player = ctx_.is_update_player(player);
+  const bool update_player = ctx_.is_update_player(player);
   const size_t action_count = decision.action_count;
   const absl::Span<const int> action_ids = decision.action_ids_span();
   std::optional<ActionBlock> actions;
   if constexpr (mode == CfrTraversalMode::kNormal) {
-    const InfoSetAddress infoset{
-        decision.public_state_id, player,
-        solver_.card_abstraction_.private_bucket(player_cards.combo,
-                                                 row.state)};
-    if (is_update_player) {
+    const PrivateBucketId bucket =
+        solver_.card_abstraction_.private_bucket(cards.combo, row.state);
+    const InfoSetAddress infoset{decision.public_state_id, player, bucket};
+    if (update_player) {
       actions = solver_.strategy_store_.get_or_create(infoset, action_ids);
     } else {
       actions = solver_.strategy_store_.find(infoset, action_count);
     }
   } else {
     actions = solver_.strategy_store_.find_frozen(
-        decision.public_state_id, player, player_cards.combo, action_count);
+        decision.public_state_id, player, cards.combo, action_count);
   }
 
   std::array<double, kMaxActionsPerNode> action_probabilities_storage{};
@@ -879,7 +886,7 @@ double CFRSolver::CfrTraversal<mode>::decision(
   ++solver_.cfr_update_count_;
   solver_.traversal_stats_.record_decision(decision.street, ctx_.depth());
 
-  if (actions.has_value() && is_update_player) {
+  if (actions.has_value() && update_player) {
     const double opponent_reach = ctx_.opponent_reach(player);
     const RegretUpdateOptions regret_options = ctx_.regret_update_options();
     for (size_t action_index = 0; action_index < action_count; ++action_index) {
