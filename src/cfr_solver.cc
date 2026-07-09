@@ -1139,9 +1139,17 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
                                      range_sampler);
   }
 
+  return evaluate_strategy_parallel_samples(samples, *root_public_state_id,
+                                            range_sampler);
+}
+
+double CFRSolver::evaluate_strategy_parallel_samples(
+    int samples,
+    uint32_t root_public_state_id,
+    const RangeSampler& range_sampler) {
   int worker_count = WorkerCountForSamples(samples);
   if (worker_count <= 1) {
-    return evaluate_strategy_samples(samples, *root_public_state_id,
+    return evaluate_strategy_samples(samples, root_public_state_id,
                                      range_sampler);
   }
 
@@ -1152,7 +1160,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   double total = 0.0;
   run_sharded(
       samples, worker_count, 0,
-      [config, range_sampler, root_public_state_id = *root_public_state_id,
+      [config, range_sampler, root_public_state_id,
        frozen_tables, cumulative](int, int shard_samples,
                                   unsigned int seed) mutable {
         CFRSolver worker(config);
