@@ -28,6 +28,11 @@ namespace {
 
 constexpr int kParallelEvaluationSampleThreshold = 32;
 
+SolverConfig NormalizedSolverConfig(SolverConfig config) {
+  config.num_training_threads = std::max(1, config.num_training_threads);
+  return config;
+}
+
 std::optional<double> UtilityBeforeShowdown(const CompactPublicState& state,
                                             uint8_t board_count) {
   const double player_a_contribution = state.player_contribution[0];
@@ -100,7 +105,7 @@ CFRSolver::CFRSolver(const SolverConfig& config)
 
 CFRSolver::CFRSolver(const SolverConfig& config,
                      const CompactPublicState& initial_state)
-    : config_(config),
+    : config_(NormalizedSolverConfig(config)),
       initial_state_(initial_state),
       rng_(12345),
       cumulative_root_utility_(0.0),
@@ -391,15 +396,14 @@ void CFRSolver::run(int iterations,
                  rows()[*root_public_state_id].action_count)
           << " legal actions";
 
-  const int num_threads =
-      config_.num_training_threads <= 1 ? 1 : config_.num_training_threads;
   const int max_depth = config_.max_depth;
   const bool regret_only_fast_path =
       config_.regret_only_training && max_depth == 0;
 
   const bool prebuilt_allowed =
-      storage_.frozen || ((num_threads > 1 || regret_only_fast_path) &&
-                          (config_.max_public_states > 0 || max_depth > 0));
+      storage_.frozen ||
+      ((config_.num_training_threads > 1 || regret_only_fast_path) &&
+       (config_.max_public_states > 0 || max_depth > 0));
 
   bool use_prebuilt_storage = false;
   if (prebuilt_allowed) {
@@ -409,7 +413,7 @@ void CFRSolver::run(int iterations,
   }
 
   if (use_prebuilt_storage) {
-    run_fixed_storage_iterations(iterations, num_threads,
+    run_fixed_storage_iterations(iterations, config_.num_training_threads,
                                  *root_public_state_id, range_sampler,
                                  player_a_training_range,
                                  player_b_training_range);
