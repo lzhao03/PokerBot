@@ -26,72 +26,42 @@ class BettingAbstraction {
   int action_key(const GameAction& action) const;
 
   BettingHistoryKey make_history_key(const CompactPublicState& state) const {
-    BettingHistoryKey key;
-    key.street = static_cast<int>(state.street);
-    key.pot = state.pot;
-    key.stack_a = state.stack[0];
-    key.stack_b = state.stack[1];
-    key.all_in = state.all_in ? 1 : 0;
-    key.folded_player = state.folded_player;
-    key.player_to_act = state.player_to_act;
-    key.player_contribution_size = 2;
-    key.player_contributions = state.player_contribution;
-    ApplyProjection(state, key);
-
-    const int history_value_count = state.history_size * 3;
-    if (history_value_count > BettingHistoryKey::kInlineHistoryValues) {
-      key.history_overflow.reserve(history_value_count -
-                                   BettingHistoryKey::kInlineHistoryValues);
-    }
-    for (uint16_t i = 0; i < state.history_size; ++i) {
-      const CompactAction action = CompactHistoryAction(state, i);
-      AddHistoryValue(key, action.player);
-      AddHistoryValue(key, static_cast<int>(action.kind));
-      AddHistoryValue(key, action.amount);
-    }
-
+    BettingHistoryKey key = BaseHistoryKey(state);
+    AppendStateHistory(state, key);
     return key;
   }
 
-  BettingHistoryRow make_history_row(const CompactPublicState& state) const {
+  BettingHistoryKey make_action_child_history_key(
+      const BettingHistoryRow& parent_row,
+      int action_index,
+      const CompactPublicState& child_state) const {
+    BettingHistoryKey key = BaseHistoryKey(child_state);
+    AppendRowHistory(parent_row, key);
+    const CompactAction action = child_state.last_action;
+    AppendHistoryValue(key, action.player);
+    AppendHistoryValue(key, static_cast<int>(action.kind));
+    AppendHistoryValue(key, action_index);
+    return key;
+  }
+
+  BettingHistoryRow make_history_row(const BettingHistoryKey& key) const {
     BettingHistoryRow row;
-    row.street = static_cast<int>(state.street);
-    row.pot = state.pot;
-    row.stack = state.stack;
-    row.all_in = state.all_in ? 1 : 0;
-    row.folded_player = state.folded_player;
-    row.player_to_act = state.player_to_act;
-    row.player_contributions = state.player_contribution;
-    ApplyProjection(state, row);
+    row.street = key.street;
+    row.pot = key.pot;
+    row.stack = {key.stack_a, key.stack_b};
+    row.all_in = key.all_in;
+    row.folded_player = key.folded_player;
+    row.player_to_act = key.player_to_act;
+    row.player_contributions = key.player_contributions;
+    row.history_size = key.history_size;
+    row.history_values = key.history_values;
+    row.history_overflow = key.history_overflow;
     return row;
   }
 
   CompactPublicState public_state_for_row(CompactPublicState state) const {
     ApplyProjection(state);
     return state;
-  }
-
-  void copy_history_to_row(const BettingHistoryKey& key,
-                           BettingHistoryRow& row) const {
-    row.history_size = key.history_size;
-    row.history_values = key.history_values;
-    row.history_overflow = key.history_overflow;
-  }
-
-  void replace_with_action_index_history(
-      const BettingHistoryRow& parent_row,
-      int action_index,
-      const CompactPublicState& child_state,
-      BettingHistoryKey& key) const {
-    key.history_size = 0;
-    key.history_overflow.clear();
-    for (int i = 0; i < parent_row.history_size; ++i) {
-      AddHistoryValue(key, RowHistoryValue(parent_row, i));
-    }
-    const CompactAction action = child_state.last_action;
-    AddHistoryValue(key, action.player);
-    AddHistoryValue(key, static_cast<int>(action.kind));
-    AddHistoryValue(key, action_index);
   }
 
  private:
@@ -149,20 +119,6 @@ class BettingAbstraction {
     }
   }
 
-  static void ApplyProjection(const CompactPublicState& state,
-                              BettingHistoryRow& row) {
-    if constexpr (kCoarsePublicBuckets) {
-      const Projection projection = Project(state);
-      row.street = projection.street;
-      row.pot = projection.pot_bucket;
-      row.stack = {projection.effective_stack_bucket, 0};
-      row.all_in = projection.all_in;
-      row.folded_player = projection.folded_player;
-      row.player_to_act = projection.player_to_act;
-      row.player_contributions = {projection.to_call_bucket, 0};
-    }
-  }
-
   static void ApplyProjection(CompactPublicState& state) {
     if constexpr (kCoarsePublicBuckets) {
       const Projection projection = Project(state);
@@ -182,13 +138,55 @@ class BettingAbstraction {
     }
   }
 
-  static void AddHistoryValue(BettingHistoryKey& key, int value) {
+  static BettingHistoryKey BaseHistoryKey(const CompactPublicState& state) {
+    BettingHistoryKey key;
+    key.street = static_cast<int>(state.street);
+    key.pot = state.pot;
+    key.stack_a = state.stack[0];
+    key.stack_b = state.stack[1];
+    key.all_in = state.all_in ? 1 : 0;
+    key.folded_player = state.folded_player;
+    key.player_to_act = state.player_to_act;
+    key.player_contribution_size = 2;
+    key.player_contributions = state.player_contribution;
+    ApplyProjection(state, key);
+    return key;
+  }
+
+  static void AppendHistoryValue(BettingHistoryKey& key, int value) {
     if (key.history_size < BettingHistoryKey::kInlineHistoryValues) {
       key.history_values[static_cast<size_t>(key.history_size)] = value;
     } else {
       key.history_overflow.push_back(value);
     }
     ++key.history_size;
+  }
+
+  static void AppendStateHistory(const CompactPublicState& state,
+                                 BettingHistoryKey& key) {
+    const int history_value_count = state.history_size * 3;
+    if (history_value_count > BettingHistoryKey::kInlineHistoryValues) {
+      key.history_overflow.reserve(history_value_count -
+                                   BettingHistoryKey::kInlineHistoryValues);
+    }
+    for (uint16_t i = 0; i < state.history_size; ++i) {
+      const CompactAction action = CompactHistoryAction(state, i);
+      AppendHistoryValue(key, action.player);
+      AppendHistoryValue(key, static_cast<int>(action.kind));
+      AppendHistoryValue(key, action.amount);
+    }
+  }
+
+  static void AppendRowHistory(const BettingHistoryRow& row,
+                               BettingHistoryKey& key) {
+    const int history_value_count = row.history_size + 3;
+    if (history_value_count > BettingHistoryKey::kInlineHistoryValues) {
+      key.history_overflow.reserve(history_value_count -
+                                   BettingHistoryKey::kInlineHistoryValues);
+    }
+    for (int i = 0; i < row.history_size; ++i) {
+      AppendHistoryValue(key, RowHistoryValue(row, i));
+    }
   }
 
   static int RowHistoryValue(const BettingHistoryRow& row, int index) {

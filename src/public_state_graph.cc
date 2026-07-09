@@ -213,8 +213,8 @@ PublicStateGraph::betting_history_key(
 
 PublicStateGraph::BettingHistoryRow
 PublicStateGraph::make_betting_history_row(
-    const CompactPublicState& state) const {
-  return betting_abstraction_.make_history_row(state);
+    const BettingHistoryKey& key) const {
+  return betting_abstraction_.make_history_row(key);
 }
 
 PublicStateGraph::PublicStateKey
@@ -304,14 +304,13 @@ std::optional<uint32_t> PublicStateGraph::get_or_create_row(
 uint32_t PublicStateGraph::get_or_create_betting_history(
     const CompactPublicState& state) {
   BettingHistoryKey key = betting_history_key(state);
-  BettingHistoryRow row = make_betting_history_row(state);
+  BettingHistoryRow row = make_betting_history_row(key);
   return get_or_create_betting_history(std::move(key), std::move(row));
 }
 
 uint32_t PublicStateGraph::get_or_create_betting_history(
     BettingHistoryKey key,
     BettingHistoryRow row) {
-  betting_abstraction_.copy_history_to_row(key, row);
   StrategyTables& tables = mtables();
   const auto [history_iter, inserted] = tables.betting_history_ids.try_emplace(
       std::move(key), static_cast<uint32_t>(tables.betting_history_ids.size()));
@@ -344,16 +343,20 @@ uint32_t PublicStateGraph::get_or_create_action_betting_history_child(
     }
   }
 
-  BettingHistoryKey child_key = betting_history_key(child_state);
-  BettingHistoryRow child_row = make_betting_history_row(child_state);
+  BettingHistoryKey child_key;
   if (parent_betting_history_id < tables.betting_history_rows.size()) {
     const BettingHistoryRow& parent_row =
         tables.betting_history_rows[parent_betting_history_id];
     if (action_index >= 0 && action_index < parent_row.action_count) {
-      betting_abstraction_.replace_with_action_index_history(
-          parent_row, action_index, child_state, child_key);
+      child_key = betting_abstraction_.make_action_child_history_key(
+          parent_row, action_index, child_state);
+    } else {
+      child_key = betting_history_key(child_state);
     }
+  } else {
+    child_key = betting_history_key(child_state);
   }
+  BettingHistoryRow child_row = make_betting_history_row(child_key);
   const uint32_t child_id = get_or_create_betting_history(
       std::move(child_key), std::move(child_row));
   if (parent_betting_history_id < tables.betting_history_rows.size()) {

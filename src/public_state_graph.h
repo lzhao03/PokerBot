@@ -94,7 +94,7 @@ class PublicStateGraph {
   BettingHistoryKey betting_history_key(
       const CompactPublicState& state) const;
   BettingHistoryRow make_betting_history_row(
-      const CompactPublicState& state) const;
+      const BettingHistoryKey& key) const;
   PublicStateKey row_key(uint32_t betting_history_id,
                          const CompactPublicState& state) const;
   std::optional<uint32_t> find_row(
