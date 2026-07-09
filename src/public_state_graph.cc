@@ -1,6 +1,7 @@
 #include "src/public_state_graph.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -221,6 +222,17 @@ PublicStateGraph::row_key(
   return {betting_history_id, card_abstraction_.public_bucket(state)};
 }
 
+std::optional<uint32_t> PublicStateGraph::find_row(
+    uint32_t betting_history_id,
+    const CompactPublicState& state) const {
+  const auto existing =
+      tables().public_state_ids.find(row_key(betting_history_id, state));
+  if (existing == tables().public_state_ids.end()) {
+    return std::nullopt;
+  }
+  return existing->second;
+}
+
 PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
     uint32_t betting_history_id,
     CompactPublicState state) {
@@ -247,34 +259,22 @@ PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
 std::optional<uint32_t> PublicStateGraph::get_or_create_row(
     uint32_t betting_history_id,
     CompactPublicState state) {
-  if (storage_.frozen) {
-    auto existing = tables().public_state_ids.find(
-        row_key(betting_history_id, state));
-    if (existing == tables().public_state_ids.end()) {
-      return std::nullopt;
-    }
-    return existing->second;
+  if (std::optional<uint32_t> existing = find_row(betting_history_id, state)) {
+    return existing;
   }
 
-  StrategyTables& tables = mtables();
-  if (config_.max_public_states > 0 &&
-      static_cast<int>(tables.public_state_rows.size()) >=
-          config_.max_public_states) {
-    auto existing = tables.public_state_ids.find(
-        row_key(betting_history_id, state));
-    if (existing != tables.public_state_ids.end()) {
-      return existing->second;
-    }
+  if (storage_.frozen || row_limit_reached()) {
     return std::nullopt;
   }
 
-  PublicStateKey key = row_key(betting_history_id, state);
+  StrategyTables& tables = mtables();
+  const uint32_t public_state_id =
+      static_cast<uint32_t>(tables.public_state_rows.size());
   const auto [state_iter, inserted] = tables.public_state_ids.try_emplace(
-      std::move(key), static_cast<uint32_t>(tables.public_state_ids.size()));
+      row_key(betting_history_id, state), public_state_id);
   if (!inserted) {
     return state_iter->second;
   }
-  const uint32_t public_state_id = state_iter->second;
   tables.public_state_rows.push_back(
       make_row(betting_history_id, std::move(state)));
   cache_betting_history_actions(betting_history_id,
@@ -436,20 +436,19 @@ std::optional<uint32_t> PublicStateGraph::find_chance_child(
     return std::nullopt;
   }
   const PublicBucketId outcome_id = chance_outcome_id(child_state);
-  size_t low = begin;
-  size_t high = end;
-  while (low < high) {
-    const size_t mid = low + (high - low) / 2;
-    if (entries[mid].outcome_id < outcome_id) {
-      low = mid + 1;
-    } else {
-      high = mid;
-    }
-  }
-  if (low == end || entries[low].outcome_id != outcome_id) {
+  const auto first =
+      entries.begin() + static_cast<std::ptrdiff_t>(begin);
+  const auto last =
+      entries.begin() + static_cast<std::ptrdiff_t>(end);
+  const auto iter = std::lower_bound(
+      first, last, outcome_id,
+      [](const auto& entry, PublicBucketId target_outcome_id) {
+        return entry.outcome_id < target_outcome_id;
+      });
+  if (iter == last || iter->outcome_id != outcome_id) {
     return std::nullopt;
   }
-  return entries[low].public_state_id;
+  return iter->public_state_id;
 }
 
 template <typename Callback>
@@ -484,7 +483,7 @@ PublicStateGraph::PublicBucketId PublicStateGraph::chance_outcome_id(
   return card_abstraction_.public_bucket(child_state);
 }
 
-std::optional<uint32_t> PublicStateGraph::find_cached_action_child(
+std::optional<uint32_t> PublicStateGraph::find_or_cache_action_child(
     uint32_t parent_public_state_id,
     int action_index) {
   const auto& public_rows = rows();
@@ -494,7 +493,7 @@ std::optional<uint32_t> PublicStateGraph::find_cached_action_child(
   const PublicStateRow& row = public_rows[parent_public_state_id];
   if (action_index < 0 || action_index >= row.action_count) {
     throw std::logic_error(
-        "find_cached_action_child: action index out of range");
+        "find_or_cache_action_child: action index out of range");
   }
 
   const size_t action_slot = static_cast<size_t>(action_index);
@@ -538,23 +537,13 @@ std::optional<uint32_t> PublicStateGraph::find_cached_action_child(
   return existing_public_child->second;
 }
 
+bool PublicStateGraph::row_limit_reached() const {
+  return config_.max_public_states > 0 &&
+         static_cast<int>(rows().size()) >= config_.max_public_states;
+}
+
 bool PublicStateGraph::can_insert_row() const {
-  return !storage_.frozen &&
-         (config_.max_public_states <= 0 ||
-          static_cast<int>(rows().size()) < config_.max_public_states);
-}
-
-CompactPublicState PublicStateGraph::action_child_state(
-    const PublicStateRow& parent_row,
-    int action_index) const {
-  const size_t action_slot = static_cast<size_t>(action_index);
-  return game_tree_.apply_action(parent_row.state,
-                                 parent_row.actions[action_slot]);
-}
-
-CompactPublicState PublicStateGraph::stored_chance_child_state(
-    const CompactPublicState& exact_child_state) const {
-  return exact_child_state;
+  return !storage_.frozen && !row_limit_reached();
 }
 
 std::optional<uint32_t>
@@ -573,7 +562,7 @@ PublicStateGraph::get_or_create_action_child(
 
   const size_t action_slot = static_cast<size_t>(action_index);
   if (std::optional<uint32_t> existing_child_id =
-          find_cached_action_child(parent_public_state_id, action_index)) {
+          find_or_cache_action_child(parent_public_state_id, action_index)) {
     stats_.record_transition_hit();
     if (*existing_child_id == kCappedPublicStateId) {
       return std::nullopt;
@@ -593,13 +582,12 @@ PublicStateGraph::get_or_create_action_child(
 
   const uint32_t parent_betting_history_id = read_row.betting_history_id;
   CompactPublicState child_state =
-      action_child_state(read_row, action_index);
+      game_tree_.apply_action(read_row.state, read_row.actions[action_slot]);
   const uint32_t child_betting_history_id =
       get_or_create_action_betting_history_child(
           parent_betting_history_id, action_index, child_state);
   std::optional<uint32_t> child_id =
-      get_or_create_row(child_betting_history_id,
-                        std::move(child_state));
+      get_or_create_row(child_betting_history_id, std::move(child_state));
   if (!child_id.has_value()) {
     mtables()
         .public_state_rows[parent_public_state_id]
@@ -616,7 +604,7 @@ PublicStateGraph::get_or_create_action_child(
   return child_id;
 }
 
-std::optional<uint32_t> PublicStateGraph::find_cached_chance_child(
+std::optional<uint32_t> PublicStateGraph::find_or_cache_chance_child(
     uint32_t parent_public_state_id,
     const CompactPublicState& child_state) {
   const auto& public_rows = rows();
@@ -665,49 +653,17 @@ std::optional<uint32_t> PublicStateGraph::find_cached_chance_child(
 }
 
 std::optional<uint32_t>
-PublicStateGraph::create_chance_child(
-    uint32_t parent_public_state_id,
-    PublicBucketId outcome_id,
-    CompactPublicState child_state) {
-  const auto& public_rows = rows();
-  if (parent_public_state_id >= public_rows.size()) {
-    return std::nullopt;
-  }
-
-  const uint32_t parent_betting_history_id =
-      public_rows[parent_public_state_id].betting_history_id;
-  const uint32_t child_betting_history_id =
-      get_or_create_chance_betting_history_child(
-          parent_betting_history_id, child_state);
-  std::optional<uint32_t> child_id =
-      get_or_create_row(child_betting_history_id,
-                        std::move(child_state));
-  if (!child_id.has_value()) {
-    stats_.record_transition_miss();
-    return std::nullopt;
-  }
-
-  const ChanceTransitionKey transition_key{
-      parent_public_state_id,
-      outcome_id,
-  };
-  mtables().public_chance_child_ids.emplace(transition_key, *child_id);
-  stats_.record_transition_miss();
-  stats_.record_child_node_created();
-  return child_id;
-}
-
-std::optional<uint32_t>
 PublicStateGraph::get_or_create_chance_child(
     uint32_t parent_public_state_id,
-    const CompactPublicState& child_state) {
+    const CompactPublicState& exact_child_state) {
   const auto& public_rows = rows();
   if (parent_public_state_id >= public_rows.size()) {
     return std::nullopt;
   }
-  const PublicBucketId outcome_id = chance_outcome_id(child_state);
+  const PublicBucketId outcome_id = chance_outcome_id(exact_child_state);
   if (std::optional<uint32_t> existing_child_id =
-          find_cached_chance_child(parent_public_state_id, child_state)) {
+          find_or_cache_chance_child(parent_public_state_id,
+                                     exact_child_state)) {
     stats_.record_transition_hit();
     return *existing_child_id;
   }
@@ -717,9 +673,23 @@ PublicStateGraph::get_or_create_chance_child(
     return std::nullopt;
   }
 
-  return create_chance_child(
-      parent_public_state_id, outcome_id,
-      stored_chance_child_state(child_state));
+  const PublicStateRow& parent_row = public_rows[parent_public_state_id];
+  CompactPublicState stored_child_state = exact_child_state;
+  const uint32_t child_betting_history_id =
+      get_or_create_chance_betting_history_child(
+          parent_row.betting_history_id, stored_child_state);
+  std::optional<uint32_t> child_id = get_or_create_row(
+      child_betting_history_id, std::move(stored_child_state));
+  if (!child_id.has_value()) {
+    stats_.record_transition_miss();
+    return std::nullopt;
+  }
+
+  mtables().public_chance_child_ids.emplace(
+      ChanceTransitionKey{parent_public_state_id, outcome_id}, *child_id);
+  stats_.record_transition_miss();
+  stats_.record_child_node_created();
+  return child_id;
 }
 
 bool PublicStateGraph::prebuild_reachable_rows(
@@ -751,7 +721,7 @@ bool PublicStateGraph::prebuild_reachable_rows(
                    absl::Span<const CardId>) {
             std::optional<uint32_t> child_public_state_id =
                 get_or_create_chance_child(entry.public_state_id,
-                                                        child_state);
+                                           child_state);
             if (!child_public_state_id.has_value()) {
               return false;
             }
@@ -772,7 +742,7 @@ bool PublicStateGraph::prebuild_reachable_rows(
          ++action_index) {
       std::optional<uint32_t> child_public_state_id =
           get_or_create_action_child(entry.public_state_id,
-                                                  action_index);
+                                     action_index);
       if (!child_public_state_id.has_value()) {
         return false;
       }

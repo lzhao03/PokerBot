@@ -97,6 +97,9 @@ class PublicStateGraph {
       const CompactPublicState& state) const;
   PublicStateKey row_key(uint32_t betting_history_id,
                          const CompactPublicState& state) const;
+  std::optional<uint32_t> find_row(
+      uint32_t betting_history_id,
+      const CompactPublicState& state) const;
   PublicStateRow make_row(uint32_t betting_history_id,
                           CompactPublicState state);
   uint32_t get_or_create_betting_history(
@@ -115,22 +118,14 @@ class PublicStateGraph {
   std::optional<uint32_t> get_or_create_row(
       uint32_t betting_history_id,
       CompactPublicState state);
-  std::optional<uint32_t> find_cached_action_child(
+  std::optional<uint32_t> find_or_cache_action_child(
       uint32_t parent_public_state_id,
       int action_index);
-  std::optional<uint32_t> find_cached_chance_child(
+  std::optional<uint32_t> find_or_cache_chance_child(
       uint32_t parent_public_state_id,
       const CompactPublicState& child_state);
+  bool row_limit_reached() const;
   bool can_insert_row() const;
-  CompactPublicState action_child_state(
-      const PublicStateRow& parent_row,
-      int action_index) const;
-  CompactPublicState stored_chance_child_state(
-      const CompactPublicState& exact_child_state) const;
-  std::optional<uint32_t> create_chance_child(
-      uint32_t parent_public_state_id,
-      PublicBucketId outcome_id,
-      CompactPublicState child_state);
   template <typename Callback>
   bool for_each_required_chance_transition(const PublicStateRow& row,
                                            Callback&& callback) const;
