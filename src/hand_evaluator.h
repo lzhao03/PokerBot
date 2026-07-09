@@ -28,26 +28,25 @@ struct HandEvaluation {
   HandRank rank = HandRank::HIGH_CARD;
   std::array<int, 5> kickers = {};
   size_t kicker_count = 0;
-  
-  // Comparison operators
+
   bool operator<(const HandEvaluation& other) const {
     if (rank != other.rank) {
       return static_cast<int>(rank) < static_cast<int>(other.rank);
     }
-    
+
     for (size_t i = 0; i < std::min(kicker_count, other.kicker_count); ++i) {
       if (kickers[i] != other.kickers[i]) {
         return kickers[i] < other.kickers[i];
       }
     }
-    
+
     return kicker_count < other.kicker_count;
   }
-  
+
   bool operator>(const HandEvaluation& other) const {
     return other < *this;
   }
-  
+
   bool operator==(const HandEvaluation& other) const {
     if (rank != other.rank || kicker_count != other.kicker_count) {
       return false;
@@ -59,38 +58,31 @@ struct HandEvaluation {
     }
     return true;
   }
-
 };
 
 class HandEvaluator {
-public:
+ public:
   HandEvaluator() = default;
-  
-  // Evaluate a 5-card hand.
+
   HandEvaluation evaluate(const std::array<CardId, 5>& cards) const;
-  
-  // Evaluate the best possible hand given hole cards and a board state
   HandEvaluation evaluate_hand(ComboId hole_cards,
                                const CompactPublicState& board_state) const;
 
-  // Return Cactus hand strength; lower values are stronger.
   uint16_t hand_value(ComboId hand,
                       const CompactPublicState& board_state) const;
   uint16_t hand_value(
       ComboId hand,
       const std::array<CardId, kMaxBoardCards>& board_cards,
       uint8_t board_count) const;
-  
-  // Compare two hands and return positive if hand1 wins, negative if hand2 wins, 0 if tie
+
   int compare_hands(ComboId hand1, ComboId hand2,
                     const CompactPublicState& board_state) const;
   int compare_hands(ComboId hand1, ComboId hand2,
                     const std::array<CardId, kMaxBoardCards>& board_cards,
                     uint8_t board_count) const;
-  
-private:
-  // Find the best 5-card hand from a set of cards
+
+ private:
   HandEvaluation find_best_hand(absl::Span<const CardId> cards) const;
 };
 
-} // namespace poker
+}  // namespace poker

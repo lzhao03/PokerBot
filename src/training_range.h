@@ -30,10 +30,6 @@ struct TrainingRange {
 };
 
 struct RangeDeal {
-  RangeDeal(ComboId player_a_combo, ComboId player_b_combo)
-      : player_a_combo(player_a_combo),
-        player_b_combo(player_b_combo) {}
-
   ComboId player_a_combo = 0;
   ComboId player_b_combo = 0;
 };

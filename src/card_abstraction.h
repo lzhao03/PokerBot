@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +14,23 @@ namespace poker {
 
 using PublicBucketId = uint64_t;
 using PrivateBucketId = uint16_t;
+
+namespace card_abstraction_detail {
+
+inline int BestStraightWindowDensity(uint16_t rank_mask) {
+  int best = 0;
+  for (int start = 0; start <= 8; ++start) {
+    const int count =
+        std::popcount(static_cast<unsigned int>((rank_mask >> start) & 0x1F));
+    best = std::max(best, count);
+  }
+  const uint16_t wheel_mask = static_cast<uint16_t>((1u << 12) | 0x0F);
+  const int wheel_count =
+      std::popcount(static_cast<unsigned int>(rank_mask & wheel_mask));
+  return std::max(best, wheel_count);
+}
+
+}  // namespace card_abstraction_detail
 
 struct ExactPublicCardBuckets {
   PublicBucketId bucket(const CompactPublicState& state) const {
@@ -56,7 +74,8 @@ struct BoardTexturePublicCardBuckets {
     } else if (max_suit_count == 2) {
       suit_bucket = 1;
     }
-    const int straight_density = BestStraightWindowDensity(rank_mask);
+    const int straight_density =
+        card_abstraction_detail::BestStraightWindowDensity(rank_mask);
     const int straight_bucket =
         straight_density >= 4 ? 2 : (straight_density >= 3 ? 1 : 0);
     const int high_bucket = max_rank >= 14 ? 0 : (max_rank >= 11 ? 1 : 2);
@@ -76,21 +95,6 @@ struct BoardTexturePublicCardBuckets {
   static constexpr int kHighBuckets = 3;
   static constexpr int kTextureBucketsPerStreet =
       3 * kSuitBuckets * kStraightBuckets * kHighBuckets;
-
-  static int BestStraightWindowDensity(uint16_t rank_mask) {
-    int best = 0;
-    for (int start = 0; start <= 8; ++start) {
-      const int count =
-          std::popcount(static_cast<unsigned int>((rank_mask >> start) & 0x1F));
-      if (count > best) {
-        best = count;
-      }
-    }
-    const uint16_t wheel_mask =
-        static_cast<uint16_t>((1u << 12) | 0x0F);
-    const int wheel_count = std::popcount(static_cast<unsigned int>(rank_mask & wheel_mask));
-    return wheel_count > best ? wheel_count : best;
-  }
 };
 
 using DefaultPublicCardBuckets =
@@ -222,22 +226,9 @@ struct CoarsePrivateBuckets {
         return 2;
       }
     }
-    return BestStraightWindowDensity(rank_mask) >= 4 ? 1 : 0;
-  }
-
-  static int BestStraightWindowDensity(uint16_t rank_mask) {
-    int best = 0;
-    for (int start = 0; start <= 8; ++start) {
-      const int count =
-          std::popcount(static_cast<unsigned int>((rank_mask >> start) & 0x1F));
-      if (count > best) {
-        best = count;
-      }
-    }
-    const uint16_t wheel_mask =
-        static_cast<uint16_t>((1u << 12) | 0x0F);
-    const int wheel_count = std::popcount(static_cast<unsigned int>(rank_mask & wheel_mask));
-    return wheel_count > best ? wheel_count : best;
+    return card_abstraction_detail::BestStraightWindowDensity(rank_mask) >= 4
+               ? 1
+               : 0;
   }
 };
 

@@ -90,7 +90,7 @@ RangeDeal RangeSampler::sample(std::mt19937& rng) const {
   }
 
   const size_t b_index = offset + static_cast<size_t>(b_it - b_begin);
-  return RangeDeal(a_combo, compatible_player_b_combos[b_index]);
+  return RangeDeal{a_combo, compatible_player_b_combos[b_index]};
 }
 
 const TrainingRangeView& TrainingRangeView::copy_without_mask_into(
