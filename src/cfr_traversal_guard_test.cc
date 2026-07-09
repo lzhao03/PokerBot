@@ -111,6 +111,11 @@ TEST_CASE("warmup full CFR traversal guard") {
                                         13, SuitKind::kSpades));
 
   solver.run(3, player_a, player_b);
+  const CFRSolver::TrainingRunStats stats =
+      solver.get_last_training_run_stats();
+  CHECK(solver.get_iterations_run() == 3);
+  CHECK(stats.warmup_iterations == 3);
+  CHECK(stats.frozen_iterations == 0);
   CheckMetrics(TrainingMetrics(solver),
                Metrics{-1.0 / 12.0, 1, 5, 3, 60},
                "warmup full CFR traversal");

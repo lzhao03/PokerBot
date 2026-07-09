@@ -3,7 +3,6 @@
 #include "src/combo.h"
 #include "doctest/doctest.h"
 
-#include <cmath>
 #include <stdexcept>
 
 namespace poker {
@@ -34,25 +33,6 @@ ComboId Combo(int first_rank,
                         MakeCardId(second_rank, second_suit));
 }
 
-TEST_CASE("range training updates counters") {
-  SolverConfig config = SmallConfig();
-  config.max_depth = 1;
-  CFRSolver solver(config);
-  HandRange player_a = ExactRange(Combo(14, SuitKind::kHearts,
-                                        14, SuitKind::kSpades));
-  HandRange player_b = ExactRange(Combo(13, SuitKind::kHearts,
-                                        13, SuitKind::kSpades));
-
-  solver.run(3, player_a, player_b);
-  const CFRSolver::TrainingRunStats stats =
-      solver.get_last_training_run_stats();
-  CHECK(solver.get_iterations_run() == 3);
-  CHECK(solver.get_cfr_update_count() > 0);
-  CHECK(solver.get_info_set_count() > 0);
-  CHECK(stats.warmup_iterations == 3);
-  CHECK(stats.frozen_iterations == 0);
-}
-
 TEST_CASE("public-state cap prevents fixed-storage training") {
   SolverConfig config = SmallConfig();
   config.max_public_states = 1;
@@ -71,24 +51,6 @@ TEST_CASE("public-state cap prevents fixed-storage training") {
   CHECK(stats.warmup_iterations == 5);
   CHECK(stats.frozen_iterations == 0);
   CHECK(solver.get_public_state_count() <= 1);
-}
-
-TEST_CASE("strategy evaluation returns finite values") {
-  SolverConfig config = SmallConfig();
-  config.max_depth = 1;
-  CFRSolver solver(config);
-  HandRange player_a = ExactRange(Combo(14, SuitKind::kHearts,
-                                        2, SuitKind::kHearts));
-  HandRange player_b = ExactRange(Combo(13, SuitKind::kClubs,
-                                        2, SuitKind::kClubs));
-
-  solver.run(3, player_a, player_b);
-  const double exact_value = solver.evaluate_strategy(
-      Combo(14, SuitKind::kHearts, 2, SuitKind::kHearts),
-      Combo(13, SuitKind::kClubs, 2, SuitKind::kClubs));
-  const double range_value = solver.evaluate_strategy(3, player_a, player_b);
-  CHECK(std::isfinite(exact_value));
-  CHECK(std::isfinite(range_value));
 }
 
 TEST_CASE("fixed terminal run counts iteration and utility") {

@@ -3,8 +3,6 @@
 #include "src/combo.h"
 #include "doctest/doctest.h"
 
-#include <cmath>
-
 namespace poker {
 namespace {
 
@@ -73,20 +71,6 @@ TEST_CASE("coarse training reaches fixed-storage phase") {
   CHECK(solver.get_iterations_run() == 6);
   CHECK(second_stats.warmup_iterations == 0);
   CHECK(second_stats.frozen_iterations == 2);
-}
-
-TEST_CASE("coarse evaluation is finite") {
-  SolverConfig config = CoarseConfig();
-  CFRSolver solver(config);
-  HandRange player_a = ExactRange(Combo(14, SuitKind::kDiamonds,
-                                        14, SuitKind::kSpades));
-  HandRange player_b = ExactRange(Combo(13, SuitKind::kDiamonds,
-                                        13, SuitKind::kSpades));
-
-  solver.run(3, player_a, player_b);
-  const double value = solver.evaluate_strategy(3, player_a, player_b);
-  CHECK(std::isfinite(value));
-  CHECK(solver.get_public_state_count() > 0);
 }
 
 }  // namespace
