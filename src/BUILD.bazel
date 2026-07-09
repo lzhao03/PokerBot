@@ -170,6 +170,14 @@ cc_test(
     name = "game_tree_test",
     srcs = ["game_tree_test.cc"],
     deps = DOCTEST_DEPS + [
+        ":game_tree",
+    ],
+)
+
+cc_test(
+    name = "betting_abstraction_test",
+    srcs = ["betting_abstraction_test.cc"],
+    deps = DOCTEST_DEPS + [
         ":betting_abstraction",
         ":game_tree",
     ],
