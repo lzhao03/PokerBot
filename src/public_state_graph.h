@@ -47,11 +47,6 @@ struct TrainingRunStats {
 
 class PublicStateGraph {
  public:
-  using PublicBucketId = StrategyTables::PublicBucketId;
-  using BettingHistoryKey = StrategyTables::BettingHistoryKey;
-  using BettingHistoryRow = StrategyTables::BettingHistoryRow;
-  using PublicStateKey = StrategyTables::PublicStateKey;
-  using ChanceTransitionKey = StrategyTables::ChanceTransitionKey;
   using PublicStateRow = StrategyTables::PublicStateRow;
 
   static constexpr uint32_t kCappedPublicStateId =
@@ -62,80 +57,78 @@ class PublicStateGraph {
                    GameTree& game_tree,
                    const CardAbstraction& card_abstraction,
                    const BettingAbstraction& betting_abstraction,
-                   TraversalStats* stats);
+                   TraversalStats& stats);
 
-  std::optional<uint32_t> get_or_create_public_state_row(
-      const CompactPublicState& state);
-  std::optional<uint32_t> action_child_public_state(
-      uint32_t public_state_id,
+  std::optional<uint32_t> get_or_create_row(const CompactPublicState& state);
+  std::optional<uint32_t> find_action_child(
+      uint32_t parent_public_state_id,
       int action_index) const;
-  std::optional<uint32_t> chance_child_public_state(
-      uint32_t public_state_id,
+  std::optional<uint32_t> find_chance_child(
+      uint32_t parent_public_state_id,
       const CompactPublicState& child_state) const;
-  std::optional<uint32_t> get_or_create_action_child_public_state(
-      uint32_t public_state_id,
+  std::optional<uint32_t> get_or_create_action_child(
+      uint32_t parent_public_state_id,
       int action_index);
-  std::optional<uint32_t> get_or_create_chance_child_public_state(
-      uint32_t public_state_id,
+  std::optional<uint32_t> get_or_create_chance_child(
+      uint32_t parent_public_state_id,
       const CompactPublicState& child_state);
-  bool prebuild_public_state_rows(uint32_t root_public_state_id,
-                                  int max_depth);
-  bool validate_prebuilt_transitions(uint32_t root_public_state_id,
-                                     int max_depth,
-                                     TrainingRunStats& stats) const;
+  bool prebuild_reachable_rows(uint32_t root_public_state_id,
+                               int max_depth);
+  bool validate_prebuilt_rows(uint32_t root_public_state_id,
+                              int max_depth,
+                              TrainingRunStats& stats) const;
 
  private:
+  using PublicBucketId = StrategyTables::PublicBucketId;
+  using BettingHistoryKey = StrategyTables::BettingHistoryKey;
+  using BettingHistoryRow = StrategyTables::BettingHistoryRow;
+  using PublicStateKey = StrategyTables::PublicStateKey;
+  using ChanceTransitionKey = StrategyTables::ChanceTransitionKey;
+
   const StrategyTables& tables() const { return storage_.frozen_ref(); }
   StrategyTables& mtables() { return storage_.mutable_ref(); }
   const std::vector<PublicStateRow>& rows() const {
     return tables().public_state_rows;
   }
 
-  struct PublicStateId {
-    uint32_t value = GameTree::kInvalidPublicStateId;
-  };
-
-  struct BettingHistoryId {
-    uint32_t value = GameTree::kInvalidBettingHistoryId;
-  };
-
-  BettingHistoryKey make_betting_history_key(
+  BettingHistoryKey betting_history_key(
       const CompactPublicState& state) const;
   BettingHistoryRow make_betting_history_row(
       const CompactPublicState& state) const;
-  PublicStateKey make_public_state_key(BettingHistoryId betting_history_id,
-                                       const CompactPublicState& state) const;
-  PublicStateRow make_public_state_row(BettingHistoryId betting_history_id,
-                                       CompactPublicState state);
-  BettingHistoryId get_or_create_betting_history_id(
+  PublicStateKey row_key(uint32_t betting_history_id,
+                         const CompactPublicState& state) const;
+  PublicStateRow make_row(uint32_t betting_history_id,
+                          CompactPublicState state);
+  uint32_t get_or_create_betting_history(
       const CompactPublicState& state);
-  BettingHistoryId get_or_create_betting_history_id(BettingHistoryKey key,
-                                                    BettingHistoryRow row);
-  BettingHistoryId get_or_create_action_child_betting_history_id(
-      BettingHistoryId parent_betting_history_id,
+  uint32_t get_or_create_betting_history(BettingHistoryKey key,
+                                         BettingHistoryRow row);
+  uint32_t get_or_create_action_betting_history_child(
+      uint32_t parent_betting_history_id,
       int action_index,
       const CompactPublicState& child_state);
-  BettingHistoryId get_or_create_chance_child_betting_history_id(
-      BettingHistoryId parent_betting_history_id,
+  uint32_t get_or_create_chance_betting_history_child(
+      uint32_t parent_betting_history_id,
       const CompactPublicState& child_state);
-  void cache_betting_history_actions(BettingHistoryId betting_history_id,
+  void cache_betting_history_actions(uint32_t betting_history_id,
                                      const PublicStateRow& row);
-  std::optional<uint32_t> get_or_create_public_state_row(
-      BettingHistoryId betting_history_id,
+  std::optional<uint32_t> get_or_create_row(
+      uint32_t betting_history_id,
       CompactPublicState state);
-  std::optional<uint32_t> find_cached_action_child(PublicStateId public_state_id,
-                                                   int action_index);
+  std::optional<uint32_t> find_cached_action_child(
+      uint32_t parent_public_state_id,
+      int action_index);
   std::optional<uint32_t> find_cached_chance_child(
-      PublicStateId public_state_id,
+      uint32_t parent_public_state_id,
       const CompactPublicState& child_state);
-  bool can_create_public_state() const;
-  CompactPublicState build_action_child_state(
+  bool can_insert_row() const;
+  CompactPublicState action_child_state(
       const PublicStateRow& parent_row,
       int action_index) const;
-  CompactPublicState build_chance_child_state(
+  CompactPublicState stored_chance_child_state(
       const CompactPublicState& exact_child_state) const;
-  std::optional<uint32_t> create_chance_child_public_state(
-      PublicStateId parent_public_state_id,
+  std::optional<uint32_t> create_chance_child(
+      uint32_t parent_public_state_id,
       PublicBucketId outcome_id,
       CompactPublicState child_state);
   template <typename Callback>
@@ -150,7 +143,7 @@ class PublicStateGraph {
   GameTree& game_tree_;
   const CardAbstraction& card_abstraction_;
   const BettingAbstraction& betting_abstraction_;
-  TraversalStats* stats_;
+  TraversalStats& stats_;
 };
 
 }  // namespace poker

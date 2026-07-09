@@ -126,7 +126,7 @@ CFRSolver::CFRSolver(
                   *game_tree_,
                   card_abstraction_,
                   betting_abstraction_,
-                  &traversal_stats_) {
+                  traversal_stats_) {
   // Pre-allocate strategy table storage when limits are known upfront.
   // This gives fully deterministic peak memory: no reallocation after init.
   if (config_.max_info_sets > 0) {
@@ -257,12 +257,12 @@ CFRSolver::NodeGraph::action_child(NodeRef parent,
   std::optional<uint32_t> child_id;
   switch (mode_) {
     case NodeGraphMode::kGrow:
-      child_id = solver_.public_graph_.get_or_create_action_child_public_state(
+      child_id = solver_.public_graph_.get_or_create_action_child(
           parent.public_state_id, action_index);
       break;
     case NodeGraphMode::kSkipMissing:
     case NodeGraphMode::kRequirePresent:
-      child_id = solver_.public_graph_.action_child_public_state(
+      child_id = solver_.public_graph_.find_action_child(
           parent.public_state_id, action_index);
       break;
   }
@@ -289,12 +289,12 @@ CFRSolver::NodeGraph::sample_chance_child(
   std::optional<uint32_t> child_id;
   switch (mode_) {
     case NodeGraphMode::kGrow:
-      child_id = solver_.public_graph_.get_or_create_chance_child_public_state(
+      child_id = solver_.public_graph_.get_or_create_chance_child(
           parent.public_state_id, exact_child_state);
       break;
     case NodeGraphMode::kSkipMissing:
     case NodeGraphMode::kRequirePresent:
-      child_id = solver_.public_graph_.chance_child_public_state(
+      child_id = solver_.public_graph_.find_chance_child(
           parent.public_state_id, exact_child_state);
       break;
   }
@@ -393,7 +393,7 @@ void CFRSolver::run(int iterations,
 
   VLOG(1) << "Preparing compact public-state rows...";
   const std::optional<uint32_t> root_public_state_id =
-      public_graph_.get_or_create_public_state_row(initial_state_);
+      public_graph_.get_or_create_row(initial_state_);
   if (!root_public_state_id.has_value()) {
     return;
   }
@@ -475,8 +475,7 @@ bool CFRSolver::prepare_prebuilt_training(
   VLOG(1) << "Prebuilding compact public-state rows...";
   const auto prebuild_start = std::chrono::steady_clock::now();
   stats.public_state_prebuild_complete =
-      public_graph_.prebuild_public_state_rows(root_public_state_id,
-                                               max_depth);
+      public_graph_.prebuild_reachable_rows(root_public_state_id, max_depth);
   const auto prebuild_end = std::chrono::steady_clock::now();
   stats.prebuild_seconds =
       std::chrono::duration<double>(prebuild_end - prebuild_start).count();
@@ -485,8 +484,8 @@ bool CFRSolver::prepare_prebuilt_training(
     return false;
   }
 
-  if (!public_graph_.validate_prebuilt_transitions(root_public_state_id,
-                                                   max_depth, stats)) {
+  if (!public_graph_.validate_prebuilt_rows(root_public_state_id, max_depth,
+                                            stats)) {
     return false;
   }
   record_action_counts();
@@ -1113,7 +1112,7 @@ CFRSolver::ActionConditionedRanges CFRSolver::condition_ranges_for_actions(
 double CFRSolver::evaluate_strategy(ComboId player_a_hand,
                                     ComboId player_b_hand) {
   const std::optional<uint32_t> root_public_state_id =
-      public_graph_.get_or_create_public_state_row(initial_state_);
+      public_graph_.get_or_create_row(initial_state_);
   if (!root_public_state_id.has_value()) {
     return 0.0;
   }
@@ -1142,7 +1141,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
       BuildTrainingRange(player_b_range);
   RangeSampler range_sampler(player_a_training_range, player_b_training_range);
   const std::optional<uint32_t> root_public_state_id =
-      public_graph_.get_or_create_public_state_row(initial_state_);
+      public_graph_.get_or_create_row(initial_state_);
   if (!root_public_state_id.has_value()) {
     return 0.0;
   }
