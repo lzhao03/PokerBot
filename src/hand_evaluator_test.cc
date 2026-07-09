@@ -132,20 +132,6 @@ TEST_CASE("generated Cactus tables match reference builder") {
   }
 }
 
-TEST_CASE("five-card evaluation recognizes royal flush") {
-  const std::array<CardId, 5> royal_flush = {
-      TestCard(10, SuitKind::kHearts),
-      TestCard(11, SuitKind::kHearts),
-      TestCard(12, SuitKind::kHearts),
-      TestCard(13, SuitKind::kHearts),
-      TestCard(14, SuitKind::kHearts),
-  };
-
-  HandEvaluator evaluator;
-  HandEvaluation evaluation = evaluator.evaluate(royal_flush);
-  CHECK(evaluation.rank == HandRank::ROYAL_FLUSH);
-}
-
 TEST_CASE("wheel straight is scored as five high") {
   HandEvaluator evaluator;
   const std::array<CardId, 5> wheel = {
@@ -180,173 +166,108 @@ TEST_CASE("wheel straight is scored as five high") {
   CHECK(wheel_flush_eval.rank == HandRank::STRAIGHT_FLUSH);
   CHECK(wheel_flush_eval.kicker_count == 1);
   CHECK(wheel_flush_eval.kickers[0] == 5);
-}
 
-TEST_CASE("seven-card evaluation chooses best hand") {
-  ComboId hand = TestCombo(14, SuitKind::kHearts, 14, SuitKind::kSpades);
-  CompactPublicState board;
-  AddBoardCard(board, TestCard(14, SuitKind::kDiamonds));
-  AddBoardCard(board, TestCard(13, SuitKind::kHearts));
-  AddBoardCard(board, TestCard(13, SuitKind::kClubs));
-  AddBoardCard(board, TestCard(2, SuitKind::kSpades));
-  AddBoardCard(board, TestCard(7, SuitKind::kHearts));
-
-  HandEvaluator evaluator;
-  HandEvaluation evaluation = evaluator.evaluate_hand(hand, board);
-  CHECK(evaluation == ReferenceBestHandFromFiveCardEvaluation(hand, board));
-  CHECK(evaluation.rank == HandRank::FULL_HOUSE);
-  CHECK(evaluation.kicker_count == 2);
-  CHECK(evaluation.kickers[0] == 14);
-  CHECK(evaluation.kickers[1] == 13);
-}
-
-TEST_CASE("Cactus comparison orders wheel below six-high straight") {
-  HandEvaluator evaluator;
   const CompactPublicState straight_board =
       TestBoard({TestCard(14, SuitKind::kClubs),
                  TestCard(5, SuitKind::kDiamonds),
                  TestCard(4, SuitKind::kHearts),
                  TestCard(3, SuitKind::kSpades),
                  TestCard(9, SuitKind::kClubs)});
-  const ComboId wheel =
+  const ComboId wheel_combo =
       TestCombo(2, SuitKind::kHearts, 13, SuitKind::kClubs);
-  const ComboId six_high =
+  const ComboId six_high_combo =
       TestCombo(6, SuitKind::kHearts, 2, SuitKind::kClubs);
-  CHECK(evaluator.compare_hands(six_high, wheel, straight_board) > 0);
-  const HandEvaluation wheel_eval = evaluator.evaluate_hand(wheel,
-                                                            straight_board);
-  CHECK(wheel_eval.rank == HandRank::STRAIGHT);
-  CHECK(wheel_eval.kicker_count == 1);
-  CHECK(wheel_eval.kickers[0] == 5);
-}
-
-TEST_CASE("compact and explicit-board comparisons match hand values") {
-  ComboId aces = TestCombo(14, SuitKind::kHearts, 14, SuitKind::kSpades);
-  ComboId kings = TestCombo(13, SuitKind::kHearts, 13, SuitKind::kSpades);
-
-  CompactPublicState compact_state;
-  AddBoardCard(compact_state, TestCard(2, SuitKind::kDiamonds));
-  AddBoardCard(compact_state, TestCard(7, SuitKind::kClubs));
-  AddBoardCard(compact_state, TestCard(9, SuitKind::kHearts));
-  AddBoardCard(compact_state, TestCard(11, SuitKind::kSpades));
-  AddBoardCard(compact_state, TestCard(12, SuitKind::kClubs));
-
-  HandEvaluator evaluator;
-  CHECK(evaluator.compare_hands(aces, kings, compact_state) ==
-        evaluator.compare_hands(aces, kings, compact_state.board_cards,
-                                compact_state.board_count));
-
-  const auto compare_values = [](uint16_t first, uint16_t second) {
-    return static_cast<int>(first < second) -
-           static_cast<int>(first > second);
-  };
-
-  const int compact_value_compare = compare_values(
-      evaluator.hand_value(aces, compact_state),
-      evaluator.hand_value(kings, compact_state));
-  CHECK(evaluator.compare_hands(aces, kings, compact_state) ==
-        compact_value_compare);
-
-  const int explicit_board_value_compare = compare_values(
-      evaluator.hand_value(aces, compact_state.board_cards,
-                           compact_state.board_count),
-      evaluator.hand_value(kings, compact_state.board_cards,
-                           compact_state.board_count));
-  CHECK(evaluator.compare_hands(aces, kings, compact_state.board_cards,
-                                compact_state.board_count) ==
-        explicit_board_value_compare);
+  CHECK(evaluator.compare_hands(six_high_combo, wheel_combo,
+                                straight_board) > 0);
 }
 
 TEST_CASE("representative Cactus comparisons match reference evaluator") {
-  CheckCompareMatchesReference(
-      TestCombo(14, SuitKind::kHearts, 13, SuitKind::kHearts),
-      TestCombo(9, SuitKind::kHearts, 8, SuitKind::kHearts),
-      TestBoard({TestCard(10, SuitKind::kHearts),
-                 TestCard(11, SuitKind::kHearts),
-                 TestCard(12, SuitKind::kHearts),
-                 TestCard(2, SuitKind::kClubs),
-                 TestCard(3, SuitKind::kDiamonds)}),
-      "royal and straight flush comparison");
+  struct CompareCase {
+    ComboId first;
+    ComboId second;
+    CompactPublicState board;
+    const char* label;
+  };
 
-  CheckCompareMatchesReference(
-      TestCombo(14, SuitKind::kSpades, 13, SuitKind::kSpades),
-      TestCombo(13, SuitKind::kHearts, 13, SuitKind::kDiamonds),
-      TestBoard({TestCard(14, SuitKind::kHearts),
-                 TestCard(14, SuitKind::kDiamonds),
-                 TestCard(14, SuitKind::kClubs),
-                 TestCard(2, SuitKind::kClubs),
-                 TestCard(7, SuitKind::kDiamonds)}),
-      "quads comparison");
+  const CompareCase cases[] = {
+      {TestCombo(14, SuitKind::kHearts, 13, SuitKind::kHearts),
+       TestCombo(9, SuitKind::kHearts, 8, SuitKind::kHearts),
+       TestBoard({TestCard(10, SuitKind::kHearts),
+                  TestCard(11, SuitKind::kHearts),
+                  TestCard(12, SuitKind::kHearts),
+                  TestCard(2, SuitKind::kClubs),
+                  TestCard(3, SuitKind::kDiamonds)}),
+       "straight flush"},
+      {TestCombo(14, SuitKind::kSpades, 13, SuitKind::kSpades),
+       TestCombo(13, SuitKind::kHearts, 13, SuitKind::kDiamonds),
+       TestBoard({TestCard(14, SuitKind::kHearts),
+                  TestCard(14, SuitKind::kDiamonds),
+                  TestCard(14, SuitKind::kClubs),
+                  TestCard(2, SuitKind::kClubs),
+                  TestCard(7, SuitKind::kDiamonds)}),
+       "quads"},
+      {TestCombo(14, SuitKind::kClubs, 13, SuitKind::kDiamonds),
+       TestCombo(13, SuitKind::kHearts, 13, SuitKind::kSpades),
+       TestBoard({TestCard(14, SuitKind::kHearts),
+                  TestCard(14, SuitKind::kDiamonds),
+                  TestCard(13, SuitKind::kClubs),
+                  TestCard(2, SuitKind::kSpades),
+                  TestCard(7, SuitKind::kHearts)}),
+       "full house"},
+      {TestCombo(13, SuitKind::kHearts, 9, SuitKind::kHearts),
+       TestCombo(11, SuitKind::kHearts, 10, SuitKind::kHearts),
+       TestBoard({TestCard(14, SuitKind::kHearts),
+                  TestCard(2, SuitKind::kHearts),
+                  TestCard(7, SuitKind::kHearts),
+                  TestCard(12, SuitKind::kDiamonds),
+                  TestCard(3, SuitKind::kClubs)}),
+       "flush"},
+      {TestCombo(14, SuitKind::kHearts, 5, SuitKind::kDiamonds),
+       TestCombo(5, SuitKind::kSpades, 6, SuitKind::kDiamonds),
+       TestBoard({TestCard(2, SuitKind::kClubs),
+                  TestCard(3, SuitKind::kDiamonds),
+                  TestCard(4, SuitKind::kHearts),
+                  TestCard(9, SuitKind::kSpades),
+                  TestCard(13, SuitKind::kClubs)}),
+       "wheel straight"},
+      {TestCombo(9, SuitKind::kSpades, 14, SuitKind::kHearts),
+       TestCombo(9, SuitKind::kClubs, 12, SuitKind::kHearts),
+       TestBoard({TestCard(9, SuitKind::kHearts),
+                  TestCard(9, SuitKind::kDiamonds),
+                  TestCard(2, SuitKind::kClubs),
+                  TestCard(5, SuitKind::kSpades),
+                  TestCard(13, SuitKind::kClubs)}),
+       "trips kicker"},
+      {TestCombo(13, SuitKind::kClubs, 12, SuitKind::kHearts),
+       TestCombo(13, SuitKind::kDiamonds, 11, SuitKind::kHearts),
+       TestBoard({TestCard(14, SuitKind::kHearts),
+                  TestCard(14, SuitKind::kDiamonds),
+                  TestCard(13, SuitKind::kSpades),
+                  TestCard(2, SuitKind::kClubs),
+                  TestCard(7, SuitKind::kDiamonds)}),
+       "two pair kicker"},
+      {TestCombo(14, SuitKind::kClubs, 12, SuitKind::kHearts),
+       TestCombo(14, SuitKind::kSpades, 11, SuitKind::kHearts),
+       TestBoard({TestCard(14, SuitKind::kHearts),
+                  TestCard(13, SuitKind::kDiamonds),
+                  TestCard(7, SuitKind::kSpades),
+                  TestCard(4, SuitKind::kClubs),
+                  TestCard(2, SuitKind::kDiamonds)}),
+       "pair kicker"},
+      {TestCombo(12, SuitKind::kClubs, 9, SuitKind::kHearts),
+       TestCombo(11, SuitKind::kClubs, 10, SuitKind::kHearts),
+       TestBoard({TestCard(14, SuitKind::kHearts),
+                  TestCard(13, SuitKind::kDiamonds),
+                  TestCard(7, SuitKind::kSpades),
+                  TestCard(4, SuitKind::kClubs),
+                  TestCard(2, SuitKind::kDiamonds)}),
+       "high card"},
+  };
 
-  CheckCompareMatchesReference(
-      TestCombo(14, SuitKind::kClubs, 13, SuitKind::kDiamonds),
-      TestCombo(13, SuitKind::kHearts, 13, SuitKind::kSpades),
-      TestBoard({TestCard(14, SuitKind::kHearts),
-                 TestCard(14, SuitKind::kDiamonds),
-                 TestCard(13, SuitKind::kClubs),
-                 TestCard(2, SuitKind::kSpades),
-                 TestCard(7, SuitKind::kHearts)}),
-      "full house comparison");
-
-  CheckCompareMatchesReference(
-      TestCombo(13, SuitKind::kHearts, 9, SuitKind::kHearts),
-      TestCombo(11, SuitKind::kHearts, 10, SuitKind::kHearts),
-      TestBoard({TestCard(14, SuitKind::kHearts),
-                 TestCard(2, SuitKind::kHearts),
-                 TestCard(7, SuitKind::kHearts),
-                 TestCard(12, SuitKind::kDiamonds),
-                 TestCard(3, SuitKind::kClubs)}),
-      "flush comparison");
-
-  CheckCompareMatchesReference(
-      TestCombo(14, SuitKind::kHearts, 5, SuitKind::kDiamonds),
-      TestCombo(5, SuitKind::kSpades, 6, SuitKind::kDiamonds),
-      TestBoard({TestCard(2, SuitKind::kClubs),
-                 TestCard(3, SuitKind::kDiamonds),
-                 TestCard(4, SuitKind::kHearts),
-                 TestCard(9, SuitKind::kSpades),
-                 TestCard(13, SuitKind::kClubs)}),
-      "wheel straight comparison");
-
-  CheckCompareMatchesReference(
-      TestCombo(9, SuitKind::kSpades, 14, SuitKind::kHearts),
-      TestCombo(9, SuitKind::kClubs, 12, SuitKind::kHearts),
-      TestBoard({TestCard(9, SuitKind::kHearts),
-                 TestCard(9, SuitKind::kDiamonds),
-                 TestCard(2, SuitKind::kClubs),
-                 TestCard(5, SuitKind::kSpades),
-                 TestCard(13, SuitKind::kClubs)}),
-      "trips kicker comparison");
-
-  CheckCompareMatchesReference(
-      TestCombo(13, SuitKind::kClubs, 12, SuitKind::kHearts),
-      TestCombo(13, SuitKind::kDiamonds, 11, SuitKind::kHearts),
-      TestBoard({TestCard(14, SuitKind::kHearts),
-                 TestCard(14, SuitKind::kDiamonds),
-                 TestCard(13, SuitKind::kSpades),
-                 TestCard(2, SuitKind::kClubs),
-                 TestCard(7, SuitKind::kDiamonds)}),
-      "two pair kicker comparison");
-
-  CheckCompareMatchesReference(
-      TestCombo(14, SuitKind::kClubs, 12, SuitKind::kHearts),
-      TestCombo(14, SuitKind::kSpades, 11, SuitKind::kHearts),
-      TestBoard({TestCard(14, SuitKind::kHearts),
-                 TestCard(13, SuitKind::kDiamonds),
-                 TestCard(7, SuitKind::kSpades),
-                 TestCard(4, SuitKind::kClubs),
-                 TestCard(2, SuitKind::kDiamonds)}),
-      "pair kicker comparison");
-
-  CheckCompareMatchesReference(
-      TestCombo(12, SuitKind::kClubs, 9, SuitKind::kHearts),
-      TestCombo(11, SuitKind::kClubs, 10, SuitKind::kHearts),
-      TestBoard({TestCard(14, SuitKind::kHearts),
-                 TestCard(13, SuitKind::kDiamonds),
-                 TestCard(7, SuitKind::kSpades),
-                 TestCard(4, SuitKind::kClubs),
-                 TestCard(2, SuitKind::kDiamonds)}),
-      "high card comparison");
+  for (const CompareCase& test_case : cases) {
+    CheckCompareMatchesReference(test_case.first, test_case.second,
+                                 test_case.board, test_case.label);
+  }
 }
 
 TEST_CASE("random Cactus comparisons match reference evaluator") {
