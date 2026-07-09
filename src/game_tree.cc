@@ -7,8 +7,6 @@ namespace poker {
 
 namespace {
 
-constexpr int kActionKeyMultiplier = 1000000;
-
 template <typename State>
 int StackForState(const State& state, int player) {
   return state.stack[player];
@@ -52,77 +50,6 @@ template <typename State>
 bool BoardComplete(const State& state) {
   return state.street == StreetKind::kRiver &&
          BoardCardCount(state) >= kMaxBoardCards;
-}
-
-template <typename State>
-int ConcreteBetAmount(const State& state, double size) {
-  if (size <= 0.0) {
-    return 0;
-  }
-  return std::max(1, static_cast<int>(std::max(1, state.pot) * size));
-}
-
-int StreetBetSizesSize(const SolverConfig& config, StreetKind street) {
-  switch (street) {
-    case StreetKind::kPreflop:
-      return config.preflop_bet_sizes.size();
-    case StreetKind::kFlop:
-      return config.flop_bet_sizes.size();
-    case StreetKind::kTurn:
-      return config.turn_bet_sizes.size();
-    case StreetKind::kRiver:
-      return config.river_bet_sizes.size();
-  }
-}
-
-double BetSizeForStreet(const SolverConfig& config,
-                        StreetKind street,
-                        int index) {
-  if (StreetBetSizesSize(config, street) == 0) {
-    return config.bet_sizes[index];
-  }
-
-  switch (street) {
-    case StreetKind::kPreflop:
-      return config.preflop_bet_sizes[index];
-    case StreetKind::kFlop:
-      return config.flop_bet_sizes[index];
-    case StreetKind::kTurn:
-      return config.turn_bet_sizes[index];
-    case StreetKind::kRiver:
-      return config.river_bet_sizes[index];
-  }
-}
-
-int BetSizesSize(const SolverConfig& config, StreetKind street) {
-  const int street_sizes = StreetBetSizesSize(config, street);
-  return street_sizes > 0 ? street_sizes
-                          : static_cast<int>(config.bet_sizes.size());
-}
-
-void AddAction(std::array<GameAction, GameTree::kMaxActionsPerNode>& actions,
-               uint8_t& action_count,
-               ActionKind kind,
-               int amount) {
-  if (action_count >= GameTree::kMaxActionsPerNode) {
-    throw std::logic_error("Legal action table exceeded kMaxActionsPerNode");
-  }
-  actions[static_cast<size_t>(action_count)] = {kind, amount, -1};
-  ++action_count;
-}
-
-void AddActionIfMissing(
-    std::array<GameAction, GameTree::kMaxActionsPerNode>& actions,
-    uint8_t& action_count,
-    ActionKind kind,
-    int amount) {
-  for (uint8_t i = 0; i < action_count; ++i) {
-    const GameAction& action = actions[static_cast<size_t>(i)];
-    if (action.kind == kind && action.amount == amount) {
-      return;
-    }
-  }
-  AddAction(actions, action_count, kind, amount);
 }
 
 template <typename State>
@@ -172,61 +99,6 @@ int PlayerToAct(const State& state) {
     return state.player_to_act;
   }
   return FirstPlayerForStreet(state);
-}
-
-template <typename State>
-uint8_t LegalActionsForState(
-    const SolverConfig& config,
-    const State& state,
-    std::array<GameAction, GameTree::kMaxActionsPerNode>& actions) {
-  uint8_t action_count = 0;
-  if (IsTerminal(state)) {
-    return action_count;
-  }
-
-  const int player = PlayerToAct(state);
-  if (!IsPlayer(player)) {
-    return action_count;
-  }
-
-  const int stack = StackForState(state, player);
-  if (stack <= 0) {
-    return action_count;
-  }
-
-  const int to_call = OutstandingToCall(state, player);
-  if (to_call > 0) {
-    AddAction(actions, action_count, ActionKind::kFold, 0);
-    AddAction(actions, action_count, ActionKind::kCall,
-              std::min(to_call, stack));
-
-    for (int i = 0; i < BetSizesSize(config, state.street); ++i) {
-      const int raise_amount =
-          to_call + ConcreteBetAmount(
-                        state, BetSizeForStreet(config, state.street, i));
-      if (raise_amount < stack) {
-        AddActionIfMissing(actions, action_count, ActionKind::kRaise,
-                           raise_amount);
-      }
-    }
-    if (stack > to_call) {
-      AddAction(actions, action_count, ActionKind::kAllIn, stack);
-    }
-  } else {
-    AddAction(actions, action_count, ActionKind::kCheck, 0);
-
-    for (int i = 0; i < BetSizesSize(config, state.street); ++i) {
-      const int bet_amount =
-          ConcreteBetAmount(state, BetSizeForStreet(config, state.street, i));
-      if (bet_amount < stack) {
-        AddActionIfMissing(actions, action_count, ActionKind::kBet,
-                           bet_amount);
-      }
-    }
-    AddAction(actions, action_count, ActionKind::kAllIn, stack);
-  }
-
-  return action_count;
 }
 
 void AppendStateHistory(CompactPublicState& state, const GameAction& action) {
@@ -394,21 +266,6 @@ double UtilityForState(const State& state,
 }
 
 }  // namespace
-
-GameTree::GameTree(const SolverConfig& config) : config_(config) {}
-
-int GameTree::action_key(const GameAction& action) {
-  if (action.amount < 0 || action.amount >= kActionKeyMultiplier) {
-    throw std::invalid_argument("Action amount is outside action-key range");
-  }
-  return static_cast<int>(action.kind) * kActionKeyMultiplier + action.amount;
-}
-
-uint8_t GameTree::get_legal_actions(
-    const CompactPublicState& state,
-    std::array<GameAction, kMaxActionsPerNode>& actions) const {
-  return LegalActionsForState(config_, state, actions);
-}
 
 CompactPublicState GameTree::apply_action(
     const CompactPublicState& state,

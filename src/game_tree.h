@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <cstdint>
 #include <limits>
 #include "absl/types/span.h"
@@ -20,15 +19,7 @@ public:
   static constexpr uint32_t kInvalidBettingHistoryId =
       std::numeric_limits<uint32_t>::max();
   
-  // Constructor
-  GameTree(const SolverConfig& config);
-
-  static int action_key(const GameAction& action);
-  
-  // Get legal actions at a given state
-  uint8_t get_legal_actions(
-      const CompactPublicState& state,
-      std::array<GameAction, kMaxActionsPerNode>& actions) const;
+  GameTree() = default;
   
   // Apply an action to a state to get the next state
   CompactPublicState apply_action(const CompactPublicState& state,
@@ -53,7 +44,6 @@ public:
   bool is_betting_round_over(const CompactPublicState& state) const;
   
 private:
-  SolverConfig config_;
   HandEvaluator hand_evaluator_;
 };
 

@@ -128,9 +128,11 @@ cc_library(
 
 cc_library(
     name = "betting_abstraction",
+    srcs = ["betting_abstraction.cc"],
     hdrs = ["betting_abstraction.h"],
     deps = [
         ":build_flags",
+        ":game_tree",
         ":strategy_tables",
     ],
     visibility = ["//visibility:public"],
@@ -169,6 +171,7 @@ cc_test(
     name = "game_tree_test",
     srcs = ["game_tree_test.cc"],
     deps = DOCTEST_DEPS + [
+        ":betting_abstraction",
         ":game_tree",
     ],
 )

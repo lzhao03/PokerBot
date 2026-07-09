@@ -1,9 +1,11 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 
 #include "src/build_flags.h"
+#include "src/game_tree.h"
 #include "src/poker_types.h"
 #include "src/strategy_tables.h"
 
@@ -13,6 +15,15 @@ class BettingAbstraction {
  public:
   using BettingHistoryKey = StrategyTables::BettingHistoryKey;
   using BettingHistoryRow = StrategyTables::BettingHistoryRow;
+
+  explicit BettingAbstraction(const SolverConfig& config);
+
+  uint8_t actions_for_betting_node(
+      const CompactPublicState& state,
+      int player,
+      std::array<GameAction, GameTree::kMaxActionsPerNode>& actions) const;
+
+  int action_key(const GameAction& action) const;
 
   BettingHistoryKey make_history_key(const CompactPublicState& state) const {
     BettingHistoryKey key;
@@ -187,6 +198,8 @@ class BettingAbstraction {
     return row.history_overflow[
         static_cast<size_t>(index - BettingHistoryKey::kInlineHistoryValues)];
   }
+
+  SolverConfig config_;
 };
 
 }  // namespace poker

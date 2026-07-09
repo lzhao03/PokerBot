@@ -5,6 +5,8 @@
 #include <array>
 #include <vector>
 
+#include "src/betting_abstraction.h"
+
 namespace poker {
 namespace {
 
@@ -75,16 +77,19 @@ bool HasAction(const std::vector<GameAction>& actions,
   return false;
 }
 
-std::vector<GameAction> LegalActions(const GameTree& tree,
+std::vector<GameAction> LegalActions(const BettingAbstraction& betting,
                                      const CompactPublicState& state) {
   std::array<GameAction, GameTree::kMaxActionsPerNode> action_table = {};
-  const uint8_t action_count = tree.get_legal_actions(state, action_table);
+  const uint8_t action_count = betting.actions_for_betting_node(
+      state, state.player_to_act, action_table);
   return std::vector<GameAction>(action_table.begin(),
                                  action_table.begin() + action_count);
 }
 
 TEST_CASE("legal actions preserve state invariants") {
-  GameTree tree(TestConfig());
+  const SolverConfig config = TestConfig();
+  GameTree tree;
+  BettingAbstraction betting(config);
   std::vector<CompactPublicState> states;
   states.push_back(PreflopState());
   states.push_back(FlopState());
@@ -95,7 +100,7 @@ TEST_CASE("legal actions preserve state invariants") {
 
   for (const CompactPublicState& state : states) {
     const int total_chips = TotalChips(state);
-    const std::vector<GameAction> actions = LegalActions(tree, state);
+    const std::vector<GameAction> actions = LegalActions(betting, state);
     REQUIRE(!actions.empty());
     for (const GameAction& action : actions) {
       CAPTURE(action.kind);
@@ -121,9 +126,9 @@ TEST_CASE("legal actions preserve state invariants") {
 }
 
 TEST_CASE("legal action abstraction shapes match config") {
-  GameTree tree(TestConfig());
+  BettingAbstraction betting(TestConfig());
   const std::vector<GameAction> preflop =
-      LegalActions(tree, PreflopState());
+      LegalActions(betting, PreflopState());
   CHECK(HasAction(preflop, ActionKind::kFold));
   CHECK(HasAction(preflop, ActionKind::kCall, 1));
   CHECK(HasAction(preflop, ActionKind::kRaise, 2));
@@ -131,26 +136,25 @@ TEST_CASE("legal action abstraction shapes match config") {
 
   SolverConfig dedup_config;
   dedup_config.bet_sizes = {0.5, 0.51};
-  GameTree dedup_tree(dedup_config);
+  BettingAbstraction dedup_betting(dedup_config);
   const std::vector<GameAction> dedup_actions =
-      LegalActions(dedup_tree, FlopState());
+      LegalActions(dedup_betting, FlopState());
   CHECK(dedup_actions.size() == 3);
   CHECK(HasAction(dedup_actions, ActionKind::kBet, 2));
 
   SolverConfig street_config;
   street_config.bet_sizes.push_back(0.5);
   street_config.flop_bet_sizes.push_back(1.0);
-  GameTree street_tree(street_config);
-  CHECK(HasAction(LegalActions(street_tree, FlopState()), ActionKind::kBet,
+  BettingAbstraction street_betting(street_config);
+  CHECK(HasAction(LegalActions(street_betting, FlopState()), ActionKind::kBet,
                   4));
 
-  CHECK_THROWS((void)GameTree::action_key({ActionKind::kCall, -1, -1}));
-  CHECK_THROWS((void)GameTree::action_key(
-      {ActionKind::kCall, 1000000, -1}));
+  CHECK_THROWS((void)betting.action_key({ActionKind::kCall, -1, -1}));
+  CHECK_THROWS((void)betting.action_key({ActionKind::kCall, 1000000, -1}));
 }
 
 TEST_CASE("terminal utility and chance transitions are correct") {
-  GameTree tree(TestConfig());
+  GameTree tree;
   CompactPublicState raised = tree.apply_action(
       PreflopState(), {ActionKind::kRaise, 4, -1});
   CompactPublicState folded = tree.apply_action(
@@ -182,7 +186,7 @@ TEST_CASE("terminal utility and chance transitions are correct") {
 }
 
 TEST_CASE("compact history cap is enforced") {
-  GameTree tree(TestConfig());
+  GameTree tree;
   CompactPublicState state;
   state.stack = {99, 98};
   state.pot = 3;

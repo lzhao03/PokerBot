@@ -248,10 +248,12 @@ PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
   row.is_chance_node = !row.is_terminal && row.player_to_act == -1;
 
   if (!row.is_terminal && !row.is_chance_node && IsPlayer(row.player_to_act)) {
-    row.action_count = game_tree_.get_legal_actions(row.state, row.actions);
+    row.action_count = betting_abstraction_.actions_for_betting_node(
+        row.state, row.player_to_act, row.actions);
     for (int i = 0; i < row.action_count; ++i) {
       row.action_ids[static_cast<size_t>(i)] =
-          GameTree::action_key(row.actions[static_cast<size_t>(i)]);
+          betting_abstraction_.action_key(
+              row.actions[static_cast<size_t>(i)]);
     }
   }
 
