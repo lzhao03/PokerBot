@@ -104,27 +104,27 @@ uint8_t BettingAbstraction::actions_for_betting_node(
     return action_count;
   }
 
-  const int to_call =
-      std::max(0, state.player_contribution[Opponent(player)] -
-                      state.player_contribution[player]);
-  if (to_call > 0) {
+  const int opponent_chips = state.player_contribution[Opponent(player)];
+  const int player_chips = state.player_contribution[player];
+  const int outstanding_call = std::max(0, opponent_chips - player_chips);
+  const bool facing_bet = outstanding_call > 0;
+  if (facing_bet) {
+    const int call_amount = std::min(outstanding_call, stack);
     AddAction(actions, action_count, ActionKind::kFold, 0);
-    AddAction(actions, action_count, ActionKind::kCall,
-              std::min(to_call, stack));
+    AddAction(actions, action_count, ActionKind::kCall, call_amount);
   } else {
     AddAction(actions, action_count, ActionKind::kCheck, 0);
   }
 
-  const ActionKind sized_action =
-      to_call > 0 ? ActionKind::kRaise : ActionKind::kBet;
+  const ActionKind sized_action = facing_bet ? ActionKind::kRaise : ActionKind::kBet;
   for (double bet_size : BetSizesForStreet(config_, state.street)) {
-    const int amount = to_call + ConcreteBetAmount(state, bet_size);
+    const int amount = outstanding_call + ConcreteBetAmount(state, bet_size);
     if (amount < stack) {
       AddActionIfMissing(actions, action_count, sized_action, amount);
     }
   }
 
-  if (to_call == 0 || stack > to_call) {
+  if (!facing_bet || stack > outstanding_call) {
     AddAction(actions, action_count, ActionKind::kAllIn, stack);
   }
 
