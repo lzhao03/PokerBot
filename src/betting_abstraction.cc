@@ -1,6 +1,7 @@
 #include "src/betting_abstraction.h"
 
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <stdexcept>
 #include <vector>
@@ -69,12 +70,7 @@ int BettingAbstraction::BucketChips(int chips) {
   if (chips <= 0) {
     return 0;
   }
-  int bucket = 1;
-  while (chips > 1) {
-    chips >>= 1;
-    ++bucket;
-  }
-  return bucket;
+  return std::bit_width(static_cast<unsigned int>(chips));
 }
 
 BettingAbstraction::Projection BettingAbstraction::Project(
