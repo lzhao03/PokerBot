@@ -509,7 +509,7 @@ class CFRSolver {
       int samples,
       uint32_t root_public_state_id,
       RangeSampler range_sampler,
-      int worker_count);
+      bool allow_parallel);
   SolverConfig config_;
   CompactPublicState initial_state_;
   std::mt19937 rng_;

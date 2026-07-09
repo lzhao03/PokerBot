@@ -1133,22 +1133,22 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   if (!root_public_state_id.has_value()) {
     return 0.0;
   }
-  const int worker_count =
-      samples >= kParallelEvaluationSampleThreshold
-          ? WorkerCountForSamples(samples)
-          : 1;
   return evaluate_strategy_samples(samples, *root_public_state_id,
-                                   range_sampler, worker_count);
+                                   range_sampler, true);
 }
 
 double CFRSolver::evaluate_strategy_samples(
     int samples,
     uint32_t root_public_state_id,
     RangeSampler range_sampler,
-    int worker_count) {
+    bool allow_parallel) {
   if (samples <= 0) {
     return 0.0;
   }
+  const int worker_count =
+      allow_parallel && samples >= kParallelEvaluationSampleThreshold
+          ? WorkerCountForSamples(samples)
+          : 1;
   if (worker_count > 1) {
     SolverConfig config = config_;
     std::shared_ptr<const StrategyTables> frozen_tables =
@@ -1164,7 +1164,7 @@ double CFRSolver::evaluate_strategy_samples(
           worker.storage_.bind_frozen(frozen_tables, cumulative);
           worker.rng_.seed(seed);
           const double value = worker.evaluate_strategy_samples(
-              shard_samples, root_public_state_id, range_sampler, 1);
+              shard_samples, root_public_state_id, range_sampler, false);
           return std::make_pair(
               value * shard_samples,
               worker.get_traversal_stats().action_entry_touches);
