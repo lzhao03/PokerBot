@@ -6,6 +6,7 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -760,6 +761,11 @@ void PublicStateGraph::rebuild_chance_child_entries() {
     uint32_t parent_id = 0;
     PublicBucketId outcome_id = 0;
     uint32_t public_state_id = GameTree::kInvalidPublicStateId;
+
+    bool operator<(const PendingChanceChild& other) const {
+      return std::tie(parent_id, outcome_id) <
+             std::tie(other.parent_id, other.outcome_id);
+    }
   };
 
   std::vector<PendingChanceChild> pending;
@@ -777,14 +783,7 @@ void PublicStateGraph::rebuild_chance_child_entries() {
     });
   }
 
-  std::sort(pending.begin(), pending.end(),
-            [](const PendingChanceChild& left,
-               const PendingChanceChild& right) {
-              if (left.parent_id != right.parent_id) {
-                return left.parent_id < right.parent_id;
-              }
-              return left.outcome_id < right.outcome_id;
-            });
+  std::sort(pending.begin(), pending.end());
 
   for (PublicStateRow& row : tables.public_state_rows) {
     row.chance_child_offset = 0;
