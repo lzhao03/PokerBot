@@ -85,11 +85,12 @@ TEST_CASE("training range view filters blocked cards into scratch") {
   poker::TrainingRangeView scratch;
 
   const poker::TrainingRangeView& blocked =
-      view.without_mask(poker::CardBit(ace_spades), scratch);
+      view.copy_without_mask_into(poker::CardBit(ace_spades), scratch);
   CHECK(blocked.size() == 1);
   CHECK(blocked.combo(0) == kings);
 
-  const poker::TrainingRangeView& unblocked = view.without_mask(0, scratch);
+  const poker::TrainingRangeView& unblocked =
+      view.copy_without_mask_into(0, scratch);
   CHECK(unblocked.size() == 2);
   CHECK(unblocked.combo(0) == aces);
   CHECK(unblocked.combo(1) == kings);

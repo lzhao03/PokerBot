@@ -186,12 +186,10 @@ class CFRSolver {
     NodeGraphMode mode_;
   };
 
-  // TODO: Move buffer borrowing behind TraversalScratch methods so traversal
-  // code does not manually pass scratch vectors/ranges around.
+  // TODO: Hide action-conditioned range borrowing behind TraversalContext too.
   struct RangeScratchFrame {
     std::vector<TrainingRangeView> conditioned_ranges;
-    TrainingRangeView public_player_a_range;
-    TrainingRangeView public_player_b_range;
+    std::array<TrainingRangeView, kPlayerCount> public_player_ranges;
   };
 
   class ActionConditionedRanges {
@@ -303,6 +301,18 @@ class CFRSolver {
 
     OptionalTrainingRange range(int player) const {
       return ranges_[static_cast<size_t>(player)];
+    }
+
+    OptionalTrainingRange range_without_mask(int player,
+                                             CardMask blocked_mask) {
+      OptionalTrainingRange current = range(player);
+      if (!current.has_value()) {
+        return {};
+      }
+      TrainingRangeView& scratch =
+          scratch_frame().public_player_ranges[static_cast<size_t>(player)];
+      return std::cref(
+          current->get().copy_without_mask_into(blocked_mask, scratch));
     }
 
     double average_strategy_weight(int player) const {

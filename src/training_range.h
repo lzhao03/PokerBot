@@ -95,8 +95,9 @@ struct TrainingRangeView {
     weights[combo_id] += weight;
   }
 
-  const TrainingRangeView& without_mask(CardMask blocked_mask,
-                                        TrainingRangeView& scratch) const;
+  const TrainingRangeView& copy_without_mask_into(
+      CardMask blocked_mask,
+      TrainingRangeView& scratch) const;
 
   bool empty() const { return size() == 0; }
 

@@ -96,7 +96,7 @@ RangeDeal RangeSampler::sample(std::mt19937& rng) const {
   return RangeDeal(player_a_combo, compatible_player_b_combos[sampled_index]);
 }
 
-const TrainingRangeView& TrainingRangeView::without_mask(
+const TrainingRangeView& TrainingRangeView::copy_without_mask_into(
     CardMask blocked_mask,
     TrainingRangeView& scratch) const {
   scratch.reset_to_filtered();

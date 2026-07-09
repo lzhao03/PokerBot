@@ -793,29 +793,13 @@ double CFRSolver::CfrTraversal<mode>::chance(NodeRef node) {
         });
   }
 
-  TrainingRangeView* public_player_a_range = nullptr;
-  TrainingRangeView* public_player_b_range = nullptr;
-  if (ctx_.range(0).has_value() || ctx_.range(1).has_value()) {
-    RangeScratchFrame& scratch_frame = ctx_.scratch_frame();
-    public_player_a_range = &scratch_frame.public_player_a_range;
-    public_player_b_range = &scratch_frame.public_player_b_range;
-  }
-
   return solver_.sample_chance_children(
       samples, node, ctx_.known_private_cards(), graph_,
       [&](NodeRef child) {
-        OptionalTrainingRange child_player_a_range = ctx_.range(0);
-        OptionalTrainingRange child_player_b_range = ctx_.range(1);
-        if (child_player_a_range.has_value()) {
-          child_player_a_range =
-              std::cref(child_player_a_range->get().without_mask(
-                  child.exact_board.mask, *public_player_a_range));
-        }
-        if (child_player_b_range.has_value()) {
-          child_player_b_range =
-              std::cref(child_player_b_range->get().without_mask(
-                  child.exact_board.mask, *public_player_b_range));
-        }
+        OptionalTrainingRange child_player_a_range =
+            ctx_.range_without_mask(0, child.exact_board.mask);
+        OptionalTrainingRange child_player_b_range =
+            ctx_.range_without_mask(1, child.exact_board.mask);
 
         if (child_player_a_range.has_value() ||
             child_player_b_range.has_value()) {
