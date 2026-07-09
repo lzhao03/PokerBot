@@ -8,7 +8,6 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <functional>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -283,8 +282,8 @@ int64_t PrimaryHands(const BenchmarkResult& result) {
                                           : result.hands;
 }
 
-void RunBenchmark(const std::string& name,
-                  const std::function<BenchmarkResult()>& benchmark) {
+template <typename BenchmarkFn>
+void RunBenchmark(const std::string& name, BenchmarkFn&& benchmark) {
   auto start = std::chrono::steady_clock::now();
   BenchmarkResult result = benchmark();
   auto end = std::chrono::steady_clock::now();
