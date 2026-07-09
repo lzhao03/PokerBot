@@ -1133,58 +1133,47 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   if (!root_public_state_id.has_value()) {
     return 0.0;
   }
-
-  if (samples < kParallelEvaluationSampleThreshold) {
-    return evaluate_strategy_samples(samples, *root_public_state_id,
-                                     range_sampler);
-  }
-
-  return evaluate_strategy_parallel_samples(samples, *root_public_state_id,
-                                            range_sampler);
-}
-
-double CFRSolver::evaluate_strategy_parallel_samples(
-    int samples,
-    uint32_t root_public_state_id,
-    const RangeSampler& range_sampler) {
-  int worker_count = WorkerCountForSamples(samples);
-  if (worker_count <= 1) {
-    return evaluate_strategy_samples(samples, root_public_state_id,
-                                     range_sampler);
-  }
-
-  SolverConfig config = config_;
-  std::shared_ptr<const StrategyTables> frozen_tables =
-      storage_.frozen_tables;
-  std::shared_ptr<MutableCumulativeArrays> cumulative = storage_.cumulative;
-  double total = 0.0;
-  run_sharded(
-      samples, worker_count, 0,
-      [config, range_sampler, root_public_state_id,
-       frozen_tables, cumulative](int, int shard_samples,
-                                  unsigned int seed) mutable {
-        CFRSolver worker(config);
-        worker.storage_.bind_frozen(frozen_tables, cumulative);
-        worker.rng_.seed(seed);
-        const double value = worker.evaluate_strategy_samples(
-            shard_samples, root_public_state_id, range_sampler);
-        return std::make_pair(
-            value * shard_samples,
-            worker.get_traversal_stats().action_entry_touches);
-      },
-      [&](const std::pair<double, int64_t>& result) {
-        total += result.first;
-        traversal_stats_.record_action_entries(result.second);
-      });
-  return total / samples;
+  return evaluate_strategy_samples(samples, *root_public_state_id,
+                                   range_sampler, true);
 }
 
 double CFRSolver::evaluate_strategy_samples(
     int samples,
     uint32_t root_public_state_id,
-    RangeSampler range_sampler) {
+    RangeSampler range_sampler,
+    bool allow_parallel) {
   if (samples <= 0) {
     return 0.0;
+  }
+  const int worker_count =
+      allow_parallel && samples >= kParallelEvaluationSampleThreshold
+          ? WorkerCountForSamples(samples)
+          : 1;
+  if (worker_count > 1) {
+    SolverConfig config = config_;
+    std::shared_ptr<const StrategyTables> frozen_tables =
+        storage_.frozen_tables;
+    std::shared_ptr<MutableCumulativeArrays> cumulative = storage_.cumulative;
+    double total = 0.0;
+    run_sharded(
+        samples, worker_count, 0,
+        [config, range_sampler, root_public_state_id,
+         frozen_tables, cumulative](int, int shard_samples,
+                                    unsigned int seed) mutable {
+          CFRSolver worker(config);
+          worker.storage_.bind_frozen(frozen_tables, cumulative);
+          worker.rng_.seed(seed);
+          const double value = worker.evaluate_strategy_samples(
+              shard_samples, root_public_state_id, range_sampler, false);
+          return std::make_pair(
+              value * shard_samples,
+              worker.get_traversal_stats().action_entry_touches);
+        },
+        [&](const std::pair<double, int64_t>& result) {
+          total += result.first;
+          traversal_stats_.record_action_entries(result.second);
+        });
+    return total / samples;
   }
 
   double total = 0.0;

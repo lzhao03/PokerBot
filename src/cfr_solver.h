@@ -508,11 +508,8 @@ class CFRSolver {
   double evaluate_strategy_samples(
       int samples,
       uint32_t root_public_state_id,
-      RangeSampler range_sampler);
-  double evaluate_strategy_parallel_samples(
-      int samples,
-      uint32_t root_public_state_id,
-      const RangeSampler& range_sampler);
+      RangeSampler range_sampler,
+      bool allow_parallel);
   SolverConfig config_;
   CompactPublicState initial_state_;
   std::mt19937 rng_;
