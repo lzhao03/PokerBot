@@ -995,7 +995,7 @@ CFRSolver::OptionalTrainingRange
 CFRSolver::ActionRangeConditioning::player_a_range_for(
     size_t action_index) const {
   if (condition_player_a_) {
-    return std::cref(conditioned_ranges_.for_action(action_index));
+    return std::cref(conditioned_ranges_[action_index]);
   }
   return original_player_a_range_;
 }
@@ -1004,12 +1004,12 @@ CFRSolver::OptionalTrainingRange
 CFRSolver::ActionRangeConditioning::player_b_range_for(
     size_t action_index) const {
   if (condition_player_b_) {
-    return std::cref(conditioned_ranges_.for_action(action_index));
+    return std::cref(conditioned_ranges_[action_index]);
   }
   return original_player_b_range_;
 }
 
-CFRSolver::ActionConditionedRanges CFRSolver::condition_ranges_for_actions(
+absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
     const TrainingRangeView& range,
     const CompactPublicState& state,
     uint32_t public_state_id,
@@ -1018,7 +1018,7 @@ CFRSolver::ActionConditionedRanges CFRSolver::condition_ranges_for_actions(
     RangeScratchFrame& scratch_frame) {
   const size_t action_count = conditioned_action_ids.size();
   if (action_count == 0) {
-    return ActionConditionedRanges();
+    return {};
   }
 
   std::vector<TrainingRangeView>& conditioned_ranges =
@@ -1031,9 +1031,8 @@ CFRSolver::ActionConditionedRanges CFRSolver::condition_ranges_for_actions(
   }
   const size_t range_size = range.size();
   if (range_size == 0) {
-    return ActionConditionedRanges(
-        absl::Span<TrainingRangeView>(conditioned_ranges.data(),
-                                      action_count));
+    return absl::Span<TrainingRangeView>(conditioned_ranges.data(),
+                                         action_count);
   }
 
   const CardMask board_mask = state.board_mask;
@@ -1063,8 +1062,7 @@ CFRSolver::ActionConditionedRanges CFRSolver::condition_ranges_for_actions(
     }
   }
 
-  return ActionConditionedRanges(
-      absl::Span<TrainingRangeView>(conditioned_ranges.data(), action_count));
+  return absl::Span<TrainingRangeView>(conditioned_ranges.data(), action_count);
 }
 
 double CFRSolver::evaluate_strategy(ComboId player_a_hand,

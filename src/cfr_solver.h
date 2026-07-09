@@ -180,21 +180,6 @@ class CFRSolver {
     std::array<TrainingRangeView, kPlayerCount> public_player_ranges;
   };
 
-  class ActionConditionedRanges {
-   public:
-    ActionConditionedRanges() = default;
-
-    explicit ActionConditionedRanges(absl::Span<TrainingRangeView> ranges)
-        : ranges_(ranges) {}
-
-    const TrainingRangeView& for_action(size_t action_index) const {
-      return ranges_[action_index];
-    }
-
-   private:
-    absl::Span<TrainingRangeView> ranges_;
-  };
-
   struct TraversalScratch {
     explicit TraversalScratch(size_t depth_count) {
       frames.reserve(depth_count);
@@ -404,7 +389,7 @@ class CFRSolver {
    private:
     OptionalTrainingRange original_player_a_range_;
     OptionalTrainingRange original_player_b_range_;
-    ActionConditionedRanges conditioned_ranges_;
+    absl::Span<TrainingRangeView> conditioned_ranges_;
     bool condition_player_a_ = false;
     bool condition_player_b_ = false;
   };
@@ -481,7 +466,7 @@ class CFRSolver {
 
   bool prebuild_info_set_rows(const TrainingRangeView& player_a_range,
                               const TrainingRangeView& player_b_range);
-  ActionConditionedRanges condition_ranges_for_actions(
+  absl::Span<TrainingRangeView> condition_ranges_for_actions(
       const TrainingRangeView& range,
       const CompactPublicState& state,
       uint32_t public_state_id,
