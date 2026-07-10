@@ -142,6 +142,7 @@ cc_library(
     hdrs = ["betting_abstraction.h"],
     deps = [
         ":build_flags",
+        ":game_tree",
         ":strategy_tables",
     ],
     visibility = ["//visibility:public"],
@@ -157,6 +158,7 @@ cc_library(
     ],
     deps = [
         ":build_flags",
+        ":game_tree",
         ":strategy_tables",
     ],
 )

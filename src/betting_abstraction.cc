@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
+#include "src/game_tree.h"
 
 namespace poker {
 namespace {
@@ -37,11 +38,18 @@ int ConcreteBetAmount(const BettingState& state, double size) {
   return std::max(1, static_cast<int>(std::max(1, state.pot) * size));
 }
 
-void AddAction(ActionMenu& menu, ActionKind kind, int amount) {
+void AddAction(ActionMenu& menu,
+               const BettingState& state,
+               ActionKind kind,
+               int amount) {
   if (menu.count >= kMaxActionsPerNode) {
     throw std::logic_error("Legal action table exceeded kMaxActionsPerNode");
   }
-  menu.actions[static_cast<size_t>(menu.count)] = {kind, amount, -1};
+  const GameAction action{kind, amount, -1};
+  if (!IsLegalAction(state, action)) {
+    throw std::logic_error("Betting abstraction generated an illegal action");
+  }
+  menu.actions[static_cast<size_t>(menu.count)] = action;
   ++menu.count;
 }
 
@@ -64,10 +72,10 @@ BettingAbstraction::ActionMenu BettingAbstraction::actions_for_betting_node(
   const int outstanding_call = std::max(0, opponent_chips - player_chips);
   if (outstanding_call > 0) {
     const int call_amount = std::min(outstanding_call, stack);
-    AddAction(menu, ActionKind::kFold, 0);
-    AddAction(menu, ActionKind::kCall, call_amount);
+    AddAction(menu, state, ActionKind::kFold, 0);
+    AddAction(menu, state, ActionKind::kCall, call_amount);
   } else {
-    AddAction(menu, ActionKind::kCheck, 0);
+    AddAction(menu, state, ActionKind::kCheck, 0);
   }
 
   ActionKind sized_action = ActionKind::kBet;
@@ -94,11 +102,11 @@ BettingAbstraction::ActionMenu BettingAbstraction::actions_for_betting_node(
   sized_actions.erase(unique_end, sized_actions.end());
 
   for (const GameAction& action : sized_actions) {
-    AddAction(menu, action.kind, action.amount);
+    AddAction(menu, state, action.kind, action.amount);
   }
 
   if (outstanding_call == 0 || stack > outstanding_call) {
-    AddAction(menu, ActionKind::kAllIn, stack);
+    AddAction(menu, state, ActionKind::kAllIn, stack);
   }
 
   return menu;
