@@ -67,14 +67,14 @@ size_t StrategyTables::BettingHistoryKeyHash::operator()(
 
 bool StrategyTables::PublicStateKey::operator==(
     const PublicStateKey& other) const {
-  return betting_history_id == other.betting_history_id &&
+  return betting_node_id == other.betting_node_id &&
          public_bucket == other.public_bucket;
 }
 
 size_t StrategyTables::PublicStateKeyHash::operator()(
     const PublicStateKey& key) const {
   size_t seed = 0;
-  HashCombine(seed, static_cast<uint64_t>(key.betting_history_id));
+  HashCombine(seed, static_cast<uint64_t>(key.betting_node_id));
   HashCombine(seed, key.public_bucket);
   return seed;
 }

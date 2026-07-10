@@ -97,17 +97,6 @@ class StrategyTables {
     size_t operator()(const BettingHistoryKey& key) const;
   };
 
-  struct PublicStateKey {
-    uint32_t betting_history_id = 0;
-    PublicBucketId public_bucket = 0;
-
-    bool operator==(const PublicStateKey& other) const;
-  };
-
-  struct PublicStateKeyHash {
-    size_t operator()(const PublicStateKey& key) const;
-  };
-
   using BettingNodeId = uint32_t;
 
   enum class NodeKind : uint8_t {
@@ -129,6 +118,17 @@ class StrategyTables {
     BettingNodeId chance_child = kInvalidBettingNodeId;
     NodeKind kind = NodeKind::kDecision;
     int player_to_act = -1;
+  };
+
+  struct PublicStateKey {
+    BettingNodeId betting_node_id = 0;
+    PublicBucketId public_bucket = 0;
+
+    bool operator==(const PublicStateKey& other) const;
+  };
+
+  struct PublicStateKeyHash {
+    size_t operator()(const PublicStateKey& key) const;
   };
 
   struct ChanceTransitionKey {

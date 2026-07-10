@@ -102,11 +102,11 @@ class PublicStateGraph {
   BettingNodeId get_or_create_chance_betting_child(
       BettingNodeId parent_node_id,
       const BettingState& child_state);
-  PublicStateKey row_key(uint32_t betting_history_id,
+  PublicStateKey row_key(BettingNodeId betting_node_id,
                          StreetKind street,
                          const Board& board) const;
   std::optional<uint32_t> find_row(
-      uint32_t betting_history_id,
+      BettingNodeId betting_node_id,
       StreetKind street,
       const Board& board) const;
   PublicStateRow make_row(uint32_t betting_history_id,

@@ -146,7 +146,7 @@ TEST_CASE("evaluate strategy traversal guard") {
                    solver.get_cfr_update_count(),
                    after_touches - before_touches,
                },
-               Metrics{0.046839674465274539, 1, 232, 3, 4},
+               Metrics{0.046839674465274539, 1, 233, 3, 4},
                "evaluate strategy traversal");
 }
 

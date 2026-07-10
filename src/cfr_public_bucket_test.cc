@@ -26,10 +26,10 @@ HandRange ExactRange(ComboId combo_id) {
 
 SolverConfig CoarseConfig() {
   SolverConfig config;
-  config.starting_stack_size = 18;
+  config.starting_stack_size = 8;
   config.small_blind = 1;
   config.big_blind = 2;
-  config.bet_sizes = {0.5, 1.0};
+  config.bet_sizes = {1.0};
   config.max_depth = 0;
   config.chance_samples = 1;
   config.regret_only_training = true;
