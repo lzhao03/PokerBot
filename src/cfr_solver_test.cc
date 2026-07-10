@@ -81,5 +81,13 @@ TEST_CASE("empty ranges are rejected") {
   CHECK_THROWS_AS(solver.run(1, empty, player_b), std::invalid_argument);
 }
 
+TEST_CASE("invalid initial betting state is rejected") {
+  SolverConfig config = SmallConfig();
+  ExactGameState invalid;
+  invalid.betting.stack[0] = -1;
+
+  CHECK_THROWS_AS(CFRSolver(config, invalid), std::invalid_argument);
+}
+
 }  // namespace
 }  // namespace poker

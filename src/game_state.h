@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -77,14 +76,12 @@ inline bool AnyPlayerAllIn(const BettingState& state) noexcept {
   return state.stack[0] == 0 || state.stack[1] == 0;
 }
 
-inline void ValidateBettingState(const BettingState& state) {
-  assert(state.stack[0] >= 0);
-  assert(state.stack[1] >= 0);
-  assert(state.committed[0] >= 0);
-  assert(state.committed[1] >= 0);
-  assert((state.pending_action_mask & ~kAllPlayersMask) == 0);
-  assert(state.folded_player >= -1 && state.folded_player < kPlayerCount);
-  assert(state.player_to_act >= -1 && state.player_to_act < kPlayerCount);
+inline bool IsValidBettingState(const BettingState& state) noexcept {
+  return state.stack[0] >= 0 && state.stack[1] >= 0 &&
+         state.committed[0] >= 0 && state.committed[1] >= 0 &&
+         (state.pending_action_mask & ~kAllPlayersMask) == 0 &&
+         state.folded_player >= -1 && state.folded_player < kPlayerCount &&
+         state.player_to_act >= -1 && state.player_to_act < kPlayerCount;
 }
 
 }  // namespace poker

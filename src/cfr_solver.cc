@@ -111,7 +111,9 @@ CFRSolver::CFRSolver(const SolverConfig& config,
       strategy_store_(config_, storage_, &traversal_stats_),
       graph_builder_(config_, storage_, betting_abstraction_,
                      traversal_stats_) {
-  ValidateBettingState(initial_state_.betting);
+  if (!IsValidBettingState(initial_state_.betting)) {
+    throw std::invalid_argument("initial betting state is invalid");
+  }
   // Pre-allocate strategy table storage when limits are known upfront.
   // This gives fully deterministic peak memory: no reallocation after init.
   if (config_.max_info_sets > 0) {

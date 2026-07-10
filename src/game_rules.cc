@@ -53,7 +53,7 @@ void AdvanceStreet(ExactGameState& state, absl::Span<const CardId> cards) {
   if (IsBettingRoundOver(state.betting)) {
     state.betting.player_to_act = -1;
   }
-  ValidateBettingState(state.betting);
+  assert(IsValidBettingState(state.betting));
 }
 
 bool HandOver(const BettingState& state, const Board& board) {
@@ -163,7 +163,7 @@ BettingState ApplyActionUnchecked(const BettingState& state,
     child.player_to_act = -1;
   }
 
-  ValidateBettingState(child);
+  assert(IsValidBettingState(child));
   return child;
 }
 
