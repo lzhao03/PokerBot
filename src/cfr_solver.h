@@ -21,6 +21,8 @@
 
 namespace poker {
 
+struct CFRSolverTestAccess;
+
 class CFRSolver {
  public:
   using TraversalStats = poker::TraversalStats;
@@ -53,6 +55,8 @@ class CFRSolver {
   static bool traversal_stats_enabled();
 
  private:
+  friend struct CFRSolverTestAccess;
+
   const StrategyTables& tables() const {
     return storage_.frozen_ref();
   }

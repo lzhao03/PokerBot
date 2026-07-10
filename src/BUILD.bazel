@@ -3,6 +3,7 @@ load("@protobuf//bazel:proto_library.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 
 DOCTEST_DEPS = ["@doctest//:main"]
+RAPIDCHECK_DEPS = ["@rapidcheck//:rapidcheck"]
 
 proto_library(
     name = "poker",
@@ -187,6 +188,18 @@ cc_test(
     srcs = ["game_tree_test.cc"],
     deps = DOCTEST_DEPS + [
         ":game_tree",
+    ],
+)
+
+cc_test(
+    name = "game_semantics_property_test",
+    srcs = ["game_semantics_property_test.cc"],
+    deps = DOCTEST_DEPS + RAPIDCHECK_DEPS + [
+        ":betting_abstraction",
+        ":card_utils",
+        ":combo",
+        ":game_tree",
+        ":hand_evaluator",
     ],
 )
 
@@ -436,6 +449,16 @@ cc_test(
     deps = DOCTEST_DEPS + [
         ":combo",
         ":cfr_solver",
+    ],
+)
+
+cc_test(
+    name = "cfr_equivalence_test",
+    srcs = ["cfr_equivalence_test.cc"],
+    deps = DOCTEST_DEPS + [
+        ":combo",
+        ":cfr_solver",
+        ":hand_range",
     ],
 )
 
