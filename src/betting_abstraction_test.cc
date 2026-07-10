@@ -65,6 +65,16 @@ std::vector<GameAction> LegalActions(const BettingAbstraction& betting,
                                  menu.actions.begin() + menu.count);
 }
 
+bool CompactTerminal(const CompactPublicState& state) {
+  const ExactGameState exact = ExactGameStateFromCompact(state);
+  return IsTerminal(exact.betting, exact.board);
+}
+
+int CompactPlayerToAct(const CompactPublicState& state) {
+  const ExactGameState exact = ExactGameStateFromCompact(state);
+  return GetPlayerToAct(exact.betting, exact.board);
+}
+
 TEST_CASE("generated betting actions preserve state invariants") {
   BettingAbstraction betting(TestConfig());
   const std::vector<CompactPublicState> states = {
@@ -91,11 +101,11 @@ TEST_CASE("generated betting actions preserve state invariants") {
       CHECK(last_action.kind == action.kind);
       CHECK(last_action.player == state.player_to_act);
       if (next.folded_player >= 0) {
-        CHECK(IsTerminal(next));
+        CHECK(CompactTerminal(next));
         CHECK(next.player_to_act == -1);
       }
-      if (IsBettingRoundOver(next)) {
-        CHECK(GetPlayerToAct(next) == -1);
+      if (IsBettingRoundOver(BettingStateFromCompact(next))) {
+        CHECK(CompactPlayerToAct(next) == -1);
       }
     }
   }

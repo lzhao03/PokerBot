@@ -400,23 +400,11 @@ bool IsTerminal(const BettingState& state, const Board& board) {
   return IsTerminalForState(state, board);
 }
 
-bool IsTerminal(const CompactPublicState& state) {
-  return IsTerminalForState(state);
-}
-
 int GetPlayerToAct(const BettingState& state, const Board& board) {
   return PlayerToActForState(state, board);
 }
 
-int GetPlayerToAct(const CompactPublicState& state) {
-  return PlayerToActForState(state);
-}
-
 bool IsBettingRoundOver(const BettingState& state) {
-  return IsBettingRoundOverForState(state);
-}
-
-bool IsBettingRoundOver(const CompactPublicState& state) {
   return IsBettingRoundOverForState(state);
 }
 

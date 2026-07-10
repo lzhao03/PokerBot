@@ -51,7 +51,8 @@ TEST_CASE("terminal utility and chance transitions are correct") {
   ComboId player_b =
       CardsToComboId(MakeCardId(13, SuitKind::kHearts),
                      MakeCardId(13, SuitKind::kSpades));
-  CHECK(IsTerminal(ShowdownState()));
+  const ExactGameState showdown = ExactGameStateFromCompact(ShowdownState());
+  CHECK(IsTerminal(showdown.betting, showdown.board));
   CHECK(GetUtility(ExactGameStateFromCompact(ShowdownState()), player_a,
                    player_b) == 10);
 

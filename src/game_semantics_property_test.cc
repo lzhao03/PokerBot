@@ -45,6 +45,20 @@ CompactPublicState InitialState(const SolverConfig& config) {
   return state;
 }
 
+bool CompactTerminal(const CompactPublicState& state) {
+  const ExactGameState exact = ExactGameStateFromCompact(state);
+  return IsTerminal(exact.betting, exact.board);
+}
+
+int CompactPlayerToAct(const CompactPublicState& state) {
+  const ExactGameState exact = ExactGameStateFromCompact(state);
+  return GetPlayerToAct(exact.betting, exact.board);
+}
+
+bool CompactBettingRoundOver(const CompactPublicState& state) {
+  return IsBettingRoundOver(BettingStateFromCompact(state));
+}
+
 ComboId Combo(int first_rank,
               SuitKind first_suit,
               int second_rank,
@@ -218,8 +232,8 @@ void CheckReachableCase(uint32_t seed, int max_steps) {
   const int total_chips = TotalChips(state);
   ValidateState(state, total_chips, trace);
 
-  for (int step = 0; step < max_steps && !IsTerminal(state); ++step) {
-    const int player = GetPlayerToAct(state);
+  for (int step = 0; step < max_steps && !CompactTerminal(state); ++step) {
+    const int player = CompactPlayerToAct(state);
     if (IsPlayer(player)) {
       const std::vector<GameAction> actions = LegalActions(betting, state);
       Require(!actions.empty(), trace, "player node must have legal actions");
@@ -270,9 +284,9 @@ CompactPublicState FlopState() {
 void CheckCompletedRound(const CompactPublicState& state,
                          bool terminal) {
   CAPTURE(StateString(state));
-  CHECK(IsBettingRoundOver(state));
-  CHECK(GetPlayerToAct(state) == -1);
-  CHECK(IsTerminal(state) == terminal);
+  CHECK(CompactBettingRoundOver(state));
+  CHECK(CompactPlayerToAct(state) == -1);
+  CHECK(CompactTerminal(state) == terminal);
 }
 
 CompactPublicState RiverShowdown(std::initializer_list<CardId> board) {
@@ -373,7 +387,7 @@ TEST_CASE("betting-round completion cases agree") {
   const CompactPublicState root = InitialState(config);
   CompactPublicState preflop_complete =
       ApplyAction(root, {ActionKind::kCall, 1, -1});
-  CHECK(!IsBettingRoundOver(preflop_complete));
+  CHECK(!CompactBettingRoundOver(preflop_complete));
   preflop_complete = ApplyAction(preflop_complete, {ActionKind::kCheck});
   CheckCompletedRound(preflop_complete, false);
 
@@ -417,8 +431,8 @@ TEST_CASE("betting-round completion cases agree") {
   runout = ApplyAction(runout, {ActionKind::kCall});
   runout = ApplyChance(runout, {MakeCardId(9, SuitKind::kSpades)});
   runout = ApplyChance(runout, {MakeCardId(3, SuitKind::kHearts)});
-  CHECK(IsTerminal(runout));
-  CHECK(GetPlayerToAct(runout) == -1);
+  CHECK(CompactTerminal(runout));
+  CHECK(CompactPlayerToAct(runout) == -1);
 }
 
 TEST_CASE("chance sampling excludes known cards") {
