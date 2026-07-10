@@ -118,7 +118,7 @@ struct CFRSolverTestAccess {
         solver.tables().public_state_rows[root_id];
     const CFRSolver::NodeRef root{
         root_id,
-        CFRSolver::ExactBoardFromState(root_row.state),
+        BoardFromCompact(root_row.state),
     };
     CFRSolver::NodeGraph graph(
         solver,

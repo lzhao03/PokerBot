@@ -66,8 +66,11 @@ class HandEvaluator {
 
   HandEvaluation evaluate(const std::array<CardId, 5>& cards) const;
   HandEvaluation evaluate_hand(ComboId hole_cards,
+                               const Board& board) const;
+  HandEvaluation evaluate_hand(ComboId hole_cards,
                                const CompactPublicState& board_state) const;
 
+  uint16_t hand_value(ComboId hand, const Board& board) const;
   uint16_t hand_value(ComboId hand,
                       const CompactPublicState& board_state) const;
   uint16_t hand_value(
@@ -75,6 +78,8 @@ class HandEvaluator {
       const std::array<CardId, kMaxBoardCards>& board_cards,
       uint8_t board_count) const;
 
+  int compare_hands(ComboId hand1, ComboId hand2,
+                    const Board& board) const;
   int compare_hands(ComboId hand1, ComboId hand2,
                     const CompactPublicState& board_state) const;
   int compare_hands(ComboId hand1, ComboId hand2,

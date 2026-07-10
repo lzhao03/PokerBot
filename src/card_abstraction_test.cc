@@ -48,8 +48,10 @@ TEST_CASE("exact public buckets use the board mask") {
                   MakeCardId(2, SuitKind::kHearts),
                   MakeCardId(7, SuitKind::kDiamonds));
 
-  CHECK(buckets.bucket(first) == first.board_mask);
-  CHECK(buckets.bucket(first) == buckets.bucket(reordered));
+  CHECK(buckets.bucket(first.street, BoardFromCompact(first)) ==
+        first.board_mask);
+  CHECK(buckets.bucket(first.street, BoardFromCompact(first)) ==
+        buckets.bucket(reordered.street, BoardFromCompact(reordered)));
 }
 
 TEST_CASE("texture public buckets group by board texture") {
@@ -81,10 +83,16 @@ TEST_CASE("texture public buckets group by board texture") {
                   MakeCardId(11, SuitKind::kClubs),
                   MakeCardId(14, SuitKind::kSpades));
 
-  CHECK(buckets.bucket(first_flop) == buckets.bucket(same_texture_flop));
-  CHECK(buckets.bucket(first_flop) != buckets.bucket(paired_flop));
-  CHECK(buckets.bucket(first_flop) != buckets.bucket(monotone_flop));
-  CHECK(buckets.bucket(first_flop) != buckets.bucket(turn));
+  CHECK(buckets.bucket(first_flop.street, BoardFromCompact(first_flop)) ==
+        buckets.bucket(same_texture_flop.street,
+                       BoardFromCompact(same_texture_flop)));
+  CHECK(buckets.bucket(first_flop.street, BoardFromCompact(first_flop)) !=
+        buckets.bucket(paired_flop.street, BoardFromCompact(paired_flop)));
+  CHECK(buckets.bucket(first_flop.street, BoardFromCompact(first_flop)) !=
+        buckets.bucket(monotone_flop.street,
+                       BoardFromCompact(monotone_flop)));
+  CHECK(buckets.bucket(first_flop.street, BoardFromCompact(first_flop)) !=
+        buckets.bucket(turn.street, BoardFromCompact(turn)));
 }
 
 TEST_CASE("exact private buckets use exact combo ids") {
@@ -93,8 +101,9 @@ TEST_CASE("exact private buckets use exact combo ids") {
   const ComboId aces =
       ExactCombo(14, SuitKind::kSpades, 14, SuitKind::kHearts);
 
-  CHECK(buckets.bucket(aces, state) == aces);
-  CHECK(buckets.bucket_count(state) == kComboCount);
+  CHECK(buckets.bucket(aces, state.street, BoardFromCompact(state)) == aces);
+  CHECK(buckets.bucket_count(state.street, BoardFromCompact(state)) ==
+        kComboCount);
 }
 
 TEST_CASE("coarse private buckets merge equivalent combos") {
@@ -108,11 +117,12 @@ TEST_CASE("coarse private buckets merge equivalent combos") {
       ExactCombo(14, SuitKind::kSpades, 13, SuitKind::kHearts);
 
   CHECK(ace_king_spades != ace_king_hearts);
-  CHECK(buckets.bucket(ace_king_spades, state) ==
-        buckets.bucket(ace_king_hearts, state));
-  CHECK(buckets.bucket(ace_king_spades, state) !=
-        buckets.bucket(ace_king_offsuit, state));
-  CHECK(buckets.bucket_count(state) < kComboCount);
+  const Board board = BoardFromCompact(state);
+  CHECK(buckets.bucket(ace_king_spades, state.street, board) ==
+        buckets.bucket(ace_king_hearts, state.street, board));
+  CHECK(buckets.bucket(ace_king_spades, state.street, board) !=
+        buckets.bucket(ace_king_offsuit, state.street, board));
+  CHECK(buckets.bucket_count(state.street, board) < kComboCount);
 }
 
 }  // namespace

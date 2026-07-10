@@ -270,46 +270,13 @@ CFRSolver::TraversalContext::ChildTraversalScope::~ChildTraversalScope() {
   }
 }
 
-CFRSolver::ExactBoardState CFRSolver::ExactBoardFromState(
-    const CompactPublicState& state) {
-  return ExactBoardState{
-      state.board_cards,
-      state.board_count,
-      state.board_mask,
-  };
-}
-
-void CFRSolver::ApplyExactBoard(CompactPublicState& state,
-                                const ExactBoardState& board) {
-  state.board_cards = board.cards;
-  state.board_count = board.count;
-  state.board_mask = board.mask;
-}
-
-const CompactPublicState& CFRSolver::NodeCursor::exact_state() const {
-  if (!exact_state_.has_value()) {
-    CompactPublicState state = row_.state;
-    CFRSolver::ApplyExactBoard(state, ref_.exact_board);
-    exact_state_.emplace(std::move(state));
-  }
-  return *exact_state_;
-}
-
-std::optional<CFRSolver::NodeCursor> CFRSolver::cursor(NodeRef node) const {
-  const auto& public_rows = rows();
-  if (node.public_state_id >= public_rows.size()) {
-    return std::nullopt;
-  }
-  return NodeCursor{node, public_rows[node.public_state_id]};
-}
-
 std::optional<CFRSolver::NodeRef> CFRSolver::root_node_ref(
     uint32_t root_id) const {
   const auto& state_rows = rows();
   if (root_id >= state_rows.size()) {
     return std::nullopt;
   }
-  return NodeRef{root_id, ExactBoardFromState(state_rows[root_id].state)};
+  return NodeRef{root_id, BoardFromCompact(state_rows[root_id].state)};
 }
 
 std::optional<CFRSolver::DecisionFrame> CFRSolver::make_decision_frame(
@@ -337,7 +304,7 @@ CFRSolver::NodeGraph::NodeGraph(CFRSolver& solver,
 CFRSolver::ChildResult
 CFRSolver::NodeGraph::make_child_result(
     std::optional<uint32_t> child_id,
-    ExactBoardState exact_board,
+    Board exact_board,
     const char* missing_message) const {
   const auto& public_rows = solver_.rows();
   ChildStatus status = ChildStatus::kOk;
@@ -384,26 +351,29 @@ CFRSolver::ChildResult
 CFRSolver::NodeGraph::sample_chance_child(
     NodeRef parent,
     CardMask known_private_cards) {
-  std::optional<NodeCursor> parent_cursor = solver_.cursor(parent);
-  if (!parent_cursor.has_value()) {
+  const auto& public_rows = solver_.rows();
+  if (parent.public_state_id >= public_rows.size()) {
     return ChildResult{ChildStatus::kInvalid, {}};
   }
-  const CompactPublicState& exact_parent_state = parent_cursor->exact_state();
-  const auto cards =
-      SampleStreetCards(exact_parent_state, known_private_cards, solver_.rng_);
-  CompactPublicState exact_child_state = ApplyChance(exact_parent_state, cards);
-  const ExactBoardState child_board =
-      CFRSolver::ExactBoardFromState(exact_child_state);
+  ExactGameState exact_parent_state =
+      ExactGameStateFromCompact(public_rows[parent.public_state_id].state);
+  exact_parent_state.board = parent.exact_board;
+  const auto cards = SampleStreetCards(exact_parent_state.betting.street,
+                                       exact_parent_state.board,
+                                       known_private_cards, solver_.rng_);
+  ExactGameState exact_child_state = ApplyChance(exact_parent_state, cards);
+  CompactPublicState child_state = ToCompact(exact_child_state);
+  const Board child_board = exact_child_state.board;
   std::optional<uint32_t> child_id;
   switch (mode_) {
     case NodeGraphMode::kGrow:
       child_id = solver_.public_graph_.get_or_create_chance_child(
-          parent.public_state_id, exact_child_state);
+          parent.public_state_id, child_state);
       break;
     case NodeGraphMode::kSkipMissing:
     case NodeGraphMode::kRequirePresent:
       child_id = solver_.public_graph_.find_chance_child(
-          parent.public_state_id, exact_child_state);
+          parent.public_state_id, child_state);
       break;
   }
 
@@ -437,7 +407,9 @@ bool CFRSolver::prebuild_info_set_rows(
       continue;
     }
 
-    const uint32_t bucket_count = card_abstraction_.private_bucket_count(row.state);
+    const Board board = BoardFromCompact(row.state);
+    const uint32_t bucket_count =
+        card_abstraction_.private_bucket_count(row.state.street, board);
     if (bucket_count == 0 || bucket_count > kComboCount) {
       return false;
     }
@@ -451,7 +423,7 @@ bool CFRSolver::prebuild_info_set_rows(
     const uint32_t generation = seen_generation++;
     const absl::Span<const int> action_ids(row.action_ids.data(),
                                            row.action_count);
-    const CardMask board_mask = row.state.board_mask;
+    const CardMask board_mask = board.mask;
     for (size_t i = 0; i < range.size(); ++i) {
       if (range.weight(i) <= 0.0f) {
         continue;
@@ -461,7 +433,7 @@ bool CFRSolver::prebuild_info_set_rows(
         continue;
       }
       const PrivateBucketId bucket =
-          card_abstraction_.private_bucket(combo_id, row.state);
+          card_abstraction_.private_bucket(combo_id, row.state.street, board);
       if (bucket >= bucket_count) {
         return false;
       }
@@ -617,7 +589,7 @@ void CFRSolver::run_growing_iterations(
           << " single-threaded iterations";
   const CompactPublicState root_state = rows()[root_id].state;
   NodeGraph graph(*this, NodeGraphMode::kGrow);
-  const NodeRef root_node{root_id, ExactBoardFromState(root_state)};
+  const NodeRef root_node{root_id, BoardFromCompact(root_state)};
   TraversalScratch scratch(ScratchDepthReserve(config_, max_depth));
   const int64_t warmup_start_updates = cfr_update_count_;
   const auto warmup_start = std::chrono::steady_clock::now();
@@ -750,7 +722,7 @@ void CFRSolver::run_fixed_storage_iterations(
           const auto& root_row = worker.tables().public_state_rows[root_id];
           const CompactPublicState root_state = root_row.state;
           NodeGraph graph(worker, NodeGraphMode::kRequirePresent);
-          const NodeRef root_node{root_id, ExactBoardFromState(root_state)};
+          const NodeRef root_node{root_id, BoardFromCompact(root_state)};
           for (int i = 0; i < shard; ++i) {
             const RangeDeal sampled = sampler.sample(worker.rng_);
             const TraversalDeal deal = worker.traversal_deal(sampled);
@@ -814,11 +786,7 @@ double CFRSolver::CfrTraversal::value(NodeRef node) {
   }
 
   if (ctx_.depth_limited()) {
-    std::optional<NodeCursor> node_cursor = solver_.cursor(node);
-    if (!node_cursor.has_value()) {
-      return 0.0;
-    }
-    return depth_limit_value(*node_cursor);
+    return depth_limit_value(node, row);
   }
 
   return decision(node, row);
@@ -827,19 +795,9 @@ double CFRSolver::CfrTraversal::value(NodeRef node) {
 double CFRSolver::CfrTraversal::terminal(
     NodeRef node,
     const PublicStateRow& row) {
-  if (ctx_.options().use_fixed_infoset_lookup) {
-    solver_.traversal_stats_.record_terminal(row.state.folded_player < 0);
-    return solver_.terminal_utility(row, node.exact_board, ctx_.cards(0),
-                                    ctx_.cards(1));
-  }
-
-  std::optional<NodeCursor> node_cursor = solver_.cursor(node);
-  if (!node_cursor.has_value()) {
-    return 0.0;
-  }
-  const CompactPublicState& state = node_cursor->exact_state();
-  solver_.traversal_stats_.record_terminal(state.folded_player < 0);
-  return solver_.terminal_utility(state, ctx_.cards(0), ctx_.cards(1));
+  solver_.traversal_stats_.record_terminal(row.state.folded_player < 0);
+  return solver_.terminal_utility(row, node.exact_board, ctx_.cards(0),
+                                  ctx_.cards(1));
 }
 
 double CFRSolver::CfrTraversal::chance(NodeRef node) {
@@ -863,10 +821,11 @@ double CFRSolver::CfrTraversal::chance(NodeRef node) {
 }
 
 double CFRSolver::CfrTraversal::depth_limit_value(
-    const NodeCursor& node_cursor) {
-  const CompactPublicState& state = node_cursor.exact_state();
-  return IsBettingRoundOver(state)
-             ? solver_.terminal_utility(state, ctx_.cards(0), ctx_.cards(1))
+    NodeRef node,
+    const PublicStateRow& row) {
+  return IsBettingRoundOver(row.state)
+             ? solver_.terminal_utility(row, node.exact_board, ctx_.cards(0),
+                                        ctx_.cards(1))
              : 0.0;
 }
 
@@ -891,7 +850,8 @@ double CFRSolver::CfrTraversal::decision(
         decision.public_state_id, player, cards.combo, action_count);
   } else {
     const PrivateBucketId bucket =
-        solver_.card_abstraction_.private_bucket(cards.combo, row.state);
+        solver_.card_abstraction_.private_bucket(
+            cards.combo, decision.street, node.exact_board);
     const InfoSetAddress infoset{decision.public_state_id, player, bucket};
     if (update_player) {
       actions = solver_.strategy_store_.get_or_create(infoset, action_ids);
@@ -915,11 +875,8 @@ double CFRSolver::CfrTraversal::decision(
   const bool needs_a_range = player == 0 && ctx_.range(0).has_value();
   const bool needs_b_range = player == 1 && ctx_.range(1).has_value();
   if (needs_a_range || needs_b_range) {
-    std::optional<NodeCursor> node_cursor = solver_.cursor(node);
-    if (!node_cursor.has_value()) {
-      return 0.0;
-    }
-    range_conditioning.emplace(solver_, ctx_, *node_cursor,
+    range_conditioning.emplace(solver_, ctx_, decision.street,
+                               node.exact_board,
                                decision.public_state_id, player, action_ids);
   }
   const bool has_conditioning = range_conditioning.has_value();
@@ -1007,7 +964,8 @@ double CFRSolver::sample_chance_children(
 CFRSolver::ActionRangeConditioning::ActionRangeConditioning(
     CFRSolver& solver,
     TraversalContext& ctx,
-    const NodeCursor& node_cursor,
+    StreetKind street,
+    const Board& board,
     uint32_t node_id,
     int player,
     absl::Span<const int> action_ids)
@@ -1022,14 +980,13 @@ CFRSolver::ActionRangeConditioning::ActionRangeConditioning(
   }
 
   RangeScratchFrame& scratch_frame = ctx.scratch_frame();
-  const CompactPublicState& state = node_cursor.exact_state();
   if (condition_player_a_) {
     conditioned_ranges_ = solver.condition_ranges_for_actions(
-        original_player_a_range_->get(), state, node_id, player, action_ids,
+        original_player_a_range_->get(), street, board, node_id, player, action_ids,
         scratch_frame);
   } else {
     conditioned_ranges_ = solver.condition_ranges_for_actions(
-        original_player_b_range_->get(), state, node_id, player, action_ids,
+        original_player_b_range_->get(), street, board, node_id, player, action_ids,
         scratch_frame);
   }
 }
@@ -1054,7 +1011,8 @@ CFRSolver::ActionRangeConditioning::player_b_range_for(
 
 absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
     const TrainingRangeView& range,
-    const CompactPublicState& state,
+    StreetKind street,
+    const Board& board,
     uint32_t node_id,
     int player,
     absl::Span<const int> action_ids,
@@ -1076,7 +1034,7 @@ absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
     return absl::Span<TrainingRangeView>(ranges.data(), action_count);
   }
 
-  const CardMask board_mask = state.board_mask;
+  const CardMask board_mask = board.mask;
   std::array<double, kMaxActionsPerNode> action_probabilities_storage{};
   absl::Span<double> action_probabilities(
       action_probabilities_storage.data(), action_count);
@@ -1088,7 +1046,7 @@ absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
     }
 
     const PrivateBucketId bucket =
-        card_abstraction_.private_bucket(combo_id, state);
+        card_abstraction_.private_bucket(combo_id, street, board);
     strategy_store_.regret_matching_for_bucket(
         node_id, player, bucket, action_ids, action_probabilities);
 
@@ -1113,7 +1071,7 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
   }
   const uint32_t root_id = *maybe_root_id;
   const CompactPublicState root_state = rows()[root_id].state;
-  const NodeRef root_node{root_id, ExactBoardFromState(root_state)};
+  const NodeRef root_node{root_id, BoardFromCompact(root_state)};
   NodeGraph graph(*this, storage_.frozen ? NodeGraphMode::kSkipMissing
                                          : NodeGraphMode::kGrow);
   const TraversalDeal deal{{
@@ -1197,16 +1155,16 @@ double CFRSolver::evaluate_strategy_node(
     NodeRef node,
     const TraversalDeal& deal,
     NodeGraph& graph) {
-  const std::optional<NodeCursor> node_cursor = cursor(node);
-  if (!node_cursor.has_value()) {
+  const auto& public_rows = rows();
+  if (node.public_state_id >= public_rows.size()) {
     return 0.0;
   }
   const uint32_t node_id = node.public_state_id;
-  const PublicStateRow& row = node_cursor->row();
+  const PublicStateRow& row = public_rows[node_id];
 
   if (row.is_terminal) {
-    const CompactPublicState& state = node_cursor->exact_state();
-    return terminal_utility(state, deal.player_cards(0), deal.player_cards(1));
+    return terminal_utility(row, node.exact_board, deal.player_cards(0),
+                            deal.player_cards(1));
   }
   if (row.is_chance_node) {
     const int samples = ChanceSamples(config_);
@@ -1228,7 +1186,8 @@ double CFRSolver::evaluate_strategy_node(
   absl::Span<double> probabilities(
       probabilities_storage.data(), decision.action_count);
   const PrivateBucketId bucket =
-      card_abstraction_.private_bucket(player_cards.combo, row.state);
+      card_abstraction_.private_bucket(player_cards.combo, decision.street,
+                                       node.exact_board);
   strategy_store_.average_strategy(
       node_id, row, player, bucket, config_.regret_only_training,
       probabilities);
@@ -1270,11 +1229,11 @@ double CFRSolver::terminal_utility(const CompactPublicState& exact_state,
 }
 
 double CFRSolver::terminal_utility(const PublicStateRow& row,
-                                   const ExactBoardState& exact_board,
+                                   const Board& board,
                                    const PrivateCards& player_a_cards,
                                    const PrivateCards& player_b_cards) {
   const CompactPublicState& state = row.state;
-  const auto utility = UtilityBeforeShowdown(state, exact_board.count);
+  const auto utility = UtilityBeforeShowdown(state, board.count);
   if (utility.has_value()) {
     return *utility;
   }
@@ -1282,9 +1241,8 @@ double CFRSolver::terminal_utility(const PublicStateRow& row,
   // Frozen sampled training sees mostly one-off showdowns; direct evaluation
   // is faster than paying shared cache lookup/mutation overhead.
   HandEvaluator evaluator;
-  const auto& board = exact_board.cards;
   const int comparison = evaluator.compare_hands(
-      player_a_cards.combo, player_b_cards.combo, board, exact_board.count);
+      player_a_cards.combo, player_b_cards.combo, board);
   return ShowdownUtilityFromComparison(state, comparison);
 }
 

@@ -452,15 +452,16 @@ bool StrategyStore::prebuild_private_bucket_rows() {
   for (size_t node_id = 0; node_id < tables.public_state_rows.size();
        ++node_id) {
     const PublicStateRow& row = tables.public_state_rows[node_id];
+    const Board board = BoardFromCompact(row.state);
     const uint32_t bucket_count = card_abstraction_.private_bucket_count(
-        row.state);
+        row.state.street, board);
     if (bucket_count == 0 || bucket_count > kComboCount) {
       return false;
     }
     auto& bucket_row = tables.private_bucket_rows[node_id];
     for (int combo = 0; combo < kComboCount; ++combo) {
       const PrivateBucketId bucket = card_abstraction_.private_bucket(
-          static_cast<ComboId>(combo), row.state);
+          static_cast<ComboId>(combo), row.state.street, board);
       if (bucket >= bucket_count) {
         return false;
       }

@@ -45,7 +45,7 @@ const std::vector<double>& BetSizesForStreet(const SolverConfig& config,
   }
 }
 
-int ConcreteBetAmount(const CompactPublicState& state, double size) {
+int ConcreteBetAmount(const BettingState& state, double size) {
   if (size <= 0.0) {
     return 0;
   }
@@ -105,25 +105,6 @@ void ApplyProjection(const CompactPublicState& state, BettingHistoryKey& key) {
     key.player_to_act = projection.player_to_act;
     key.player_contribution_size = 1;
     key.player_contributions = {projection.to_call_bucket, 0};
-  }
-}
-
-void ApplyProjection(CompactPublicState& state) {
-  if constexpr (kCoarsePublicBuckets) {
-    const Projection projection = Project(state);
-    state.street = static_cast<StreetKind>(projection.street);
-    state.pot = projection.pot_bucket;
-    state.stack = {projection.effective_stack_bucket,
-                   projection.effective_stack_bucket};
-    state.all_in = projection.all_in != 0;
-    state.folded_player = projection.folded_player;
-    state.player_to_act = projection.player_to_act;
-    state.player_contribution = {0, 0};
-    if (IsPlayer(projection.player_to_act)) {
-      state.player_contribution[Opponent(projection.player_to_act)] =
-          projection.to_call_bucket;
-    }
-    state.player_contribution_count = 2;
   }
 }
 
@@ -191,7 +172,7 @@ BettingAbstraction::BettingAbstraction(const SolverConfig& config)
     : config_(config) {}
 
 BettingAbstraction::ActionMenu BettingAbstraction::actions_for_betting_node(
-    const CompactPublicState& state,
+    const BettingState& state,
     int player) const {
   ActionMenu menu;
   const int stack = state.stack[player];
@@ -199,8 +180,8 @@ BettingAbstraction::ActionMenu BettingAbstraction::actions_for_betting_node(
     return menu;
   }
 
-  const int opponent_chips = state.player_contribution[Opponent(player)];
-  const int player_chips = state.player_contribution[player];
+  const int opponent_chips = state.contribution[Opponent(player)];
+  const int player_chips = state.contribution[player];
   const int outstanding_call = std::max(0, opponent_chips - player_chips);
   if (outstanding_call > 0) {
     const int call_amount = std::min(outstanding_call, stack);
@@ -226,6 +207,12 @@ BettingAbstraction::ActionMenu BettingAbstraction::actions_for_betting_node(
   }
 
   return menu;
+}
+
+BettingAbstraction::ActionMenu BettingAbstraction::actions_for_betting_node(
+    const CompactPublicState& state,
+    int player) const {
+  return actions_for_betting_node(BettingStateFromCompact(state), player);
 }
 
 int BettingAbstraction::action_key(const GameAction& action) const {
@@ -270,12 +257,6 @@ BettingAbstraction::BettingHistoryRow BettingAbstraction::make_history_row(
   row.history_values = key.history_values;
   row.history_overflow = key.history_overflow;
   return row;
-}
-
-CompactPublicState BettingAbstraction::public_state_for_row(
-    CompactPublicState state) const {
-  ApplyProjection(state);
-  return state;
 }
 
 }  // namespace poker

@@ -144,7 +144,8 @@ CoarseChanceTransitionMap BuildCoarseChanceTransitions(StreetKind street) {
     for (CardId card : board) {
       AddBoardCard(parent, card);
     }
-    const PublicBucketId parent_bucket = abstraction.public_bucket(parent);
+    const PublicBucketId parent_bucket =
+        abstraction.public_bucket(parent.street, BoardFromCompact(parent));
     ForEachCardCombination(deal_count, parent.board_mask,
                            [&](absl::Span<const CardId> cards) {
       CompactPublicState child = parent;
@@ -152,7 +153,8 @@ CoarseChanceTransitionMap BuildCoarseChanceTransitions(StreetKind street) {
       for (CardId card : cards) {
         AddBoardCard(child, card);
       }
-      const PublicBucketId child_bucket = abstraction.public_bucket(child);
+      const PublicBucketId child_bucket =
+          abstraction.public_bucket(child.street, BoardFromCompact(child));
       const uint64_t seen_key = (parent_bucket << 32) | child_bucket;
       if (!seen.insert(seen_key).second) {
         return true;
@@ -220,7 +222,9 @@ PublicStateGraph::PublicStateKey
 PublicStateGraph::row_key(
     uint32_t betting_history_id,
     const CompactPublicState& state) const {
-  return {betting_history_id, card_abstraction_.public_bucket(state)};
+  return {betting_history_id,
+          card_abstraction_.public_bucket(state.street,
+                                          BoardFromCompact(state))};
 }
 
 std::optional<uint32_t> PublicStateGraph::find_row(
@@ -237,10 +241,10 @@ std::optional<uint32_t> PublicStateGraph::find_row(
 PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
     uint32_t betting_history_id,
     CompactPublicState state) {
-  state = betting_abstraction_.public_state_for_row(std::move(state));
   PublicStateRow row;
   row.betting_history_id = betting_history_id;
-  row.public_bucket = card_abstraction_.public_bucket(state);
+  row.public_bucket =
+      card_abstraction_.public_bucket(state.street, BoardFromCompact(state));
   row.is_terminal = IsTerminal(state);
   row.player_to_act = GetPlayerToAct(state);
   row.state = std::move(state);
@@ -488,7 +492,8 @@ bool PublicStateGraph::for_each_required_chance_transition(
 
 PublicStateGraph::PublicBucketId PublicStateGraph::chance_outcome_id(
     const CompactPublicState& child_state) const {
-  return card_abstraction_.public_bucket(child_state);
+  return card_abstraction_.public_bucket(child_state.street,
+                                         BoardFromCompact(child_state));
 }
 
 std::optional<uint32_t> PublicStateGraph::find_or_cache_action_child(

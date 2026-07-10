@@ -104,12 +104,6 @@ class CFRSolver {
     bool record_atomic_retry_stats = false;
   };
 
-  struct ExactBoardState {
-    std::array<CardId, kMaxBoardCards> cards = {};
-    uint8_t count = 0;
-    CardMask mask = 0;
-  };
-
   using OptionalTrainingRange =
       std::optional<std::reference_wrapper<const TrainingRangeView>>;
 
@@ -121,22 +115,7 @@ class CFRSolver {
 
   struct NodeRef {
     uint32_t public_state_id = kInvalidPublicStateId;
-    ExactBoardState exact_board;
-  };
-
-  class NodeCursor {
-   public:
-    NodeCursor(NodeRef ref, PublicStateRow row)
-        : ref_(ref), row_(std::move(row)) {}
-
-    NodeRef ref() const { return ref_; }
-    const PublicStateRow& row() const { return row_; }
-    const CompactPublicState& exact_state() const;
-
-   private:
-    NodeRef ref_;
-    PublicStateRow row_;
-    mutable std::optional<CompactPublicState> exact_state_;
+    Board exact_board;
   };
 
   enum class ChildStatus {
@@ -165,7 +144,7 @@ class CFRSolver {
    private:
     ChildResult make_child_result(
         std::optional<uint32_t> child_id,
-        ExactBoardState exact_board,
+        Board exact_board,
         const char* missing_message) const;
 
     CFRSolver& solver_;
@@ -293,7 +272,8 @@ class CFRSolver {
    public:
     ActionRangeConditioning(CFRSolver& solver,
                             TraversalContext& ctx,
-                            const NodeCursor& node_cursor,
+                            StreetKind street,
+                            const Board& board,
                             uint32_t node_id,
                             int player,
                             absl::Span<const int> action_ids);
@@ -325,7 +305,7 @@ class CFRSolver {
    private:
     double terminal(NodeRef node, const PublicStateRow& row);
     double chance(NodeRef node);
-    double depth_limit_value(const NodeCursor& node_cursor);
+    double depth_limit_value(NodeRef node, const PublicStateRow& row);
     double decision(NodeRef node, const PublicStateRow& row);
 
     CFRSolver& solver_;
@@ -361,11 +341,6 @@ class CFRSolver {
                    int first_index,
                    WorkerFn&& worker_fn,
                    AccumulateFn&& accumulate_fn);
-  static ExactBoardState ExactBoardFromState(
-      const CompactPublicState& state);
-  static void ApplyExactBoard(CompactPublicState& state,
-                              const ExactBoardState& board);
-  std::optional<NodeCursor> cursor(NodeRef node) const;
   std::optional<NodeRef> root_node_ref(uint32_t root_id) const;
   static std::optional<DecisionFrame> make_decision_frame(
       uint32_t node_id,
@@ -382,7 +357,8 @@ class CFRSolver {
                               const TrainingRangeView& b_view);
   absl::Span<TrainingRangeView> condition_ranges_for_actions(
       const TrainingRangeView& range,
-      const CompactPublicState& state,
+      StreetKind street,
+      const Board& board,
       uint32_t node_id,
       int player,
       absl::Span<const int> action_ids,
@@ -391,7 +367,7 @@ class CFRSolver {
                           const PrivateCards& player_a_cards,
                           const PrivateCards& player_b_cards);
   double terminal_utility(const PublicStateRow& row,
-                          const ExactBoardState& exact_board,
+                          const Board& board,
                           const PrivateCards& player_a_cards,
                           const PrivateCards& player_b_cards);
   double evaluate_strategy_node(NodeRef node,

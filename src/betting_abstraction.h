@@ -19,6 +19,8 @@ class BettingAbstraction {
 
   explicit BettingAbstraction(const SolverConfig& config);
 
+  ActionMenu actions_for_betting_node(const BettingState& state,
+                                      int player) const;
   ActionMenu actions_for_betting_node(const CompactPublicState& state,
                                       int player) const;
 
@@ -32,8 +34,6 @@ class BettingAbstraction {
       const CompactPublicState& child_state) const;
 
   BettingHistoryRow make_history_row(const BettingHistoryKey& key) const;
-
-  CompactPublicState public_state_for_row(CompactPublicState state) const;
 
  private:
   SolverConfig config_;

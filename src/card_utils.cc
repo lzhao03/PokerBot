@@ -93,12 +93,20 @@ absl::InlinedVector<CardId, 5> SampleStreetCards(
 }
 
 absl::InlinedVector<CardId, 5> SampleStreetCards(
+    StreetKind street,
+    const Board& board,
+    CardMask known_private_cards,
+    std::mt19937& rng) {
+  return SampleStreetCards(street, board.count, board.mask,
+                           known_private_cards, rng);
+}
+
+absl::InlinedVector<CardId, 5> SampleStreetCards(
     const CompactPublicState& state,
     CardMask known_private_cards,
     std::mt19937& rng) {
-  return SampleStreetCards(
-      state.street, state.board_count, state.board_mask,
-      known_private_cards, rng);
+  return SampleStreetCards(state.street, BoardFromCompact(state),
+                           known_private_cards, rng);
 }
 
 }  // namespace poker

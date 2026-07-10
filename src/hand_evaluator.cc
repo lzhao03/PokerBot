@@ -33,10 +33,14 @@ class SevenCardHand {
 
   static SevenCardHand FromHoleAndBoard(
       ComboId hole_cards,
+      const Board& board) {
+    return FromHoleAndBoard(hole_cards, board.span());
+  }
+
+  static SevenCardHand FromHoleAndBoard(
+      ComboId hole_cards,
       const CompactPublicState& board_state) {
-    return FromHoleAndBoard(
-        hole_cards, absl::Span<const CardId>(board_state.board_cards.data(),
-                                             board_state.board_count));
+    return FromHoleAndBoard(hole_cards, BoardFromCompact(board_state));
   }
 
   static SevenCardHand FromHoleAndBoard(
@@ -179,16 +183,27 @@ HandEvaluation HandEvaluator::evaluate(
 
 HandEvaluation HandEvaluator::evaluate_hand(
     ComboId hole_cards,
-    const CompactPublicState& board_state) const {
+    const Board& board) const {
   const SevenCardHand cards =
-      SevenCardHand::FromHoleAndBoard(hole_cards, board_state);
+      SevenCardHand::FromHoleAndBoard(hole_cards, board);
   return find_best_hand(cards.cards());
+}
+
+HandEvaluation HandEvaluator::evaluate_hand(
+    ComboId hole_cards,
+    const CompactPublicState& board_state) const {
+  return evaluate_hand(hole_cards, BoardFromCompact(board_state));
+}
+
+uint16_t HandEvaluator::hand_value(ComboId hand, const Board& board) const {
+  const SevenCardHand cards = SevenCardHand::FromHoleAndBoard(hand, board);
+  return EvalBestCactus(cards.cards());
 }
 
 uint16_t HandEvaluator::hand_value(
     ComboId hand,
     const CompactPublicState& board_state) const {
-  return hand_value(hand, board_state.board_cards, board_state.board_count);
+  return hand_value(hand, BoardFromCompact(board_state));
 }
 
 uint16_t HandEvaluator::hand_value(
@@ -203,9 +218,16 @@ uint16_t HandEvaluator::hand_value(
 int HandEvaluator::compare_hands(
     ComboId hand1,
     ComboId hand2,
+    const Board& board) const {
+  return CompareCactusValues(hand_value(hand1, board),
+                             hand_value(hand2, board));
+}
+
+int HandEvaluator::compare_hands(
+    ComboId hand1,
+    ComboId hand2,
     const CompactPublicState& board_state) const {
-  return compare_hands(hand1, hand2, board_state.board_cards,
-                       board_state.board_count);
+  return compare_hands(hand1, hand2, BoardFromCompact(board_state));
 }
 
 int HandEvaluator::compare_hands(

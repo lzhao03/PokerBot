@@ -1,10 +1,13 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
+
+#include "absl/types/span.h"
 
 namespace poker {
 
@@ -58,6 +61,18 @@ struct GameAction {
 // With 3 bet sizes: fold/call + 3 raises + all-in = 6 (facing bet),
 // or check + 3 bets + all-in = 5 (no bet). 8 gives headroom.
 inline constexpr int kMaxActionsPerNode = 8;
+
+struct BettingState {
+  std::array<int, kPlayerCount> stack = {0, 0};
+  std::array<int, kPlayerCount> contribution = {0, 0};
+  int pot = 0;
+  StreetKind street = StreetKind::kPreflop;
+  int8_t player_to_act = 0;
+  int8_t folded_player = -1;
+  uint8_t actions_this_street = 0;
+  ActionKind last_action = ActionKind::kNoAction;
+  bool all_in = false;
+};
 
 struct SolverConfig {
   std::vector<double> bet_sizes;
@@ -178,16 +193,43 @@ inline CardMask CardBit(CardId card_id) {
   return CardMask{1} << card_id;
 }
 
+struct Board {
+  std::array<CardId, kMaxBoardCards> cards = {};
+  CardMask mask = 0;
+  uint8_t count = 0;
+
+  absl::Span<const CardId> span() const {
+    return absl::Span<const CardId>(cards.data(), count);
+  }
+
+  bool contains(CardId card) const {
+    return (mask & CardBit(card)) != 0;
+  }
+
+  void add(CardId card) {
+    if (count >= cards.size()) {
+      throw std::logic_error("board is full");
+    }
+    if (contains(card)) {
+      throw std::invalid_argument("duplicate board card");
+    }
+    cards[static_cast<size_t>(count)] = card;
+    ++count;
+    mask |= CardBit(card);
+  }
+};
+
+struct ExactGameState {
+  BettingState betting;
+  Board board;
+};
+
 inline void AddBoardCard(CompactPublicState& state, CardId card_id) {
-  if (state.board_count >= kMaxBoardCards) {
-    throw std::invalid_argument("Board already has five cards");
-  }
-  if ((state.board_mask & CardBit(card_id)) != 0) {
-    throw std::invalid_argument("Duplicate board card");
-  }
-  state.board_cards[state.board_count] = card_id;
-  ++state.board_count;
-  state.board_mask |= CardBit(card_id);
+  Board board{state.board_cards, state.board_mask, state.board_count};
+  board.add(card_id);
+  state.board_cards = board.cards;
+  state.board_count = board.count;
+  state.board_mask = board.mask;
 }
 
 inline void CopyBoardFrom(CompactPublicState& state,
@@ -207,6 +249,56 @@ inline bool IsPlayer(int player) {
 
 inline int Opponent(int player) {
   return 1 - player;
+}
+
+inline Board BoardFromCompact(const CompactPublicState& state) {
+  return Board{state.board_cards, state.board_mask, state.board_count};
+}
+
+inline void SetBoard(CompactPublicState& state, const Board& board) {
+  state.board_cards = board.cards;
+  state.board_count = board.count;
+  state.board_mask = board.mask;
+}
+
+inline BettingState BettingStateFromCompact(const CompactPublicState& state) {
+  return BettingState{
+      state.stack,
+      state.player_contribution,
+      state.pot,
+      state.street,
+      static_cast<int8_t>(state.player_to_act),
+      static_cast<int8_t>(state.folded_player),
+      static_cast<uint8_t>(
+          std::min<uint16_t>(state.history_size, UINT8_MAX)),
+      state.last_action.kind,
+      state.all_in,
+  };
+}
+
+inline ExactGameState ExactGameStateFromCompact(
+    const CompactPublicState& state) {
+  return ExactGameState{BettingStateFromCompact(state), BoardFromCompact(state)};
+}
+
+inline CompactPublicState ToCompact(const BettingState& betting,
+                                    const Board& board) {
+  CompactPublicState state;
+  state.stack = betting.stack;
+  state.pot = betting.pot;
+  SetBoard(state, board);
+  state.street = betting.street;
+  state.all_in = betting.all_in;
+  state.folded_player = betting.folded_player;
+  state.player_to_act = betting.player_to_act;
+  state.player_contribution = betting.contribution;
+  state.last_action.kind = betting.last_action;
+  state.history_size = betting.actions_this_street;
+  return state;
+}
+
+inline CompactPublicState ToCompact(const ExactGameState& state) {
+  return ToCompact(state.betting, state.board);
 }
 
 }  // namespace poker

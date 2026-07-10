@@ -268,9 +268,20 @@ double UtilityForState(const State& state,
 
 }  // namespace
 
+BettingState ApplyAction(const BettingState& state,
+                         const GameAction& action) {
+  const CompactPublicState compact = ToCompact(state, Board{});
+  return BettingStateFromCompact(ApplyActionForState(compact, action));
+}
+
 CompactPublicState ApplyAction(const CompactPublicState& state,
                                const GameAction& action) {
   return ApplyActionForState(state, action);
+}
+
+ExactGameState ApplyChance(const ExactGameState& state,
+                           absl::Span<const CardId> cards) {
+  return ExactGameStateFromCompact(ApplyChance(ToCompact(state), cards));
 }
 
 CompactPublicState ApplyChance(const CompactPublicState& state,
@@ -284,6 +295,12 @@ CompactPublicState ApplyChance(const CompactPublicState& state,
   return child;
 }
 
+double GetUtility(const ExactGameState& state,
+                  ComboId player_a_hand,
+                  ComboId player_b_hand) {
+  return GetUtility(ToCompact(state), player_a_hand, player_b_hand);
+}
+
 double GetUtility(const CompactPublicState& state,
                   ComboId player_a_hand,
                   ComboId player_b_hand) {
@@ -291,12 +308,24 @@ double GetUtility(const CompactPublicState& state,
   return UtilityForState(state, player_a_hand, player_b_hand, evaluator);
 }
 
+bool IsTerminal(const BettingState& state, const Board& board) {
+  return IsTerminalForState(ToCompact(state, board));
+}
+
 bool IsTerminal(const CompactPublicState& state) {
   return IsTerminalForState(state);
 }
 
+int GetPlayerToAct(const BettingState& state, const Board& board) {
+  return PlayerToActForState(ToCompact(state, board));
+}
+
 int GetPlayerToAct(const CompactPublicState& state) {
   return PlayerToActForState(state);
+}
+
+bool IsBettingRoundOver(const BettingState& state) {
+  return IsBettingRoundOverForState(ToCompact(state, Board{}));
 }
 
 bool IsBettingRoundOver(const CompactPublicState& state) {

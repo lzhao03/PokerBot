@@ -33,14 +33,14 @@ inline int BestStraightWindowDensity(uint16_t rank_mask) {
 }  // namespace card_abstraction_detail
 
 struct ExactPublicCardBuckets {
-  PublicBucketId bucket(const CompactPublicState& state) const {
-    return state.board_mask;
+  PublicBucketId bucket(StreetKind, const Board& board) const {
+    return board.mask;
   }
 };
 
 struct BoardTexturePublicCardBuckets {
-  PublicBucketId bucket(const CompactPublicState& state) const {
-    const int board_count = state.board_count;
+  PublicBucketId bucket(StreetKind street, const Board& board) const {
+    const int board_count = board.count;
     if (board_count == 0) {
       return 0;
     }
@@ -52,7 +52,7 @@ struct BoardTexturePublicCardBuckets {
     int max_suit_count = 0;
     int max_rank = 0;
     for (int i = 0; i < board_count; ++i) {
-      const CardId card = state.board_cards[static_cast<size_t>(i)];
+      const CardId card = board.cards[static_cast<size_t>(i)];
       const int rank = RankFromCardId(card);
       const int rank_index = rank - 2;
       const int suit_index = SuitIndex(SuitFromCardId(card));
@@ -84,7 +84,7 @@ struct BoardTexturePublicCardBuckets {
          straight_bucket) *
             kHighBuckets +
         high_bucket;
-    return 1 + static_cast<PublicBucketId>(state.street) *
+    return 1 + static_cast<PublicBucketId>(street) *
                    kTextureBucketsPerStreet +
            static_cast<PublicBucketId>(texture);
   }
@@ -103,11 +103,11 @@ using DefaultPublicCardBuckets =
                        ExactPublicCardBuckets>;
 
 struct ExactPrivateBuckets {
-  PrivateBucketId bucket(ComboId combo_id, const CompactPublicState&) const {
+  PrivateBucketId bucket(ComboId combo_id, StreetKind, const Board&) const {
     return combo_id;
   }
 
-  uint32_t bucket_count(const CompactPublicState&) const {
+  uint32_t bucket_count(StreetKind, const Board&) const {
     return kComboCount;
   }
 };
@@ -119,7 +119,8 @@ struct CoarsePrivateBuckets {
       kPreflopBucketCount + 3 * kPostflopBucketsPerStreet;
 
   PrivateBucketId bucket(ComboId combo_id,
-                         const CompactPublicState& state) const {
+                         StreetKind street,
+                         const Board& board) const {
     const ComboInfo& combo = GetComboInfo(combo_id);
     const int rank0 = RankFromCardId(combo.card0);
     const int rank1 = RankFromCardId(combo.card1);
@@ -129,22 +130,22 @@ struct CoarsePrivateBuckets {
     const bool suited = SuitFromCardId(combo.card0) ==
                         SuitFromCardId(combo.card1);
 
-    if (state.street == StreetKind::kPreflop || state.board_count == 0) {
+    if (street == StreetKind::kPreflop || board.count == 0) {
       const int shape = pair ? 0 : (suited ? 1 : 2);
       return static_cast<PrivateBucketId>(
           shape * 12 + HighRankGroup(high) * 3 + LowRankGroup(low));
     }
 
-    const int street = static_cast<int>(state.street) - 1;
+    const int street_index = static_cast<int>(street) - 1;
     const int local_bucket =
-        MadeBucket(combo, state) * 9 + DrawBucket(combo, state) * 3 +
+        MadeBucket(combo, board) * 9 + DrawBucket(combo, board) * 3 +
         HoleStrengthBucket(high, low, pair, suited);
     return static_cast<PrivateBucketId>(
-        kPreflopBucketCount + street * kPostflopBucketsPerStreet +
+        kPreflopBucketCount + street_index * kPostflopBucketsPerStreet +
         local_bucket);
   }
 
-  uint32_t bucket_count(const CompactPublicState&) const {
+  uint32_t bucket_count(StreetKind, const Board&) const {
     return kBucketCount;
   }
 
@@ -177,14 +178,12 @@ struct CoarsePrivateBuckets {
     return 2;
   }
 
-  static int MadeBucket(const ComboInfo& combo,
-                        const CompactPublicState& state) {
+  static int MadeBucket(const ComboInfo& combo, const Board& board) {
     int rank_counts[15] = {};
     ++rank_counts[RankFromCardId(combo.card0)];
     ++rank_counts[RankFromCardId(combo.card1)];
-    for (int i = 0; i < state.board_count; ++i) {
-      ++rank_counts[
-          RankFromCardId(state.board_cards[static_cast<size_t>(i)])];
+    for (uint8_t i = 0; i < board.count; ++i) {
+      ++rank_counts[RankFromCardId(board.cards[static_cast<size_t>(i)])];
     }
 
     int pairs = 0;
@@ -206,8 +205,7 @@ struct CoarsePrivateBuckets {
     return pairs == 1 ? 1 : 0;
   }
 
-  static int DrawBucket(const ComboInfo& combo,
-                        const CompactPublicState& state) {
+  static int DrawBucket(const ComboInfo& combo, const Board& board) {
     int suit_counts[4] = {};
     uint16_t rank_mask = 0;
     auto add_card = [&](CardId card) {
@@ -217,8 +215,8 @@ struct CoarsePrivateBuckets {
     };
     add_card(combo.card0);
     add_card(combo.card1);
-    for (int i = 0; i < state.board_count; ++i) {
-      add_card(state.board_cards[static_cast<size_t>(i)]);
+    for (uint8_t i = 0; i < board.count; ++i) {
+      add_card(board.cards[static_cast<size_t>(i)]);
     }
 
     for (int count : suit_counts) {
@@ -241,17 +239,31 @@ struct CardAbstraction {
   DefaultPublicCardBuckets public_buckets;
   DefaultPrivateBuckets private_buckets;
 
+  PublicBucketId public_bucket(StreetKind street, const Board& board) const {
+    return public_buckets.bucket(street, board);
+  }
+
   PublicBucketId public_bucket(const CompactPublicState& state) const {
-    return public_buckets.bucket(state);
+    return public_bucket(state.street, BoardFromCompact(state));
+  }
+
+  PrivateBucketId private_bucket(ComboId combo_id,
+                                 StreetKind street,
+                                 const Board& board) const {
+    return private_buckets.bucket(combo_id, street, board);
   }
 
   PrivateBucketId private_bucket(ComboId combo_id,
                                  const CompactPublicState& state) const {
-    return private_buckets.bucket(combo_id, state);
+    return private_bucket(combo_id, state.street, BoardFromCompact(state));
+  }
+
+  uint32_t private_bucket_count(StreetKind street, const Board& board) const {
+    return private_buckets.bucket_count(street, board);
   }
 
   uint32_t private_bucket_count(const CompactPublicState& state) const {
-    return private_buckets.bucket_count(state);
+    return private_bucket_count(state.street, BoardFromCompact(state));
   }
 };
 
