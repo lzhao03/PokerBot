@@ -19,10 +19,12 @@
 namespace poker {
 
 using NodeId = uint32_t;
+using BettingNodeId = uint32_t;
+using PublicObservationId = BoardBucketId;
 
 inline constexpr NodeId kInvalidNodeId =
     std::numeric_limits<uint32_t>::max();
-inline constexpr uint32_t kInvalidBettingNodeId =
+inline constexpr BettingNodeId kInvalidBettingNodeId =
     std::numeric_limits<uint32_t>::max();
 inline constexpr NodeId kCappedNodeId = kInvalidNodeId - 1;
 
@@ -73,7 +75,7 @@ class StrategyTables {
   static constexpr uint32_t kInvalidActionOffset =
       std::numeric_limits<uint32_t>::max();
 
-  using BettingNodeId = uint32_t;
+  using BettingNodeId = poker::BettingNodeId;
 
   enum class NodeKind : uint8_t {
     kDecision,

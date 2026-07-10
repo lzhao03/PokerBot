@@ -146,6 +146,7 @@ cc_library(
         ":game_rules",
         ":poker_types",
     ],
+    visibility = ["//tests:__pkg__"],
 )
 
 cc_library(
@@ -251,6 +252,7 @@ cc_library(
         ":strategy_tables",
         "@abseil-cpp//absl/types:span",
     ],
+    visibility = ["//tests:__pkg__"],
 )
 
 cc_library(
@@ -344,6 +346,7 @@ cc_library(
         ":betting_abstraction_coarse_buckets",
         ":strategy_store_coarse_buckets",
     ],
+    visibility = ["//tests:__pkg__"],
 )
 
 cc_library(

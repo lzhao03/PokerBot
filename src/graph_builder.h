@@ -15,6 +15,8 @@
 
 namespace poker {
 
+struct GraphBuilderTestAccess;
+
 class GraphBuilder {
  public:
   using Node = StrategyTables::Node;
@@ -43,6 +45,8 @@ class GraphBuilder {
                                TrainingRunStats& stats) const;
 
  private:
+  friend struct GraphBuilderTestAccess;
+
   using BoardBucketId = StrategyTables::BoardBucketId;
   using BettingNodeId = StrategyTables::BettingNodeId;
   using BettingNode = StrategyTables::BettingNode;
