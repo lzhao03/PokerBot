@@ -122,7 +122,25 @@ TEST_CASE("coarse private buckets merge equivalent combos") {
         buckets.bucket(ace_king_hearts, state.street, board));
   CHECK(buckets.bucket(ace_king_spades, state.street, board) !=
         buckets.bucket(ace_king_offsuit, state.street, board));
-  CHECK(buckets.bucket_count(state.street, board) < kComboCount);
+  CHECK(buckets.bucket_count(state.street, board) == 36);
+}
+
+TEST_CASE("coarse private bucket ids are local to street") {
+  CoarsePrivateBuckets buckets;
+  Board board;
+  board.add(MakeCardId(14, SuitKind::kDiamonds));
+  board.add(MakeCardId(2, SuitKind::kClubs));
+  board.add(MakeCardId(7, SuitKind::kSpades));
+
+  const ComboId hand =
+      ExactCombo(14, SuitKind::kSpades, 13, SuitKind::kSpades);
+  CHECK(buckets.bucket(hand, StreetKind::kFlop, board) < 36);
+
+  board.add(MakeCardId(9, SuitKind::kHearts));
+  CHECK(buckets.bucket(hand, StreetKind::kTurn, board) < 36);
+
+  board.add(MakeCardId(3, SuitKind::kDiamonds));
+  CHECK(buckets.bucket(hand, StreetKind::kRiver, board) < 36);
 }
 
 }  // namespace

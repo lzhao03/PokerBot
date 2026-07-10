@@ -463,7 +463,8 @@ bool StrategyStore::prebuild_frozen_info_set_action_offsets() {
     for (int player = 0; player < kPlayerCount; ++player) {
       const PublicInfoSetSlabPlayer& player_slab = slab->players[player];
       auto& player_offsets = offset_row[player];
-      for (int bucket = 0; bucket < kComboCount; ++bucket) {
+      for (uint32_t bucket = 0; bucket < StrategyTables::kPrivateBucketCount;
+           ++bucket) {
         const auto private_bucket = static_cast<PrivateBucketId>(bucket);
         const InfoSetRow* info_row = find_info_set_row(player_slab,
                                                        private_bucket);
@@ -507,7 +508,7 @@ StrategyStore::get_or_create_public_info_set_slab(uint32_t node_id) {
 const StrategyStore::InfoSetRow* StrategyStore::find_info_set_row(
     InfoSetAddress address) const {
   if (address.player < 0 || address.player >= kPlayerCount ||
-      address.private_bucket >= kComboCount) {
+      address.private_bucket >= StrategyTables::kPrivateBucketCount) {
     return nullptr;
   }
   const PublicInfoSetSlab* slab = public_info_set_slab(address.public_state_id);
@@ -521,7 +522,7 @@ const StrategyStore::InfoSetRow* StrategyStore::find_info_set_row(
 const StrategyStore::InfoSetRow* StrategyStore::find_info_set_row(
     const PublicInfoSetSlabPlayer& player_slab,
     PrivateBucketId private_bucket) {
-  if (private_bucket >= kComboCount) {
+  if (private_bucket >= StrategyTables::kPrivateBucketCount) {
     return nullptr;
   }
   const size_t chunk_index =
@@ -560,7 +561,7 @@ const StrategyStore::InfoSetRow* StrategyStore::get_or_create_info_set_row(
     InfoSetAddress address,
     absl::Span<const int> action_ids) {
   if (address.player < 0 || address.player >= kPlayerCount ||
-      address.private_bucket >= kComboCount) {
+      address.private_bucket >= StrategyTables::kPrivateBucketCount) {
     return nullptr;
   }
 

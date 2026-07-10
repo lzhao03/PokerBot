@@ -113,10 +113,7 @@ struct ExactPrivateBuckets {
 };
 
 struct CoarsePrivateBuckets {
-  static constexpr uint32_t kPreflopBucketCount = 36;
-  static constexpr uint32_t kPostflopBucketsPerStreet = 36;
-  static constexpr uint32_t kBucketCount =
-      kPreflopBucketCount + 3 * kPostflopBucketsPerStreet;
+  static constexpr uint32_t kBucketCount = 36;
 
   PrivateBucketId bucket(ComboId combo_id,
                          StreetKind street,
@@ -136,13 +133,10 @@ struct CoarsePrivateBuckets {
           shape * 12 + HighRankGroup(high) * 3 + LowRankGroup(low));
     }
 
-    const int street_index = static_cast<int>(street) - 1;
     const int local_bucket =
         MadeBucket(combo, board) * 9 + DrawBucket(combo, board) * 3 +
         HoleStrengthBucket(high, low, pair, suited);
-    return static_cast<PrivateBucketId>(
-        kPreflopBucketCount + street_index * kPostflopBucketsPerStreet +
-        local_bucket);
+    return static_cast<PrivateBucketId>(local_bucket);
   }
 
   uint32_t bucket_count(StreetKind, const Board&) const {

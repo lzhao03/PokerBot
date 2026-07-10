@@ -12,6 +12,10 @@
 #include "src/combo.h"
 #include "src/poker_types.h"
 
+#ifndef POKER_COARSE_PUBLIC_BUCKETS
+#define POKER_COARSE_PUBLIC_BUCKETS 0
+#endif
+
 namespace poker {
 
 inline constexpr uint32_t kInvalidPublicStateId =
@@ -62,6 +66,8 @@ class StrategyTables {
  public:
   using PrivateBucketId = uint16_t;
   using PublicBucketId = uint64_t;
+  static constexpr uint32_t kPrivateBucketCount =
+      POKER_COARSE_PUBLIC_BUCKETS != 0 ? 36 : kComboCount;
   static constexpr uint32_t kInvalidActionOffset =
       std::numeric_limits<uint32_t>::max();
 
@@ -172,7 +178,8 @@ class StrategyTables {
 
   static constexpr int kPrivateBucketChunkSize = 64;
   static constexpr int kPrivateBucketChunkCount =
-      (kComboCount + kPrivateBucketChunkSize - 1) / kPrivateBucketChunkSize;
+      (kPrivateBucketCount + kPrivateBucketChunkSize - 1) /
+      kPrivateBucketChunkSize;
 
   struct PrivateRowChunk {
     PrivateRowChunk() { rows.fill(-1); }
@@ -191,7 +198,7 @@ class StrategyTables {
   };
 
   using FrozenInfoSetActionOffsetRow =
-      std::array<std::array<uint32_t, kComboCount>, kPlayerCount>;
+      std::array<std::array<uint32_t, kPrivateBucketCount>, kPlayerCount>;
 
   absl::flat_hash_map<BettingHistoryKey, uint32_t, BettingHistoryKeyHash>
       betting_history_ids;

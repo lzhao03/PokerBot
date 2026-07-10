@@ -417,7 +417,8 @@ bool CFRSolver::prebuild_info_set_rows(
     const Board& board = *row_boards[node_id];
     const uint32_t bucket_count =
         card_abstraction_.private_bucket_count(row.betting.street, board);
-    if (bucket_count == 0 || bucket_count > kComboCount) {
+    if (bucket_count == 0 ||
+        bucket_count > StrategyTables::kPrivateBucketCount) {
       return false;
     }
     if (seen_buckets.size() < bucket_count) {
