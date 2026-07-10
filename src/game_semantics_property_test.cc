@@ -319,7 +319,8 @@ void CheckUtility(const CompactPublicState& state,
                   double expected_a) {
   CAPTURE(expected_a);
   CAPTURE(StateString(state));
-  const double actual_a = GetUtility(state, a_hand, b_hand);
+  const double actual_a =
+      GetUtility(ExactGameStateFromCompact(state), a_hand, b_hand);
   const double oracle_a = OracleUtility(state, a_hand, b_hand, 0);
   const double oracle_b = OracleUtility(state, a_hand, b_hand, 1);
   CHECK(actual_a == doctest::Approx(expected_a));

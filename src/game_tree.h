@@ -17,9 +17,6 @@ CompactPublicState ApplyChance(const CompactPublicState& state,
 double GetUtility(const ExactGameState& state,
                   ComboId player_a_hand,
                   ComboId player_b_hand);
-double GetUtility(const CompactPublicState& state,
-                  ComboId player_a_hand,
-                  ComboId player_b_hand);
 bool IsTerminal(const BettingState& state, const Board& board);
 bool IsTerminal(const CompactPublicState& state);
 int GetPlayerToAct(const BettingState& state, const Board& board);

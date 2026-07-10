@@ -333,34 +333,6 @@ State ApplyActionForState(const State& state, const GameAction& action) {
   return new_state;
 }
 
-template <typename State>
-double UtilityForState(const State& state,
-                       ComboId a_hand,
-                       ComboId b_hand,
-                       const HandEvaluator& hand_evaluator) {
-  const double a_contribution = ContributionForState(state, 0);
-
-  if (state.folded_player >= 0) {
-    if (state.folded_player == 0) {
-      return -a_contribution;
-    }
-    return state.pot - a_contribution;
-  }
-
-  if (BoardCardCount(state) + 2 < 5) {
-    return 0.0;
-  }
-
-  const int comparison = hand_evaluator.compare_hands(a_hand, b_hand, state);
-  if (comparison > 0) {
-    return state.pot - a_contribution;
-  }
-  if (comparison < 0) {
-    return -a_contribution;
-  }
-  return (state.pot / 2.0) - a_contribution;
-}
-
 }  // namespace
 
 BettingState ApplyAction(const BettingState& state,
@@ -422,13 +394,6 @@ double GetUtility(const ExactGameState& state,
     return -a_contribution;
   }
   return (state.betting.pot / 2.0) - a_contribution;
-}
-
-double GetUtility(const CompactPublicState& state,
-                  ComboId player_a_hand,
-                  ComboId player_b_hand) {
-  static const HandEvaluator evaluator;
-  return UtilityForState(state, player_a_hand, player_b_hand, evaluator);
 }
 
 bool IsTerminal(const BettingState& state, const Board& board) {

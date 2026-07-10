@@ -43,7 +43,7 @@ TEST_CASE("terminal utility and chance transitions are correct") {
       PreflopState(), {ActionKind::kRaise, 4, -1});
   CompactPublicState folded = ApplyAction(
       raised, {ActionKind::kFold, 0, -1});
-  CHECK(GetUtility(folded, 0, 1) == 2);
+  CHECK(GetUtility(ExactGameStateFromCompact(folded), 0, 1) == 2);
 
   ComboId player_a =
       CardsToComboId(MakeCardId(14, SuitKind::kHearts),
@@ -52,7 +52,8 @@ TEST_CASE("terminal utility and chance transitions are correct") {
       CardsToComboId(MakeCardId(13, SuitKind::kHearts),
                      MakeCardId(13, SuitKind::kSpades));
   CHECK(IsTerminal(ShowdownState()));
-  CHECK(GetUtility(ShowdownState(), player_a, player_b) == 10);
+  CHECK(GetUtility(ExactGameStateFromCompact(ShowdownState()), player_a,
+                   player_b) == 10);
 
   CompactPublicState closed_preflop = ApplyAction(
       ApplyAction(PreflopState(), {ActionKind::kCall, 0, -1}),
