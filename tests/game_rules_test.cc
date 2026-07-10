@@ -65,6 +65,50 @@ ExactPublicState Showdown(std::array<CardId, kMaxBoardCards> cards) {
   return state;
 }
 
+enum class StatePhase {
+  kDecision,
+  kChance,
+  kTerminal,
+};
+
+void CheckExactState(const char* label,
+                     const ExactPublicState& actual,
+                     std::array<Chips, kPlayerCount> stack,
+                     std::array<Chips, kPlayerCount> total,
+                     std::array<Chips, kPlayerCount> street_committed,
+                     Chips last_full_raise,
+                     StreetKind street,
+                     int player_to_act,
+                     uint8_t pending_action_mask,
+                     const BoardRunout& expected_board,
+                     StatePhase expected_phase) {
+  CAPTURE(label);
+  BettingState expected_betting;
+  expected_betting.stack = stack;
+  expected_betting.total_committed = total;
+  expected_betting.street_committed = street_committed;
+  expected_betting.last_full_raise = last_full_raise;
+  expected_betting.street = street;
+  expected_betting.player_to_act = static_cast<int8_t>(player_to_act);
+  expected_betting.pending_action_mask = pending_action_mask;
+  CHECK(actual.betting == expected_betting);
+  CHECK(Pot(actual.betting) == Pot(expected_betting));
+  CHECK(actual.board == expected_board);
+
+  if (expected_phase == StatePhase::kTerminal) {
+    CHECK(IsTerminal(actual));
+    return;
+  }
+  CHECK_FALSE(IsTerminal(actual));
+  if (expected_phase == StatePhase::kChance) {
+    CHECK(IsBettingRoundOver(actual.betting));
+    CHECK(actual.betting.player_to_act == -1);
+    return;
+  }
+  CHECK_FALSE(IsBettingRoundOver(actual.betting));
+  CHECK(IsPlayer(actual.betting.player_to_act));
+}
+
 BettingState State(std::array<Chips, kPlayerCount> stack,
                    std::array<Chips, kPlayerCount> total,
                    std::array<Chips, kPlayerCount> street,
@@ -416,6 +460,172 @@ TEST_CASE("river terminal utility handles win, loss, and tie") {
   CHECK(TerminalUtility(
             tie, H(14, S::kClubs, 13, S::kDiamonds),
             H(12, S::kClubs, 11, S::kDiamonds)) == doctest::Approx(0.0));
+}
+
+TEST_CASE("a complete normal hand preserves exact state") {
+  ExactPublicState state = test::InitialHeadsUpState(20, 20, 1, 2);
+  BoardRunout board = BoardRunout::Preflop();
+  CheckExactState("blinds", state, {19, 18}, {1, 2}, {1, 2}, 2,
+                  StreetKind::kPreflop, 0, kAllPlayersMask, board,
+                  StatePhase::kDecision);
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kCall, 2});
+  CheckExactState("small blind calls", state, {18, 18}, {2, 2},
+                  {2, 2}, 2, StreetKind::kPreflop, 1, PlayerBit(1),
+                  board, StatePhase::kDecision);
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kCheck});
+  CheckExactState("big blind checks", state, {18, 18}, {2, 2},
+                  {2, 2}, 2, StreetKind::kPreflop, -1, 0, board,
+                  StatePhase::kChance);
+
+  state = ApplyChance(state, Flop(), kRules);
+  board.deal_flop(Flop());
+  CheckExactState("flop", state, {18, 18}, {2, 2}, {0, 0}, 2,
+                  StreetKind::kFlop, 1, kAllPlayersMask, board,
+                  StatePhase::kDecision);
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kCheck});
+  CheckExactState("flop check", state, {18, 18}, {2, 2}, {0, 0}, 2,
+                  StreetKind::kFlop, 0, PlayerBit(0), board,
+                  StatePhase::kDecision);
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kBet, 2});
+  CheckExactState("flop bet", state, {16, 18}, {4, 2}, {2, 0}, 2,
+                  StreetKind::kFlop, 1, PlayerBit(1), board,
+                  StatePhase::kDecision);
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kCall, 2});
+  CheckExactState("flop call", state, {16, 16}, {4, 4}, {2, 2}, 2,
+                  StreetKind::kFlop, -1, 0, board,
+                  StatePhase::kChance);
+
+  const std::array<CardId, 1> turn = {C(9, S::kSpades)};
+  state = ApplyChance(state, turn, kRules);
+  board.deal_turn(turn[0]);
+  CheckExactState("turn", state, {16, 16}, {4, 4}, {0, 0}, 2,
+                  StreetKind::kTurn, 1, kAllPlayersMask, board,
+                  StatePhase::kDecision);
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kCheck});
+  CheckExactState("turn first check", state, {16, 16}, {4, 4},
+                  {0, 0}, 2, StreetKind::kTurn, 0, PlayerBit(0), board,
+                  StatePhase::kDecision);
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kCheck});
+  CheckExactState("turn second check", state, {16, 16}, {4, 4},
+                  {0, 0}, 2, StreetKind::kTurn, -1, 0, board,
+                  StatePhase::kChance);
+
+  const std::array<CardId, 1> river = {C(3, S::kHearts)};
+  state = ApplyChance(state, river, kRules);
+  board.deal_river(river[0]);
+  CheckExactState("river", state, {16, 16}, {4, 4}, {0, 0}, 2,
+                  StreetKind::kRiver, 1, kAllPlayersMask, board,
+                  StatePhase::kDecision);
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kBet, 2});
+  CheckExactState("river bet", state, {16, 14}, {4, 6}, {0, 2}, 2,
+                  StreetKind::kRiver, 0, PlayerBit(0), board,
+                  StatePhase::kDecision);
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kCall, 2});
+  CheckExactState("river call", state, {14, 14}, {6, 6}, {2, 2}, 2,
+                  StreetKind::kRiver, -1, 0, board,
+                  StatePhase::kTerminal);
+
+  const ComboId aces = H(14, S::kClubs, 14, S::kDiamonds);
+  const ComboId kings = H(13, S::kClubs, 13, S::kDiamonds);
+  CHECK(TerminalUtility(state, aces, kings) == doctest::Approx(6.0));
+}
+
+TEST_CASE("full raises update the minimum re-raise increment") {
+  ExactPublicState state = test::InitialHeadsUpState(20, 20, 1, 2);
+  const BoardRunout board = BoardRunout::Preflop();
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kRaise, 4});
+  CheckExactState("minimum raise", state, {16, 18}, {4, 2}, {4, 2}, 2,
+                  StreetKind::kPreflop, 1, PlayerBit(1), board,
+                  StatePhase::kDecision);
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kRaise, 8});
+  CheckExactState("full re-raise", state, {16, 12}, {4, 8}, {4, 8}, 4,
+                  StreetKind::kPreflop, 0, PlayerBit(0), board,
+                  StatePhase::kDecision);
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kCall, 8});
+  CheckExactState("call re-raise", state, {12, 12}, {8, 8}, {8, 8}, 4,
+                  StreetKind::kPreflop, -1, 0, board,
+                  StatePhase::kChance);
+}
+
+TEST_CASE("a short all-in raise preserves the full-raise increment") {
+  ExactPublicState state = test::InitialHeadsUpState(20, 5, 1, 2);
+  BoardRunout board = BoardRunout::Preflop();
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kCall, 2});
+  state.betting = ApplyAction(state.betting, {ActionKind::kCheck});
+  state = ApplyChance(state, Flop(), kRules);
+  board.deal_flop(Flop());
+  CheckExactState("short stack reaches flop", state, {18, 3}, {2, 2},
+                  {0, 0}, 2, StreetKind::kFlop, 1, kAllPlayersMask,
+                  board, StatePhase::kDecision);
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kCheck});
+  state.betting = ApplyAction(state.betting, {ActionKind::kBet, 2});
+  CheckExactState("player zero bets", state, {16, 3}, {4, 2}, {2, 0}, 2,
+                  StreetKind::kFlop, 1, PlayerBit(1), board,
+                  StatePhase::kDecision);
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kAllIn, 3});
+  CheckExactState("subminimum all-in raise", state, {16, 0}, {4, 5},
+                  {2, 3}, 2, StreetKind::kFlop, 0, PlayerBit(0), board,
+                  StatePhase::kDecision);
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kCall, 3});
+  CheckExactState("short raise called", state, {15, 0}, {5, 5}, {3, 3},
+                  2, StreetKind::kFlop, -1, 0, board,
+                  StatePhase::kChance);
+
+  const std::array<CardId, 1> turn = {C(9, S::kSpades)};
+  state = ApplyChance(state, turn, kRules);
+  board.deal_turn(turn[0]);
+  CheckExactState("automatic turn", state, {15, 0}, {5, 5}, {0, 0}, 2,
+                  StreetKind::kTurn, -1, kAllPlayersMask, board,
+                  StatePhase::kChance);
+
+  const std::array<CardId, 1> river = {C(3, S::kHearts)};
+  state = ApplyChance(state, river, kRules);
+  board.deal_river(river[0]);
+  CheckExactState("automatic river", state, {15, 0}, {5, 5}, {0, 0}, 2,
+                  StreetKind::kRiver, -1, kAllPlayersMask, board,
+                  StatePhase::kTerminal);
+}
+
+TEST_CASE("effective stacks leave unmatched chips uncommitted") {
+  ExactPublicState state = test::InitialHeadsUpState(100, 20, 1, 2);
+  BoardRunout board = BoardRunout::Preflop();
+  state.betting = ApplyAction(state.betting, {ActionKind::kCall, 2});
+  state.betting = ApplyAction(state.betting, {ActionKind::kCheck});
+  state = ApplyChance(state, Flop(), kRules);
+  board.deal_flop(Flop());
+  state.betting = ApplyAction(state.betting, {ActionKind::kCheck});
+
+  const std::array<double, 2> sizes = {1.0, 10.0};
+  const ActionMenu menu = LegalActions(state.betting, sizes);
+  for (uint8_t i = 0; i < menu.count; ++i) {
+    CHECK(menu.actions[i].target_street_commitment <= 18);
+  }
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kAllIn, 18});
+  CheckExactState("effective all-in", state, {80, 18}, {20, 2}, {18, 0},
+                  18, StreetKind::kFlop, 1, PlayerBit(1), board,
+                  StatePhase::kDecision);
+
+  state.betting = ApplyAction(state.betting, {ActionKind::kCall, 18});
+  CheckExactState("effective all-in called", state, {80, 0}, {20, 20},
+                  {18, 18}, 18, StreetKind::kFlop, -1, 0, board,
+                  StatePhase::kChance);
 }
 
 }  // namespace
