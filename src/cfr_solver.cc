@@ -136,6 +136,7 @@ CFRSolver::CFRSolver(const SolverConfig& config,
     storage_.mutable_ref().public_state_ids.reserve(public_state_cap);
     storage_.mutable_ref().public_state_rows.reserve(public_state_cap);
     storage_.mutable_ref().public_chance_child_ids.reserve(public_state_cap);
+    storage_.mutable_ref().action_child_ids.reserve(public_state_cap * 4);
     storage_.mutable_ref().chance_child_entries.reserve(public_state_cap);
     storage_.mutable_ref().frozen_info_set_action_offsets.reserve(
         public_state_cap);
@@ -253,8 +254,12 @@ uint32_t CFRSolver::FrozenTraversalGraph::required_action_child_id(
   if (action_index < 0 || action_index >= node.action_count) {
     throw std::logic_error("frozen action child index out of range");
   }
-  const uint32_t child_id =
-      row.action_child_ids[static_cast<size_t>(action_index)];
+  const size_t child_slot = static_cast<size_t>(row.action_child_offset) +
+                            static_cast<size_t>(action_index);
+  if (child_slot >= solver_.tables().action_child_ids.size()) {
+    throw std::logic_error("required action child public state is missing");
+  }
+  const uint32_t child_id = solver_.tables().action_child_ids[child_slot];
   if (child_id == kInvalidPublicStateId ||
       child_id == kCappedPublicStateId ||
       child_id >= rows.size()) {

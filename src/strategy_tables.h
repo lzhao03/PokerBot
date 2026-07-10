@@ -133,17 +133,15 @@ class StrategyTables {
   };
 
   struct PublicStateRow {
-    PublicStateRow() {
-      action_child_ids.fill(kInvalidPublicStateId);
-    }
-
     BettingNodeId betting_node_id = kInvalidBettingNodeId;
     PublicBucketId public_bucket = 0;
-    std::array<uint32_t, kMaxActionsPerNode> action_child_ids = {};
+    uint32_t action_child_offset = 0;
     uint32_t chance_child_offset = 0;
     uint32_t chance_child_count = 0;
   };
 
+  std::optional<uint32_t> action_child(uint32_t parent_public_state_id,
+                                       int action_index) const;
   std::optional<uint32_t> chance_child(
       uint32_t parent_public_state_id,
       PublicBucketId outcome_id) const;
@@ -179,6 +177,7 @@ class StrategyTables {
   absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>
       public_state_ids;
   std::vector<PublicStateRow> public_state_rows;
+  std::vector<uint32_t> action_child_ids;
   absl::flat_hash_map<ChanceTransitionKey, uint32_t, ChanceTransitionKeyHash>
       public_chance_child_ids;
   std::vector<ChanceChildEntry> chance_child_entries;

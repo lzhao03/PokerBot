@@ -368,13 +368,21 @@ GraphBuilder::PublicStateRow GraphBuilder::make_row(
   row.public_bucket =
       card_abstraction_.public_bucket(state.betting.street, state.board);
 
-  const auto& nodes = tables().betting_nodes;
+  StrategyTables& tables = mtables();
+  const auto& nodes = tables.betting_nodes;
   if (betting_node_id >= nodes.size()) {
     throw std::logic_error("public row betting node is invalid");
   }
   const BettingNode& node = nodes[betting_node_id];
   if (!SameBettingState(node.state, state.betting)) {
     throw std::logic_error("public row betting node state mismatch");
+  }
+  if (node.action_count > 0) {
+    row.action_child_offset =
+        static_cast<uint32_t>(tables.action_child_ids.size());
+    const size_t new_size = tables.action_child_ids.size() +
+                            node.action_count;
+    tables.action_child_ids.resize(new_size, kInvalidPublicStateId);
   }
 
   return row;
@@ -433,7 +441,8 @@ bool GraphBuilder::for_each_required_chance_transition(
   if (row.betting_node_id >= tables().betting_nodes.size()) {
     return false;
   }
-  const BettingState& betting = tables().betting_nodes[row.betting_node_id].state;
+  const BettingState& betting =
+      tables().betting_nodes[row.betting_node_id].state;
   if constexpr (kCoarsePublicBuckets) {
     const auto& transitions = CoarseChanceTransitions(betting.street);
     const auto existing = transitions.find(row.public_bucket);
@@ -480,7 +489,12 @@ std::optional<uint32_t> GraphBuilder::find_or_cache_action_child(
   }
 
   const size_t action_slot = static_cast<size_t>(action_index);
-  const uint32_t row_child_id = row.action_child_ids[action_slot];
+  const size_t child_slot = static_cast<size_t>(row.action_child_offset) +
+                            action_slot;
+  if (child_slot >= tables().action_child_ids.size()) {
+    return std::nullopt;
+  }
+  const uint32_t row_child_id = tables().action_child_ids[child_slot];
   if (row_child_id != kInvalidPublicStateId) {
     return row_child_id;
   }
@@ -516,9 +530,7 @@ std::optional<uint32_t> GraphBuilder::find_or_cache_action_child(
   }
 
   if (!storage_.frozen) {
-    mtables()
-        .public_state_rows[parent_public_state_id]
-        .action_child_ids[action_slot] = child_id->second;
+    mtables().action_child_ids[child_slot] = child_id->second;
   }
   return child_id->second;
 }
@@ -552,6 +564,8 @@ GraphBuilder::get_or_create_action_child(
   }
 
   const size_t action_slot = static_cast<size_t>(action_index);
+  const size_t child_slot = static_cast<size_t>(read_row.action_child_offset) +
+                            action_slot;
   if (std::optional<uint32_t> existing_child_id =
           find_or_cache_action_child(parent_public_state_id, action_index)) {
     stats_.record_transition_hit();
@@ -563,9 +577,7 @@ GraphBuilder::get_or_create_action_child(
 
   if (!can_insert_row()) {
     if (!storage_.frozen) {
-      mtables()
-          .public_state_rows[parent_public_state_id]
-          .action_child_ids[action_slot] = kCappedPublicStateId;
+      mtables().action_child_ids[child_slot] = kCappedPublicStateId;
     }
     stats_.record_transition_miss();
     return std::nullopt;
@@ -586,16 +598,12 @@ GraphBuilder::get_or_create_action_child(
   }
   auto child_id = get_or_create_row(child_betting_node_id, child_state);
   if (!child_id.has_value()) {
-    mtables()
-        .public_state_rows[parent_public_state_id]
-        .action_child_ids[action_slot] = kCappedPublicStateId;
+    mtables().action_child_ids[child_slot] = kCappedPublicStateId;
     stats_.record_transition_miss();
     return std::nullopt;
   }
 
-  mtables()
-      .public_state_rows[parent_public_state_id]
-      .action_child_ids[action_slot] = *child_id;
+  mtables().action_child_ids[child_slot] = *child_id;
   stats_.record_transition_miss();
   stats_.record_child_node_created();
   return child_id;
@@ -900,8 +908,9 @@ bool GraphBuilder::validate_prebuilt_rows(
     for (int action_index = 0; action_index < node.action_count;
          ++action_index) {
       ++stats.prebuild_action_transitions;
-      const size_t action_slot = static_cast<size_t>(action_index);
-      const uint32_t child_id = row.action_child_ids[action_slot];
+      const uint32_t child_id =
+          tables().action_child(entry.node_id, action_index)
+              .value_or(kInvalidPublicStateId);
       const bool valid_child = valid_public_child(child_id);
       if (!valid_child) {
         mark_missing_action();

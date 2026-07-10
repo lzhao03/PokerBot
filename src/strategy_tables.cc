@@ -71,4 +71,27 @@ std::optional<uint32_t> StrategyTables::chance_child(
   return iter->public_state_id;
 }
 
+std::optional<uint32_t> StrategyTables::action_child(
+    uint32_t parent_public_state_id,
+    int action_index) const {
+  if (parent_public_state_id >= public_state_rows.size()) {
+    return std::nullopt;
+  }
+  const PublicStateRow& row = public_state_rows[parent_public_state_id];
+  if (row.betting_node_id >= betting_nodes.size()) {
+    return std::nullopt;
+  }
+  const BettingNode& node = betting_nodes[row.betting_node_id];
+  if (action_index < 0 || action_index >= node.action_count) {
+    return std::nullopt;
+  }
+
+  const size_t child_index = static_cast<size_t>(row.action_child_offset) +
+                             static_cast<size_t>(action_index);
+  if (child_index >= action_child_ids.size()) {
+    return std::nullopt;
+  }
+  return action_child_ids[child_index];
+}
+
 }  // namespace poker

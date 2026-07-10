@@ -68,14 +68,21 @@ struct CFRSolverTestAccess {
     out.reserve(tables.public_state_rows.size() +
                 tables.chance_child_entries.size() +
                 tables.betting_nodes.size() + tables.betting_edges.size());
-    for (const StrategyTables::PublicStateRow& row :
-         tables.public_state_rows) {
+    for (size_t row_id = 0; row_id < tables.public_state_rows.size();
+         ++row_id) {
+      const StrategyTables::PublicStateRow& row =
+          tables.public_state_rows[row_id];
       uint64_t hash = 0;
       hash = Mix(hash, row.betting_node_id);
       hash = Mix(hash, row.public_bucket);
+      hash = Mix(hash, row.action_child_offset);
       hash = Mix(hash, row.chance_child_offset);
       hash = Mix(hash, row.chance_child_count);
-      for (uint32_t child_id : row.action_child_ids) {
+      const auto& node = tables.betting_nodes[row.betting_node_id];
+      for (int action = 0; action < node.action_count; ++action) {
+        const uint32_t child_id =
+            tables.action_child(static_cast<uint32_t>(row_id), action)
+                .value_or(kInvalidPublicStateId);
         hash = Mix(hash, child_id);
       }
       out.push_back(hash);
