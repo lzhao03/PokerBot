@@ -124,7 +124,10 @@ cc_library(
 
 cc_library(
     name = "card_abstraction",
-    hdrs = ["card_abstraction.h"],
+    hdrs = [
+        "card_abstraction.h",
+        "coarse_chance_transitions.h",
+    ],
     deps = [
         ":build_flags",
         ":combo",
@@ -391,6 +394,7 @@ cc_library(
         "public_state_graph.cc",
     ],
     hdrs = [
+        "coarse_chance_transitions.h",
         "cfr_solver.h",
         "public_state_graph.h",
     ],
@@ -408,6 +412,7 @@ cc_library(
         "public_state_graph.cc",
     ],
     hdrs = [
+        "coarse_chance_transitions.h",
         "cfr_solver.h",
         "public_state_graph.h",
     ],
@@ -425,6 +430,7 @@ cc_library(
         "public_state_graph.cc",
     ],
     hdrs = [
+        "coarse_chance_transitions.h",
         "cfr_solver.h",
         "public_state_graph.h",
     ],
@@ -445,6 +451,7 @@ cc_library(
         "public_state_graph.cc",
     ],
     hdrs = [
+        "coarse_chance_transitions.h",
         "cfr_solver.h",
         "public_state_graph.h",
     ],

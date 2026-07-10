@@ -12,10 +12,10 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
 #include "src/build_flags.h"
 #include "src/card_utils.h"
+#include "src/coarse_chance_transitions.h"
 #include "src/game_tree.h"
 
 namespace poker {
@@ -122,73 +122,49 @@ bool ForEachNextStreetDeal(StreetKind street,
   return ForEachCardCombination(count, board.mask, callback);
 }
 
-struct CoarseChanceTransitionTemplate {
-  Board parent_board;
-  absl::InlinedVector<CardId, 5> cards;
-};
-
-using CoarseChanceTransitionMap =
-    absl::flat_hash_map<PublicBucketId,
-                        std::vector<CoarseChanceTransitionTemplate>>;
-
-CoarseChanceTransitionMap BuildCoarseChanceTransitions(StreetKind street) {
-  CoarseChanceTransitionMap transitions;
-  const int board_count = BoardCardsForStreet(street);
-  const int deal_count = CardsForNextStreet(street);
-  if (deal_count <= 0) {
-    return transitions;
-  }
-
-  absl::flat_hash_set<uint64_t> seen;
-  ForEachCardCombination(board_count, 0, [&](absl::Span<const CardId> board) {
-    Board parent;
-    for (CardId card : board) {
-      parent.add(card);
+template <size_t N, typename Callback>
+bool ForEachCoarseChanceTransition(
+    const std::array<CoarseChanceTransition, N>& transitions,
+    PublicBucketId parent_bucket,
+    const BettingState& betting,
+    Callback&& callback) {
+  for (const CoarseChanceTransition& transition : transitions) {
+    if (transition.parent_bucket != parent_bucket) {
+      continue;
     }
-    const PublicBucketId parent_bucket =
-        public_bucket(street, parent);
-    ForEachCardCombination(deal_count, parent.mask,
-                           [&](absl::Span<const CardId> cards) {
-      Board child = parent;
-      for (CardId card : cards) {
-        child.add(card);
-      }
-      const PublicBucketId child_bucket =
-          public_bucket(StreetAfterChance(street), child);
-      const uint64_t seen_key = (parent_bucket << 32) | child_bucket;
-      if (!seen.insert(seen_key).second) {
-        return true;
-      }
-      CoarseChanceTransitionTemplate transition;
-      transition.parent_board = parent;
-      transition.cards.assign(cards.begin(), cards.end());
-      transitions[parent_bucket].push_back(std::move(transition));
-      return true;
-    });
-    return true;
-  });
-  return transitions;
+    Board parent;
+    for (uint8_t i = 0; i < transition.parent_count; ++i) {
+      parent.add(transition.parent_cards[static_cast<size_t>(i)]);
+    }
+    const absl::Span<const CardId> cards(
+        transition.cards.data(), transition.card_count);
+    if (!callback(ApplyChance({betting, parent}, cards), cards)) {
+      return false;
+    }
+  }
+  return true;
 }
 
-[[maybe_unused]] const CoarseChanceTransitionMap& CoarseChanceTransitions(
-    StreetKind street) {
-  static const CoarseChanceTransitionMap preflop =
-      BuildCoarseChanceTransitions(StreetKind::kPreflop);
-  static const CoarseChanceTransitionMap flop =
-      BuildCoarseChanceTransitions(StreetKind::kFlop);
-  static const CoarseChanceTransitionMap turn =
-      BuildCoarseChanceTransitions(StreetKind::kTurn);
-  static const CoarseChanceTransitionMap river =
-      BuildCoarseChanceTransitions(StreetKind::kRiver);
+template <typename Callback>
+bool ForEachCoarseChanceTransition(StreetKind street,
+                                   PublicBucketId parent_bucket,
+                                   const BettingState& betting,
+                                   Callback&& callback) {
   switch (street) {
     case StreetKind::kPreflop:
-      return preflop;
+      return ForEachCoarseChanceTransition(kPreflopTextureTransitions,
+                                           parent_bucket, betting,
+                                           std::forward<Callback>(callback));
     case StreetKind::kFlop:
-      return flop;
+      return ForEachCoarseChanceTransition(kFlopTextureTransitions,
+                                           parent_bucket, betting,
+                                           std::forward<Callback>(callback));
     case StreetKind::kTurn:
-      return turn;
+      return ForEachCoarseChanceTransition(kTurnTextureTransitions,
+                                           parent_bucket, betting,
+                                           std::forward<Callback>(callback));
     case StreetKind::kRiver:
-      return river;
+      return true;
   }
 }
 
@@ -441,19 +417,9 @@ bool GraphBuilder::for_each_required_chance_transition(
   const BettingState& betting =
       tables().betting_nodes[row.betting_node_id].state;
   if constexpr (kCoarsePublicBuckets) {
-    const auto& transitions = CoarseChanceTransitions(betting.street);
-    const auto existing = transitions.find(row.public_bucket);
-    if (existing == transitions.end()) {
-      return false;
-    }
-    for (const CoarseChanceTransitionTemplate& transition : existing->second) {
-      const ExactGameState parent{betting, transition.parent_board};
-      const ExactGameState child_state = ApplyChance(parent, transition.cards);
-      if (!callback(child_state, absl::Span<const CardId>(transition.cards))) {
-        return false;
-      }
-    }
-    return true;
+    return ForEachCoarseChanceTransition(
+        betting.street, row.public_bucket, betting,
+        std::forward<Callback>(callback));
   } else {
     return ForEachNextStreetDeal(
         betting.street, board, [&](absl::Span<const CardId> cards) {
