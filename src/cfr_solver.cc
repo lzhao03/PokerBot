@@ -362,18 +362,17 @@ CFRSolver::NodeGraph::sample_chance_child(
                                        exact_parent_state.board,
                                        known_private_cards, solver_.rng_);
   ExactGameState exact_child_state = ApplyChance(exact_parent_state, cards);
-  CompactPublicState child_state = ToCompact(exact_child_state);
   const Board child_board = exact_child_state.board;
   std::optional<uint32_t> child_id;
   switch (mode_) {
     case NodeGraphMode::kGrow:
       child_id = solver_.public_graph_.get_or_create_chance_child(
-          parent.public_state_id, child_state);
+          parent.public_state_id, exact_child_state);
       break;
     case NodeGraphMode::kSkipMissing:
     case NodeGraphMode::kRequirePresent:
       child_id = solver_.public_graph_.find_chance_child(
-          parent.public_state_id, child_state);
+          parent.public_state_id, exact_child_state);
       break;
   }
 

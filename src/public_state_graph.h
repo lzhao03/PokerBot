@@ -52,18 +52,25 @@ class PublicStateGraph {
                    TraversalStats& stats);
 
   std::optional<uint32_t> get_or_create_row(const CompactPublicState& state);
+  std::optional<uint32_t> get_or_create_row(const ExactGameState& state);
   std::optional<uint32_t> find_action_child(
       uint32_t parent_public_state_id,
       int action_index) const;
   std::optional<uint32_t> find_chance_child(
       uint32_t parent_public_state_id,
       const CompactPublicState& child_state) const;
+  std::optional<uint32_t> find_chance_child(
+      uint32_t parent_public_state_id,
+      const ExactGameState& child_state) const;
   std::optional<uint32_t> get_or_create_action_child(
       uint32_t parent_public_state_id,
       int action_index);
   std::optional<uint32_t> get_or_create_chance_child(
       uint32_t parent_public_state_id,
       const CompactPublicState& child_state);
+  std::optional<uint32_t> get_or_create_chance_child(
+      uint32_t parent_public_state_id,
+      const ExactGameState& child_state);
   bool prebuild_reachable_rows(uint32_t root_id,
                                int max_depth);
   bool validate_prebuilt_rows(uint32_t root_id,
@@ -90,12 +97,19 @@ class PublicStateGraph {
   BettingHistoryRow make_betting_history_row(
       const BettingHistoryKey& key) const;
   PublicStateKey row_key(uint32_t betting_history_id,
+                         StreetKind street,
+                         const Board& board) const;
+  PublicStateKey row_key(uint32_t betting_history_id,
                          const CompactPublicState& state) const;
+  std::optional<uint32_t> find_row(
+      uint32_t betting_history_id,
+      StreetKind street,
+      const Board& board) const;
   std::optional<uint32_t> find_row(
       uint32_t betting_history_id,
       const CompactPublicState& state) const;
   PublicStateRow make_row(uint32_t betting_history_id,
-                          CompactPublicState state);
+                          const ExactGameState& state);
   uint32_t get_or_create_betting_history(
       const BettingState& state);
   uint32_t get_or_create_betting_history(
@@ -113,18 +127,23 @@ class PublicStateGraph {
                                      const PublicStateRow& row);
   std::optional<uint32_t> get_or_create_row(
       uint32_t betting_history_id,
-      CompactPublicState state);
+      const ExactGameState& state);
   std::optional<uint32_t> find_or_cache_action_child(
       uint32_t parent_public_state_id,
       int action_index);
   std::optional<uint32_t> find_or_cache_chance_child(
       uint32_t parent_public_state_id,
       const CompactPublicState& child_state);
+  std::optional<uint32_t> find_or_cache_chance_child(
+      uint32_t parent_public_state_id,
+      const ExactGameState& child_state);
   bool row_limit_reached() const;
   bool can_insert_row() const;
   template <typename Callback>
   bool for_each_required_chance_transition(const PublicStateRow& row,
                                            Callback&& callback) const;
+  PublicBucketId chance_outcome_id(
+      const ExactGameState& child_state) const;
   PublicBucketId chance_outcome_id(
       const CompactPublicState& child_state) const;
   void rebuild_chance_child_entries();

@@ -226,34 +226,47 @@ PublicStateGraph::make_betting_history_row(
 PublicStateGraph::PublicStateKey
 PublicStateGraph::row_key(
     uint32_t betting_history_id,
+    StreetKind street,
+    const Board& board) const {
+  return {betting_history_id, card_abstraction_.public_bucket(street, board)};
+}
+
+PublicStateGraph::PublicStateKey
+PublicStateGraph::row_key(
+    uint32_t betting_history_id,
     const CompactPublicState& state) const {
-  return {betting_history_id,
-          card_abstraction_.public_bucket(state.street,
-                                          BoardFromCompact(state))};
+  return row_key(betting_history_id, state.street, BoardFromCompact(state));
 }
 
 std::optional<uint32_t> PublicStateGraph::find_row(
     uint32_t betting_history_id,
-    const CompactPublicState& state) const {
+    StreetKind street,
+    const Board& board) const {
   const auto existing =
-      tables().public_state_ids.find(row_key(betting_history_id, state));
+      tables().public_state_ids.find(row_key(betting_history_id, street, board));
   if (existing == tables().public_state_ids.end()) {
     return std::nullopt;
   }
   return existing->second;
 }
 
+std::optional<uint32_t> PublicStateGraph::find_row(
+    uint32_t betting_history_id,
+    const CompactPublicState& state) const {
+  return find_row(betting_history_id, state.street, BoardFromCompact(state));
+}
+
 PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
     uint32_t betting_history_id,
-    CompactPublicState state) {
+    const ExactGameState& state) {
   PublicStateRow row;
-  const Board board = BoardFromCompact(state);
   row.betting_history_id = betting_history_id;
-  row.public_bucket = card_abstraction_.public_bucket(state.street, board);
-  row.betting = BettingStateFromCompact(state);
-  row.board = board;
-  row.is_terminal = IsTerminal(row.betting, board);
-  row.player_to_act = GetPlayerToAct(row.betting, board);
+  row.public_bucket =
+      card_abstraction_.public_bucket(state.betting.street, state.board);
+  row.betting = state.betting;
+  row.board = state.board;
+  row.is_terminal = IsTerminal(row.betting, row.board);
+  row.player_to_act = GetPlayerToAct(row.betting, row.board);
   row.is_chance_node = !row.is_terminal && row.player_to_act == -1;
 
   if (!row.is_terminal && !row.is_chance_node && IsPlayer(row.player_to_act)) {
@@ -273,8 +286,9 @@ PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
 
 std::optional<uint32_t> PublicStateGraph::get_or_create_row(
     uint32_t betting_history_id,
-    CompactPublicState state) {
-  if (std::optional<uint32_t> existing = find_row(betting_history_id, state)) {
+    const ExactGameState& state) {
+  if (std::optional<uint32_t> existing =
+          find_row(betting_history_id, state.betting.street, state.board)) {
     return existing;
   }
 
@@ -286,12 +300,13 @@ std::optional<uint32_t> PublicStateGraph::get_or_create_row(
   const uint32_t public_state_id =
       static_cast<uint32_t>(tables.public_state_rows.size());
   const auto [state_iter, inserted] = tables.public_state_ids.try_emplace(
-      row_key(betting_history_id, state), public_state_id);
+      row_key(betting_history_id, state.betting.street, state.board),
+      public_state_id);
   if (!inserted) {
     return state_iter->second;
   }
   tables.public_state_rows.push_back(
-      make_row(betting_history_id, std::move(state)));
+      make_row(betting_history_id, state));
   cache_betting_history_actions(betting_history_id,
                                 tables.public_state_rows.back());
   return public_state_id;
@@ -305,10 +320,27 @@ std::optional<uint32_t> PublicStateGraph::get_or_create_row(
     if (betting_history == tables().betting_history_ids.end()) {
       return std::nullopt;
     }
-    return get_or_create_row(betting_history->second, state);
+    return get_or_create_row(betting_history->second,
+                             ExactGameStateFromCompact(state));
   }
 
   const uint32_t betting_history_id = get_or_create_betting_history(state);
+  return get_or_create_row(betting_history_id, ExactGameStateFromCompact(state));
+}
+
+std::optional<uint32_t> PublicStateGraph::get_or_create_row(
+    const ExactGameState& state) {
+  if (storage_.frozen) {
+    BettingHistoryKey key = betting_history_key(state.betting);
+    const auto betting_history = tables().betting_history_ids.find(key);
+    if (betting_history == tables().betting_history_ids.end()) {
+      return std::nullopt;
+    }
+    return get_or_create_row(betting_history->second, state);
+  }
+
+  const uint32_t betting_history_id =
+      get_or_create_betting_history(state.betting);
   return get_or_create_row(betting_history_id, state);
 }
 
@@ -449,6 +481,13 @@ std::optional<uint32_t> PublicStateGraph::find_action_child(
 std::optional<uint32_t> PublicStateGraph::find_chance_child(
     uint32_t parent_public_state_id,
     const CompactPublicState& child_state) const {
+  return find_chance_child(parent_public_state_id,
+                           ExactGameStateFromCompact(child_state));
+}
+
+std::optional<uint32_t> PublicStateGraph::find_chance_child(
+    uint32_t parent_public_state_id,
+    const ExactGameState& child_state) const {
   const auto& public_rows = rows();
   if (parent_public_state_id >= public_rows.size()) {
     return std::nullopt;
@@ -505,9 +544,14 @@ bool PublicStateGraph::for_each_required_chance_transition(
 }
 
 PublicStateGraph::PublicBucketId PublicStateGraph::chance_outcome_id(
+    const ExactGameState& child_state) const {
+  return card_abstraction_.public_bucket(child_state.betting.street,
+                                         child_state.board);
+}
+
+PublicStateGraph::PublicBucketId PublicStateGraph::chance_outcome_id(
     const CompactPublicState& child_state) const {
-  return card_abstraction_.public_bucket(child_state.street,
-                                         BoardFromCompact(child_state));
+  return chance_outcome_id(ExactGameStateFromCompact(child_state));
 }
 
 std::optional<uint32_t> PublicStateGraph::find_or_cache_action_child(
@@ -608,11 +652,10 @@ PublicStateGraph::get_or_create_action_child(
   const uint32_t parent_history_id = read_row.betting_history_id;
   const BettingState child_betting =
       ApplyAction(read_row.betting, read_row.actions[action_slot]);
-  CompactPublicState child_state =
-      ToCompact(child_betting, read_row.board);
+  const ExactGameState child_state{child_betting, read_row.board};
   const uint32_t child_history_id = get_or_create_action_history_child(
       parent_history_id, action_index, child_betting);
-  auto child_id = get_or_create_row(child_history_id, std::move(child_state));
+  auto child_id = get_or_create_row(child_history_id, child_state);
   if (!child_id.has_value()) {
     mtables()
         .public_state_rows[parent_public_state_id]
@@ -632,6 +675,13 @@ PublicStateGraph::get_or_create_action_child(
 std::optional<uint32_t> PublicStateGraph::find_or_cache_chance_child(
     uint32_t parent_public_state_id,
     const CompactPublicState& child_state) {
+  return find_or_cache_chance_child(parent_public_state_id,
+                                    ExactGameStateFromCompact(child_state));
+}
+
+std::optional<uint32_t> PublicStateGraph::find_or_cache_chance_child(
+    uint32_t parent_public_state_id,
+    const ExactGameState& child_state) {
   const auto& public_rows = rows();
   if (parent_public_state_id >= public_rows.size()) {
     return std::nullopt;
@@ -679,6 +729,14 @@ std::optional<uint32_t>
 PublicStateGraph::get_or_create_chance_child(
     uint32_t parent_public_state_id,
     const CompactPublicState& exact_child_state) {
+  return get_or_create_chance_child(parent_public_state_id,
+                                    ExactGameStateFromCompact(exact_child_state));
+}
+
+std::optional<uint32_t>
+PublicStateGraph::get_or_create_chance_child(
+    uint32_t parent_public_state_id,
+    const ExactGameState& exact_child_state) {
   const auto& public_rows = rows();
   if (parent_public_state_id >= public_rows.size()) {
     return std::nullopt;
@@ -697,12 +755,10 @@ PublicStateGraph::get_or_create_chance_child(
   }
 
   const PublicStateRow& parent_row = public_rows[parent_public_state_id];
-  CompactPublicState child_state = exact_child_state;
-  const BettingState child_betting = BettingStateFromCompact(child_state);
   const uint32_t parent_history_id = parent_row.betting_history_id;
   const uint32_t child_history_id = get_or_create_chance_history_child(
-      parent_history_id, child_betting);
-  auto child_id = get_or_create_row(child_history_id, std::move(child_state));
+      parent_history_id, exact_child_state.betting);
+  auto child_id = get_or_create_row(child_history_id, exact_child_state);
   if (!child_id.has_value()) {
     stats_.record_transition_miss();
     return std::nullopt;
