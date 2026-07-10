@@ -20,8 +20,6 @@ namespace poker {
 
 inline constexpr uint32_t kInvalidPublicStateId =
     std::numeric_limits<uint32_t>::max();
-inline constexpr uint32_t kInvalidBettingHistoryId =
-    std::numeric_limits<uint32_t>::max();
 inline constexpr uint32_t kInvalidBettingNodeId =
     std::numeric_limits<uint32_t>::max();
 inline constexpr uint32_t kCappedPublicStateId = kInvalidPublicStateId - 1;
@@ -73,30 +71,6 @@ class StrategyTables {
   static constexpr uint32_t kInvalidActionOffset =
       std::numeric_limits<uint32_t>::max();
 
-  struct BettingHistoryKey {
-    static constexpr int kInlineHistoryValues = 48;
-
-    int street = 0;
-    int pot = 0;
-    int stack_a = 0;
-    int stack_b = 0;
-    int all_in = 0;
-    int folded_player = 0;
-    int player_to_act = 0;
-    int player_contribution_size = 0;
-    std::array<int, 2> player_contributions = {0, 0};
-    int history_size = 0;
-    // Only entries [0, history_size) are read by hash/equality.
-    std::array<int, kInlineHistoryValues> history_values = {};
-    std::vector<int> history_overflow;
-
-    bool operator==(const BettingHistoryKey& other) const;
-  };
-
-  struct BettingHistoryKeyHash {
-    size_t operator()(const BettingHistoryKey& key) const;
-  };
-
   using BettingNodeId = uint32_t;
 
   enum class NodeKind : uint8_t {
@@ -142,29 +116,6 @@ class StrategyTables {
     size_t operator()(const ChanceTransitionKey& key) const;
   };
 
-  struct BettingHistoryRow {
-    BettingHistoryRow() {
-      action_ids.fill(0);
-      action_child_ids.fill(kInvalidBettingHistoryId);
-    }
-
-    int street = 0;
-    int pot = 0;
-    std::array<int, 2> stack = {0, 0};
-    int all_in = 0;
-    int folded_player = 0;
-    int player_to_act = 0;
-    std::array<int, 2> player_contributions = {0, 0};
-    int history_size = 0;
-    // Only entries [0, history_size) are read when extending abstract history.
-    std::array<int, BettingHistoryKey::kInlineHistoryValues> history_values = {};
-    std::vector<int> history_overflow;
-    uint8_t action_count = 0;
-    std::array<int, kMaxActionsPerNode> action_ids;
-    std::array<uint32_t, kMaxActionsPerNode> action_child_ids;
-    uint32_t chance_child_id = kInvalidBettingHistoryId;
-  };
-
   struct InfoSetRow {
     uint32_t action_offset = 0;
     uint16_t action_count = 0;
@@ -187,7 +138,6 @@ class StrategyTables {
     }
 
     BettingState betting;
-    uint32_t betting_history_id = kInvalidBettingHistoryId;
     BettingNodeId betting_node_id = kInvalidBettingNodeId;
     PublicBucketId public_bucket = 0;
     bool is_terminal = false;
@@ -222,8 +172,6 @@ class StrategyTables {
   using FrozenInfoSetActionOffsetRow =
       std::array<std::array<uint32_t, kPrivateBucketCount>, kPlayerCount>;
 
-  absl::flat_hash_map<BettingHistoryKey, uint32_t, BettingHistoryKeyHash>
-      betting_history_ids;
   BettingNodeId root_betting_node_id = kInvalidBettingNodeId;
   std::vector<BettingNode> betting_nodes;
   std::vector<BettingEdge> betting_edges;
@@ -233,7 +181,6 @@ class StrategyTables {
   absl::flat_hash_map<ChanceTransitionKey, uint32_t, ChanceTransitionKeyHash>
       public_chance_child_ids;
   std::vector<ChanceChildEntry> chance_child_entries;
-  std::vector<BettingHistoryRow> betting_history_rows;
   std::vector<FrozenInfoSetActionOffsetRow> frozen_info_set_action_offsets;
   size_t info_set_count = 0;
   std::vector<int> action_ids;

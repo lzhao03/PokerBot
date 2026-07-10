@@ -51,7 +51,6 @@ TEST_CASE("coarse training reaches fixed-storage phase") {
   const CFRSolver::TrainingRunStats stats =
       solver.get_last_training_run_stats();
   CHECK(stats.public_state_prebuild_complete);
-  CHECK(stats.betting_history_transition_prebuild_complete);
   CHECK(stats.action_transition_prebuild_complete);
   CHECK(stats.chance_transition_prebuild_complete);
   CHECK(stats.info_set_prebuild_complete);
@@ -59,7 +58,6 @@ TEST_CASE("coarse training reaches fixed-storage phase") {
   CHECK(stats.warmup_iterations == 0);
   CHECK(stats.frozen_iterations == 4);
   CHECK(stats.frozen_cfr_updates > stats.frozen_iterations);
-  CHECK(stats.missing_betting_history_transitions == 0);
   CHECK(stats.missing_action_transitions == 0);
   CHECK(stats.missing_chance_transitions == 0);
 

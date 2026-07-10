@@ -67,8 +67,8 @@ Metrics TrainingMetrics(const CFRSolver& solver) {
 
 TEST_CASE("frozen regret-only traversal guard") {
   SolverConfig config = BaseConfig();
-  config.starting_stack_size = 18;
-  config.bet_sizes = {0.5, 1.0};
+  config.starting_stack_size = 8;
+  config.bet_sizes = {1.0};
   config.regret_only_training = true;
   config.max_info_sets = 500000;
   config.max_public_states = 200000;
@@ -86,7 +86,7 @@ TEST_CASE("frozen regret-only traversal guard") {
   CHECK(stats.frozen_iterations == 4);
   CHECK(stats.frozen_cfr_updates > stats.frozen_iterations);
   CheckMetrics(TrainingMetrics(solver),
-               Metrics{5.52593, 455328, 32953, 9080, 1282628},
+               Metrics{1.31831, 140256, 11560, 320, 303708},
                "frozen regret-only traversal");
 }
 

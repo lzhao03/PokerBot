@@ -128,10 +128,7 @@ void PrintBenchmarkHeader() {
             << "\tcfr_node_updates\tcfr_node_updates_per_second"
             << "\tcfr_node_updates_per_hand"
             << "\tprebuild_seconds\tpublic_state_prebuild_complete"
-            << "\tprebuild_public_states\tprebuild_betting_histories"
-            << "\tbetting_history_transition_prebuild_complete"
-            << "\tprebuild_betting_history_transitions"
-            << "\tmissing_betting_history_transitions"
+            << "\tprebuild_public_states"
             << "\taction_transition_prebuild_complete"
             << "\tprebuild_action_transitions"
             << "\tmissing_action_transitions"
@@ -199,13 +196,6 @@ std::string FrozenPrebuildFailure(
   std::string failure;
   if (!stats.public_state_prebuild_complete) {
     AppendFailure(&failure, "public-state prebuild incomplete");
-  }
-  if (!stats.betting_history_transition_prebuild_complete) {
-    AppendFailure(&failure,
-                  "betting-history transition prebuild incomplete");
-  }
-  if (stats.missing_betting_history_transitions != 0) {
-    AppendFailure(&failure, "missing betting-history transitions");
   }
   if (!stats.chance_transition_prebuild_complete) {
     AppendFailure(&failure, "chance transition prebuild incomplete");
@@ -344,10 +334,6 @@ void RunBenchmark(const std::string& name, BenchmarkFn&& benchmark) {
             << training.prebuild_seconds << "\t"
             << training.public_state_prebuild_complete << "\t"
             << training.prebuild_public_states << "\t"
-            << training.prebuild_betting_histories << "\t"
-            << training.betting_history_transition_prebuild_complete << "\t"
-            << training.prebuild_betting_history_transitions << "\t"
-            << training.missing_betting_history_transitions << "\t"
             << training.action_transition_prebuild_complete << "\t"
             << training.prebuild_action_transitions << "\t"
             << training.missing_action_transitions << "\t"

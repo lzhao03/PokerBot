@@ -15,15 +15,11 @@ namespace poker {
 
 struct TrainingRunStats {
   bool public_state_prebuild_complete = false;
-  bool betting_history_transition_prebuild_complete = false;
   bool action_transition_prebuild_complete = false;
   bool chance_transition_prebuild_complete = false;
   bool info_set_prebuild_complete = false;
   bool frozen_info_set_lookup_prebuild_complete = false;
   int64_t prebuild_public_states = 0;
-  int64_t prebuild_betting_histories = 0;
-  int64_t prebuild_betting_history_transitions = 0;
-  int64_t missing_betting_history_transitions = 0;
   int64_t prebuild_action_transitions = 0;
   int64_t missing_action_transitions = 0;
   int64_t prebuild_chance_transitions = 0;
@@ -79,8 +75,6 @@ class PublicStateGraph {
   using BettingNodeId = StrategyTables::BettingNodeId;
   using BettingNode = StrategyTables::BettingNode;
   using BettingEdge = StrategyTables::BettingEdge;
-  using BettingHistoryKey = StrategyTables::BettingHistoryKey;
-  using BettingHistoryRow = StrategyTables::BettingHistoryRow;
   using PublicStateKey = StrategyTables::PublicStateKey;
   using ChanceTransitionKey = StrategyTables::ChanceTransitionKey;
 
@@ -90,10 +84,6 @@ class PublicStateGraph {
     return tables().public_state_rows;
   }
 
-  BettingHistoryKey betting_history_key(
-      const BettingState& state) const;
-  BettingHistoryRow make_betting_history_row(
-      const BettingHistoryKey& key) const;
   BettingNodeId append_betting_node(const BettingState& state);
   BettingNodeId get_or_create_root_betting_node(const BettingState& state);
   BettingNodeId get_or_create_action_betting_child(
@@ -109,24 +99,9 @@ class PublicStateGraph {
       BettingNodeId betting_node_id,
       StreetKind street,
       const Board& board) const;
-  PublicStateRow make_row(uint32_t betting_history_id,
-                          BettingNodeId betting_node_id,
+  PublicStateRow make_row(BettingNodeId betting_node_id,
                           const ExactGameState& state);
-  uint32_t get_or_create_betting_history(
-      const BettingState& state);
-  uint32_t get_or_create_betting_history(BettingHistoryKey key,
-                                         BettingHistoryRow row);
-  uint32_t get_or_create_action_history_child(
-      uint32_t parent_history_id,
-      int action_index,
-      const BettingState& child_state);
-  uint32_t get_or_create_chance_history_child(
-      uint32_t parent_history_id,
-      const BettingState& child_state);
-  void cache_betting_history_actions(uint32_t betting_history_id,
-                                     const PublicStateRow& row);
   std::optional<uint32_t> get_or_create_row(
-      uint32_t betting_history_id,
       BettingNodeId betting_node_id,
       const ExactGameState& state);
   std::optional<uint32_t> find_or_cache_action_child(

@@ -141,8 +141,8 @@ CFRSolver::CFRSolver(const SolverConfig& config,
     storage_.mutable_ref().frozen_info_set_action_offsets.reserve(
         public_state_cap);
     storage_.mutable_ref().public_info_set_slabs.reserve(public_state_cap);
-    storage_.mutable_ref().betting_history_ids.reserve(public_state_cap);
-    storage_.mutable_ref().betting_history_rows.reserve(public_state_cap);
+    storage_.mutable_ref().betting_nodes.reserve(public_state_cap);
+    storage_.mutable_ref().betting_edges.reserve(public_state_cap);
   }
 }
 
@@ -556,11 +556,8 @@ bool CFRSolver::prepare_prebuilt_training(
   }
 
   auto record_public_counts = [&] {
-    const auto& histories_table = tables().betting_history_rows;
     const int64_t public_states = static_cast<int64_t>(get_public_state_count());
-    const int64_t histories = static_cast<int64_t>(histories_table.size());
     stats.prebuild_public_states = public_states;
-    stats.prebuild_betting_histories = histories;
   };
   auto record_action_counts = [&] {
     const int64_t info_sets = static_cast<int64_t>(get_info_set_count());

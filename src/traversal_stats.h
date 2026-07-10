@@ -22,8 +22,8 @@ struct TraversalStats {
   int64_t showdown_utility_calls = 0;
   int64_t action_entry_touches = 0;
   int64_t atomic_regret_update_retries = 0;
-  int64_t betting_history_transition_hits = 0;
-  int64_t betting_history_transition_misses = 0;
+  int64_t transition_hits = 0;
+  int64_t transition_misses = 0;
 
   void add(const TraversalStats& other) {
     cfr_updates += other.cfr_updates;
@@ -38,10 +38,8 @@ struct TraversalStats {
     showdown_utility_calls += other.showdown_utility_calls;
     action_entry_touches += other.action_entry_touches;
     atomic_regret_update_retries += other.atomic_regret_update_retries;
-    betting_history_transition_hits +=
-        other.betting_history_transition_hits;
-    betting_history_transition_misses +=
-        other.betting_history_transition_misses;
+    transition_hits += other.transition_hits;
+    transition_misses += other.transition_misses;
     max_decision_depth =
         std::max(max_decision_depth, other.max_decision_depth);
   }
@@ -98,13 +96,13 @@ struct TraversalStats {
 
   void record_transition_hit() {
     if constexpr (kTraversalStatsEnabled) {
-      ++betting_history_transition_hits;
+      ++transition_hits;
     }
   }
 
   void record_transition_miss() {
     if constexpr (kTraversalStatsEnabled) {
-      ++betting_history_transition_misses;
+      ++transition_misses;
     }
   }
 
