@@ -136,10 +136,6 @@ struct CFRSolverTestAccess {
         root_id,
         solver.initial_state_.board,
     };
-    CFRSolver::NodeGraph graph(
-        solver,
-        freeze_storage ? CFRSolver::NodeGraphMode::kRequirePresent
-                       : CFRSolver::NodeGraphMode::kGrow);
     CFRSolver::TraversalScratch scratch(32);
     const CFRSolver::TraversalDeal deal{{
         CFRSolver::PrivateCards::FromCombo(a_combo),
@@ -150,7 +146,14 @@ struct CFRSolverTestAccess {
     CFRSolver::TraversalContext ctx(deal, options, scratch, std::cref(a_view),
                                     std::cref(b_view));
 
-    const double value = solver.cfr(root, ctx, graph);
+    double value = 0.0;
+    if (freeze_storage) {
+      CFRSolver::FrozenTraversalGraph graph(solver);
+      value = solver.cfr(root, ctx, graph);
+    } else {
+      CFRSolver::MutableTraversalGraph graph(solver);
+      value = solver.cfr(root, ctx, graph);
+    }
     const MutableCumulativeArrays& arrays = solver.storage_.cumulative_ref();
     return SolverSnapshot{
         value,

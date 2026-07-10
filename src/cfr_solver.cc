@@ -291,8 +291,8 @@ std::optional<CFRSolver::DecisionFrame> CFRSolver::make_decision_frame(
     return std::nullopt;
   }
   const auto& node = betting_nodes[row.betting_node_id];
-  if (row.is_terminal || row.is_chance_node || node.action_count == 0 ||
-      !IsPlayer(row.player_to_act)) {
+  if (row.kind != StrategyTables::NodeKind::kDecision ||
+      node.action_count == 0 || !IsPlayer(row.player_to_act)) {
     return std::nullopt;
   }
 
@@ -312,63 +312,30 @@ std::optional<CFRSolver::DecisionFrame> CFRSolver::make_decision_frame(
   return frame;
 }
 
-CFRSolver::NodeGraph::NodeGraph(CFRSolver& solver,
-                                NodeGraphMode mode)
-    : solver_(solver), mode_(mode) {}
+CFRSolver::MutableTraversalGraph::MutableTraversalGraph(CFRSolver& solver)
+    : solver_(solver) {}
 
-CFRSolver::ChildResult
-CFRSolver::NodeGraph::make_child_result(
-    std::optional<uint32_t> child_id,
-    Board exact_board,
-    const char* missing_message) const {
-  const auto& public_rows = solver_.rows();
-  ChildStatus status = ChildStatus::kOk;
+std::optional<CFRSolver::NodeRef>
+CFRSolver::MutableTraversalGraph::action_child(NodeRef parent,
+                                               int action_index) {
+  const auto child_id = solver_.public_graph_.get_or_create_action_child(
+      parent.public_state_id, action_index, parent.exact_board);
   if (!child_id.has_value() ||
-      *child_id == kInvalidPublicStateId) {
-    status = ChildStatus::kMissing;
-  } else if (*child_id == kCappedPublicStateId) {
-    status = ChildStatus::kCapped;
-  } else if (*child_id >= public_rows.size()) {
-    status = ChildStatus::kInvalid;
+      *child_id == kInvalidPublicStateId ||
+      *child_id == kCappedPublicStateId ||
+      *child_id >= solver_.rows().size()) {
+    return std::nullopt;
   }
-
-  if (status != ChildStatus::kOk) {
-    if (mode_ == NodeGraphMode::kRequirePresent) {
-      throw std::logic_error(missing_message);
-    }
-    return ChildResult{status, {}};
-  }
-
-  return ChildResult{ChildStatus::kOk, NodeRef{*child_id, exact_board}};
+  return NodeRef{*child_id, parent.exact_board};
 }
 
-CFRSolver::ChildResult
-CFRSolver::NodeGraph::action_child(NodeRef parent,
-                                   int action_index) {
-  std::optional<uint32_t> child_id;
-  switch (mode_) {
-    case NodeGraphMode::kGrow:
-      child_id = solver_.public_graph_.get_or_create_action_child(
-          parent.public_state_id, action_index, parent.exact_board);
-      break;
-    case NodeGraphMode::kSkipMissing:
-    case NodeGraphMode::kRequirePresent:
-      child_id = solver_.public_graph_.find_action_child(
-          parent.public_state_id, action_index);
-      break;
-  }
-
-  return make_child_result(child_id, parent.exact_board,
-                           "required action child public state is missing");
-}
-
-CFRSolver::ChildResult
-CFRSolver::NodeGraph::sample_chance_child(
+std::optional<CFRSolver::NodeRef>
+CFRSolver::MutableTraversalGraph::sample_chance_child(
     NodeRef parent,
     CardMask known_private_cards) {
   const auto& public_rows = solver_.rows();
   if (parent.public_state_id >= public_rows.size()) {
-    return ChildResult{ChildStatus::kInvalid, {}};
+    return std::nullopt;
   }
   ExactGameState exact_parent_state{
       public_rows[parent.public_state_id].betting,
@@ -378,22 +345,88 @@ CFRSolver::NodeGraph::sample_chance_child(
                                        exact_parent_state.board,
                                        known_private_cards, solver_.rng_);
   ExactGameState exact_child_state = ApplyChance(exact_parent_state, cards);
-  const Board child_board = exact_child_state.board;
-  std::optional<uint32_t> child_id;
-  switch (mode_) {
-    case NodeGraphMode::kGrow:
-      child_id = solver_.public_graph_.get_or_create_chance_child(
-          parent.public_state_id, exact_child_state);
-      break;
-    case NodeGraphMode::kSkipMissing:
-    case NodeGraphMode::kRequirePresent:
-      child_id = solver_.public_graph_.find_chance_child(
-          parent.public_state_id, exact_child_state);
-      break;
+  const auto child_id = solver_.public_graph_.get_or_create_chance_child(
+      parent.public_state_id, exact_child_state);
+  if (!child_id.has_value() ||
+      *child_id == kInvalidPublicStateId ||
+      *child_id == kCappedPublicStateId ||
+      *child_id >= public_rows.size()) {
+    return std::nullopt;
   }
+  return NodeRef{*child_id, exact_child_state.board};
+}
 
-  return make_child_result(child_id, child_board,
-                           "required chance child public state is missing");
+CFRSolver::FrozenTraversalGraph::FrozenTraversalGraph(CFRSolver& solver)
+    : solver_(solver) {}
+
+uint32_t CFRSolver::FrozenTraversalGraph::required_action_child_id(
+    uint32_t parent_public_state_id,
+    int action_index) const {
+  const auto& rows = solver_.rows();
+  if (parent_public_state_id >= rows.size()) {
+    throw std::logic_error("frozen action parent public state is invalid");
+  }
+  const PublicStateRow& row = rows[parent_public_state_id];
+  if (row.betting_node_id >= solver_.tables().betting_nodes.size()) {
+    throw std::logic_error("frozen action parent betting node is invalid");
+  }
+  const auto& node = solver_.tables().betting_nodes[row.betting_node_id];
+  if (action_index < 0 || action_index >= node.action_count) {
+    throw std::logic_error("frozen action child index out of range");
+  }
+  const uint32_t child_id =
+      row.action_child_ids[static_cast<size_t>(action_index)];
+  if (child_id == kInvalidPublicStateId ||
+      child_id == kCappedPublicStateId ||
+      child_id >= rows.size()) {
+    throw std::logic_error("required action child public state is missing");
+  }
+  return child_id;
+}
+
+uint32_t CFRSolver::FrozenTraversalGraph::required_chance_child_id(
+    uint32_t parent_public_state_id,
+    const ExactGameState& child_state) const {
+  const auto child_id =
+      solver_.public_graph_.find_chance_child(parent_public_state_id,
+                                              child_state);
+  if (!child_id.has_value() ||
+      *child_id == kInvalidPublicStateId ||
+      *child_id == kCappedPublicStateId ||
+      *child_id >= solver_.rows().size()) {
+    throw std::logic_error("required chance child public state is missing");
+  }
+  return *child_id;
+}
+
+CFRSolver::NodeRef CFRSolver::FrozenTraversalGraph::action_child(
+    NodeRef parent,
+    int action_index) const {
+  return NodeRef{
+      required_action_child_id(parent.public_state_id, action_index),
+      parent.exact_board,
+  };
+}
+
+CFRSolver::NodeRef CFRSolver::FrozenTraversalGraph::sample_chance_child(
+    NodeRef parent,
+    CardMask known_private_cards) {
+  const auto& public_rows = solver_.rows();
+  if (parent.public_state_id >= public_rows.size()) {
+    throw std::logic_error("frozen chance parent public state is invalid");
+  }
+  ExactGameState exact_parent_state{
+      public_rows[parent.public_state_id].betting,
+      parent.exact_board,
+  };
+  const auto cards = SampleStreetCards(exact_parent_state.betting.street,
+                                       exact_parent_state.board,
+                                       known_private_cards, solver_.rng_);
+  ExactGameState exact_child_state = ApplyChance(exact_parent_state, cards);
+  return NodeRef{
+      required_chance_child_id(parent.public_state_id, exact_child_state),
+      exact_child_state.board,
+  };
 }
 
 bool CFRSolver::prebuild_info_set_rows(
@@ -625,7 +658,7 @@ void CFRSolver::run_growing_iterations(
   LOG(INFO) << "Starting CFR iterations...";
   VLOG(1) << "Growing storage backend: " << iterations
           << " single-threaded iterations";
-  NodeGraph graph(*this, NodeGraphMode::kGrow);
+  MutableTraversalGraph graph(*this);
   const NodeRef root_node{root_id, initial_state_.board};
   TraversalScratch scratch(ScratchDepthReserve(config_, max_depth));
   const int64_t warmup_start_updates = cfr_update_count_;
@@ -758,7 +791,7 @@ void CFRSolver::run_fixed_storage_iterations(
           }
 
           double local_utility = 0.0;
-          NodeGraph graph(worker, NodeGraphMode::kRequirePresent);
+          FrozenTraversalGraph graph(worker);
           const NodeRef root_node{root_id, root_board};
           for (int i = 0; i < shard; ++i) {
             const RangeDeal sampled = sampler.sample(worker.rng_);
@@ -806,7 +839,8 @@ void CFRSolver::run_fixed_storage_iterations(
       cfr_update_count_ - frozen_start_updates;
 }
 
-double CFRSolver::CfrTraversal::value(NodeRef node) {
+template <typename Graph>
+double CFRSolver::CfrTraversal<Graph>::value(NodeRef node) {
   const uint32_t node_id = node.public_state_id;
   const auto& rows = solver_.rows();
   if (node_id >= rows.size()) {
@@ -814,12 +848,15 @@ double CFRSolver::CfrTraversal::value(NodeRef node) {
   }
   const PublicStateRow& row = rows[node_id];
 
-  if (row.is_terminal) {
-    return terminal(node, row);
-  }
-
-  if (row.is_chance_node) {
-    return chance(node);
+  switch (row.kind) {
+    case StrategyTables::NodeKind::kTerminal:
+      return terminal(node, row);
+    case StrategyTables::NodeKind::kChance:
+      return chance(node);
+    case StrategyTables::NodeKind::kFrontier:
+      return depth_limit_value(node, row);
+    case StrategyTables::NodeKind::kDecision:
+      break;
   }
 
   if (ctx_.depth_limited()) {
@@ -829,7 +866,8 @@ double CFRSolver::CfrTraversal::value(NodeRef node) {
   return decision(node, row);
 }
 
-double CFRSolver::CfrTraversal::terminal(
+template <typename Graph>
+double CFRSolver::CfrTraversal<Graph>::terminal(
     NodeRef node,
     const PublicStateRow& row) {
   solver_.traversal_stats_.record_terminal(row.betting.folded_player < 0);
@@ -837,7 +875,8 @@ double CFRSolver::CfrTraversal::terminal(
                                   ctx_.cards(1));
 }
 
-double CFRSolver::CfrTraversal::chance(NodeRef node) {
+template <typename Graph>
+double CFRSolver::CfrTraversal<Graph>::chance(NodeRef node) {
   const int samples = ChanceSamples(solver_.config_);
   solver_.traversal_stats_.record_chance_samples(samples);
   return solver_.sample_chance_children(
@@ -857,7 +896,8 @@ double CFRSolver::CfrTraversal::chance(NodeRef node) {
       });
 }
 
-double CFRSolver::CfrTraversal::depth_limit_value(
+template <typename Graph>
+double CFRSolver::CfrTraversal<Graph>::depth_limit_value(
     NodeRef node,
     const PublicStateRow& row) {
   return IsBettingRoundOver(row.betting)
@@ -866,7 +906,8 @@ double CFRSolver::CfrTraversal::depth_limit_value(
              : 0.0;
 }
 
-double CFRSolver::CfrTraversal::decision(
+template <typename Graph>
+double CFRSolver::CfrTraversal<Graph>::decision(
     NodeRef node,
     const PublicStateRow& row) {
   const uint32_t node_id = node.public_state_id;
@@ -922,26 +963,45 @@ double CFRSolver::CfrTraversal::decision(
 
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     const int action = static_cast<int>(action_index);
-    const ChildResult child = graph_.action_child(node, action);
-    if (child.status != ChildStatus::kOk) {
-      continue;
-    }
-
-    double action_value = 0.0;
-    {
-      OptionalTrainingRange a_child_range;
-      OptionalTrainingRange b_child_range;
-      if (override_ranges) {
-        a_child_range = range_conditioning->player_a_range_for(action_index);
-        b_child_range = range_conditioning->player_b_range_for(action_index);
+    const auto child = graph_.action_child(node, action);
+    if constexpr (std::is_same_v<std::remove_cvref_t<decltype(child)>,
+                                 std::optional<NodeRef>>) {
+      if (!child.has_value()) {
+        continue;
       }
-      TraversalContext::ChildTraversalScope child_scope(
-          ctx_, player, action_probabilities[action_index], a_child_range,
-          b_child_range, override_ranges);
-      action_value = value(child.node);
+
+      double action_value = 0.0;
+      {
+        OptionalTrainingRange a_child_range;
+        OptionalTrainingRange b_child_range;
+        if (override_ranges) {
+          a_child_range = range_conditioning->player_a_range_for(action_index);
+          b_child_range = range_conditioning->player_b_range_for(action_index);
+        }
+        TraversalContext::ChildTraversalScope child_scope(
+            ctx_, player, action_probabilities[action_index], a_child_range,
+            b_child_range, override_ranges);
+        action_value = value(*child);
+      }
+      action_values[action_index] = action_value;
+      node_value += action_probabilities[action_index] * action_value;
+    } else {
+      double action_value = 0.0;
+      {
+        OptionalTrainingRange a_child_range;
+        OptionalTrainingRange b_child_range;
+        if (override_ranges) {
+          a_child_range = range_conditioning->player_a_range_for(action_index);
+          b_child_range = range_conditioning->player_b_range_for(action_index);
+        }
+        TraversalContext::ChildTraversalScope child_scope(
+            ctx_, player, action_probabilities[action_index], a_child_range,
+            b_child_range, override_ranges);
+        action_value = value(child);
+      }
+      action_values[action_index] = action_value;
+      node_value += action_probabilities[action_index] * action_value;
     }
-    action_values[action_index] = action_value;
-    node_value += action_probabilities[action_index] * action_value;
   }
 
   ++solver_.cfr_update_count_;
@@ -969,34 +1029,49 @@ double CFRSolver::CfrTraversal::decision(
   return node_value;
 }
 
+template <typename Graph>
 double CFRSolver::cfr(
     NodeRef node,
     TraversalContext& ctx,
-    NodeGraph& graph) {
-  return CfrTraversal(*this, ctx, graph).value(node);
+    Graph& graph) {
+  return CfrTraversal<Graph>(*this, ctx, graph).value(node);
 }
 
-template <typename EvalChild>
+template <typename Graph, typename EvalChild>
 double CFRSolver::sample_chance_children(
     int samples,
     NodeRef node,
     CardMask known_private_cards,
-    NodeGraph& graph,
+    Graph& graph,
     EvalChild&& eval_child) {
   double value = 0.0;
   int evaluated = 0;
   for (int i = 0; i < samples; ++i) {
-    const ChildResult child =
-        graph.sample_chance_child(node, known_private_cards);
-    if (child.status != ChildStatus::kOk) {
-      continue;
+    const auto child = graph.sample_chance_child(node, known_private_cards);
+    if constexpr (std::is_same_v<std::remove_cvref_t<decltype(child)>,
+                                 std::optional<NodeRef>>) {
+      if (!child.has_value()) {
+        continue;
+      }
+      value += eval_child(*child);
+    } else {
+      value += eval_child(child);
     }
-    value += eval_child(child.node);
     ++evaluated;
   }
 
   return evaluated > 0 ? value / evaluated : 0.0;
 }
+
+template double CFRSolver::cfr<CFRSolver::MutableTraversalGraph>(
+    NodeRef node,
+    TraversalContext& ctx,
+    MutableTraversalGraph& graph);
+
+template double CFRSolver::cfr<CFRSolver::FrozenTraversalGraph>(
+    NodeRef node,
+    TraversalContext& ctx,
+    FrozenTraversalGraph& graph);
 
 CFRSolver::ActionRangeConditioning::ActionRangeConditioning(
     CFRSolver& solver,
@@ -1108,12 +1183,15 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
   }
   const uint32_t root_id = *maybe_root_id;
   const NodeRef root_node{root_id, initial_state_.board};
-  NodeGraph graph(*this, storage_.frozen ? NodeGraphMode::kSkipMissing
-                                         : NodeGraphMode::kGrow);
   const TraversalDeal deal{{
       PrivateCards::FromCombo(player_a_hand),
       PrivateCards::FromCombo(player_b_hand),
   }};
+  if (storage_.frozen) {
+    FrozenTraversalGraph graph(*this);
+    return evaluate_strategy_node(root_node, deal, graph);
+  }
+  MutableTraversalGraph graph(*this);
   return evaluate_strategy_node(root_node, deal, graph);
 }
 
@@ -1176,15 +1254,26 @@ double CFRSolver::evaluate_strategy_samples(
     return 0.0;
   }
   const NodeRef root_node{root_id, root_board};
-  NodeGraph graph(*this, storage_.frozen ? NodeGraphMode::kSkipMissing
-                                         : NodeGraphMode::kGrow);
-  for (int i = 0; i < samples; ++i) {
-    const RangeDeal deal = sampler.sample(rng_);
-    const TraversalDeal traversal_deal{{
-        PrivateCards::FromCombo(deal.player_a_combo),
-        PrivateCards::FromCombo(deal.player_b_combo),
-    }};
-    total += evaluate_strategy_node(root_node, traversal_deal, graph);
+  if (storage_.frozen) {
+    FrozenTraversalGraph graph(*this);
+    for (int i = 0; i < samples; ++i) {
+      const RangeDeal deal = sampler.sample(rng_);
+      const TraversalDeal traversal_deal{{
+          PrivateCards::FromCombo(deal.player_a_combo),
+          PrivateCards::FromCombo(deal.player_b_combo),
+      }};
+      total += evaluate_strategy_node(root_node, traversal_deal, graph);
+    }
+  } else {
+    MutableTraversalGraph graph(*this);
+    for (int i = 0; i < samples; ++i) {
+      const RangeDeal deal = sampler.sample(rng_);
+      const TraversalDeal traversal_deal{{
+          PrivateCards::FromCombo(deal.player_a_combo),
+          PrivateCards::FromCombo(deal.player_b_combo),
+      }};
+      total += evaluate_strategy_node(root_node, traversal_deal, graph);
+    }
   }
   return total / samples;
 }
@@ -1192,7 +1281,22 @@ double CFRSolver::evaluate_strategy_samples(
 double CFRSolver::evaluate_strategy_node(
     NodeRef node,
     const TraversalDeal& deal,
-    NodeGraph& graph) {
+    MutableTraversalGraph& graph) {
+  return evaluate_strategy_node_impl(node, deal, graph);
+}
+
+double CFRSolver::evaluate_strategy_node(
+    NodeRef node,
+    const TraversalDeal& deal,
+    FrozenTraversalGraph& graph) {
+  return evaluate_strategy_node_impl(node, deal, graph);
+}
+
+template <typename Graph>
+double CFRSolver::evaluate_strategy_node_impl(
+    NodeRef node,
+    const TraversalDeal& deal,
+    Graph& graph) {
   const auto& public_rows = rows();
   if (node.public_state_id >= public_rows.size()) {
     return 0.0;
@@ -1200,17 +1304,22 @@ double CFRSolver::evaluate_strategy_node(
   const uint32_t node_id = node.public_state_id;
   const PublicStateRow& row = public_rows[node_id];
 
-  if (row.is_terminal) {
-    return terminal_utility(row, node.exact_board, deal.player_cards(0),
-                            deal.player_cards(1));
-  }
-  if (row.is_chance_node) {
-    const int samples = ChanceSamples(config_);
-    return sample_chance_children(
-        samples, node, deal.known_private_cards(), graph,
-        [&](NodeRef child) {
-          return evaluate_strategy_node(child, deal, graph);
-        });
+  switch (row.kind) {
+    case StrategyTables::NodeKind::kTerminal:
+      return terminal_utility(row, node.exact_board, deal.player_cards(0),
+                              deal.player_cards(1));
+    case StrategyTables::NodeKind::kChance: {
+      const int samples = ChanceSamples(config_);
+      return sample_chance_children(
+          samples, node, deal.known_private_cards(), graph,
+          [&](NodeRef child) {
+            return evaluate_strategy_node_impl(child, deal, graph);
+          });
+    }
+    case StrategyTables::NodeKind::kFrontier:
+      return 0.0;
+    case StrategyTables::NodeKind::kDecision:
+      break;
   }
   const auto maybe_decision = make_decision_frame(node_id, row);
   if (!maybe_decision.has_value()) {
@@ -1234,12 +1343,18 @@ double CFRSolver::evaluate_strategy_node(
   double value = 0.0;
   const int action_count = decision.action_count;
   for (int action_index = 0; action_index < action_count; ++action_index) {
-    const ChildResult child = graph.action_child(node, action_index);
-    if (child.status != ChildStatus::kOk) {
-      continue;
+    const auto child = graph.action_child(node, action_index);
+    if constexpr (std::is_same_v<std::remove_cvref_t<decltype(child)>,
+                                 std::optional<NodeRef>>) {
+      if (!child.has_value()) {
+        continue;
+      }
+      value += probabilities[action_index] *
+               evaluate_strategy_node_impl(*child, deal, graph);
+    } else {
+      value += probabilities[action_index] *
+               evaluate_strategy_node_impl(child, deal, graph);
     }
-    value += probabilities[action_index] *
-             evaluate_strategy_node(child.node, deal, graph);
   }
   return value;
 }

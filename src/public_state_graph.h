@@ -48,9 +48,6 @@ class PublicStateGraph {
                    TraversalStats& stats);
 
   std::optional<uint32_t> get_or_create_row(const ExactGameState& state);
-  std::optional<uint32_t> find_action_child(
-      uint32_t parent_public_state_id,
-      int action_index) const;
   std::optional<uint32_t> find_chance_child(
       uint32_t parent_public_state_id,
       const ExactGameState& child_state) const;

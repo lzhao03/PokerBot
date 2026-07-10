@@ -6,6 +6,7 @@
 #include <functional>
 #include <optional>
 #include <random>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -109,48 +110,42 @@ class CFRSolver {
   using OptionalTrainingRange =
       std::optional<std::reference_wrapper<const TrainingRangeView>>;
 
-  enum class NodeGraphMode {
-    kGrow,
-    kSkipMissing,
-    kRequirePresent,
-  };
-
   struct NodeRef {
     uint32_t public_state_id = kInvalidPublicStateId;
     Board exact_board;
   };
 
-  enum class ChildStatus {
-    kOk,
-    kMissing,
-    kCapped,
-    kInvalid,
-  };
-
-  struct ChildResult {
-    ChildStatus status = ChildStatus::kInvalid;
-    NodeRef node;
-  };
-
-  class NodeGraph {
+  class MutableTraversalGraph {
    public:
-    NodeGraph(CFRSolver& solver, NodeGraphMode mode);
+    explicit MutableTraversalGraph(CFRSolver& solver);
 
-    ChildResult action_child(
+    std::optional<NodeRef> action_child(
         NodeRef parent,
         int action_index);
-    ChildResult sample_chance_child(
+    std::optional<NodeRef> sample_chance_child(
         NodeRef parent,
         CardMask known_private_cards);
 
    private:
-    ChildResult make_child_result(
-        std::optional<uint32_t> child_id,
-        Board exact_board,
-        const char* missing_message) const;
+    CFRSolver& solver_;
+  };
+
+  class FrozenTraversalGraph {
+   public:
+    explicit FrozenTraversalGraph(CFRSolver& solver);
+
+    NodeRef action_child(NodeRef parent, int action_index) const;
+    NodeRef sample_chance_child(NodeRef parent,
+                                CardMask known_private_cards);
+
+   private:
+    uint32_t required_action_child_id(uint32_t parent_public_state_id,
+                                      int action_index) const;
+    uint32_t required_chance_child_id(
+        uint32_t parent_public_state_id,
+        const ExactGameState& child_state) const;
 
     CFRSolver& solver_;
-    NodeGraphMode mode_;
   };
 
   // TODO: Hide action-conditioned range borrowing behind TraversalContext too.
@@ -295,11 +290,12 @@ class CFRSolver {
     bool condition_player_b_ = false;
   };
 
+  template <typename Graph>
   class CfrTraversal {
    public:
     CfrTraversal(CFRSolver& solver,
                  TraversalContext& ctx,
-                 NodeGraph& graph)
+                 Graph& graph)
         : solver_(solver), ctx_(ctx), graph_(graph) {}
 
     double value(NodeRef node);
@@ -312,7 +308,7 @@ class CFRSolver {
 
     CFRSolver& solver_;
     TraversalContext& ctx_;
-    NodeGraph& graph_;
+    Graph& graph_;
   };
 
   bool prepare_prebuilt_training(
@@ -348,12 +344,13 @@ class CFRSolver {
   std::optional<DecisionFrame> make_decision_frame(
       uint32_t node_id,
       const PublicStateRow& row) const;
-  double cfr(NodeRef node, TraversalContext& ctx, NodeGraph& graph);
-  template <typename EvalChild>
+  template <typename Graph>
+  double cfr(NodeRef node, TraversalContext& ctx, Graph& graph);
+  template <typename Graph, typename EvalChild>
   double sample_chance_children(int samples,
                                 NodeRef node,
                                 CardMask known_private_cards,
-                                NodeGraph& graph,
+                                Graph& graph,
                                 EvalChild&& eval_child);
 
   bool prebuild_info_set_rows(const TrainingRangeView& a_view,
@@ -373,7 +370,14 @@ class CFRSolver {
                           const PrivateCards& player_b_cards);
   double evaluate_strategy_node(NodeRef node,
                                 const TraversalDeal& deal,
-                                NodeGraph& graph);
+                                MutableTraversalGraph& graph);
+  double evaluate_strategy_node(NodeRef node,
+                                const TraversalDeal& deal,
+                                FrozenTraversalGraph& graph);
+  template <typename Graph>
+  double evaluate_strategy_node_impl(NodeRef node,
+                                     const TraversalDeal& deal,
+                                     Graph& graph);
   double evaluate_strategy_samples(
       int samples,
       uint32_t root_id,

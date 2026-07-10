@@ -372,6 +372,13 @@ PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
   row.is_terminal = IsTerminal(row.betting, state.board);
   row.player_to_act = GetPlayerToAct(row.betting, state.board);
   row.is_chance_node = !row.is_terminal && row.player_to_act == -1;
+  if (row.is_terminal) {
+    row.kind = StrategyTables::NodeKind::kTerminal;
+  } else if (row.is_chance_node) {
+    row.kind = StrategyTables::NodeKind::kChance;
+  } else {
+    row.kind = StrategyTables::NodeKind::kDecision;
+  }
 
   const auto& nodes = tables().betting_nodes;
   if (betting_node_id >= nodes.size()) {
@@ -416,40 +423,21 @@ std::optional<uint32_t> PublicStateGraph::get_or_create_row(
 std::optional<uint32_t> PublicStateGraph::get_or_create_row(
     const ExactGameState& state) {
   if (storage_.frozen) {
-    const BettingNodeId betting_node_id = tables().root_betting_node_id;
-    if (betting_node_id == kInvalidBettingNodeId) {
+    const uint32_t root_id = tables().root_public_state_id;
+    if (root_id == kInvalidPublicStateId ||
+        root_id >= tables().public_state_rows.size()) {
       return std::nullopt;
     }
-    return get_or_create_row(betting_node_id, state);
+    return root_id;
   }
 
   const BettingNodeId betting_node_id =
       get_or_create_root_betting_node(state.betting);
-  return get_or_create_row(betting_node_id, state);
-}
-
-std::optional<uint32_t> PublicStateGraph::find_action_child(
-    uint32_t parent_public_state_id,
-    int action_index) const {
-  const auto& public_rows = rows();
-  if (parent_public_state_id >= public_rows.size()) {
-    return std::nullopt;
+  auto root_id = get_or_create_row(betting_node_id, state);
+  if (root_id.has_value()) {
+    mtables().root_public_state_id = *root_id;
   }
-  const PublicStateRow& row = public_rows[parent_public_state_id];
-  if (row.betting_node_id >= tables().betting_nodes.size()) {
-    return std::nullopt;
-  }
-  const BettingNode& node = tables().betting_nodes[row.betting_node_id];
-  if (action_index < 0 || action_index >= node.action_count) {
-    throw std::logic_error("action child index out of range");
-  }
-  const uint32_t child_id =
-      row.action_child_ids[static_cast<size_t>(action_index)];
-  if (child_id == kInvalidPublicStateId ||
-      child_id == kCappedPublicStateId) {
-    return std::nullopt;
-  }
-  return child_id;
+  return root_id;
 }
 
 std::optional<uint32_t> PublicStateGraph::find_chance_child(
@@ -790,6 +778,8 @@ bool PublicStateGraph::prebuild_reachable_rows(
     }
 
     if (max_depth > 0 && entry.depth >= max_depth) {
+      mtables().public_state_rows[entry.node_id].kind =
+          StrategyTables::NodeKind::kFrontier;
       continue;
     }
 
@@ -939,7 +929,8 @@ bool PublicStateGraph::validate_prebuilt_rows(
       continue;
     }
 
-    if (max_depth > 0 && entry.depth >= max_depth) {
+    if (row.kind == StrategyTables::NodeKind::kFrontier ||
+        (max_depth > 0 && entry.depth >= max_depth)) {
       continue;
     }
 

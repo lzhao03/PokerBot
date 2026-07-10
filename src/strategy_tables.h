@@ -74,9 +74,10 @@ class StrategyTables {
   using BettingNodeId = uint32_t;
 
   enum class NodeKind : uint8_t {
-    kTerminal,
-    kChance,
     kDecision,
+    kChance,
+    kTerminal,
+    kFrontier,
   };
 
   struct BettingEdge {
@@ -140,6 +141,7 @@ class StrategyTables {
     BettingState betting;
     BettingNodeId betting_node_id = kInvalidBettingNodeId;
     PublicBucketId public_bucket = 0;
+    NodeKind kind = NodeKind::kDecision;
     bool is_terminal = false;
     bool is_chance_node = false;
     int player_to_act = -1;
@@ -173,6 +175,7 @@ class StrategyTables {
       std::array<std::array<uint32_t, kPrivateBucketCount>, kPlayerCount>;
 
   BettingNodeId root_betting_node_id = kInvalidBettingNodeId;
+  uint32_t root_public_state_id = kInvalidPublicStateId;
   std::vector<BettingNode> betting_nodes;
   std::vector<BettingEdge> betting_edges;
   absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>
