@@ -51,23 +51,16 @@ class PublicStateGraph {
                    const BettingAbstraction& betting_abstraction,
                    TraversalStats& stats);
 
-  std::optional<uint32_t> get_or_create_row(const CompactPublicState& state);
   std::optional<uint32_t> get_or_create_row(const ExactGameState& state);
   std::optional<uint32_t> find_action_child(
       uint32_t parent_public_state_id,
       int action_index) const;
   std::optional<uint32_t> find_chance_child(
       uint32_t parent_public_state_id,
-      const CompactPublicState& child_state) const;
-  std::optional<uint32_t> find_chance_child(
-      uint32_t parent_public_state_id,
       const ExactGameState& child_state) const;
   std::optional<uint32_t> get_or_create_action_child(
       uint32_t parent_public_state_id,
       int action_index);
-  std::optional<uint32_t> get_or_create_chance_child(
-      uint32_t parent_public_state_id,
-      const CompactPublicState& child_state);
   std::optional<uint32_t> get_or_create_chance_child(
       uint32_t parent_public_state_id,
       const ExactGameState& child_state);
@@ -92,28 +85,19 @@ class PublicStateGraph {
 
   BettingHistoryKey betting_history_key(
       const BettingState& state) const;
-  BettingHistoryKey betting_history_key(
-      const CompactPublicState& state) const;
   BettingHistoryRow make_betting_history_row(
       const BettingHistoryKey& key) const;
   PublicStateKey row_key(uint32_t betting_history_id,
                          StreetKind street,
                          const Board& board) const;
-  PublicStateKey row_key(uint32_t betting_history_id,
-                         const CompactPublicState& state) const;
   std::optional<uint32_t> find_row(
       uint32_t betting_history_id,
       StreetKind street,
       const Board& board) const;
-  std::optional<uint32_t> find_row(
-      uint32_t betting_history_id,
-      const CompactPublicState& state) const;
   PublicStateRow make_row(uint32_t betting_history_id,
                           const ExactGameState& state);
   uint32_t get_or_create_betting_history(
       const BettingState& state);
-  uint32_t get_or_create_betting_history(
-      const CompactPublicState& state);
   uint32_t get_or_create_betting_history(BettingHistoryKey key,
                                          BettingHistoryRow row);
   uint32_t get_or_create_action_history_child(
@@ -133,9 +117,6 @@ class PublicStateGraph {
       int action_index);
   std::optional<uint32_t> find_or_cache_chance_child(
       uint32_t parent_public_state_id,
-      const CompactPublicState& child_state);
-  std::optional<uint32_t> find_or_cache_chance_child(
-      uint32_t parent_public_state_id,
       const ExactGameState& child_state);
   bool row_limit_reached() const;
   bool can_insert_row() const;
@@ -144,8 +125,6 @@ class PublicStateGraph {
                                            Callback&& callback) const;
   PublicBucketId chance_outcome_id(
       const ExactGameState& child_state) const;
-  PublicBucketId chance_outcome_id(
-      const CompactPublicState& child_state) const;
   void rebuild_chance_child_entries();
 
   const SolverConfig& config_;
