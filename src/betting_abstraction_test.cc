@@ -139,5 +139,25 @@ TEST_CASE("betting action menu follows config") {
   CHECK_THROWS((void)betting.action_key({ActionKind::kCall, 1000000, -1}));
 }
 
+TEST_CASE("bet sizes use exact pot and stack values") {
+  SolverConfig config;
+  config.bet_sizes = {0.5};
+  BettingAbstraction betting(config);
+
+  BettingState state;
+  state.pot = 100;
+  state.stack = {200, 200};
+  state.contribution = {0, 0};
+  state.street = StreetKind::kFlop;
+  state.player_to_act = 0;
+  state.folded_player = -1;
+
+  const auto menu = betting.actions_for_betting_node(state, 0);
+  const std::vector<GameAction> actions(menu.actions.begin(),
+                                        menu.actions.begin() + menu.count);
+  CHECK(HasAction(actions, ActionKind::kBet, 50));
+  CHECK(HasAction(actions, ActionKind::kAllIn, 200));
+}
+
 }  // namespace
 }  // namespace poker

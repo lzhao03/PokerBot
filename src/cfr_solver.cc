@@ -392,6 +392,30 @@ bool CFRSolver::prebuild_info_set_rows(
     return true;
   }
 
+  if constexpr (kCoarsePublicBuckets) {
+    for (uint32_t node_id = 0; node_id < rows().size(); ++node_id) {
+      if (node_id >= row_boards.size() || !row_boards[node_id].has_value()) {
+        continue;
+      }
+      const PublicStateRow& row = rows()[node_id];
+      const auto decision = make_decision_frame(node_id, row);
+      if (!decision.has_value()) {
+        continue;
+      }
+      const int player = PlayerIndex(decision->player);
+      const absl::Span<const int> action_ids(row.action_ids.data(), row.action_count);
+      for (uint32_t bucket = 0; bucket < StrategyTables::kPrivateBucketCount;
+           ++bucket) {
+        const PrivateBucketId private_bucket = static_cast<PrivateBucketId>(bucket);
+        const InfoSetAddress infoset{node_id, player, private_bucket};
+        if (!strategy_store_.get_or_create(infoset, action_ids).has_value()) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   std::vector<uint32_t> seen_buckets;
   uint32_t seen_generation = 1;
 

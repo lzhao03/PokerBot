@@ -86,7 +86,7 @@ TEST_CASE("frozen regret-only traversal guard") {
   CHECK(stats.frozen_iterations == 4);
   CHECK(stats.frozen_cfr_updates > stats.frozen_iterations);
   CheckMetrics(TrainingMetrics(solver),
-               Metrics{5.5612562039552344, 11464, 32953, 9080, 39327},
+               Metrics{5.52593, 455328, 32953, 9080, 1282628},
                "frozen regret-only traversal");
 }
 

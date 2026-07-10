@@ -143,5 +143,27 @@ TEST_CASE("coarse private bucket ids are local to street") {
   CHECK(buckets.bucket(hand, StreetKind::kRiver, board) < 36);
 }
 
+TEST_CASE("coarse private buckets still use exact board within public bucket") {
+  BoardTexturePublicCardBuckets public_buckets;
+  CoarsePrivateBuckets private_buckets;
+  const ComboId hand =
+      ExactCombo(12, SuitKind::kHearts, 9, SuitKind::kHearts);
+
+  Board paired_with_hand;
+  paired_with_hand.add(MakeCardId(12, SuitKind::kSpades));
+  paired_with_hand.add(MakeCardId(2, SuitKind::kClubs));
+  paired_with_hand.add(MakeCardId(7, SuitKind::kDiamonds));
+
+  Board unpaired_for_hand;
+  unpaired_for_hand.add(MakeCardId(11, SuitKind::kSpades));
+  unpaired_for_hand.add(MakeCardId(3, SuitKind::kClubs));
+  unpaired_for_hand.add(MakeCardId(8, SuitKind::kDiamonds));
+
+  CHECK(public_buckets.bucket(StreetKind::kFlop, paired_with_hand) ==
+        public_buckets.bucket(StreetKind::kFlop, unpaired_for_hand));
+  CHECK(private_buckets.bucket(hand, StreetKind::kFlop, paired_with_hand) !=
+        private_buckets.bucket(hand, StreetKind::kFlop, unpaired_for_hand));
+}
+
 }  // namespace
 }  // namespace poker
