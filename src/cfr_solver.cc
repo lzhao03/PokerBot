@@ -35,12 +35,12 @@ SolverConfig NormalizedSolverConfig(SolverConfig config) {
 
 std::optional<double> UtilityBeforeShowdown(const BettingState& state,
                                             uint8_t board_count) {
-  const double player_a_contribution = state.contribution[0];
+  const double player_a_committed = state.committed[0];
   if (state.folded_player == 0) {
-    return -player_a_contribution;
+    return -player_a_committed;
   }
   if (state.folded_player == 1) {
-    return state.pot - player_a_contribution;
+    return Pot(state) - player_a_committed;
   }
   if (board_count + 2 < 5) {
     return 0.0;
@@ -50,14 +50,14 @@ std::optional<double> UtilityBeforeShowdown(const BettingState& state,
 
 double ShowdownUtilityFromComparison(const BettingState& state,
                                      int comparison) {
-  const double player_a_contribution = state.contribution[0];
+  const double player_a_committed = state.committed[0];
   if (comparison > 0) {
-    return state.pot - player_a_contribution;
+    return Pot(state) - player_a_committed;
   }
   if (comparison < 0) {
-    return -player_a_contribution;
+    return -player_a_committed;
   }
-  return (state.pot / 2.0) - player_a_contribution;
+  return (Pot(state) / 2.0) - player_a_committed;
 }
 
 size_t ScratchDepthReserve(const SolverConfig& config, int max_depth) {
@@ -93,7 +93,7 @@ ExactGameState DefaultInitialState(const SolverConfig& config) {
   betting.street = StreetKind::kPreflop;
   betting.all_in = false;
   betting.player_to_act = 0;
-  betting.contribution = {small_blind, big_blind};
+  betting.committed = {small_blind, big_blind};
   return ExactGameState{betting, Board{}};
 }
 
@@ -114,6 +114,7 @@ CFRSolver::CFRSolver(const SolverConfig& config,
       strategy_store_(config_, storage_, &traversal_stats_),
       graph_builder_(config_, storage_, betting_abstraction_,
                      traversal_stats_) {
+  ValidateBettingState(initial_state_.betting);
   // Pre-allocate strategy table storage when limits are known upfront.
   // This gives fully deterministic peak memory: no reallocation after init.
   if (config_.max_info_sets > 0) {

@@ -25,7 +25,7 @@ BettingState PreflopState() {
   state.pot = 3;
   state.street = StreetKind::kPreflop;
   state.folded_player = -1;
-  state.contribution = {1, 2};
+  state.committed = {1, 2};
   state.player_to_act = 0;
   return state;
 }
@@ -37,13 +37,13 @@ BettingState FlopState() {
   state.pot = 4;
   state.street = StreetKind::kFlop;
   state.folded_player = -1;
-  state.contribution = {2, 2};
+  state.committed = {2, 2};
   state.player_to_act = 1;
   return state;
 }
 
 int TotalChips(const BettingState& state) {
-  return state.stack[0] + state.stack[1] + state.pot;
+  return state.stack[0] + state.stack[1] + Pot(state);
 }
 
 bool HasAction(const std::vector<GameAction>& actions,
@@ -151,7 +151,7 @@ TEST_CASE("bet sizes use exact pot and stack values") {
   BettingState state;
   state.pot = 100;
   state.stack = {200, 200};
-  state.contribution = {0, 0};
+  state.committed = {0, 0};
   state.street = StreetKind::kFlop;
   state.player_to_act = 0;
   state.folded_player = -1;

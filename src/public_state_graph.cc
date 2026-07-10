@@ -194,7 +194,7 @@ int BettingNodePlayerToAct(const BettingState& state) {
 
 bool SameBettingState(const BettingState& first, const BettingState& second) {
   return first.stack == second.stack &&
-         first.contribution == second.contribution &&
+         first.committed == second.committed &&
          first.pot == second.pot &&
          first.street == second.street &&
          first.player_to_act == second.player_to_act &&

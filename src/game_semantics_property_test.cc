@@ -43,7 +43,7 @@ ExactGameState InitialState(const SolverConfig& config) {
   state.betting.street = StreetKind::kPreflop;
   state.betting.folded_player = -1;
   state.betting.player_to_act = 0;
-  state.betting.contribution = {small_blind, big_blind};
+  state.betting.committed = {small_blind, big_blind};
   return state;
 }
 
@@ -94,10 +94,10 @@ std::string StateString(const ExactGameState& state) {
   const BettingState& betting = state.betting;
   std::ostringstream out;
   out << "street=" << static_cast<int>(betting.street)
-      << " pot=" << betting.pot
+      << " pot=" << Pot(betting)
       << " stack={" << betting.stack[0] << "," << betting.stack[1] << "}"
-      << " contrib={" << betting.contribution[0] << ","
-      << betting.contribution[1] << "}"
+      << " committed={" << betting.committed[0] << ","
+      << betting.committed[1] << "}"
       << " player_to_act=" << static_cast<int>(betting.player_to_act)
       << " folded=" << static_cast<int>(betting.folded_player)
       << " all_in=" << betting.all_in
@@ -136,7 +136,7 @@ void Require(bool condition,
 }
 
 int TotalChips(const ExactGameState& state) {
-  return state.betting.pot + state.betting.stack[0] +
+  return Pot(state.betting) + state.betting.stack[0] +
          state.betting.stack[1];
 }
 
@@ -168,15 +168,14 @@ void ValidateState(const ExactGameState& state,
           "player A stack must be non-negative");
   Require(betting.stack[1] >= 0, trace,
           "player B stack must be non-negative");
-  Require(betting.contribution[0] >= 0, trace,
-          "player A contribution must be non-negative");
-  Require(betting.contribution[1] >= 0, trace,
-          "player B contribution must be non-negative");
+  Require(betting.committed[0] >= 0, trace,
+          "player A committed chips must be non-negative");
+  Require(betting.committed[1] >= 0, trace,
+          "player B committed chips must be non-negative");
   Require(TotalChips(state) == total_chips, trace,
           "pot plus stacks must conserve chips");
-  Require(betting.pot ==
-              betting.contribution[0] + betting.contribution[1],
-          trace, "pot must equal total contributions");
+  Require(betting.pot == betting.committed[0] + betting.committed[1],
+          trace, "pot must equal total committed chips");
   ValidateBoard(state, trace);
 }
 
@@ -191,12 +190,12 @@ void ValidateActionTransition(const ExactGameState& parent,
   Require(committed >= 0, trace, "action cannot add chips to stack");
   Require(child.betting.pot == parent.betting.pot + committed, trace,
           "pot must increase by committed chips");
-  Require(child.betting.contribution[player] ==
-              parent.betting.contribution[player] + committed,
-          trace, "acting player contribution must increase by committed chips");
-  Require(child.betting.contribution[Opponent(player)] ==
-              parent.betting.contribution[Opponent(player)],
-          trace, "opponent contribution must not change");
+  Require(child.betting.committed[player] ==
+              parent.betting.committed[player] + committed,
+          trace, "acting player's committed chips must increase");
+  Require(child.betting.committed[Opponent(player)] ==
+              parent.betting.committed[Opponent(player)],
+          trace, "opponent's committed chips must not change");
   Require(child.board.mask == parent.board.mask, trace,
           "action cannot change the board");
 }
@@ -333,7 +332,7 @@ ExactGameState FlopState() {
   state.betting.street = StreetKind::kFlop;
   state.betting.player_to_act = 1;
   state.betting.folded_player = -1;
-  state.betting.contribution = {2, 2};
+  state.betting.committed = {2, 2};
   state.board.add(MakeCardId(2, SuitKind::kHearts));
   state.board.add(MakeCardId(7, SuitKind::kDiamonds));
   state.board.add(MakeCardId(12, SuitKind::kClubs));
@@ -347,7 +346,7 @@ ExactGameState RiverState() {
   state.betting.street = StreetKind::kRiver;
   state.betting.player_to_act = 1;
   state.betting.folded_player = -1;
-  state.betting.contribution = {10, 10};
+  state.betting.committed = {10, 10};
   state.board.add(MakeCardId(2, SuitKind::kHearts));
   state.board.add(MakeCardId(7, SuitKind::kDiamonds));
   state.board.add(MakeCardId(12, SuitKind::kClubs));
@@ -370,7 +369,7 @@ ExactGameState RiverShowdown(std::initializer_list<CardId> board) {
   state.betting.street = StreetKind::kRiver;
   state.betting.player_to_act = -1;
   state.betting.folded_player = -1;
-  state.betting.contribution = {10, 10};
+  state.betting.committed = {10, 10};
   for (CardId card : board) {
     state.board.add(card);
   }
@@ -382,12 +381,12 @@ double OracleUtility(const ExactGameState& state,
                      ComboId b_hand,
                      int player) {
   const BettingState& betting = state.betting;
-  const double contribution = betting.contribution[player];
+  const double committed = betting.committed[player];
   if (betting.folded_player == player) {
-    return -contribution;
+    return -committed;
   }
   if (betting.folded_player == Opponent(player)) {
-    return betting.pot - contribution;
+    return Pot(betting) - committed;
   }
 
   HandEvaluator evaluator;
@@ -395,12 +394,12 @@ double OracleUtility(const ExactGameState& state,
       evaluator.compare_hands(a_hand, b_hand, state.board);
   const int player_comparison = player == 0 ? comparison : -comparison;
   if (player_comparison > 0) {
-    return betting.pot - contribution;
+    return Pot(betting) - committed;
   }
   if (player_comparison < 0) {
-    return -contribution;
+    return -committed;
   }
-  return betting.pot / 2.0 - contribution;
+  return Pot(betting) / 2.0 - committed;
 }
 
 void CheckUtility(const ExactGameState& state,
@@ -467,8 +466,8 @@ TEST_CASE("deterministic action transitions preserve chip accounting") {
   ValidateState(root, total_chips, trace);
   CHECK(root.betting.street == StreetKind::kPreflop);
   CHECK(root.betting.player_to_act == 0);
-  CHECK(root.betting.contribution[0] == config.small_blind);
-  CHECK(root.betting.contribution[1] == config.big_blind);
+  CHECK(root.betting.committed[0] == config.small_blind);
+  CHECK(root.betting.committed[1] == config.big_blind);
 
   ExactGameState call_check =
       ApplyChecked(root, {ActionKind::kCall, 1}, total_chips, trace);
@@ -511,12 +510,12 @@ TEST_CASE("deterministic action transitions preserve chip accounting") {
   short_call.betting.stack[0] = 3;
   short_call.betting.stack[1] = 12;
   short_call.betting.pot = 9;
-  short_call.betting.contribution = {1, 8};
+  short_call.betting.committed = {1, 8};
   short_call = ApplyChecked(short_call, {ActionKind::kCall}, 24, trace);
   CheckCompletedRound(short_call, false);
   CHECK(short_call.betting.stack[0] == 0);
-  CHECK(short_call.betting.contribution[0] <
-        short_call.betting.contribution[1]);
+  CHECK(short_call.betting.committed[0] <
+        short_call.betting.committed[1]);
 
   ExactGameState river_check =
       ApplyChecked(RiverState(), {ActionKind::kCheck}, 60, trace);
@@ -582,12 +581,12 @@ TEST_CASE("betting-round completion cases agree") {
   short_call.betting.stack[0] = 3;
   short_call.betting.stack[1] = 12;
   short_call.betting.pot = 9;
-  short_call.betting.contribution = {1, 8};
+  short_call.betting.committed = {1, 8};
   short_call = ApplyStateAction(short_call, {ActionKind::kCall, 7, -1});
   CheckCompletedRound(short_call, false);
   CHECK(short_call.betting.stack[0] == 0);
-  CHECK(short_call.betting.contribution[0] <
-        short_call.betting.contribution[1]);
+  CHECK(short_call.betting.committed[0] <
+        short_call.betting.committed[1]);
 
   ExactGameState all_in =
       ApplyStateAction(FlopState(), {ActionKind::kAllIn});

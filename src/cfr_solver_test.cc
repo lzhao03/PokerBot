@@ -60,7 +60,7 @@ TEST_CASE("fixed terminal run counts iteration and utility") {
   terminal.betting.street = StreetKind::kRiver;
   terminal.betting.player_to_act = -1;
   terminal.betting.folded_player = 1;
-  terminal.betting.contribution = {5, 5};
+  terminal.betting.committed = {5, 5};
 
   CFRSolver solver(config, terminal);
   HandRange player_a = ExactRange(Combo(14, SuitKind::kHearts,

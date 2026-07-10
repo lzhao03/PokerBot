@@ -31,17 +31,19 @@ const std::vector<double>& BetSizesForStreet(const SolverConfig& config,
   }
 }
 
-int ConcreteBetAmount(const BettingState& state, double size) {
+Chips ConcreteBetAmount(const BettingState& state, double size) {
   if (size <= 0.0) {
     return 0;
   }
-  return std::max(1, static_cast<int>(std::max(1, state.pot) * size));
+  return std::max(
+      Chips{1},
+      static_cast<Chips>(std::max(Chips{1}, Pot(state)) * size));
 }
 
 void AddAction(ActionMenu& menu,
                const BettingState& state,
                ActionKind kind,
-               int amount) {
+               Chips amount) {
   if (menu.count >= kMaxActionsPerNode) {
     throw std::logic_error("Legal action table exceeded kMaxActionsPerNode");
   }
@@ -62,16 +64,14 @@ BettingAbstraction::ActionMenu BettingAbstraction::actions_for_betting_node(
     const BettingState& state,
     int player) const {
   ActionMenu menu;
-  const int stack = state.stack[player];
+  const Chips stack = state.stack[player];
   if (stack <= 0) {
     return menu;
   }
 
-  const int opponent_chips = state.contribution[Opponent(player)];
-  const int player_chips = state.contribution[player];
-  const int outstanding_call = std::max(0, opponent_chips - player_chips);
+  const Chips outstanding_call = ToCall(state, player);
   if (outstanding_call > 0) {
-    const int call_amount = std::min(outstanding_call, stack);
+    const Chips call_amount = std::min(outstanding_call, stack);
     AddAction(menu, state, ActionKind::kFold, 0);
     AddAction(menu, state, ActionKind::kCall, call_amount);
   } else {
@@ -84,7 +84,8 @@ BettingAbstraction::ActionMenu BettingAbstraction::actions_for_betting_node(
   }
   absl::InlinedVector<GameAction, kMaxActionsPerNode> sized_actions;
   for (double bet_size : BetSizesForStreet(config_, state.street)) {
-    const int amount = outstanding_call + ConcreteBetAmount(state, bet_size);
+    const Chips bet = ConcreteBetAmount(state, bet_size);
+    const Chips amount = outstanding_call + bet;
     if (amount < stack) {
       sized_actions.push_back({sized_action, amount, -1});
     }

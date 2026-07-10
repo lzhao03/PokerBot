@@ -13,7 +13,7 @@ ExactGameState PreflopState() {
   state.betting.pot = 3;
   state.betting.street = StreetKind::kPreflop;
   state.betting.folded_player = -1;
-  state.betting.contribution = {1, 2};
+  state.betting.committed = {1, 2};
   state.betting.player_to_act = 0;
   return state;
 }
@@ -24,7 +24,7 @@ ExactGameState ShowdownState() {
   state.betting.pot = 20;
   state.betting.street = StreetKind::kRiver;
   state.betting.folded_player = -1;
-  state.betting.contribution = {10, 10};
+  state.betting.committed = {10, 10};
   state.betting.player_to_act = 1;
   state.betting.actions_this_street = 2;
   state.betting.last_action = {ActionKind::kCheck, 0, 0};

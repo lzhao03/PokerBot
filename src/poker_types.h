@@ -1,6 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -12,6 +14,7 @@ namespace poker {
 
 using CardId = uint8_t;
 using CardMask = uint64_t;
+using Chips = int32_t;
 
 constexpr int kDeckCardCount = 52;
 constexpr int kMaxBoardCards = 5;
@@ -52,7 +55,7 @@ enum class ActionKind : uint8_t {
 
 struct GameAction {
   ActionKind kind = ActionKind::kNoAction;
-  int amount = 0;
+  Chips amount = 0;
   int player = -1;
 };
 
@@ -62,9 +65,9 @@ struct GameAction {
 inline constexpr int kMaxActionsPerNode = 8;
 
 struct BettingState {
-  std::array<int, kPlayerCount> stack = {0, 0};
-  std::array<int, kPlayerCount> contribution = {0, 0};
-  int pot = 0;
+  std::array<Chips, kPlayerCount> stack = {0, 0};
+  std::array<Chips, kPlayerCount> committed = {0, 0};
+  Chips pot = 0;
   StreetKind street = StreetKind::kPreflop;
   int8_t player_to_act = 0;
   int8_t folded_player = -1;
@@ -168,6 +171,32 @@ inline bool IsPlayer(int player) {
 
 inline int Opponent(int player) {
   return 1 - player;
+}
+
+inline Chips Pot(const BettingState& state) noexcept {
+  return state.pot;
+}
+
+inline Chips ToCall(const BettingState& state, int player) noexcept {
+  return std::max(Chips{0},
+                  state.committed[Opponent(player)] -
+                      state.committed[player]);
+}
+
+inline bool AnyPlayerAllIn(const BettingState& state) noexcept {
+  return state.stack[0] == 0 || state.stack[1] == 0;
+}
+
+inline void ValidateBettingState(const BettingState& state) {
+  assert(state.stack[0] >= 0);
+  assert(state.stack[1] >= 0);
+  assert(state.committed[0] >= 0);
+  assert(state.committed[1] >= 0);
+  assert(state.pot == state.committed[0] + state.committed[1]);
+  assert(state.folded_player >= -1 &&
+         state.folded_player < kPlayerCount);
+  assert(state.player_to_act >= -1 &&
+         state.player_to_act < kPlayerCount);
 }
 
 }  // namespace poker

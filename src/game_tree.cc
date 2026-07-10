@@ -8,11 +8,6 @@
 namespace poker {
 namespace {
 
-int ToCall(const BettingState& state, int player) {
-  return std::max(0, state.contribution[Opponent(player)] -
-                         state.contribution[player]);
-}
-
 int FirstPlayerForStreet(StreetKind street) {
   return street == StreetKind::kPreflop ? 0 : 1;
 }
@@ -21,13 +16,13 @@ bool BoardComplete(const BettingState& state, const Board& board) {
   return state.street == StreetKind::kRiver && board.count >= kMaxBoardCards;
 }
 
-int CommitChips(BettingState& state, int player, int requested) {
+Chips CommitChips(BettingState& state, int player, Chips requested) {
   if (requested <= 0) {
     throw std::invalid_argument("Action amount must be positive");
   }
 
-  const int committed = std::min(requested, state.stack[player]);
-  state.contribution[player] += committed;
+  const Chips committed = std::min(requested, state.stack[player]);
+  state.committed[player] += committed;
   state.stack[player] -= committed;
   state.pot += committed;
   if (state.stack[player] == 0) {
@@ -69,6 +64,7 @@ void AdvanceStreet(ExactGameState& state, absl::Span<const CardId> cards) {
   }
   ResetActions(state.betting);
   state.betting.player_to_act = FirstPlayerForStreet(state.betting.street);
+  ValidateBettingState(state.betting);
 }
 
 bool HandOver(const BettingState& state, const Board& board) {
@@ -92,7 +88,7 @@ bool IsBettingRoundOver(const BettingState& state) {
     return true;
   }
   const bool calls_matched = ToCall(state, 0) == 0 && ToCall(state, 1) == 0;
-  if (state.all_in) {
+  if (AnyPlayerAllIn(state)) {
     const int player = state.player_to_act;
     return calls_matched || !IsPlayer(player) || state.stack[player] == 0 ||
            ToCall(state, player) == 0;
@@ -132,7 +128,7 @@ bool IsLegalAction(const BettingState& state, const GameAction& action) {
     return false;
   }
 
-  const int to_call = ToCall(state, player);
+  const Chips to_call = ToCall(state, player);
   switch (action.kind) {
     case ActionKind::kFold:
       return true;
@@ -163,7 +159,7 @@ BettingState ApplyLegalActionUnchecked(const BettingState& state,
   }
 
   const int opponent = Opponent(player);
-  const int to_call = ToCall(child, player);
+  const Chips to_call = ToCall(child, player);
   GameAction applied = action;
   applied.player = player;
 
@@ -195,6 +191,7 @@ BettingState ApplyLegalActionUnchecked(const BettingState& state,
   }
 
   AppendAction(child, applied);
+  ValidateBettingState(child);
   return child;
 }
 
@@ -222,13 +219,13 @@ double GetUtility(const ExactGameState& state,
                   ComboId player_a_hand,
                   ComboId player_b_hand) {
   static const HandEvaluator evaluator;
-  const double a_contribution = state.betting.contribution[0];
+  const double a_committed = state.betting.committed[0];
 
   if (state.betting.folded_player >= 0) {
     if (state.betting.folded_player == 0) {
-      return -a_contribution;
+      return -a_committed;
     }
-    return state.betting.pot - a_contribution;
+    return Pot(state.betting) - a_committed;
   }
 
   if (state.board.count + 2 < 5) {
@@ -238,12 +235,12 @@ double GetUtility(const ExactGameState& state,
   const int comparison =
       evaluator.compare_hands(player_a_hand, player_b_hand, state.board);
   if (comparison > 0) {
-    return state.betting.pot - a_contribution;
+    return Pot(state.betting) - a_committed;
   }
   if (comparison < 0) {
-    return -a_contribution;
+    return -a_committed;
   }
-  return (state.betting.pot / 2.0) - a_contribution;
+  return (Pot(state.betting) / 2.0) - a_committed;
 }
 
 }  // namespace poker
