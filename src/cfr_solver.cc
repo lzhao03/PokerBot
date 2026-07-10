@@ -236,11 +236,17 @@ NodeId CFRSolver::FrozenTraversalGraph::required_action_child_id(
 NodeId CFRSolver::FrozenTraversalGraph::required_chance_child_id(
     NodeId parent_node_id,
     const ExactPublicState& child_state) const {
+  if (parent_node_id >= solver_.nodes().size()) {
+    throw std::logic_error("frozen chance parent node is invalid");
+  }
+  const PublicObservationId parent_observation =
+      solver_.nodes()[parent_node_id].public_observation;
+  const PublicObservationId child_observation =
+      public_observation_after_chance(
+          parent_observation, child_state.betting.street,
+          child_state.board);
   const auto child_id =
-      solver_.tables().chance_child(
-          parent_node_id,
-          public_observation_id(child_state.betting.street,
-                                child_state.board));
+      solver_.tables().chance_child(parent_node_id, child_observation);
   if (!child_id.has_value() ||
       *child_id == kInvalidNodeId ||
       *child_id == kCappedNodeId ||

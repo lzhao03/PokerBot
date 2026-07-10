@@ -28,12 +28,12 @@ TEST_CASE("coarse mode reaches and reuses fixed storage") {
   config.small_blind = 1;
   config.big_blind = 2;
   config.bet_sizes = {1.0};
-  config.max_depth = 0;
+  config.max_depth = 1;
   config.chance_samples = 1;
   config.regret_only_training = true;
   config.max_info_sets = 500000;
   config.max_public_states = 200000;
-  config.num_training_threads = 1;
+  config.num_training_threads = 2;
   CFRSolver solver(config);
   const HandRange a = R(H(14, SuitKind::kHearts, 13, SuitKind::kHearts));
   const HandRange b = R(H(12, SuitKind::kClubs, 11, SuitKind::kClubs));

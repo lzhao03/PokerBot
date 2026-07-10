@@ -167,10 +167,16 @@ bool ForEachCoarseChanceTransition(
 
 template <typename Callback>
 bool ForEachCoarseChanceTransition(StreetKind street,
-                                   BoardBucketId parent_bucket,
+                                   PublicStreetObservation parent_observation,
                                    const BettingState& betting,
                                    const BettingRules& rules,
                                    Callback&& callback) {
+  BoardBucketId parent_bucket = 0;
+  if (street != StreetKind::kPreflop) {
+    const auto street_id = static_cast<BoardBucketId>(street);
+    const auto stride = kCoarsePublicStreetObservationCount;
+    parent_bucket = 1 + street_id * stride + parent_observation.value;
+  }
   switch (street) {
     case StreetKind::kPreflop:
       return ForEachCoarseChanceTransition(kPreflopTextureTransitions,
@@ -319,15 +325,15 @@ GraphBuilder::get_or_create_chance_betting_child(
 GraphBuilder::NodeKey
 GraphBuilder::node_key(
     BettingNodeId betting_node_id,
-    const ExactPublicState& state) const {
-  return {betting_node_id,
-          public_observation_id(state.betting.street, state.board)};
+    PublicObservationId public_observation) const {
+  return {betting_node_id, public_observation};
 }
 
 std::optional<NodeId> GraphBuilder::find_node(
     BettingNodeId betting_node_id,
-    const ExactPublicState& state) const {
-  const auto existing = tables().node_ids.find(node_key(betting_node_id, state));
+    PublicObservationId public_observation) const {
+  const auto existing =
+      tables().node_ids.find(node_key(betting_node_id, public_observation));
   if (existing == tables().node_ids.end()) {
     return std::nullopt;
   }
@@ -336,11 +342,11 @@ std::optional<NodeId> GraphBuilder::find_node(
 
 GraphBuilder::Node GraphBuilder::make_node(
     BettingNodeId betting_node_id,
-    const ExactPublicState& state) {
+    const ExactPublicState& state,
+    PublicObservationId public_observation) {
   Node graph_node;
   graph_node.betting_node_id = betting_node_id;
-  graph_node.public_observation =
-      public_observation_id(state.betting.street, state.board);
+  graph_node.public_observation = public_observation;
 
   StrategyTables& tables = mtables();
   const auto& nodes = tables.betting_nodes;
@@ -364,9 +370,10 @@ GraphBuilder::Node GraphBuilder::make_node(
 
 std::optional<NodeId> GraphBuilder::get_or_create_node(
     BettingNodeId betting_node_id,
-    const ExactPublicState& state) {
+    const ExactPublicState& state,
+    PublicObservationId public_observation) {
   if (std::optional<NodeId> existing =
-          find_node(betting_node_id, state)) {
+          find_node(betting_node_id, public_observation)) {
     return existing;
   }
 
@@ -378,11 +385,12 @@ std::optional<NodeId> GraphBuilder::get_or_create_node(
   const NodeId node_id =
       static_cast<uint32_t>(tables.nodes.size());
   const auto [state_iter, inserted] = tables.node_ids.try_emplace(
-      node_key(betting_node_id, state), node_id);
+      node_key(betting_node_id, public_observation), node_id);
   if (!inserted) {
     return state_iter->second;
   }
-  tables.nodes.push_back(make_node(betting_node_id, state));
+  tables.nodes.push_back(make_node(betting_node_id, state,
+                                   public_observation));
   return node_id;
 }
 
@@ -399,7 +407,10 @@ std::optional<NodeId> GraphBuilder::get_or_create_node(
 
   const BettingNodeId betting_node_id =
       get_or_create_root_betting_node(state.betting);
-  auto root_id = get_or_create_node(betting_node_id, state);
+  const PublicObservationId public_observation =
+      public_observation_id(state.betting.street, state.board);
+  auto root_id = get_or_create_node(betting_node_id, state,
+                                    public_observation);
   if (root_id.has_value()) {
     mtables().root_node_id = *root_id;
   }
@@ -417,8 +428,11 @@ bool GraphBuilder::for_each_required_chance_transition(
   const BettingState& betting =
       tables().betting_nodes[graph_node.betting_node_id].state;
   if constexpr (kCoarsePublicBuckets) {
+    const PublicStreetObservation current_observation =
+        current_public_street_observation(graph_node.public_observation,
+                                          betting.street);
     return ForEachCoarseChanceTransition(
-        betting.street, graph_node.public_observation, betting, rules_,
+        betting.street, current_observation, betting, rules_,
         std::forward<Callback>(callback));
   } else {
     return ForEachNextStreetDeal(
@@ -551,7 +565,8 @@ GraphBuilder::get_or_create_action_child(
   if (tables().betting_nodes[child_betting_node_id].state != child_betting) {
     throw std::logic_error("action betting child state mismatch");
   }
-  auto child_id = get_or_create_node(child_betting_node_id, child_state);
+  auto child_id = get_or_create_node(
+      child_betting_node_id, child_state, parent_node.public_observation);
   if (!child_id.has_value()) {
     mtables().action_child_ids[child_slot] = kCappedNodeId;
     stats_.record_transition_miss();
@@ -573,7 +588,9 @@ std::optional<NodeId> GraphBuilder::find_or_cache_chance_child(
   }
   const Node& graph_node = graph_nodes[parent_node_id];
   const PublicObservationId child_public_observation =
-      public_observation_id(child_state.betting.street, child_state.board);
+      public_observation_after_chance(
+          graph_node.public_observation, child_state.betting.street,
+          child_state.board);
   const ChanceTransitionKey transition_key{
       parent_node_id, child_public_observation};
   auto existing = tables().public_chance_child_ids.find(transition_key);
@@ -620,8 +637,11 @@ GraphBuilder::get_or_create_chance_child(
   if (parent_node_id >= graph_nodes.size()) {
     return std::nullopt;
   }
-  const PublicObservationId child_public_observation = public_observation_id(
-      exact_child_state.betting.street, exact_child_state.board);
+  const Node& parent_node = graph_nodes[parent_node_id];
+  const PublicObservationId child_public_observation =
+      public_observation_after_chance(
+          parent_node.public_observation, exact_child_state.betting.street,
+          exact_child_state.board);
   if (std::optional<NodeId> existing_child_id =
           find_or_cache_chance_child(parent_node_id,
                                      exact_child_state)) {
@@ -634,11 +654,11 @@ GraphBuilder::get_or_create_chance_child(
     return std::nullopt;
   }
 
-  const Node& parent_node = graph_nodes[parent_node_id];
   const BettingNodeId child_betting_node_id =
       get_or_create_chance_betting_child(parent_node.betting_node_id,
                                          exact_child_state.betting);
-  auto child_id = get_or_create_node(child_betting_node_id, exact_child_state);
+  auto child_id = get_or_create_node(
+      child_betting_node_id, exact_child_state, child_public_observation);
   if (!child_id.has_value()) {
     stats_.record_transition_miss();
     return std::nullopt;
@@ -843,8 +863,9 @@ bool GraphBuilder::validate_prebuilt_nodes(
                                 absl::Span<const CardId>) {
         ++stats.prebuild_chance_transitions;
         const PublicObservationId expected_observation =
-            public_observation_id(child_state.betting.street,
-                                  child_state.board);
+            public_observation_after_chance(
+                graph_node.public_observation, child_state.betting.street,
+                child_state.board);
         const auto child = tables().chance_child(
             entry.node_id, expected_observation);
         const NodeId child_id = child.value_or(kInvalidNodeId);

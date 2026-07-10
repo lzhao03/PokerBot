@@ -68,15 +68,17 @@ class GraphBuilder {
       BettingNodeId parent_node_id,
       const BettingState& child_state);
   NodeKey node_key(BettingNodeId betting_node_id,
-                   const ExactPublicState& state) const;
+                   PublicObservationId public_observation) const;
   std::optional<NodeId> find_node(
       BettingNodeId betting_node_id,
-      const ExactPublicState& state) const;
+      PublicObservationId public_observation) const;
   Node make_node(BettingNodeId betting_node_id,
-                 const ExactPublicState& state);
+                 const ExactPublicState& state,
+                 PublicObservationId public_observation);
   std::optional<NodeId> get_or_create_node(
       BettingNodeId betting_node_id,
-      const ExactPublicState& state);
+      const ExactPublicState& state,
+      PublicObservationId public_observation);
   std::optional<NodeId> find_or_cache_action_child(
       NodeId parent_node_id,
       int action_index);

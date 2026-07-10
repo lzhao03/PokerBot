@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 
 #include "src/build_flags.h"
 #include "src/combo.h"
@@ -16,6 +17,7 @@ using PrivateBucketId = uint16_t;
 
 inline constexpr uint32_t kCoarsePrivateStreetObservationCount = 36;
 inline constexpr uint32_t kCoarsePublicStreetObservationCount = 108;
+inline constexpr int kPublicObservationBitsPerStreet = 7;
 
 struct ExactChanceObservation {
   std::array<CardId, 3> cards = {};
@@ -194,7 +196,7 @@ inline PublicObservationId exact_public_observation(
 }
 
 inline BoardBucketId board_texture_bucket(
-    StreetKind street,
+    StreetKind,
     const BoardFeatures& features) {
   if (features.card_count == 0) {
     return 0;
@@ -224,9 +226,62 @@ inline BoardBucketId board_texture_bucket(
        straight_bucket) *
           card_abstraction_detail::kHighBuckets +
       high_bucket;
-  return 1 + static_cast<BoardBucketId>(street) *
-                 kCoarsePublicStreetObservationCount +
-         static_cast<BoardBucketId>(texture);
+  return static_cast<BoardBucketId>(texture);
+}
+
+inline constexpr PublicObservationId initial_public_observation() {
+  return 0;
+}
+
+inline int public_observation_shift(StreetKind street) {
+  switch (street) {
+    case StreetKind::kFlop:
+      return 0;
+    case StreetKind::kTurn:
+      return kPublicObservationBitsPerStreet;
+    case StreetKind::kRiver:
+      return 2 * kPublicObservationBitsPerStreet;
+    case StreetKind::kPreflop:
+      throw std::invalid_argument("preflop has no public street observation");
+  }
+}
+
+inline PublicStreetObservation current_public_street_observation(
+    PublicObservationId history,
+    StreetKind street) {
+  if (street == StreetKind::kPreflop) {
+    return {};
+  }
+  constexpr PublicObservationId kSlotMask =
+      (PublicObservationId{1} << kPublicObservationBitsPerStreet) - 1;
+  const PublicObservationId encoded =
+      (history >> public_observation_shift(street)) & kSlotMask;
+  return {encoded == 0 ? 0 : encoded - 1, {}};
+}
+
+inline PublicObservationId advance_public_observation(
+    PublicObservationId previous,
+    StreetKind new_street,
+    PublicStreetObservation current) {
+  if (current.value >= kCoarsePublicStreetObservationCount) {
+    throw std::invalid_argument("public street observation is out of range");
+  }
+  const int shift = public_observation_shift(new_street);
+  constexpr PublicObservationId kSlotMask =
+      (PublicObservationId{1} << kPublicObservationBitsPerStreet) - 1;
+  const PublicObservationId slot_mask = kSlotMask << shift;
+  const PublicObservationId later =
+      previous >> (shift + kPublicObservationBitsPerStreet);
+  if ((previous & slot_mask) != 0 || later != 0) {
+    throw std::invalid_argument("public street observation already exists");
+  }
+  if (new_street != StreetKind::kFlop) {
+    const int previous_shift = shift - kPublicObservationBitsPerStreet;
+    if (((previous >> previous_shift) & kSlotMask) == 0) {
+      throw std::invalid_argument("public observation history is incomplete");
+    }
+  }
+  return previous | ((current.value + 1) << shift);
 }
 
 inline ExactChanceObservation exact_chance_observation(
@@ -268,11 +323,48 @@ inline PublicStreetObservation observe_public_street(
   return observe_public_street(street, board, board_features(board));
 }
 
+inline PublicObservationId public_observation_after_chance(
+    PublicObservationId previous,
+    StreetKind new_street,
+    const BoardRunout& board) {
+  if constexpr (kCoarsePublicBuckets) {
+    return advance_public_observation(
+        previous, new_street, observe_public_street(new_street, board));
+  }
+  return exact_public_observation(board);
+}
+
 inline PublicObservationId public_observation_id(
     StreetKind street,
     const BoardRunout& board) {
   if constexpr (kCoarsePublicBuckets) {
-    return observe_public_street(street, board).value;
+    PublicObservationId history = initial_public_observation();
+    if (street == StreetKind::kPreflop) {
+      return history;
+    }
+
+    const auto cards = board.cards();
+    BoardRunout prefix = BoardRunout::Preflop();
+    prefix.deal_flop(cards.first(3));
+    history = advance_public_observation(
+        history, StreetKind::kFlop,
+        observe_public_street(StreetKind::kFlop, prefix));
+    if (street == StreetKind::kFlop) {
+      return history;
+    }
+
+    prefix.deal_turn(cards[3]);
+    history = advance_public_observation(
+        history, StreetKind::kTurn,
+        observe_public_street(StreetKind::kTurn, prefix));
+    if (street == StreetKind::kTurn) {
+      return history;
+    }
+
+    prefix.deal_river(cards[4]);
+    return advance_public_observation(
+        history, StreetKind::kRiver,
+        observe_public_street(StreetKind::kRiver, prefix));
   }
   return exact_public_observation(board);
 }
