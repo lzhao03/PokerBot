@@ -8,7 +8,7 @@ namespace poker {
 
 std::optional<NodeId> StrategyTables::chance_child(
     NodeId parent_node_id,
-    BoardBucketId outcome_id) const {
+    PublicObservationId child_public_observation) const {
   if (parent_node_id >= nodes.size()) {
     return std::nullopt;
   }
@@ -24,11 +24,12 @@ std::optional<NodeId> StrategyTables::chance_child(
   const auto last =
       chance_child_entries.begin() + static_cast<std::ptrdiff_t>(end);
   const auto iter = std::lower_bound(
-      first, last, outcome_id,
-      [](const ChanceChildEntry& entry, BoardBucketId target) {
-        return entry.outcome_id < target;
+      first, last, child_public_observation,
+      [](const ChanceChildEntry& entry, PublicObservationId target) {
+        return entry.child_public_observation < target;
       });
-  if (iter == last || iter->outcome_id != outcome_id) {
+  if (iter == last ||
+      iter->child_public_observation != child_public_observation) {
     return std::nullopt;
   }
   return iter->node_id;

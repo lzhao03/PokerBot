@@ -21,7 +21,6 @@ namespace poker {
 
 using NodeId = uint32_t;
 using BettingNodeId = uint32_t;
-using PublicObservationId = BoardBucketId;
 
 inline constexpr NodeId kInvalidNodeId =
     std::numeric_limits<uint32_t>::max();
@@ -100,28 +99,29 @@ class StrategyTables {
   };
 
   struct NodeKey {
-    BettingNodeId betting_node_id = 0;
-    BoardBucketId board_bucket = 0;
+    BettingNodeId betting_history_id = 0;
+    PublicObservationId public_observation = 0;
 
     friend bool operator==(const NodeKey&, const NodeKey&) = default;
 
     template <typename H>
     friend H AbslHashValue(H h, const NodeKey& key) {
-      return H::combine(std::move(h), key.betting_node_id,
-                        key.board_bucket);
+      return H::combine(std::move(h), key.betting_history_id,
+                        key.public_observation);
     }
   };
 
   struct ChanceTransitionKey {
     NodeId parent_node_id = 0;
-    BoardBucketId outcome_id = 0;
+    PublicObservationId child_public_observation = 0;
 
     friend bool operator==(const ChanceTransitionKey&,
                            const ChanceTransitionKey&) = default;
 
     template <typename H>
     friend H AbslHashValue(H h, const ChanceTransitionKey& key) {
-      return H::combine(std::move(h), key.parent_node_id, key.outcome_id);
+      return H::combine(std::move(h), key.parent_node_id,
+                        key.child_public_observation);
     }
   };
 
@@ -131,7 +131,7 @@ class StrategyTables {
   };
 
   struct ChanceChildEntry {
-    BoardBucketId outcome_id = 0;
+    PublicObservationId child_public_observation = 0;
     NodeId node_id = kInvalidNodeId;
   };
 
@@ -142,7 +142,7 @@ class StrategyTables {
 
   struct Node {
     BettingNodeId betting_node_id = kInvalidBettingNodeId;
-    BoardBucketId board_bucket = 0;
+    PublicObservationId public_observation = 0;
     uint32_t action_child_offset = 0;
     uint32_t chance_child_offset = 0;
     uint32_t chance_child_count = 0;
@@ -152,7 +152,7 @@ class StrategyTables {
                                      int action_index) const;
   std::optional<NodeId> chance_child(
       NodeId parent_node_id,
-      BoardBucketId outcome_id) const;
+      PublicObservationId child_public_observation) const;
 
   static constexpr int kPrivateBucketChunkSize = 64;
   static constexpr int kPrivateBucketChunkCount =

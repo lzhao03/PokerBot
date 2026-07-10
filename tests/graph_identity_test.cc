@@ -56,7 +56,7 @@ SameMaskHistory BuildSameMaskHistories() {
   };
 }
 
-TEST_CASE("current graph merges equal masks with different reveal history") {
+TEST_CASE("exact graph preserves reveal history") {
   const SameMaskHistory histories = BuildSameMaskHistories();
   const PublicStreetObservation observation_a =
       observe_public_street(StreetKind::kTurn, histories.runout_a);
@@ -69,9 +69,74 @@ TEST_CASE("current graph merges equal masks with different reveal history") {
   CHECK(observation_b.exact_cards.count == 1);
   CHECK(observation_a.exact_cards != observation_b.exact_cards);
   CHECK(observation_a != observation_b);
-  CHECK(histories.observation_a == histories.observation_b);
+  CHECK(histories.observation_a != histories.observation_b);
   CHECK(histories.betting_a == histories.betting_b);
-  CHECK(histories.node_a == histories.node_b);
+  CHECK(histories.node_a != histories.node_b);
+}
+
+TEST_CASE("public observation follows graph transitions") {
+  test::IdentityGraph graph;
+  ExactPublicState state = graph.initial_state();
+  const NodeId root = graph.root(state);
+  const NodeId action = graph.action_child(
+      root, state, {ActionKind::kCall, 2});
+  CHECK(graph.access().public_observation(action) ==
+        graph.access().public_observation(root));
+
+  const NodeId preflop = graph.action_child(
+      action, state, {ActionKind::kCheck, 0});
+  const std::array<CardId, 3> flop = {
+      C(14, S::kSpades), C(13, S::kSpades), C(12, S::kSpades)};
+  const NodeId flop_node = graph.chance_child(preflop, state, flop);
+  CHECK(graph.access().public_observation(flop_node) !=
+        graph.access().public_observation(preflop));
+}
+
+TEST_CASE("canonical flop order deduplicates graph nodes") {
+  test::IdentityGraph graph;
+  ExactPublicState preflop = graph.initial_state();
+  const NodeId parent = test::ClosePreflop(graph, preflop);
+  ExactPublicState state_a = preflop;
+  ExactPublicState state_b = preflop;
+  const std::array<CardId, 3> flop_a = {
+      C(14, S::kSpades), C(13, S::kSpades), C(12, S::kSpades)};
+  const std::array<CardId, 3> flop_b = {
+      C(12, S::kSpades), C(14, S::kSpades), C(13, S::kSpades)};
+  CHECK(graph.chance_child(parent, state_a, flop_a) ==
+        graph.chance_child(parent, state_b, flop_b));
+}
+
+TEST_CASE("mutable and frozen chance lookup agree") {
+  test::IdentityGraph graph;
+  ExactPublicState state = graph.initial_state();
+  const NodeId parent = test::ClosePreflop(graph, state);
+  const std::array<CardId, 3> flop = {
+      C(2, S::kHearts), C(7, S::kDiamonds), C(12, S::kClubs)};
+  const NodeId child = graph.chance_child(parent, state, flop);
+  const PublicObservationId observation =
+      graph.access().public_observation(child);
+  CHECK(graph.access().chance_child(parent, observation) == child);
+  graph.access().freeze();
+  CHECK(graph.access().frozen_chance_child(parent, observation) == child);
+}
+
+TEST_CASE("validation rejects a chance edge with the wrong observation") {
+  test::IdentityGraph graph;
+  ExactPublicState state = graph.initial_state();
+  NodeId node = test::ClosePreflop(graph, state);
+  const std::array<CardId, 3> flop = {
+      C(2, S::kHearts), C(7, S::kDiamonds), C(12, S::kClubs)};
+  node = graph.chance_child(node, state, flop);
+  node = test::CheckCheck(graph, node, state);
+  const BoardRunout flop_board = state.board;
+  REQUIRE(graph.prebuild(node, flop_board, 1));
+  REQUIRE(graph.validate(node, flop_board, 1));
+
+  const std::array<CardId, 1> turn = {C(9, S::kSpades)};
+  const NodeId child = graph.chance_child(node, state, turn);
+  graph.access().set_public_observation(
+      child, graph.access().public_observation(child) + 1);
+  CHECK_FALSE(graph.validate(node, flop_board, 1));
 }
 
 TEST_CASE("exact observations contain only the current street reveal") {
@@ -101,13 +166,6 @@ TEST_CASE("exact observations contain only the current street reveal") {
   CHECK(observe_private_street(hand, StreetKind::kRiver, board).value == hand);
   CHECK(private_bucket(hand, StreetKind::kRiver, board_features(board)) ==
         hand);
-}
-
-// TODO(identity-commit-3): Enable when public observation IDs retain prefixes.
-TEST_CASE("different reveal histories have distinct graph identity" *
-          doctest::skip()) {
-  const SameMaskHistory histories = BuildSameMaskHistories();
-  CHECK(histories.node_a != histories.node_b);
 }
 
 }  // namespace

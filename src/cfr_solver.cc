@@ -239,7 +239,8 @@ NodeId CFRSolver::FrozenTraversalGraph::required_chance_child_id(
   const auto child_id =
       solver_.tables().chance_child(
           parent_node_id,
-          board_bucket(child_state.betting.street, child_state.board));
+          public_observation_id(child_state.betting.street,
+                                child_state.board));
   if (!child_id.has_value() ||
       *child_id == kInvalidNodeId ||
       *child_id == kCappedNodeId ||

@@ -10,7 +10,7 @@
 namespace poker {
 
 struct GraphBuilderTestAccess {
-  explicit GraphBuilderTestAccess(const GraphBuilder& graph) : graph_(graph) {}
+  explicit GraphBuilderTestAccess(GraphBuilder& graph) : graph_(graph) {}
 
   NodeId root_node() const {
     return graph_.tables().root_node_id;
@@ -35,12 +35,31 @@ struct GraphBuilderTestAccess {
     return child->second;
   }
 
+  NodeId frozen_chance_child(NodeId parent,
+                             PublicObservationId observation) const {
+    const auto child = graph_.tables().chance_child(parent, observation);
+    if (!child.has_value()) {
+      throw std::logic_error("missing frozen chance child");
+    }
+    return *child;
+  }
+
   PublicObservationId public_observation(NodeId node) const {
-    return graph_node(node).board_bucket;
+    return graph_node(node).public_observation;
   }
 
   BettingNodeId betting_history(NodeId node) const {
     return graph_node(node).betting_node_id;
+  }
+
+  void freeze() {
+    graph_.rebuild_chance_child_entries();
+    graph_.storage_.freeze();
+  }
+
+  void set_public_observation(NodeId node,
+                              PublicObservationId observation) {
+    graph_.mtables().nodes.at(node).public_observation = observation;
   }
 
  private:
@@ -52,7 +71,7 @@ struct GraphBuilderTestAccess {
     return nodes[node];
   }
 
-  const GraphBuilder& graph_;
+  GraphBuilder& graph_;
 };
 
 namespace test {
@@ -125,7 +144,7 @@ class IdentityGraph {
       throw std::logic_error("failed to create chance child");
     }
     const PublicObservationId observation =
-        board_bucket(state.betting.street, state.board);
+        public_observation_id(state.betting.street, state.board);
     if (access_.chance_child(parent, observation) != *child) {
       throw std::logic_error("chance child accessor mismatch");
     }
@@ -133,6 +152,18 @@ class IdentityGraph {
   }
 
   const GraphBuilderTestAccess& access() const { return access_; }
+  GraphBuilderTestAccess& access() { return access_; }
+
+  bool prebuild(NodeId root, const BoardRunout& board, int max_depth) {
+    std::vector<std::optional<BoardRunout>> node_boards;
+    return graph_.prebuild_reachable_nodes(root, board, max_depth,
+                                           node_boards);
+  }
+
+  bool validate(NodeId root, const BoardRunout& board, int max_depth) const {
+    TrainingRunStats stats;
+    return graph_.validate_prebuilt_nodes(root, board, max_depth, stats);
+  }
 
  private:
   SolverConfig config_;
@@ -146,7 +177,7 @@ class IdentityGraph {
 
 inline PublicObservationId PublicObservation(
     const ExactPublicState& state) {
-  return board_bucket(state.betting.street, state.board);
+  return public_observation_id(state.betting.street, state.board);
 }
 
 inline PrivateBucketId PrivateObservation(

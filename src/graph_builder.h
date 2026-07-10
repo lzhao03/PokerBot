@@ -47,7 +47,6 @@ class GraphBuilder {
  private:
   friend struct GraphBuilderTestAccess;
 
-  using BoardBucketId = StrategyTables::BoardBucketId;
   using BettingNodeId = StrategyTables::BettingNodeId;
   using BettingNode = StrategyTables::BettingNode;
   using BettingEdge = StrategyTables::BettingEdge;
@@ -69,12 +68,10 @@ class GraphBuilder {
       BettingNodeId parent_node_id,
       const BettingState& child_state);
   NodeKey node_key(BettingNodeId betting_node_id,
-                   StreetKind street,
-                   const BoardRunout& board) const;
+                   const ExactPublicState& state) const;
   std::optional<NodeId> find_node(
       BettingNodeId betting_node_id,
-      StreetKind street,
-      const BoardRunout& board) const;
+      const ExactPublicState& state) const;
   Node make_node(BettingNodeId betting_node_id,
                  const ExactPublicState& state);
   std::optional<NodeId> get_or_create_node(
@@ -92,8 +89,6 @@ class GraphBuilder {
   bool for_each_required_chance_transition(const Node& node,
                                            const BoardRunout& board,
                                            Callback&& callback) const;
-  BoardBucketId chance_outcome_id(
-      const ExactPublicState& child_state) const;
   void rebuild_chance_child_entries();
 
   const SolverConfig& config_;

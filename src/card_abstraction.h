@@ -181,6 +181,18 @@ inline BoardBucketId exact_board_bucket(const BoardRunout& board) {
   return board.mask();
 }
 
+inline PublicObservationId exact_public_observation(
+    const BoardRunout& board) {
+  // Pack the canonical flop and ordered turn/river into one history ID.
+  PublicObservationId observation = board.count();
+  size_t shift = 3;
+  for (CardId card : board.cards()) {
+    observation |= static_cast<PublicObservationId>(card) << shift;
+    shift += 6;
+  }
+  return observation;
+}
+
 inline BoardBucketId board_texture_bucket(
     StreetKind street,
     const BoardFeatures& features) {
@@ -254,6 +266,15 @@ inline PublicStreetObservation observe_public_street(
     StreetKind street,
     const BoardRunout& board) {
   return observe_public_street(street, board, board_features(board));
+}
+
+inline PublicObservationId public_observation_id(
+    StreetKind street,
+    const BoardRunout& board) {
+  if constexpr (kCoarsePublicBuckets) {
+    return observe_public_street(street, board).value;
+  }
+  return exact_public_observation(board);
 }
 
 inline BoardBucketId board_bucket(StreetKind street,
