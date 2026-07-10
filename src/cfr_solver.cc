@@ -1127,12 +1127,11 @@ double CFRSolver::evaluate_strategy_samples(
           const double value = worker.evaluate_strategy_samples(
               shard_samples, root_id, root_board, sampler, false);
           return std::make_pair(
-              value * shard_samples,
-              worker.get_traversal_stats().action_entry_touches);
+              value * shard_samples, worker.get_traversal_stats());
         },
-        [&](const std::pair<double, int64_t>& result) {
+        [&](const std::pair<double, TraversalStats>& result) {
           total += result.first;
-          traversal_stats_.record_action_entries(result.second);
+          traversal_stats_.add(result.second);
         });
     return total / samples;
   }

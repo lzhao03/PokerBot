@@ -133,18 +133,22 @@ TEST_CASE("evaluate strategy traversal guard") {
   HandRange player_b = ExactRange(player_b_combo);
 
   solver.run(3, player_a, player_b);
-  const int64_t before_touches =
-      solver.get_traversal_stats().action_entry_touches;
+  solver.reset_traversal_stats();
+  const CFRSolver::TraversalStats reset_stats = solver.get_traversal_stats();
+  CHECK(reset_stats.cfr_updates == 0);
+  CHECK(reset_stats.max_decision_depth == 0);
+  CHECK(reset_stats.action_entry_touches == 0);
+
   const double value =
       solver.evaluate_strategy(player_a_combo, player_b_combo);
-  const int64_t after_touches =
+  const int64_t touches =
       solver.get_traversal_stats().action_entry_touches;
   CheckMetrics(Metrics{
                    value,
                    static_cast<int64_t>(solver.get_info_set_count()),
                    static_cast<int64_t>(solver.get_public_state_count()),
                    solver.get_cfr_update_count(),
-                   after_touches - before_touches,
+                   touches,
                },
                Metrics{0.046839674465274539, 1, 233, 3, 4},
                "evaluate strategy traversal");

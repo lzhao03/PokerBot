@@ -50,6 +50,7 @@ class CFRSolver {
     return nodes().size();
   }
   TraversalStats get_traversal_stats() const { return traversal_stats_; }
+  void reset_traversal_stats() { traversal_stats_ = {}; }
   TrainingRunStats get_last_training_run_stats() const {
     return last_training_run_stats_;
   }

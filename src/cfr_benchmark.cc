@@ -258,32 +258,6 @@ BenchmarkResult WithSolverState(BenchmarkResult result,
   return result;
 }
 
-poker::CFRSolver::TraversalStats TraversalDelta(
-    const poker::CFRSolver::TraversalStats& after,
-    const poker::CFRSolver::TraversalStats& before) {
-  poker::CFRSolver::TraversalStats delta;
-  delta.cfr_updates = after.cfr_updates - before.cfr_updates;
-  delta.preflop_updates = after.preflop_updates - before.preflop_updates;
-  delta.flop_updates = after.flop_updates - before.flop_updates;
-  delta.turn_updates = after.turn_updates - before.turn_updates;
-  delta.river_updates = after.river_updates - before.river_updates;
-  delta.child_nodes_created =
-      after.child_nodes_created - before.child_nodes_created;
-  delta.chance_samples = after.chance_samples - before.chance_samples;
-  delta.terminal_utility_calls =
-      after.terminal_utility_calls - before.terminal_utility_calls;
-  delta.fold_utility_calls =
-      after.fold_utility_calls - before.fold_utility_calls;
-  delta.showdown_utility_calls =
-      after.showdown_utility_calls - before.showdown_utility_calls;
-  delta.action_entry_touches =
-      after.action_entry_touches - before.action_entry_touches;
-  delta.atomic_regret_update_retries =
-      after.atomic_regret_update_retries -
-      before.atomic_regret_update_retries;
-  return delta;
-}
-
 bool UseFrozenPrimaryMetric(
     const poker::CFRSolver::TrainingRunStats& training) {
   return training.frozen_iterations > 0;
@@ -491,15 +465,13 @@ int main(int argc, char** argv) {
 
     poker::CFRSolver evaluate_solver(config);
     evaluate_solver.run(options.iterations, a_range, b_range);
+    evaluate_solver.reset_traversal_stats();
     RunBenchmark("evaluate_range", [&] {
-      poker::CFRSolver::TraversalStats traversal_before =
-          evaluate_solver.get_traversal_stats();
       double value = evaluate_solver.evaluate_strategy(
           options.eval_samples, a_range, b_range);
       return WithSolverState(MakeBenchmarkResult(
           value, options.eval_samples, 0,
-          TraversalDelta(evaluate_solver.get_traversal_stats(),
-                         traversal_before)),
+          evaluate_solver.get_traversal_stats()),
           config, evaluate_solver);
     });
   } catch (const std::exception& error) {
