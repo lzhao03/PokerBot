@@ -96,10 +96,9 @@ TEST_CASE("generated betting actions preserve state invariants") {
       CHECK(next.stack[0] >= 0);
       CHECK(next.stack[1] >= 0);
       CHECK(next.pot >= 0);
-      CHECK(next.history_size == state.history_size + 1);
-      const GameAction last_action = MakeGameAction(next.last_action);
-      CHECK(last_action.kind == action.kind);
-      CHECK(last_action.player == state.player_to_act);
+      CHECK(next.actions_this_street == state.actions_this_street + 1);
+      CHECK(next.last_action.kind == action.kind);
+      CHECK(next.last_action.player == state.player_to_act);
       if (next.folded_player >= 0) {
         CHECK(CompactTerminal(next));
         CHECK(next.player_to_act == -1);

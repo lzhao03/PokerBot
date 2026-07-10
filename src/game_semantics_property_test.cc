@@ -204,7 +204,8 @@ void ValidateChanceTransition(const CompactPublicState& parent,
           "chance must advance street");
   Require(child.board_count == BoardCardsForStreet(child.street), trace,
           "chance must produce exact board count for street");
-  Require(child.history_size == 0, trace, "chance must reset action history");
+  Require(child.actions_this_street == 0, trace,
+          "chance must reset street action count");
 
   CardMask dealt = 0;
   for (CardId card : cards) {

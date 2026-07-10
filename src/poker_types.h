@@ -99,25 +99,14 @@ struct SolverConfig {
   int num_training_threads = 0;
 };
 
-struct CompactAction {
-  int amount = 0;
-  int8_t player = -1;
-  ActionKind kind = ActionKind::kNoAction;
-};
-
 struct CompactPublicState {
-  static constexpr int kMaxHistoryActions = 32;
-
   std::array<int, kPlayerCount> stack = {0, 0};
   int pot = 0;
   std::array<CardId, kMaxBoardCards> board_cards = {};
   uint8_t board_count = 0;
   CardMask board_mask = 0;
-  std::array<int, kMaxHistoryActions> history_amounts = {};
-  std::array<int8_t, kMaxHistoryActions> history_players = {};
-  std::array<ActionKind, kMaxHistoryActions> history_kinds = {};
-  uint16_t history_size = 0;
-  CompactAction last_action;
+  uint8_t actions_this_street = 0;
+  GameAction last_action;
   StreetKind street = StreetKind::kPreflop;
   bool all_in = false;
   int folded_player = -1;
@@ -125,44 +114,6 @@ struct CompactPublicState {
   std::array<int, kPlayerCount> player_contribution = {0, 0};
   int player_contribution_count = 0;
 };
-
-inline CompactAction MakeCompactAction(const GameAction& action) {
-  return {action.amount, static_cast<int8_t>(action.player), action.kind};
-}
-
-inline GameAction MakeGameAction(const CompactAction& action) {
-  return {action.kind, action.amount, action.player};
-}
-
-inline CompactAction CompactHistoryAction(const CompactPublicState& state,
-                                          uint16_t action_index) {
-  if (action_index >= state.history_size ||
-      action_index >= CompactPublicState::kMaxHistoryActions) {
-    throw std::logic_error("Compact history action index out of range");
-  }
-  const size_t index = static_cast<size_t>(action_index);
-  return {state.history_amounts[index],
-          state.history_players[index],
-          state.history_kinds[index]};
-}
-
-inline void AppendHistoryAction(CompactPublicState& state,
-                                const GameAction& action) {
-  if (state.history_size >= CompactPublicState::kMaxHistoryActions) {
-    throw std::logic_error("Compact public state history is full");
-  }
-  const size_t index = static_cast<size_t>(state.history_size);
-  state.history_amounts[index] = action.amount;
-  state.history_players[index] = static_cast<int8_t>(action.player);
-  state.history_kinds[index] = action.kind;
-  state.last_action = MakeCompactAction(action);
-  ++state.history_size;
-}
-
-inline void ResetHistory(CompactPublicState& state) {
-  state.history_size = 0;
-  state.last_action = CompactAction{};
-}
 
 inline int SuitIndex(SuitKind suit) {
   return static_cast<int>(suit);
@@ -269,9 +220,8 @@ inline BettingState BettingStateFromCompact(const CompactPublicState& state) {
       state.street,
       static_cast<int8_t>(state.player_to_act),
       static_cast<int8_t>(state.folded_player),
-      static_cast<uint8_t>(
-          std::min<uint16_t>(state.history_size, UINT8_MAX)),
-      MakeGameAction(state.last_action),
+      state.actions_this_street,
+      state.last_action,
       state.all_in,
   };
 }
@@ -292,8 +242,8 @@ inline CompactPublicState ToCompact(const BettingState& betting,
   state.folded_player = betting.folded_player;
   state.player_to_act = betting.player_to_act;
   state.player_contribution = betting.contribution;
-  state.last_action = MakeCompactAction(betting.last_action);
-  state.history_size = betting.actions_this_street;
+  state.actions_this_street = betting.actions_this_street;
+  state.last_action = betting.last_action;
   return state;
 }
 

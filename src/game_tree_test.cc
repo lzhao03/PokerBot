@@ -28,8 +28,8 @@ CompactPublicState ShowdownState() {
   state.folded_player = -1;
   state.player_contribution = {10, 10};
   state.player_to_act = 1;
-  AppendHistoryAction(state, {ActionKind::kCheck, 0, 1});
-  AppendHistoryAction(state, {ActionKind::kCheck, 0, 0});
+  state.actions_this_street = 2;
+  state.last_action = {ActionKind::kCheck, 0, 0};
   AddBoardCard(state, MakeCardId(2, SuitKind::kHearts));
   AddBoardCard(state, MakeCardId(7, SuitKind::kDiamonds));
   AddBoardCard(state, MakeCardId(9, SuitKind::kClubs));
@@ -72,23 +72,8 @@ TEST_CASE("terminal utility and chance transitions are correct") {
   const CompactPublicState child = CompactApplyChance(closed_preflop, flop);
   CHECK(child.street == StreetKind::kFlop);
   CHECK(child.board_count == 3);
-  CHECK(child.history_size == 0);
+  CHECK(child.actions_this_street == 0);
   CHECK(child.player_to_act == 1);
-}
-
-TEST_CASE("compact history cap is enforced") {
-  CompactPublicState state;
-  state.stack = {99, 98};
-  state.pot = 3;
-  state.street = StreetKind::kPreflop;
-  state.folded_player = -1;
-  state.player_contribution = {1, 2};
-  state.player_to_act = 0;
-  for (int i = 0; i < CompactPublicState::kMaxHistoryActions; ++i) {
-    AppendHistoryAction(state, {ActionKind::kCheck, 0, 0});
-  }
-
-  CHECK_THROWS((void)ApplyAction(state, {ActionKind::kCall, 0, -1}));
 }
 
 }  // namespace

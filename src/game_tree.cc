@@ -45,7 +45,7 @@ int BoardCardCount(const Board& board) {
 }
 
 int HistorySize(const CompactPublicState& state) {
-  return state.history_size;
+  return state.actions_this_street;
 }
 
 int HistorySize(const BettingState& state) {
@@ -53,7 +53,7 @@ int HistorySize(const BettingState& state) {
 }
 
 GameAction LastAction(const CompactPublicState& state) {
-  return MakeGameAction(state.last_action);
+  return state.last_action;
 }
 
 GameAction LastAction(const BettingState& state) {
@@ -164,7 +164,11 @@ int PlayerToActForState(const BettingState& state, const Board& board) {
 }
 
 void AppendStateHistory(CompactPublicState& state, const GameAction& action) {
-  AppendHistoryAction(state, action);
+  state.last_action = action;
+  if (state.actions_this_street == UINT8_MAX) {
+    throw std::logic_error("Compact public state action count overflow");
+  }
+  ++state.actions_this_street;
 }
 
 void AppendStateHistory(BettingState& state, const GameAction& action) {
