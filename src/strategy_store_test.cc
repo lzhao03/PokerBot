@@ -15,7 +15,7 @@ struct StoreFixture {
     storage.mutable_tables->public_state_rows[0].betting_node_id = 0;
     storage.mutable_tables->betting_nodes[0].kind =
         StrategyTables::NodeKind::kDecision;
-    storage.mutable_tables->betting_nodes[0].player_to_act = 0;
+    storage.mutable_tables->betting_nodes[0].state.player_to_act = 0;
   }
 
   SolverConfig config;

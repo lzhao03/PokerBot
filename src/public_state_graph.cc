@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -168,10 +169,6 @@ bool ForEachCoarseChanceTransition(StreetKind street,
   }
 }
 
-int FirstBettingPlayer(StreetKind street) {
-  return street == StreetKind::kPreflop ? 0 : 1;
-}
-
 StrategyTables::NodeKind BettingNodeKind(const BettingState& state) {
   const bool betting_over = IsBettingRoundOver(state);
   if (state.folded_player >= 0 ||
@@ -184,12 +181,12 @@ StrategyTables::NodeKind BettingNodeKind(const BettingState& state) {
   return StrategyTables::NodeKind::kDecision;
 }
 
-int BettingNodePlayerToAct(const BettingState& state) {
-  if (BettingNodeKind(state) != StrategyTables::NodeKind::kDecision) {
-    return -1;
+void ValidateBettingNode(const StrategyTables::BettingNode& node) {
+  if (node.kind == StrategyTables::NodeKind::kDecision) {
+    assert(IsPlayer(node.state.player_to_act));
+  } else {
+    assert(node.state.player_to_act == -1);
   }
-  return IsPlayer(state.player_to_act) ? state.player_to_act
-                                       : FirstBettingPlayer(state.street);
 }
 
 bool SameBettingState(const BettingState& first, const BettingState& second) {
@@ -219,11 +216,11 @@ GraphBuilder::BettingNodeId GraphBuilder::append_betting_node(
   BettingNode node;
   node.state = state;
   node.kind = BettingNodeKind(state);
-  node.player_to_act = BettingNodePlayerToAct(state);
+  ValidateBettingNode(node);
 
   if (node.kind == StrategyTables::NodeKind::kDecision) {
-    const auto menu =
-        betting_abstraction_.actions_for_betting_node(state, node.player_to_act);
+    const auto menu = betting_abstraction_.actions_for_betting_node(
+        state, node.state.player_to_act);
     node.action_begin = static_cast<uint32_t>(tables.betting_edges.size());
     node.action_count = menu.count;
     for (uint8_t i = 0; i < menu.count; ++i) {
@@ -831,6 +828,7 @@ bool GraphBuilder::validate_prebuilt_rows(
       return false;
     }
     const BettingNode& node = tables().betting_nodes[row.betting_node_id];
+    ValidateBettingNode(node);
     if (node.kind == StrategyTables::NodeKind::kTerminal) {
       continue;
     }

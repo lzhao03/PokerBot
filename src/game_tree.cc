@@ -1,6 +1,7 @@
 #include "src/game_tree.h"
 
 #include <algorithm>
+#include <cassert>
 #include <stdexcept>
 
 #include "src/hand_evaluator.h"
@@ -47,21 +48,14 @@ void AdvanceStreet(ExactGameState& state, absl::Span<const CardId> cards) {
   }
   state.betting.pending_action_mask = kAllPlayersMask;
   state.betting.player_to_act = FirstPlayerForStreet(state.betting.street);
+  if (IsBettingRoundOver(state.betting)) {
+    state.betting.player_to_act = -1;
+  }
   ValidateBettingState(state.betting);
 }
 
 bool HandOver(const BettingState& state, const Board& board) {
   return BoardComplete(state, board) && IsBettingRoundOver(state);
-}
-
-int PlayerToAct(const BettingState& state) {
-  if (state.folded_player >= 0 || IsBettingRoundOver(state)) {
-    return -1;
-  }
-  if (IsPlayer(state.player_to_act)) {
-    return state.player_to_act;
-  }
-  return FirstPlayerForStreet(state.street);
 }
 
 }  // namespace
@@ -87,17 +81,12 @@ int GetPlayerToAct(const BettingState& state, const Board& board) {
   if (IsTerminal(state, board) || IsBettingRoundOver(state)) {
     return -1;
   }
-  if (IsPlayer(state.player_to_act)) {
-    return state.player_to_act;
-  }
-  return FirstPlayerForStreet(state.street);
+  assert(IsPlayer(state.player_to_act));
+  return state.player_to_act;
 }
 
 bool IsLegalAction(const BettingState& state, const GameAction& action) {
-  int player = state.player_to_act;
-  if (!IsPlayer(player)) {
-    player = PlayerToAct(state);
-  }
+  const int player = state.player_to_act;
   if (!IsPlayer(player) || state.folded_player >= 0 ||
       state.stack[player] <= 0) {
     return false;
@@ -128,11 +117,8 @@ bool IsLegalAction(const BettingState& state, const GameAction& action) {
 BettingState ApplyLegalActionUnchecked(const BettingState& state,
                                        const GameAction& action) {
   BettingState child = state;
-  int player = child.player_to_act;
-  if (!IsPlayer(player)) {
-    player = PlayerToAct(child);
-  }
-
+  assert(IsPlayer(child.player_to_act));
+  const int player = child.player_to_act;
   const int opponent = Opponent(player);
   const Chips to_call_before = ToCall(child, player);
   Chips committed = 0;
@@ -173,6 +159,9 @@ BettingState ApplyLegalActionUnchecked(const BettingState& state,
       child.pending_action_mask &=
           static_cast<uint8_t>(~PlayerBit(player));
     }
+  }
+  if (IsBettingRoundOver(child)) {
+    child.player_to_act = -1;
   }
 
   ValidateBettingState(child);

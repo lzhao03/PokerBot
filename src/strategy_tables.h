@@ -89,7 +89,6 @@ class StrategyTables {
     uint8_t action_count = 0;
     BettingNodeId chance_child = kInvalidBettingNodeId;
     NodeKind kind = NodeKind::kDecision;
-    int player_to_act = -1;
   };
 
   struct PublicStateKey {

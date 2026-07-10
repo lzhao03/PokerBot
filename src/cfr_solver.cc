@@ -335,7 +335,7 @@ bool CFRSolver::prebuild_info_set_rows(
       }
       const auto& node = tables().betting_nodes[row.betting_node_id];
       if (node.kind != StrategyTables::NodeKind::kDecision ||
-          node.action_count == 0 || !IsPlayer(node.player_to_act)) {
+          node.action_count == 0 || !IsPlayer(node.state.player_to_act)) {
         continue;
       }
       for (uint32_t bucket = 0; bucket < StrategyTables::kPrivateBucketCount;
@@ -367,11 +367,11 @@ bool CFRSolver::prebuild_info_set_rows(
     }
     const auto& node = tables().betting_nodes[row.betting_node_id];
     if (node.kind != StrategyTables::NodeKind::kDecision ||
-        node.action_count == 0 || !IsPlayer(node.player_to_act)) {
+        node.action_count == 0 || !IsPlayer(node.state.player_to_act)) {
       continue;
     }
 
-    const int player = node.player_to_act;
+    const int player = node.state.player_to_act;
     const TrainingRangeView& range = player == 0 ? a_view : b_view;
     if (range.empty()) {
       continue;
@@ -835,10 +835,11 @@ double CFRSolver::CfrTraversal<Graph>::decision(
   const auto& betting_node =
       solver_.tables().betting_nodes[row.betting_node_id];
   if (betting_node.kind != StrategyTables::NodeKind::kDecision ||
-      betting_node.action_count == 0 || !IsPlayer(betting_node.player_to_act)) {
+      betting_node.action_count == 0 ||
+      !IsPlayer(betting_node.state.player_to_act)) {
     return 0.0;
   }
-  const int player = betting_node.player_to_act;
+  const int player = betting_node.state.player_to_act;
   const ComboId hand = run_.deal.hand(player);
 
   const bool update_player = player == run_.options.update_player;
@@ -1191,10 +1192,11 @@ double CFRSolver::evaluate_strategy_node_impl(
       break;
   }
   if (betting_node.kind != StrategyTables::NodeKind::kDecision ||
-      betting_node.action_count == 0 || !IsPlayer(betting_node.player_to_act)) {
+      betting_node.action_count == 0 ||
+      !IsPlayer(betting_node.state.player_to_act)) {
     return 0.0;
   }
-  const int player = betting_node.player_to_act;
+  const int player = betting_node.state.player_to_act;
 
   std::array<double, kMaxActionsPerNode> probabilities_storage{};
   absl::Span<double> probabilities(

@@ -23,7 +23,7 @@ ExactGameState ShowdownState() {
   state.betting.street = StreetKind::kRiver;
   state.betting.folded_player = -1;
   state.betting.committed = {10, 10};
-  state.betting.player_to_act = 1;
+  state.betting.player_to_act = -1;
   state.betting.pending_action_mask = 0;
   state.board.add(MakeCardId(2, SuitKind::kHearts));
   state.board.add(MakeCardId(7, SuitKind::kDiamonds));

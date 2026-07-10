@@ -175,6 +175,13 @@ void ValidateState(const ExactGameState& state,
           "pot plus stacks must conserve chips");
   Require(Pot(betting) == betting.committed[0] + betting.committed[1],
           trace, "pot must equal total committed chips");
+  if (BettingRoundOver(state)) {
+    Require(betting.player_to_act == -1, trace,
+            "completed state must not have an acting player");
+  } else {
+    Require(IsPlayer(betting.player_to_act), trace,
+            "decision state must have an acting player");
+  }
   ValidateBoard(state, trace);
 }
 
@@ -356,6 +363,7 @@ void CheckCompletedRound(const ExactGameState& state, bool terminal) {
   CAPTURE(StateString(state));
   CHECK(BettingRoundOver(state));
   CHECK(PlayerToAct(state) == -1);
+  CHECK(state.betting.player_to_act == -1);
   CHECK(Terminal(state) == terminal);
 }
 
@@ -628,9 +636,11 @@ TEST_CASE("betting-round completion cases agree") {
   runout = ApplyStateAction(runout, {ActionKind::kAllIn});
   runout = ApplyStateAction(runout, {ActionKind::kCall});
   runout = ApplyChance(runout, {MakeCardId(9, SuitKind::kSpades)});
+  CHECK(runout.betting.player_to_act == -1);
   runout = ApplyChance(runout, {MakeCardId(3, SuitKind::kHearts)});
   CHECK(Terminal(runout));
   CHECK(PlayerToAct(runout) == -1);
+  CHECK(runout.betting.player_to_act == -1);
 }
 
 TEST_CASE("chance sampling excludes known cards") {

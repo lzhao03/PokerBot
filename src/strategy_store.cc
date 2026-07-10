@@ -382,13 +382,13 @@ bool StrategyStore::prebuild_frozen_info_set_action_offsets() {
     if (slab == nullptr) {
       continue;
     }
-    if (node.player_to_act < 0 || node.player_to_act >= kPlayerCount) {
+    const int player = node.state.player_to_act;
+    if (!IsPlayer(player)) {
       continue;
     }
 
     auto& offset_row = tables.frozen_info_set_action_offsets[node_id];
-    const PublicInfoSetSlabPlayer& player_slab =
-        slab->players[node.player_to_act];
+    const PublicInfoSetSlabPlayer& player_slab = slab->players[player];
     for (uint32_t bucket = 0; bucket < StrategyTables::kPrivateBucketCount;
          ++bucket) {
       const auto private_bucket = static_cast<PrivateBucketId>(bucket);
@@ -567,7 +567,7 @@ int StrategyStore::player_for_public_state(uint32_t public_state_id) const {
   if (row.betting_node_id >= tables.betting_nodes.size()) {
     return -1;
   }
-  return tables.betting_nodes[row.betting_node_id].player_to_act;
+  return tables.betting_nodes[row.betting_node_id].state.player_to_act;
 }
 
 }  // namespace poker
