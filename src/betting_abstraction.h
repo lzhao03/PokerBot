@@ -21,22 +21,15 @@ class BettingAbstraction {
 
   ActionMenu actions_for_betting_node(const BettingState& state,
                                       int player) const;
-  ActionMenu actions_for_betting_node(const CompactPublicState& state,
-                                      int player) const;
 
   int action_key(const GameAction& action) const;
 
   BettingHistoryKey make_history_key(const BettingState& state) const;
-  BettingHistoryKey make_history_key(const CompactPublicState& state) const;
 
   BettingHistoryKey make_action_child_history_key(
       const BettingHistoryRow& parent_row,
       int action_index,
       const BettingState& child_state) const;
-  BettingHistoryKey make_action_child_history_key(
-      const BettingHistoryRow& parent_row,
-      int action_index,
-      const CompactPublicState& child_state) const;
 
   BettingHistoryRow make_history_row(const BettingHistoryKey& key) const;
 

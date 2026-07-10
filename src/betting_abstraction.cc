@@ -140,21 +140,6 @@ int RowHistoryValue(const BettingHistoryRow& row, int index) {
       static_cast<size_t>(index - BettingHistoryKey::kInlineHistoryValues)];
 }
 
-void AppendStateHistory(const CompactPublicState& state,
-                        BettingHistoryKey& key) {
-  const int value_count = state.history_size * 3;
-  if (value_count > BettingHistoryKey::kInlineHistoryValues) {
-    key.history_overflow.reserve(value_count -
-                                 BettingHistoryKey::kInlineHistoryValues);
-  }
-  for (uint16_t i = 0; i < state.history_size; ++i) {
-    const CompactAction action = CompactHistoryAction(state, i);
-    AppendHistoryValue(key, action.player);
-    AppendHistoryValue(key, static_cast<int>(action.kind));
-    AppendHistoryValue(key, action.amount);
-  }
-}
-
 void AppendStateHistory(const BettingState& state, BettingHistoryKey& key) {
   if (state.actions_this_street == 0 ||
       state.last_action.kind == ActionKind::kNoAction) {
@@ -223,12 +208,6 @@ BettingAbstraction::ActionMenu BettingAbstraction::actions_for_betting_node(
   return menu;
 }
 
-BettingAbstraction::ActionMenu BettingAbstraction::actions_for_betting_node(
-    const CompactPublicState& state,
-    int player) const {
-  return actions_for_betting_node(BettingStateFromCompact(state), player);
-}
-
 int BettingAbstraction::action_key(const GameAction& action) const {
   if (action.amount < 0 || action.amount >= kActionKeyMultiplier) {
     throw std::invalid_argument("Action amount is outside action-key range");
@@ -243,13 +222,6 @@ BettingAbstraction::BettingHistoryKey BettingAbstraction::make_history_key(
   return key;
 }
 
-BettingAbstraction::BettingHistoryKey BettingAbstraction::make_history_key(
-    const CompactPublicState& state) const {
-  BettingHistoryKey key = BaseHistoryKey(BettingStateFromCompact(state));
-  AppendStateHistory(state, key);
-  return key;
-}
-
 BettingAbstraction::BettingHistoryKey
 BettingAbstraction::make_action_child_history_key(
     const BettingHistoryRow& parent_row,
@@ -258,20 +230,6 @@ BettingAbstraction::make_action_child_history_key(
   BettingHistoryKey key = BaseHistoryKey(child_state);
   AppendRowHistory(parent_row, key);
   const GameAction action = child_state.last_action;
-  AppendHistoryValue(key, action.player);
-  AppendHistoryValue(key, static_cast<int>(action.kind));
-  AppendHistoryValue(key, action_index);
-  return key;
-}
-
-BettingAbstraction::BettingHistoryKey
-BettingAbstraction::make_action_child_history_key(
-    const BettingHistoryRow& parent_row,
-    int action_index,
-    const CompactPublicState& child_state) const {
-  BettingHistoryKey key = BaseHistoryKey(BettingStateFromCompact(child_state));
-  AppendRowHistory(parent_row, key);
-  const CompactAction action = child_state.last_action;
   AppendHistoryValue(key, action.player);
   AppendHistoryValue(key, static_cast<int>(action.kind));
   AppendHistoryValue(key, action_index);

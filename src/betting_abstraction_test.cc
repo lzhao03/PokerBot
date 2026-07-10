@@ -59,7 +59,8 @@ bool HasAction(const std::vector<GameAction>& actions,
 
 std::vector<GameAction> LegalActions(const BettingAbstraction& betting,
                                      const CompactPublicState& state) {
-  const auto menu = betting.actions_for_betting_node(state, state.player_to_act);
+  const auto menu = betting.actions_for_betting_node(
+      BettingStateFromCompact(state), state.player_to_act);
   return std::vector<GameAction>(menu.actions.begin(),
                                  menu.actions.begin() + menu.count);
 }
