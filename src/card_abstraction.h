@@ -237,27 +237,14 @@ struct CardAbstraction {
     return public_buckets.bucket(street, board);
   }
 
-  PublicBucketId public_bucket(const CompactPublicState& state) const {
-    return public_bucket(state.street, BoardFromCompact(state));
-  }
-
   PrivateBucketId private_bucket(ComboId combo_id,
                                  StreetKind street,
                                  const Board& board) const {
     return private_buckets.bucket(combo_id, street, board);
   }
 
-  PrivateBucketId private_bucket(ComboId combo_id,
-                                 const CompactPublicState& state) const {
-    return private_bucket(combo_id, state.street, BoardFromCompact(state));
-  }
-
   uint32_t private_bucket_count(StreetKind street, const Board& board) const {
     return private_buckets.bucket_count(street, board);
-  }
-
-  uint32_t private_bucket_count(const CompactPublicState& state) const {
-    return private_bucket_count(state.street, BoardFromCompact(state));
   }
 };
 
