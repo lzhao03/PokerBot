@@ -1,6 +1,5 @@
 #pragma once
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -99,22 +98,6 @@ struct SolverConfig {
   int num_training_threads = 0;
 };
 
-struct CompactPublicState {
-  std::array<int, kPlayerCount> stack = {0, 0};
-  int pot = 0;
-  std::array<CardId, kMaxBoardCards> board_cards = {};
-  uint8_t board_count = 0;
-  CardMask board_mask = 0;
-  uint8_t actions_this_street = 0;
-  GameAction last_action;
-  StreetKind street = StreetKind::kPreflop;
-  bool all_in = false;
-  int folded_player = -1;
-  int player_to_act = 0;
-  std::array<int, kPlayerCount> player_contribution = {0, 0};
-  int player_contribution_count = 0;
-};
-
 inline int SuitIndex(SuitKind suit) {
   return static_cast<int>(suit);
 }
@@ -175,21 +158,6 @@ struct ExactGameState {
   Board board;
 };
 
-inline void AddBoardCard(CompactPublicState& state, CardId card_id) {
-  Board board{state.board_cards, state.board_mask, state.board_count};
-  board.add(card_id);
-  state.board_cards = board.cards;
-  state.board_count = board.count;
-  state.board_mask = board.mask;
-}
-
-inline void CopyBoardFrom(CompactPublicState& state,
-                          const CompactPublicState& source) {
-  state.board_cards = source.board_cards;
-  state.board_count = source.board_count;
-  state.board_mask = source.board_mask;
-}
-
 inline int EncodedCard(CardId card_id) {
   return RankFromCardId(card_id) * 8 + 1 + SuitIndex(SuitFromCardId(card_id));
 }
@@ -200,55 +168,6 @@ inline bool IsPlayer(int player) {
 
 inline int Opponent(int player) {
   return 1 - player;
-}
-
-inline Board BoardFromCompact(const CompactPublicState& state) {
-  return Board{state.board_cards, state.board_mask, state.board_count};
-}
-
-inline void SetBoard(CompactPublicState& state, const Board& board) {
-  state.board_cards = board.cards;
-  state.board_count = board.count;
-  state.board_mask = board.mask;
-}
-
-inline BettingState BettingStateFromCompact(const CompactPublicState& state) {
-  return BettingState{
-      state.stack,
-      state.player_contribution,
-      state.pot,
-      state.street,
-      static_cast<int8_t>(state.player_to_act),
-      static_cast<int8_t>(state.folded_player),
-      state.actions_this_street,
-      state.last_action,
-      state.all_in,
-  };
-}
-
-inline ExactGameState ExactGameStateFromCompact(
-    const CompactPublicState& state) {
-  return ExactGameState{BettingStateFromCompact(state), BoardFromCompact(state)};
-}
-
-inline CompactPublicState ToCompact(const BettingState& betting,
-                                    const Board& board) {
-  CompactPublicState state;
-  state.stack = betting.stack;
-  state.pot = betting.pot;
-  SetBoard(state, board);
-  state.street = betting.street;
-  state.all_in = betting.all_in;
-  state.folded_player = betting.folded_player;
-  state.player_to_act = betting.player_to_act;
-  state.player_contribution = betting.contribution;
-  state.actions_this_street = betting.actions_this_street;
-  state.last_action = betting.last_action;
-  return state;
-}
-
-inline CompactPublicState ToCompact(const ExactGameState& state) {
-  return ToCompact(state.betting, state.board);
 }
 
 }  // namespace poker

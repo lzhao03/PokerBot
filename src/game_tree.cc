@@ -21,17 +21,13 @@ bool BoardComplete(const BettingState& state, const Board& board) {
   return state.street == StreetKind::kRiver && board.count >= kMaxBoardCards;
 }
 
-void AddContribution(BettingState& state, int player, int amount) {
-  state.contribution[player] += amount;
-}
-
 int CommitChips(BettingState& state, int player, int requested) {
   if (requested <= 0) {
     throw std::invalid_argument("Action amount must be positive");
   }
 
   const int committed = std::min(requested, state.stack[player]);
-  AddContribution(state, player, committed);
+  state.contribution[player] += committed;
   state.stack[player] -= committed;
   state.pot += committed;
   if (state.stack[player] == 0) {
