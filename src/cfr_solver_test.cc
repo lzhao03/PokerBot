@@ -71,16 +71,6 @@ TEST_CASE("fixed terminal run counts iteration and utility") {
   CHECK(solver.get_expected_value(0) == doctest::Approx(5.0));
 }
 
-TEST_CASE("empty ranges are rejected") {
-  SolverConfig config = SmallConfig();
-  CFRSolver solver(config);
-  HandRange empty;
-  HandRange player_b = ExactRange(Combo(14, SuitKind::kHearts,
-                                        14, SuitKind::kSpades));
-
-  CHECK_THROWS_AS(solver.run(1, empty, player_b), std::invalid_argument);
-}
-
 TEST_CASE("invalid initial betting state is rejected") {
   SolverConfig config = SmallConfig();
   ExactGameState invalid;

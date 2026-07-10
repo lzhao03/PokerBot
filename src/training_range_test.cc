@@ -9,11 +9,14 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <random>
+#include <stdexcept>
 #include <vector>
 
 namespace {
 
 constexpr int kHandTypeCount = 169;
+using RawRangeEntry = std::array<uint16_t, 2>;
 
 struct RangeOracle {
   std::array<double, kHandTypeCount> hand_weights = {};
@@ -118,6 +121,51 @@ void CheckRange(
   RC_ASSERT(Near(expanded_total, oracle.total_weight));
 }
 
+poker::TrainingRange SparseRange(
+    const std::vector<RawRangeEntry>& entries) {
+  poker::TrainingRange range;
+  for (const RawRangeEntry& entry : entries) {
+    const poker::ComboId combo =
+        static_cast<poker::ComboId>(entry[0] % poker::kComboCount);
+    range.add(combo, static_cast<float>(1 + entry[1] % 100));
+  }
+  return range;
+}
+
+void CheckFiltered(const poker::TrainingRange& source,
+                   poker::CardMask blocked,
+                   const poker::TrainingRangeView& filtered) {
+  std::array<bool, poker::kComboCount> seen = {};
+  for (uint16_t i = 0; i < filtered.active_count; ++i) {
+    const poker::ComboId combo = filtered.active[i];
+    RC_ASSERT(!seen[combo]);
+    seen[combo] = true;
+  }
+
+  uint16_t expected_count = 0;
+  for (poker::ComboId combo = 0; combo < poker::kComboCount; ++combo) {
+    const bool selected =
+        source.weights[combo] > 0.0f &&
+        (poker::ComboMask(combo) & blocked) == 0;
+    const float expected = selected ? source.weights[combo] : 0.0f;
+    RC_ASSERT(filtered.weights[combo] == expected);
+    if (selected) {
+      ++expected_count;
+      RC_ASSERT(seen[combo]);
+    }
+  }
+  RC_ASSERT(filtered.active_count == expected_count);
+}
+
+bool IsActive(const poker::TrainingRange& range, poker::ComboId combo) {
+  for (uint16_t i = 0; i < range.active_count; ++i) {
+    if (range.active[i] == combo) {
+      return true;
+    }
+  }
+  return false;
+}
+
 TEST_CASE("training range preserves hand range expansion") {
   poker::HandRange hand_range;
   hand_range.add_hand_by_index(poker::HandRange::string_to_index("AA"), 6.0);
@@ -191,59 +239,88 @@ TEST_CASE("range mutations match an exact-combo oracle") {
   CHECK(passed);
 }
 
-TEST_CASE("training range view can reset and reuse filtered storage") {
-  const poker::ComboId aces =
-      MakeCombo(14, poker::SuitKind::kSpades, 14, poker::SuitKind::kHearts);
-  const poker::ComboId kings =
-      MakeCombo(13, poker::SuitKind::kSpades, 13, poker::SuitKind::kHearts);
-  poker::TrainingRange range;
-  range.add(aces, 1.0f);
-  range.add(kings, 2.0f);
+TEST_CASE("training range view reuses scratch without stale weights") {
+  const bool passed = rc::check("range view filtering", [] {
+    const auto entries =
+        *rc::gen::resize(
+             32, rc::gen::arbitrary<std::vector<RawRangeEntry>>())
+             .as("range");
+    const poker::CardMask mask_a =
+        *rc::gen::arbitrary<poker::CardMask>().as("mask A");
+    const poker::CardMask mask_b =
+        *rc::gen::arbitrary<poker::CardMask>().as("mask B");
+    const poker::TrainingRange source = SparseRange(entries);
+    const poker::TrainingRange original = source;
+    const poker::TrainingRangeView view(source);
+    poker::TrainingRangeView scratch;
 
-  poker::TrainingRangeView view(range);
-  CHECK(view.size() == 2);
+    view.copy_without_mask_into(mask_a, scratch);
+    CheckFiltered(source, mask_a, scratch);
+    const auto first_weights = scratch.weights;
 
-  view.reset_to_filtered();
-  view.add(aces, 0.25f);
-  view.add(kings, 0.75f);
-  CHECK(view.size() == 2);
+    view.copy_without_mask_into(mask_b, scratch);
+    CheckFiltered(source, mask_b, scratch);
+    for (poker::ComboId combo = 0; combo < poker::kComboCount; ++combo) {
+      if (first_weights[combo] > 0.0f &&
+          (poker::ComboMask(combo) & mask_b) != 0) {
+        RC_ASSERT(scratch.weights[combo] == 0.0f);
+      }
+    }
 
-  view.reset_to_filtered();
-  CHECK(view.empty());
-  CHECK(view.weights[aces] == 0.0f);
-  CHECK(view.weights[kings] == 0.0f);
-
-  view.add(kings, 0.5f);
-  CHECK(view.size() == 1);
-  CHECK(view.combo(0) == kings);
-  CHECK(view.weight(0) == doctest::Approx(0.5f).epsilon(1e-6));
+    RC_ASSERT(source.active_count == original.active_count);
+    RC_ASSERT(source.active == original.active);
+    RC_ASSERT(source.weights == original.weights);
+  });
+  CHECK(passed);
 }
 
-TEST_CASE("training range view filters blocked cards into scratch") {
-  const poker::CardId ace_spades =
-      poker::MakeCardId(14, poker::SuitKind::kSpades);
-  const poker::CardId ace_hearts =
-      poker::MakeCardId(14, poker::SuitKind::kHearts);
-  const poker::ComboId aces = poker::CardsToComboId(ace_spades, ace_hearts);
-  const poker::ComboId kings =
-      MakeCombo(13, poker::SuitKind::kSpades, 13, poker::SuitKind::kHearts);
+TEST_CASE("range sampler returns active compatible hands") {
+  const bool passed = rc::check("compatible range sampling", [] {
+    const auto a_entries =
+        *rc::gen::resize(
+             32, rc::gen::arbitrary<std::vector<RawRangeEntry>>())
+             .as("range A");
+    const auto b_entries =
+        *rc::gen::resize(
+             32, rc::gen::arbitrary<std::vector<RawRangeEntry>>())
+             .as("range B");
+    const uint32_t seed = *rc::gen::arbitrary<uint32_t>().as("seed");
+    poker::TrainingRange a_range = SparseRange(a_entries);
+    poker::TrainingRange b_range = SparseRange(b_entries);
+    const poker::ComboId guaranteed_a = poker::CardsToComboId(0, 1);
+    const poker::ComboId guaranteed_b = poker::CardsToComboId(2, 3);
+    a_range.add(guaranteed_a, 1.0f);
+    b_range.add(guaranteed_b, 1.0f);
 
-  poker::TrainingRange range;
-  range.add(aces, 1.0f);
-  range.add(kings, 2.0f);
-  const poker::TrainingRangeView view(range);
-  poker::TrainingRangeView scratch;
+    const poker::RangeSampler sampler(a_range, b_range);
+    std::mt19937 rng(seed);
+    for (int i = 0; i < 64; ++i) {
+      const poker::RangeDeal deal = sampler.sample(rng);
+      RC_ASSERT(IsActive(a_range, deal.player_a_combo));
+      RC_ASSERT(IsActive(b_range, deal.player_b_combo));
+      RC_ASSERT(a_range.weight(deal.player_a_combo) > 0.0f);
+      RC_ASSERT(b_range.weight(deal.player_b_combo) > 0.0f);
+      RC_ASSERT((poker::ComboMask(deal.player_a_combo) &
+                 poker::ComboMask(deal.player_b_combo)) == 0);
+    }
+  });
+  CHECK(passed);
+}
 
-  const poker::TrainingRangeView& blocked =
-      view.copy_without_mask_into(poker::CardBit(ace_spades), scratch);
-  CHECK(blocked.size() == 1);
-  CHECK(blocked.combo(0) == kings);
+TEST_CASE("range sampler rejects empty and incompatible ranges") {
+  poker::TrainingRange empty;
+  poker::TrainingRange nonempty;
+  nonempty.add(poker::CardsToComboId(0, 1), 1.0f);
+  CHECK_THROWS_AS(poker::RangeSampler(empty, nonempty),
+                  std::invalid_argument);
 
-  const poker::TrainingRangeView& unblocked =
-      view.copy_without_mask_into(0, scratch);
-  CHECK(unblocked.size() == 2);
-  CHECK(unblocked.combo(0) == aces);
-  CHECK(unblocked.combo(1) == kings);
+  poker::TrainingRange a_range;
+  a_range.add(poker::CardsToComboId(0, 1), 1.0f);
+  poker::TrainingRange b_range;
+  b_range.add(poker::CardsToComboId(0, 2), 1.0f);
+  b_range.add(poker::CardsToComboId(1, 3), 1.0f);
+  CHECK_THROWS_AS(poker::RangeSampler(a_range, b_range),
+                  std::invalid_argument);
 }
 
 }  // namespace
