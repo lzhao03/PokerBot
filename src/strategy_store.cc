@@ -91,6 +91,14 @@ const MutableCumulativeArrays& SolverStorage::cumulative_ref() const {
 }
 
 void SolverStorage::freeze() {
+  if (mutable_tables == nullptr) {
+    frozen = true;
+    return;
+  }
+  mutable_tables->public_state_ids.clear();
+  mutable_tables->public_state_ids.rehash(0);
+  mutable_tables->public_chance_child_ids.clear();
+  mutable_tables->public_chance_child_ids.rehash(0);
   frozen_tables = mutable_tables;
   mutable_tables.reset();
   frozen = true;

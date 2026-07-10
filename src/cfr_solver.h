@@ -340,7 +340,6 @@ class CFRSolver {
                    int first_index,
                    WorkerFn&& worker_fn,
                    AccumulateFn&& accumulate_fn);
-  std::optional<NodeRef> root_node_ref(uint32_t root_id) const;
   std::optional<DecisionFrame> make_decision_frame(
       uint32_t node_id,
       const PublicStateRow& row) const;
@@ -394,10 +393,9 @@ class CFRSolver {
   TrainingRunStats last_training_run_stats_;
   CardAbstraction card_abstraction_;
   BettingAbstraction betting_abstraction_;
-  bool require_frozen_children_ = false;
   SolverStorage storage_;
   StrategyStore strategy_store_;
-  PublicStateGraph public_graph_;
+  GraphBuilder graph_builder_;
 };
 
 }  // namespace poker

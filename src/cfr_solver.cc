@@ -116,7 +116,7 @@ CFRSolver::CFRSolver(const SolverConfig& config,
       betting_abstraction_(config_),
       storage_(),
       strategy_store_(config_, storage_, &traversal_stats_),
-      public_graph_(config_,
+      graph_builder_(config_,
                     storage_,
                     card_abstraction_,
                     betting_abstraction_,
@@ -273,15 +273,6 @@ CFRSolver::TraversalContext::ChildTraversalScope::~ChildTraversalScope() {
   }
 }
 
-std::optional<CFRSolver::NodeRef> CFRSolver::root_node_ref(
-    uint32_t root_id) const {
-  const auto& state_rows = rows();
-  if (root_id >= state_rows.size()) {
-    return std::nullopt;
-  }
-  return NodeRef{root_id, initial_state_.board};
-}
-
 std::optional<CFRSolver::DecisionFrame> CFRSolver::make_decision_frame(
     uint32_t node_id,
     const PublicStateRow& row) const {
@@ -318,7 +309,7 @@ CFRSolver::MutableTraversalGraph::MutableTraversalGraph(CFRSolver& solver)
 std::optional<CFRSolver::NodeRef>
 CFRSolver::MutableTraversalGraph::action_child(NodeRef parent,
                                                int action_index) {
-  const auto child_id = solver_.public_graph_.get_or_create_action_child(
+  const auto child_id = solver_.graph_builder_.get_or_create_action_child(
       parent.public_state_id, action_index, parent.exact_board);
   if (!child_id.has_value() ||
       *child_id == kInvalidPublicStateId ||
@@ -345,7 +336,7 @@ CFRSolver::MutableTraversalGraph::sample_chance_child(
                                        exact_parent_state.board,
                                        known_private_cards, solver_.rng_);
   ExactGameState exact_child_state = ApplyChance(exact_parent_state, cards);
-  const auto child_id = solver_.public_graph_.get_or_create_chance_child(
+  const auto child_id = solver_.graph_builder_.get_or_create_chance_child(
       parent.public_state_id, exact_child_state);
   if (!child_id.has_value() ||
       *child_id == kInvalidPublicStateId ||
@@ -388,8 +379,10 @@ uint32_t CFRSolver::FrozenTraversalGraph::required_chance_child_id(
     uint32_t parent_public_state_id,
     const ExactGameState& child_state) const {
   const auto child_id =
-      solver_.public_graph_.find_chance_child(parent_public_state_id,
-                                              child_state);
+      solver_.tables().chance_child(
+          parent_public_state_id,
+          solver_.card_abstraction_.public_bucket(child_state.betting.street,
+                                                  child_state.board));
   if (!child_id.has_value() ||
       *child_id == kInvalidPublicStateId ||
       *child_id == kCappedPublicStateId ||
@@ -543,7 +536,7 @@ void CFRSolver::run(int iterations,
   RangeSampler sampler(a_range, b_range);
 
   VLOG(1) << "Preparing compact public-state rows...";
-  const auto maybe_root_id = public_graph_.get_or_create_row(initial_state_);
+  const auto maybe_root_id = graph_builder_.get_or_create_row(initial_state_);
   if (!maybe_root_id.has_value()) {
     return;
   }
@@ -601,7 +594,7 @@ bool CFRSolver::prepare_prebuilt_training(
   };
 
   VLOG(1) << "Prebuilding compact public-state rows...";
-  PublicStateGraph& graph = public_graph_;
+  GraphBuilder& graph = graph_builder_;
   std::vector<std::optional<Board>> row_boards;
   const auto prebuild_start = std::chrono::steady_clock::now();
   const bool public_rows_complete = graph.prebuild_reachable_rows(
@@ -738,7 +731,6 @@ void CFRSolver::run_fixed_storage_iterations(
   if (!storage_.frozen) {
     storage_.freeze();
   }
-  require_frozen_children_ = true;
 
   LOG(INFO) << "Starting fixed-storage CFR iterations ("
             << iterations << " iterations, " << num_threads << " workers)...";
@@ -750,11 +742,10 @@ void CFRSolver::run_fixed_storage_iterations(
   // Workers use their own RNG and TraversalScratch; no locks needed.
   auto fixed_tables = storage_.frozen_tables;
   auto cumulative = storage_.cumulative;
-  const bool fixed_children = storage_.frozen && require_frozen_children_;
   const bool depth_zero = config_.max_depth == 0;
   const bool regret_only_config = config_.regret_only_training && depth_zero;
   const bool use_fixed_infoset_lookup =
-      fixed_children && regret_only_config && !kCoarsePublicBuckets;
+      storage_.frozen && regret_only_config && !kCoarsePublicBuckets;
   const bool use_atomic_updates = num_threads > 1;
 
   struct WorkerResult {
@@ -773,7 +764,6 @@ void CFRSolver::run_fixed_storage_iterations(
           // Build a lightweight worker that shares frozen tables.
           CFRSolver worker(config_);
           worker.storage_.bind_frozen(fixed_tables, cumulative);
-          worker.require_frozen_children_ = true;
           worker.rng_.seed(seed);
 
           TrainingRangeView a_view;
@@ -1177,7 +1167,7 @@ absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
 
 double CFRSolver::evaluate_strategy(ComboId player_a_hand,
                                     ComboId player_b_hand) {
-  const auto maybe_root_id = public_graph_.get_or_create_row(initial_state_);
+  const auto maybe_root_id = graph_builder_.get_or_create_row(initial_state_);
   if (!maybe_root_id.has_value()) {
     return 0.0;
   }
@@ -1204,7 +1194,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   const TrainingRange a_range = BuildTrainingRange(player_a_range);
   const TrainingRange b_range = BuildTrainingRange(player_b_range);
   RangeSampler sampler(a_range, b_range);
-  const auto maybe_root_id = public_graph_.get_or_create_row(initial_state_);
+  const auto maybe_root_id = graph_builder_.get_or_create_row(initial_state_);
   if (!maybe_root_id.has_value()) {
     return 0.0;
   }

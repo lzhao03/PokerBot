@@ -233,7 +233,7 @@ bool SameBettingState(const BettingState& first, const BettingState& second) {
 
 }  // namespace
 
-PublicStateGraph::PublicStateGraph(
+GraphBuilder::GraphBuilder(
     const SolverConfig& config,
     SolverStorage& storage,
     const CardAbstraction& card_abstraction,
@@ -245,7 +245,7 @@ PublicStateGraph::PublicStateGraph(
       betting_abstraction_(betting_abstraction),
       stats_(stats) {}
 
-PublicStateGraph::BettingNodeId PublicStateGraph::append_betting_node(
+GraphBuilder::BettingNodeId GraphBuilder::append_betting_node(
     const BettingState& state) {
   StrategyTables& tables = mtables();
   BettingNode node;
@@ -274,8 +274,8 @@ PublicStateGraph::BettingNodeId PublicStateGraph::append_betting_node(
   return node_id;
 }
 
-PublicStateGraph::BettingNodeId
-PublicStateGraph::get_or_create_root_betting_node(const BettingState& state) {
+GraphBuilder::BettingNodeId
+GraphBuilder::get_or_create_root_betting_node(const BettingState& state) {
   StrategyTables& tables = mtables();
   if (tables.root_betting_node_id == kInvalidBettingNodeId) {
     tables.root_betting_node_id = append_betting_node(state);
@@ -290,8 +290,8 @@ PublicStateGraph::get_or_create_root_betting_node(const BettingState& state) {
   return node_id;
 }
 
-PublicStateGraph::BettingNodeId
-PublicStateGraph::get_or_create_action_betting_child(
+GraphBuilder::BettingNodeId
+GraphBuilder::get_or_create_action_betting_child(
     BettingNodeId parent_node_id,
     int action_index) {
   StrategyTables& tables = mtables();
@@ -317,8 +317,8 @@ PublicStateGraph::get_or_create_action_betting_child(
   return child_node_id;
 }
 
-PublicStateGraph::BettingNodeId
-PublicStateGraph::get_or_create_chance_betting_child(
+GraphBuilder::BettingNodeId
+GraphBuilder::get_or_create_chance_betting_child(
     BettingNodeId parent_node_id,
     const BettingState& child_state) {
   StrategyTables& tables = mtables();
@@ -341,15 +341,15 @@ PublicStateGraph::get_or_create_chance_betting_child(
   return existing_child;
 }
 
-PublicStateGraph::PublicStateKey
-PublicStateGraph::row_key(
+GraphBuilder::PublicStateKey
+GraphBuilder::row_key(
     BettingNodeId betting_node_id,
     StreetKind street,
     const Board& board) const {
   return {betting_node_id, card_abstraction_.public_bucket(street, board)};
 }
 
-std::optional<uint32_t> PublicStateGraph::find_row(
+std::optional<uint32_t> GraphBuilder::find_row(
     BettingNodeId betting_node_id,
     StreetKind street,
     const Board& board) const {
@@ -361,7 +361,7 @@ std::optional<uint32_t> PublicStateGraph::find_row(
   return existing->second;
 }
 
-PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
+GraphBuilder::PublicStateRow GraphBuilder::make_row(
     BettingNodeId betting_node_id,
     const ExactGameState& state) {
   PublicStateRow row;
@@ -369,12 +369,12 @@ PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
   row.public_bucket =
       card_abstraction_.public_bucket(state.betting.street, state.board);
   row.betting = state.betting;
-  row.is_terminal = IsTerminal(row.betting, state.board);
+  const bool terminal = IsTerminal(row.betting, state.board);
   row.player_to_act = GetPlayerToAct(row.betting, state.board);
-  row.is_chance_node = !row.is_terminal && row.player_to_act == -1;
-  if (row.is_terminal) {
+  const bool chance_node = !terminal && row.player_to_act == -1;
+  if (terminal) {
     row.kind = StrategyTables::NodeKind::kTerminal;
-  } else if (row.is_chance_node) {
+  } else if (chance_node) {
     row.kind = StrategyTables::NodeKind::kChance;
   } else {
     row.kind = StrategyTables::NodeKind::kDecision;
@@ -395,7 +395,7 @@ PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
   return row;
 }
 
-std::optional<uint32_t> PublicStateGraph::get_or_create_row(
+std::optional<uint32_t> GraphBuilder::get_or_create_row(
     BettingNodeId betting_node_id,
     const ExactGameState& state) {
   if (std::optional<uint32_t> existing =
@@ -420,7 +420,7 @@ std::optional<uint32_t> PublicStateGraph::get_or_create_row(
   return public_state_id;
 }
 
-std::optional<uint32_t> PublicStateGraph::get_or_create_row(
+std::optional<uint32_t> GraphBuilder::get_or_create_row(
     const ExactGameState& state) {
   if (storage_.frozen) {
     const uint32_t root_id = tables().root_public_state_id;
@@ -440,38 +440,8 @@ std::optional<uint32_t> PublicStateGraph::get_or_create_row(
   return root_id;
 }
 
-std::optional<uint32_t> PublicStateGraph::find_chance_child(
-    uint32_t parent_public_state_id,
-    const ExactGameState& child_state) const {
-  const auto& public_rows = rows();
-  if (parent_public_state_id >= public_rows.size()) {
-    return std::nullopt;
-  }
-  const PublicStateRow& row = public_rows[parent_public_state_id];
-  const size_t begin = row.chance_child_offset;
-  const size_t end = begin + row.chance_child_count;
-  const auto& entries = tables().chance_child_entries;
-  if (begin > entries.size() || end > entries.size()) {
-    return std::nullopt;
-  }
-  const PublicBucketId outcome_id = chance_outcome_id(child_state);
-  const auto first =
-      entries.begin() + static_cast<std::ptrdiff_t>(begin);
-  const auto last =
-      entries.begin() + static_cast<std::ptrdiff_t>(end);
-  const auto iter = std::lower_bound(
-      first, last, outcome_id,
-      [](const auto& entry, PublicBucketId target_outcome_id) {
-        return entry.outcome_id < target_outcome_id;
-      });
-  if (iter == last || iter->outcome_id != outcome_id) {
-    return std::nullopt;
-  }
-  return iter->public_state_id;
-}
-
 template <typename Callback>
-bool PublicStateGraph::for_each_required_chance_transition(
+bool GraphBuilder::for_each_required_chance_transition(
     const PublicStateRow& row,
     const Board& board,
     Callback&& callback) const {
@@ -497,13 +467,13 @@ bool PublicStateGraph::for_each_required_chance_transition(
   }
 }
 
-PublicStateGraph::PublicBucketId PublicStateGraph::chance_outcome_id(
+GraphBuilder::PublicBucketId GraphBuilder::chance_outcome_id(
     const ExactGameState& child_state) const {
   return card_abstraction_.public_bucket(child_state.betting.street,
                                          child_state.board);
 }
 
-std::optional<uint32_t> PublicStateGraph::find_or_cache_action_child(
+std::optional<uint32_t> GraphBuilder::find_or_cache_action_child(
     uint32_t parent_public_state_id,
     int action_index) {
   const auto& public_rows = rows();
@@ -564,17 +534,17 @@ std::optional<uint32_t> PublicStateGraph::find_or_cache_action_child(
   return child_id->second;
 }
 
-bool PublicStateGraph::row_limit_reached() const {
+bool GraphBuilder::row_limit_reached() const {
   return config_.max_public_states > 0 &&
          static_cast<int>(rows().size()) >= config_.max_public_states;
 }
 
-bool PublicStateGraph::can_insert_row() const {
+bool GraphBuilder::can_insert_row() const {
   return !storage_.frozen && !row_limit_reached();
 }
 
 std::optional<uint32_t>
-PublicStateGraph::get_or_create_action_child(
+GraphBuilder::get_or_create_action_child(
     uint32_t parent_public_state_id,
     int action_index,
     const Board& parent_board) {
@@ -642,7 +612,7 @@ PublicStateGraph::get_or_create_action_child(
   return child_id;
 }
 
-std::optional<uint32_t> PublicStateGraph::find_or_cache_chance_child(
+std::optional<uint32_t> GraphBuilder::find_or_cache_chance_child(
     uint32_t parent_public_state_id,
     const ExactGameState& child_state) {
   const auto& public_rows = rows();
@@ -689,7 +659,7 @@ std::optional<uint32_t> PublicStateGraph::find_or_cache_chance_child(
 }
 
 std::optional<uint32_t>
-PublicStateGraph::get_or_create_chance_child(
+GraphBuilder::get_or_create_chance_child(
     uint32_t parent_public_state_id,
     const ExactGameState& exact_child_state) {
   const auto& public_rows = rows();
@@ -726,7 +696,7 @@ PublicStateGraph::get_or_create_chance_child(
   return child_id;
 }
 
-bool PublicStateGraph::prebuild_reachable_rows(
+bool GraphBuilder::prebuild_reachable_rows(
     uint32_t root_id,
     const Board& root_board,
     int max_depth,
@@ -750,11 +720,11 @@ bool PublicStateGraph::prebuild_reachable_rows(
     // Copy before creating children; child creation can append to rows and
     // invalidate references.
     const PublicStateRow row = rows()[entry.node_id];
-    if (row.is_terminal) {
+    if (row.kind == StrategyTables::NodeKind::kTerminal) {
       continue;
     }
 
-    if (row.is_chance_node) {
+    if (row.kind == StrategyTables::NodeKind::kChance) {
       const bool complete = for_each_required_chance_transition(
           row, entry.board, [&](const ExactGameState& child_state,
                                 absl::Span<const CardId>) {
@@ -808,7 +778,7 @@ bool PublicStateGraph::prebuild_reachable_rows(
   return true;
 }
 
-void PublicStateGraph::rebuild_chance_child_entries() {
+void GraphBuilder::rebuild_chance_child_entries() {
   StrategyTables& tables = mtables();
   struct PendingChanceChild {
     uint32_t parent_id = 0;
@@ -862,7 +832,7 @@ void PublicStateGraph::rebuild_chance_child_entries() {
   }
 }
 
-bool PublicStateGraph::validate_prebuilt_rows(
+bool GraphBuilder::validate_prebuilt_rows(
     uint32_t root_id,
     const Board& root_board,
     int max_depth,
@@ -902,16 +872,17 @@ bool PublicStateGraph::validate_prebuilt_rows(
       return false;
     }
     const PublicStateRow& row = public_rows[entry.node_id];
-    if (row.is_terminal) {
+    if (row.kind == StrategyTables::NodeKind::kTerminal) {
       continue;
     }
 
-    if (row.is_chance_node) {
+    if (row.kind == StrategyTables::NodeKind::kChance) {
       const bool chance_complete = for_each_required_chance_transition(
           row, entry.board, [&](const ExactGameState& child_state,
                                 absl::Span<const CardId>) {
         ++stats.prebuild_chance_transitions;
-        const auto child = find_chance_child(entry.node_id, child_state);
+        const auto child = tables().chance_child(
+            entry.node_id, chance_outcome_id(child_state));
         const uint32_t child_id = child.value_or(kInvalidPublicStateId);
         const bool valid_child = valid_public_child(child_id);
         if (!valid_child) {

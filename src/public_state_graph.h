@@ -37,20 +37,17 @@ struct TrainingRunStats {
   int64_t frozen_cfr_updates = 0;
 };
 
-class PublicStateGraph {
+class GraphBuilder {
  public:
   using PublicStateRow = StrategyTables::PublicStateRow;
 
-  PublicStateGraph(const SolverConfig& config,
+  GraphBuilder(const SolverConfig& config,
                    SolverStorage& storage,
                    const CardAbstraction& card_abstraction,
                    const BettingAbstraction& betting_abstraction,
                    TraversalStats& stats);
 
   std::optional<uint32_t> get_or_create_row(const ExactGameState& state);
-  std::optional<uint32_t> find_chance_child(
-      uint32_t parent_public_state_id,
-      const ExactGameState& child_state) const;
   std::optional<uint32_t> get_or_create_action_child(
       uint32_t parent_public_state_id,
       int action_index,

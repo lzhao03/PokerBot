@@ -67,8 +67,7 @@ struct CFRSolverTestAccess {
       uint64_t hash = 0;
       hash = Mix(hash, row.betting_node_id);
       hash = Mix(hash, row.public_bucket);
-      hash = Mix(hash, row.is_terminal);
-      hash = Mix(hash, row.is_chance_node);
+      hash = Mix(hash, static_cast<uint64_t>(row.kind));
       hash = Mix(hash, static_cast<uint64_t>(row.player_to_act + 2));
       hash = Mix(hash, row.chance_child_offset);
       hash = Mix(hash, row.chance_child_count);
@@ -121,7 +120,7 @@ struct CFRSolverTestAccess {
 
     CFRSolver solver(EquivalenceConfig());
     const std::optional<uint32_t> maybe_root =
-        solver.public_graph_.get_or_create_row(solver.initial_state_);
+        solver.graph_builder_.get_or_create_row(solver.initial_state_);
     REQUIRE(maybe_root.has_value());
     const uint32_t root_id = *maybe_root;
     REQUIRE(solver.prepare_prebuilt_training(root_id, solver.config_.max_depth,
@@ -129,7 +128,6 @@ struct CFRSolverTestAccess {
 
     if (freeze_storage) {
       solver.storage_.freeze();
-      solver.require_frozen_children_ = true;
     }
 
     const CFRSolver::NodeRef root{

@@ -6,6 +6,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <optional>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -142,13 +143,15 @@ class StrategyTables {
     BettingNodeId betting_node_id = kInvalidBettingNodeId;
     PublicBucketId public_bucket = 0;
     NodeKind kind = NodeKind::kDecision;
-    bool is_terminal = false;
-    bool is_chance_node = false;
     int player_to_act = -1;
     std::array<uint32_t, kMaxActionsPerNode> action_child_ids = {};
     uint32_t chance_child_offset = 0;
     uint32_t chance_child_count = 0;
   };
+
+  std::optional<uint32_t> chance_child(
+      uint32_t parent_public_state_id,
+      PublicBucketId outcome_id) const;
 
   static constexpr int kPrivateBucketChunkSize = 64;
   static constexpr int kPrivateBucketChunkCount =
