@@ -111,6 +111,8 @@ class StrategyStore {
   std::optional<ActionBlock> find_frozen(uint32_t public_state_id,
                                          int player,
                                          ComboId combo_id,
+                                         StreetKind street,
+                                         const Board& board,
                                          size_t expected_action_count);
 
   void regret_matching_or_uniform(std::optional<ActionBlock> block,
@@ -157,8 +159,6 @@ class StrategyStore {
       InfoSetAddress address,
       absl::Span<const int> action_ids);
   InfoSetRow append_info_set_actions(absl::Span<const int> action_ids);
-  PrivateBucketId private_bucket_for_frozen_row(uint32_t public_state_id,
-                                                ComboId combo_id) const;
   uint32_t frozen_info_set_action_offset(
       uint32_t public_state_id,
       int player,

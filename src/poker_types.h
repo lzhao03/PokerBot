@@ -70,7 +70,7 @@ struct BettingState {
   int8_t player_to_act = 0;
   int8_t folded_player = -1;
   uint8_t actions_this_street = 0;
-  ActionKind last_action = ActionKind::kNoAction;
+  GameAction last_action;
   bool all_in = false;
 };
 
@@ -271,7 +271,7 @@ inline BettingState BettingStateFromCompact(const CompactPublicState& state) {
       static_cast<int8_t>(state.folded_player),
       static_cast<uint8_t>(
           std::min<uint16_t>(state.history_size, UINT8_MAX)),
-      state.last_action.kind,
+      MakeGameAction(state.last_action),
       state.all_in,
   };
 }
@@ -292,7 +292,7 @@ inline CompactPublicState ToCompact(const BettingState& betting,
   state.folded_player = betting.folded_player;
   state.player_to_act = betting.player_to_act;
   state.player_contribution = betting.contribution;
-  state.last_action.kind = betting.last_action;
+  state.last_action = MakeCompactAction(betting.last_action);
   state.history_size = betting.actions_this_street;
   return state;
 }

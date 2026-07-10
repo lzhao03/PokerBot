@@ -357,9 +357,10 @@ std::optional<ActionBlock> StrategyStore::find_frozen(
     uint32_t node_id,
     int player,
     ComboId combo_id,
+    StreetKind street,
+    const Board& board,
     size_t expected_action_count) {
   if (player < 0 || player >= kPlayerCount ||
-      node_id >= frozen_tables().private_bucket_rows.size() ||
       node_id >= frozen_tables().frozen_info_set_action_offsets.size()) {
     return std::nullopt;
   }
@@ -367,8 +368,8 @@ std::optional<ActionBlock> StrategyStore::find_frozen(
     throw std::logic_error("infoset action count exceeds uint16_t");
   }
 
-  const PrivateBucketId bucket = private_bucket_for_frozen_row(node_id,
-                                                               combo_id);
+  const PrivateBucketId bucket = card_abstraction_.private_bucket(
+      combo_id, street, board);
   const uint32_t offset = frozen_info_set_action_offset(node_id, player,
                                                         bucket);
   if (offset == StrategyTables::kInvalidActionOffset) {
@@ -454,14 +455,14 @@ bool StrategyStore::prebuild_private_bucket_rows() {
     const PublicStateRow& row = tables.public_state_rows[node_id];
     const Board board = BoardFromCompact(row.state);
     const uint32_t bucket_count = card_abstraction_.private_bucket_count(
-        row.state.street, board);
+        row.betting.street, board);
     if (bucket_count == 0 || bucket_count > kComboCount) {
       return false;
     }
     auto& bucket_row = tables.private_bucket_rows[node_id];
     for (int combo = 0; combo < kComboCount; ++combo) {
       const PrivateBucketId bucket = card_abstraction_.private_bucket(
-          static_cast<ComboId>(combo), row.state.street, board);
+          static_cast<ComboId>(combo), row.betting.street, board);
       if (bucket >= bucket_count) {
         return false;
       }
@@ -654,12 +655,6 @@ StrategyStore::InfoSetRow StrategyStore::append_info_set_actions(
     stats_->record_action_entries();
   }
   return row;
-}
-
-StrategyStore::PrivateBucketId StrategyStore::private_bucket_for_frozen_row(
-    uint32_t public_state_id,
-    ComboId combo_id) const {
-  return frozen_tables().private_bucket_rows[public_state_id][combo_id];
 }
 
 uint32_t StrategyStore::frozen_info_set_action_offset(

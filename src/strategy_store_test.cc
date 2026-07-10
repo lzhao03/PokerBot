@@ -93,12 +93,10 @@ TEST_CASE("frozen lookup matches slow slab lookup") {
   fixture.storage.mutable_tables->public_state_rows[0].action_count = 2;
   const int actions[] = {10, 20};
   ActionBlock block = CreateBlock(fixture, actions);
-  fixture.storage.mutable_tables->private_bucket_rows.resize(1);
-  fixture.storage.mutable_tables->private_bucket_rows[0][0] = 0;
 
   REQUIRE(fixture.store.prebuild_frozen_info_set_action_offsets());
   std::optional<ActionBlock> frozen_block =
-      fixture.store.find_frozen(0, 0, 0, 2);
+      fixture.store.find_frozen(0, 0, 0, StreetKind::kPreflop, Board{}, 2);
 
   REQUIRE(frozen_block.has_value());
   CHECK(frozen_block->action_offset() == block.action_offset());

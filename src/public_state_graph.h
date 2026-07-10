@@ -86,6 +86,8 @@ class PublicStateGraph {
   }
 
   BettingHistoryKey betting_history_key(
+      const BettingState& state) const;
+  BettingHistoryKey betting_history_key(
       const CompactPublicState& state) const;
   BettingHistoryRow make_betting_history_row(
       const BettingHistoryKey& key) const;
@@ -97,16 +99,18 @@ class PublicStateGraph {
   PublicStateRow make_row(uint32_t betting_history_id,
                           CompactPublicState state);
   uint32_t get_or_create_betting_history(
+      const BettingState& state);
+  uint32_t get_or_create_betting_history(
       const CompactPublicState& state);
   uint32_t get_or_create_betting_history(BettingHistoryKey key,
                                          BettingHistoryRow row);
   uint32_t get_or_create_action_history_child(
       uint32_t parent_history_id,
       int action_index,
-      const CompactPublicState& child_state);
+      const BettingState& child_state);
   uint32_t get_or_create_chance_history_child(
       uint32_t parent_history_id,
-      const CompactPublicState& child_state);
+      const BettingState& child_state);
   void cache_betting_history_actions(uint32_t betting_history_id,
                                      const PublicStateRow& row);
   std::optional<uint32_t> get_or_create_row(

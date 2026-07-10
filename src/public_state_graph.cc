@@ -208,6 +208,12 @@ PublicStateGraph::PublicStateGraph(
 
 PublicStateGraph::BettingHistoryKey
 PublicStateGraph::betting_history_key(
+    const BettingState& state) const {
+  return betting_abstraction_.make_history_key(state);
+}
+
+PublicStateGraph::BettingHistoryKey
+PublicStateGraph::betting_history_key(
     const CompactPublicState& state) const {
   return betting_abstraction_.make_history_key(state);
 }
@@ -242,17 +248,18 @@ PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
     uint32_t betting_history_id,
     CompactPublicState state) {
   PublicStateRow row;
+  const Board board = BoardFromCompact(state);
   row.betting_history_id = betting_history_id;
-  row.public_bucket =
-      card_abstraction_.public_bucket(state.street, BoardFromCompact(state));
-  row.is_terminal = IsTerminal(state);
-  row.player_to_act = GetPlayerToAct(state);
+  row.public_bucket = card_abstraction_.public_bucket(state.street, board);
+  row.betting = BettingStateFromCompact(state);
+  row.is_terminal = IsTerminal(row.betting, board);
+  row.player_to_act = GetPlayerToAct(row.betting, board);
   row.state = std::move(state);
   row.is_chance_node = !row.is_terminal && row.player_to_act == -1;
 
   if (!row.is_terminal && !row.is_chance_node && IsPlayer(row.player_to_act)) {
     const auto menu = betting_abstraction_.actions_for_betting_node(
-        row.state, row.player_to_act);
+        row.betting, row.player_to_act);
     row.action_count = menu.count;
     row.actions = menu.actions;
     for (int i = 0; i < row.action_count; ++i) {
@@ -307,6 +314,13 @@ std::optional<uint32_t> PublicStateGraph::get_or_create_row(
 }
 
 uint32_t PublicStateGraph::get_or_create_betting_history(
+    const BettingState& state) {
+  BettingHistoryKey key = betting_history_key(state);
+  BettingHistoryRow row = make_betting_history_row(key);
+  return get_or_create_betting_history(std::move(key), std::move(row));
+}
+
+uint32_t PublicStateGraph::get_or_create_betting_history(
     const CompactPublicState& state) {
   BettingHistoryKey key = betting_history_key(state);
   BettingHistoryRow row = make_betting_history_row(key);
@@ -334,7 +348,7 @@ uint32_t PublicStateGraph::get_or_create_betting_history(
 uint32_t PublicStateGraph::get_or_create_action_history_child(
     uint32_t parent_history_id,
     int action_index,
-    const CompactPublicState& child_state) {
+    const BettingState& child_state) {
   StrategyTables& tables = mtables();
   if (parent_history_id < tables.betting_history_rows.size()) {
     BettingHistoryRow& parent_row =
@@ -377,7 +391,7 @@ uint32_t PublicStateGraph::get_or_create_action_history_child(
 
 uint32_t PublicStateGraph::get_or_create_chance_history_child(
     uint32_t parent_history_id,
-    const CompactPublicState& child_state) {
+    const BettingState& child_state) {
   StrategyTables& tables = mtables();
   if (parent_history_id < tables.betting_history_rows.size()) {
     BettingHistoryRow& parent_row =
@@ -592,10 +606,12 @@ PublicStateGraph::get_or_create_action_child(
   }
 
   const uint32_t parent_history_id = read_row.betting_history_id;
+  const BettingState child_betting =
+      ApplyAction(read_row.betting, read_row.actions[action_slot]);
   CompactPublicState child_state =
-      ApplyAction(read_row.state, read_row.actions[action_slot]);
+      ToCompact(child_betting, BoardFromCompact(read_row.state));
   const uint32_t child_history_id = get_or_create_action_history_child(
-      parent_history_id, action_index, child_state);
+      parent_history_id, action_index, child_betting);
   auto child_id = get_or_create_row(child_history_id, std::move(child_state));
   if (!child_id.has_value()) {
     mtables()
@@ -682,9 +698,10 @@ PublicStateGraph::get_or_create_chance_child(
 
   const PublicStateRow& parent_row = public_rows[parent_public_state_id];
   CompactPublicState child_state = exact_child_state;
+  const BettingState child_betting = BettingStateFromCompact(child_state);
   const uint32_t parent_history_id = parent_row.betting_history_id;
   const uint32_t child_history_id = get_or_create_chance_history_child(
-      parent_history_id, child_state);
+      parent_history_id, child_betting);
   auto child_id = get_or_create_row(child_history_id, std::move(child_state));
   if (!child_id.has_value()) {
     stats_.record_transition_miss();

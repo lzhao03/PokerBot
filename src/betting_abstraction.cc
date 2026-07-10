@@ -77,11 +77,11 @@ int BucketChips(int chips) {
   return std::bit_width(static_cast<unsigned int>(chips));
 }
 
-Projection Project(const CompactPublicState& state) {
+Projection Project(const BettingState& state) {
   const int gap =
-      state.player_contribution[0] > state.player_contribution[1]
-          ? state.player_contribution[0] - state.player_contribution[1]
-          : state.player_contribution[1] - state.player_contribution[0];
+      state.contribution[0] > state.contribution[1]
+          ? state.contribution[0] - state.contribution[1]
+          : state.contribution[1] - state.contribution[0];
   return {
       static_cast<int>(state.street),
       BucketChips(state.pot),
@@ -93,7 +93,7 @@ Projection Project(const CompactPublicState& state) {
   };
 }
 
-void ApplyProjection(const CompactPublicState& state, BettingHistoryKey& key) {
+void ApplyProjection(const BettingState& state, BettingHistoryKey& key) {
   if constexpr (kCoarsePublicBuckets) {
     const Projection projection = Project(state);
     key.street = projection.street;
@@ -108,7 +108,7 @@ void ApplyProjection(const CompactPublicState& state, BettingHistoryKey& key) {
   }
 }
 
-BettingHistoryKey BaseHistoryKey(const CompactPublicState& state) {
+BettingHistoryKey BaseHistoryKey(const BettingState& state) {
   BettingHistoryKey key;
   key.street = static_cast<int>(state.street);
   key.pot = state.pot;
@@ -118,7 +118,7 @@ BettingHistoryKey BaseHistoryKey(const CompactPublicState& state) {
   key.folded_player = state.folded_player;
   key.player_to_act = state.player_to_act;
   key.player_contribution_size = 2;
-  key.player_contributions = state.player_contribution;
+  key.player_contributions = state.contribution;
   ApplyProjection(state, key);
   return key;
 }
@@ -153,6 +153,20 @@ void AppendStateHistory(const CompactPublicState& state,
     AppendHistoryValue(key, static_cast<int>(action.kind));
     AppendHistoryValue(key, action.amount);
   }
+}
+
+void AppendStateHistory(const BettingState& state, BettingHistoryKey& key) {
+  if (state.actions_this_street == 0 ||
+      state.last_action.kind == ActionKind::kNoAction) {
+    return;
+  }
+  if (state.actions_this_street != 1) {
+    throw std::logic_error(
+        "BettingState does not carry full multi-action history");
+  }
+  AppendHistoryValue(key, state.last_action.player);
+  AppendHistoryValue(key, static_cast<int>(state.last_action.kind));
+  AppendHistoryValue(key, state.last_action.amount);
 }
 
 void AppendRowHistory(const BettingHistoryRow& row, BettingHistoryKey& key) {
@@ -223,8 +237,15 @@ int BettingAbstraction::action_key(const GameAction& action) const {
 }
 
 BettingAbstraction::BettingHistoryKey BettingAbstraction::make_history_key(
-    const CompactPublicState& state) const {
+    const BettingState& state) const {
   BettingHistoryKey key = BaseHistoryKey(state);
+  AppendStateHistory(state, key);
+  return key;
+}
+
+BettingAbstraction::BettingHistoryKey BettingAbstraction::make_history_key(
+    const CompactPublicState& state) const {
+  BettingHistoryKey key = BaseHistoryKey(BettingStateFromCompact(state));
   AppendStateHistory(state, key);
   return key;
 }
@@ -233,8 +254,22 @@ BettingAbstraction::BettingHistoryKey
 BettingAbstraction::make_action_child_history_key(
     const BettingHistoryRow& parent_row,
     int action_index,
-    const CompactPublicState& child_state) const {
+    const BettingState& child_state) const {
   BettingHistoryKey key = BaseHistoryKey(child_state);
+  AppendRowHistory(parent_row, key);
+  const GameAction action = child_state.last_action;
+  AppendHistoryValue(key, action.player);
+  AppendHistoryValue(key, static_cast<int>(action.kind));
+  AppendHistoryValue(key, action_index);
+  return key;
+}
+
+BettingAbstraction::BettingHistoryKey
+BettingAbstraction::make_action_child_history_key(
+    const BettingHistoryRow& parent_row,
+    int action_index,
+    const CompactPublicState& child_state) const {
+  BettingHistoryKey key = BaseHistoryKey(BettingStateFromCompact(child_state));
   AppendRowHistory(parent_row, key);
   const CompactAction action = child_state.last_action;
   AppendHistoryValue(key, action.player);

@@ -33,9 +33,9 @@ SolverConfig NormalizedSolverConfig(SolverConfig config) {
   return config;
 }
 
-std::optional<double> UtilityBeforeShowdown(const CompactPublicState& state,
+std::optional<double> UtilityBeforeShowdown(const BettingState& state,
                                             uint8_t board_count) {
-  const double player_a_contribution = state.player_contribution[0];
+  const double player_a_contribution = state.contribution[0];
   if (state.folded_player == 0) {
     return -player_a_contribution;
   }
@@ -48,9 +48,9 @@ std::optional<double> UtilityBeforeShowdown(const CompactPublicState& state,
   return std::nullopt;
 }
 
-double ShowdownUtilityFromComparison(const CompactPublicState& state,
+double ShowdownUtilityFromComparison(const BettingState& state,
                                      int comparison) {
-  const double player_a_contribution = state.player_contribution[0];
+  const double player_a_contribution = state.contribution[0];
   if (comparison > 0) {
     return state.pot - player_a_contribution;
   }
@@ -290,7 +290,7 @@ std::optional<CFRSolver::DecisionFrame> CFRSolver::make_decision_frame(
   DecisionFrame frame;
   frame.public_state_id = node_id;
   frame.player = static_cast<Player>(row.player_to_act);
-  frame.street = row.state.street;
+  frame.street = row.betting.street;
   frame.action_count = static_cast<uint8_t>(row.action_count);
   std::copy_n(row.action_ids.begin(), row.action_count,
               frame.action_ids.begin());
@@ -355,9 +355,10 @@ CFRSolver::NodeGraph::sample_chance_child(
   if (parent.public_state_id >= public_rows.size()) {
     return ChildResult{ChildStatus::kInvalid, {}};
   }
-  ExactGameState exact_parent_state =
-      ExactGameStateFromCompact(public_rows[parent.public_state_id].state);
-  exact_parent_state.board = parent.exact_board;
+  ExactGameState exact_parent_state{
+      public_rows[parent.public_state_id].betting,
+      parent.exact_board,
+  };
   const auto cards = SampleStreetCards(exact_parent_state.betting.street,
                                        exact_parent_state.board,
                                        known_private_cards, solver_.rng_);
@@ -409,7 +410,7 @@ bool CFRSolver::prebuild_info_set_rows(
 
     const Board board = BoardFromCompact(row.state);
     const uint32_t bucket_count =
-        card_abstraction_.private_bucket_count(row.state.street, board);
+        card_abstraction_.private_bucket_count(row.betting.street, board);
     if (bucket_count == 0 || bucket_count > kComboCount) {
       return false;
     }
@@ -433,7 +434,7 @@ bool CFRSolver::prebuild_info_set_rows(
         continue;
       }
       const PrivateBucketId bucket =
-          card_abstraction_.private_bucket(combo_id, row.state.street, board);
+          card_abstraction_.private_bucket(combo_id, row.betting.street, board);
       if (bucket >= bucket_count) {
         return false;
       }
@@ -682,7 +683,8 @@ void CFRSolver::run_fixed_storage_iterations(
   const bool fixed_children = storage_.frozen && require_frozen_children_;
   const bool depth_zero = config_.max_depth == 0;
   const bool regret_only_config = config_.regret_only_training && depth_zero;
-  const bool use_fixed_infoset_lookup = fixed_children && regret_only_config;
+  const bool use_fixed_infoset_lookup =
+      fixed_children && regret_only_config && !kCoarsePublicBuckets;
   const bool use_atomic_updates = num_threads > 1;
 
   struct WorkerResult {
@@ -795,7 +797,7 @@ double CFRSolver::CfrTraversal::value(NodeRef node) {
 double CFRSolver::CfrTraversal::terminal(
     NodeRef node,
     const PublicStateRow& row) {
-  solver_.traversal_stats_.record_terminal(row.state.folded_player < 0);
+  solver_.traversal_stats_.record_terminal(row.betting.folded_player < 0);
   return solver_.terminal_utility(row, node.exact_board, ctx_.cards(0),
                                   ctx_.cards(1));
 }
@@ -823,7 +825,7 @@ double CFRSolver::CfrTraversal::chance(NodeRef node) {
 double CFRSolver::CfrTraversal::depth_limit_value(
     NodeRef node,
     const PublicStateRow& row) {
-  return IsBettingRoundOver(row.state)
+  return IsBettingRoundOver(row.betting)
              ? solver_.terminal_utility(row, node.exact_board, ctx_.cards(0),
                                         ctx_.cards(1))
              : 0.0;
@@ -847,7 +849,8 @@ double CFRSolver::CfrTraversal::decision(
   std::optional<ActionBlock> actions;
   if (ctx_.options().use_fixed_infoset_lookup) {
     actions = solver_.strategy_store_.find_frozen(
-        decision.public_state_id, player, cards.combo, action_count);
+        decision.public_state_id, player, cards.combo, decision.street,
+        node.exact_board, action_count);
   } else {
     const PrivateBucketId bucket =
         solver_.card_abstraction_.private_bucket(
@@ -1220,7 +1223,8 @@ bool CFRSolver::traversal_stats_enabled() {
 double CFRSolver::terminal_utility(const CompactPublicState& exact_state,
                                    const PrivateCards& player_a_cards,
                                    const PrivateCards& player_b_cards) {
-  const auto utility = UtilityBeforeShowdown(exact_state, exact_state.board_count);
+  const auto utility = UtilityBeforeShowdown(
+      BettingStateFromCompact(exact_state), exact_state.board_count);
   if (utility.has_value()) {
     return *utility;
   }
@@ -1232,7 +1236,7 @@ double CFRSolver::terminal_utility(const PublicStateRow& row,
                                    const Board& board,
                                    const PrivateCards& player_a_cards,
                                    const PrivateCards& player_b_cards) {
-  const CompactPublicState& state = row.state;
+  const BettingState& state = row.betting;
   const auto utility = UtilityBeforeShowdown(state, board.count);
   if (utility.has_value()) {
     return *utility;
