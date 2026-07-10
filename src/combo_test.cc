@@ -2,43 +2,35 @@
 
 #include "doctest/doctest.h"
 
-#include <array>
-
+namespace poker {
 namespace {
 
-TEST_CASE("combo table contains every unique canonical combo") {
-  const auto& table = poker::ComboTable();
-  CHECK(table.size() == poker::kComboCount);
+TEST_CASE("combo encoding is a canonical bijection") {
+  ComboId expected = 0;
+  for (int first = 0; first < kDeckCardCount; ++first) {
+    for (int second = first + 1; second < kDeckCardCount; ++second) {
+      const CardId a = static_cast<CardId>(first);
+      const CardId b = static_cast<CardId>(second);
+      CAPTURE(first);
+      CAPTURE(second);
+      CAPTURE(expected);
 
-  std::array<bool, poker::kComboCount> seen = {};
-  for (poker::ComboId combo_id = 0; combo_id < poker::kComboCount;
-       ++combo_id) {
-    CAPTURE(combo_id);
-    const poker::ComboInfo& combo = poker::GetComboInfo(combo_id);
-    CHECK(combo.card0 < combo.card1);
-    CHECK(combo.card1 < poker::kDeckCardCount);
-    CHECK(poker::CardsToComboId(combo.card0, combo.card1) == combo_id);
-    CHECK(combo.mask ==
-          (poker::CardBit(combo.card0) | poker::CardBit(combo.card1)));
-    seen[combo_id] = true;
+      CHECK(CardsToComboId(a, b) == expected);
+      CHECK(CardsToComboId(b, a) == expected);
+
+      const ComboInfo& info = GetComboInfo(expected);
+      CHECK(info.card0 == a);
+      CHECK(info.card1 == b);
+      CHECK(info.mask == (CardBit(a) | CardBit(b)));
+      ++expected;
+    }
   }
 
-  for (bool value : seen) {
-    CHECK(value);
-  }
-}
-
-TEST_CASE("combo id ignores hand card order") {
-  const poker::CardId ace = poker::MakeCardId(14, poker::SuitKind::kSpades);
-  const poker::CardId king = poker::MakeCardId(13, poker::SuitKind::kHearts);
-
-  CHECK(poker::CardsToComboId(ace, king) ==
-        poker::CardsToComboId(king, ace));
-}
-
-TEST_CASE("invalid hands do not map to combo ids") {
-  const poker::CardId ace = poker::MakeCardId(14, poker::SuitKind::kSpades);
-  CHECK(!poker::MaybeCardsToComboId(ace, ace).has_value());
+  CHECK(expected == kComboCount);
+  CHECK(!MaybeCardsToComboId(0, 0).has_value());
+  CHECK(!MaybeCardsToComboId(static_cast<CardId>(kDeckCardCount), 0)
+             .has_value());
 }
 
 }  // namespace
+}  // namespace poker
