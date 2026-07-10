@@ -1,0 +1,20 @@
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+cc_test(
+    name = "game_rules_test",
+    srcs = [
+        "board_runout_test.cc",
+        "game_rules_test.cc",
+        "game_state_test.cc",
+        "rules_test_support.h",
+    ],
+    deps = [
+        "//src:card_utils",
+        "//src:combo",
+        "//src:game_rules",
+        "//src:game_state",
+        "//src:hand_evaluator",
+        "//src:poker_types",
+        "@doctest//:main",
+    ],
+)
