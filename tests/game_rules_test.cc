@@ -41,10 +41,11 @@ TEST_CASE("commitments update and reset across streets") {
       state.betting.stack[1] + state.betting.total_committed[1],
   };
 
-  state.betting = ApplyAction(state.betting, {ActionKind::kCall});
+  state.betting = ApplyAction(state.betting, {ActionKind::kCall, 2});
   CHECK(state.betting.stack[0] == 18);
   CHECK(state.betting.total_committed[0] == 2);
   CHECK(state.betting.street_committed[0] == 2);
+  CHECK(Pot(state.betting) == 4);
   state.betting = ApplyAction(state.betting, {ActionKind::kCheck});
   state = ApplyChance(state, Flop(), kRules);
 
@@ -59,10 +60,39 @@ TEST_CASE("commitments update and reset across streets") {
   CHECK(state.betting.total_committed[1] == 6);
   CHECK(state.betting.street_committed[1] == 4);
   CHECK(state.betting.last_full_raise == 4);
+  CHECK(Pot(state.betting) == 8);
   for (size_t player = 0; player < kPlayerCount; ++player) {
     CHECK(state.betting.stack[player] +
               state.betting.total_committed[player] ==
           chips[player]);
+  }
+}
+
+TEST_CASE("chip actions use final street commitments") {
+  SUBCASE("raise") {
+    ExactPublicState state = test::InitialHeadsUpState(20, 20, 1, 2);
+    state.betting = ApplyAction(state.betting, {ActionKind::kRaise, 5});
+
+    CHECK(state.betting.stack ==
+          std::array<Chips, kPlayerCount>{15, 18});
+    CHECK(state.betting.total_committed ==
+          std::array<Chips, kPlayerCount>{5, 2});
+    CHECK(state.betting.street_committed ==
+          std::array<Chips, kPlayerCount>{5, 2});
+    CHECK(Pot(state.betting) == 7);
+  }
+
+  SUBCASE("all-in") {
+    ExactPublicState state = test::InitialHeadsUpState(20, 20, 1, 2);
+    state.betting = ApplyAction(state.betting, {ActionKind::kAllIn, 20});
+
+    CHECK(state.betting.stack ==
+          std::array<Chips, kPlayerCount>{0, 18});
+    CHECK(state.betting.total_committed ==
+          std::array<Chips, kPlayerCount>{20, 2});
+    CHECK(state.betting.street_committed ==
+          std::array<Chips, kPlayerCount>{20, 2});
+    CHECK(Pot(state.betting) == 22);
   }
 }
 
@@ -72,7 +102,7 @@ TEST_CASE("short all-in calls refund unmatched chips") {
   state.betting.total_committed = {1, 8};
   state.betting.street_committed = {1, 8};
 
-  state.betting = ApplyAction(state.betting, {ActionKind::kCall});
+  state.betting = ApplyAction(state.betting, {ActionKind::kCall, 8});
 
   CHECK(state.betting.total_committed ==
         std::array<Chips, kPlayerCount>{4, 4});

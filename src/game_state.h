@@ -11,8 +11,6 @@
 
 namespace poker {
 
-using Chips = int32_t;
-
 struct BettingRules {
   Chips minimum_bet = 0;
 };

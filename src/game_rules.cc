@@ -23,7 +23,7 @@ bool BoardComplete(const BettingState& state, const BoardRunout& board) {
 
 Chips CommitChips(BettingState& state, int player, Chips requested) {
   if (requested <= 0) {
-    throw std::invalid_argument("Action amount must be positive");
+    throw std::invalid_argument("Action commitment delta must be positive");
   }
 
   const Chips committed = std::min(requested, state.stack[player]);
@@ -99,22 +99,26 @@ bool IsLegalAction(const BettingState& state, const GameAction& action) {
   }
 
   const Chips to_call = ToCall(state, player);
+  const Chips current = state.street_committed[player];
+  const Chips highest = HighestStreetCommitment(state);
+  const Chips target = action.target_street_commitment;
+  const Chips delta = target - current;
   switch (action.kind) {
     case ActionKind::kFold:
-      return true;
+      return target == 0;
     case ActionKind::kCheck:
-      return to_call == 0;
+      return to_call == 0 && target == 0;
     case ActionKind::kCall:
-      return to_call > 0;
+      return to_call > 0 && target == highest;
     case ActionKind::kBet:
-      return to_call == 0 && action.amount > 0 &&
-             action.amount < state.stack[player];
+      return to_call == 0 && target > current &&
+             delta < state.stack[player];
     case ActionKind::kRaise:
-      return to_call > 0 && action.amount > to_call &&
+      return to_call > 0 && target > highest &&
              state.stack[player] > to_call &&
-             action.amount < state.stack[player];
+             delta < state.stack[player];
     case ActionKind::kAllIn:
-      return true;
+      return target == current + state.stack[player];
     case ActionKind::kNoAction:
       return false;
   }
@@ -123,11 +127,11 @@ bool IsLegalAction(const BettingState& state, const GameAction& action) {
 void AddAction(ActionMenu& menu,
                const BettingState& state,
                ActionKind kind,
-               Chips amount) {
+               Chips target_street_commitment) {
   if (menu.count >= kMaxActionsPerNode) {
     throw std::logic_error("Legal action table exceeded kMaxActionsPerNode");
   }
-  const GameAction action{kind, amount};
+  const GameAction action{kind, target_street_commitment};
   if (!IsLegalAction(state, action)) {
     throw std::logic_error("Generated an illegal poker action");
   }
@@ -143,6 +147,8 @@ BettingState ApplyActionUnchecked(const BettingState& state,
   const int opponent = Opponent(player);
   const Chips to_call_before = ToCall(child, player);
   const Chips highest_before = HighestStreetCommitment(child);
+  const Chips current = child.street_committed[player];
+  const Chips delta = action.target_street_commitment - current;
   Chips committed = 0;
 
   switch (action.kind) {
@@ -154,16 +160,10 @@ BettingState ApplyActionUnchecked(const BettingState& state,
       child.player_to_act = opponent;
       break;
     case ActionKind::kCall:
-      committed = CommitChips(child, player, to_call_before);
-      child.player_to_act = opponent;
-      break;
     case ActionKind::kBet:
     case ActionKind::kRaise:
-      committed = CommitChips(child, player, action.amount);
-      child.player_to_act = opponent;
-      break;
     case ActionKind::kAllIn:
-      committed = CommitChips(child, player, child.stack[player]);
+      committed = CommitChips(child, player, delta);
       child.player_to_act = opponent;
       break;
     case ActionKind::kNoAction:
@@ -227,11 +227,12 @@ ActionMenu LegalActions(const BettingState& state,
 
   ActionMenu menu;
   const Chips stack = state.stack[player];
+  const Chips current = state.street_committed[player];
+  const Chips highest = HighestStreetCommitment(state);
   const Chips outstanding_call = ToCall(state, player);
   if (outstanding_call > 0) {
     AddAction(menu, state, ActionKind::kFold, 0);
-    AddAction(menu, state, ActionKind::kCall,
-              std::min(outstanding_call, stack));
+    AddAction(menu, state, ActionKind::kCall, highest);
   } else {
     AddAction(menu, state, ActionKind::kCheck, 0);
   }
@@ -243,25 +244,27 @@ ActionMenu LegalActions(const BettingState& state,
   absl::InlinedVector<GameAction, kMaxActionsPerNode> sized_actions;
   for (double bet_size : bet_sizes) {
     const Chips bet = ConcreteBetAmount(state, bet_size);
-    const Chips amount = outstanding_call + bet;
-    if (amount < stack) {
-      sized_actions.push_back({sized_kind, amount});
+    const Chips target = highest + bet;
+    if (target - current < stack) {
+      sized_actions.push_back({sized_kind, target});
     }
   }
   std::sort(sized_actions.begin(), sized_actions.end(),
             [](const GameAction& left, const GameAction& right) {
-              return left.amount < right.amount;
+              return left.target_street_commitment <
+                     right.target_street_commitment;
             });
   const auto unique_end =
       std::unique(sized_actions.begin(), sized_actions.end());
   sized_actions.erase(unique_end, sized_actions.end());
 
   for (const GameAction& action : sized_actions) {
-    AddAction(menu, state, action.kind, action.amount);
+    AddAction(menu, state, action.kind,
+              action.target_street_commitment);
   }
 
   if (outstanding_call == 0 || stack > outstanding_call) {
-    AddAction(menu, state, ActionKind::kAllIn, stack);
+    AddAction(menu, state, ActionKind::kAllIn, current + stack);
   }
   return menu;
 }

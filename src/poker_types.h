@@ -9,6 +9,7 @@ namespace poker {
 using CardId = uint8_t;
 using CardMask = uint64_t;
 using BoardBucketId = uint64_t;
+using Chips = int32_t;
 
 constexpr int kDeckCardCount = 52;
 constexpr int kMaxBoardCards = 5;
@@ -49,7 +50,7 @@ enum class ActionKind : uint8_t {
 
 struct GameAction {
   ActionKind kind = ActionKind::kNoAction;
-  int32_t amount = 0;
+  Chips target_street_commitment = 0;
 
   friend bool operator==(const GameAction&, const GameAction&) = default;
 };

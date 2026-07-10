@@ -114,7 +114,7 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   ExactPublicState state = Root();
   CHECK_THROWS(ApplyAction(state.betting, {ActionKind::kCheck}));
   CHECK_THROWS(ApplyAction(state.betting, {ActionKind::kRaise, 1}));
-  state.betting = ApplyAction(state.betting, {ActionKind::kCall});
+  state.betting = ApplyAction(state.betting, {ActionKind::kCall, 2});
   state.betting = ApplyAction(state.betting, {ActionKind::kCheck});
   CHECK_THROWS_AS(ApplyChance(state, {C(14, S::kSpades)}, kRules),
                   std::invalid_argument);
@@ -123,7 +123,8 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   short_call.betting.stack = {3, 12};
   short_call.betting.total_committed = {1, 8};
   short_call.betting.street_committed = {1, 8};
-  short_call.betting = ApplyAction(short_call.betting, {ActionKind::kCall});
+  short_call.betting = ApplyAction(short_call.betting,
+                                   {ActionKind::kCall, 8});
   CHECK(IsBettingRoundOver(short_call.betting));
   CHECK(short_call.betting.stack[0] == 0);
   CHECK(short_call.betting.total_committed ==
