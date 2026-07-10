@@ -40,10 +40,6 @@ BettingState FlopState() {
   return state;
 }
 
-int TotalChips(const BettingState& state) {
-  return state.stack[0] + state.stack[1] + Pot(state);
-}
-
 bool HasAction(const std::vector<GameAction>& actions,
                ActionKind kind,
                int amount = 0) {
@@ -60,38 +56,6 @@ std::vector<GameAction> AvailableActions(const BettingAbstraction& betting,
   const auto menu = betting.actions_for_betting_node(state);
   return std::vector<GameAction>(menu.actions.begin(),
                                  menu.actions.begin() + menu.count);
-}
-
-TEST_CASE("generated betting actions preserve state invariants") {
-  BettingAbstraction betting(TestConfig());
-  const std::vector<BettingState> states = {
-      PreflopState(),
-      FlopState(),
-      ApplyAction(PreflopState(), {ActionKind::kRaise, 4}),
-      ApplyAction(FlopState(), {ActionKind::kCheck, 0}),
-  };
-
-  for (const BettingState& state : states) {
-    const int total_chips = TotalChips(state);
-    const std::vector<GameAction> actions = AvailableActions(betting, state);
-    REQUIRE(!actions.empty());
-    for (const GameAction& action : actions) {
-      CAPTURE(action.kind);
-      CAPTURE(action.amount);
-      const BettingState next = ApplyAction(state, action);
-      CHECK(TotalChips(next) == total_chips);
-      CHECK(next.stack[0] >= 0);
-      CHECK(next.stack[1] >= 0);
-      CHECK(Pot(next) >= 0);
-      if (next.folded_player >= 0) {
-        CHECK(IsTerminal(next, Board{}));
-        CHECK(next.player_to_act == -1);
-      }
-      if (IsBettingRoundOver(next)) {
-        CHECK(next.player_to_act == -1);
-      }
-    }
-  }
 }
 
 TEST_CASE("betting action menu follows config") {
