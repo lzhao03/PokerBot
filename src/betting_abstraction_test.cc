@@ -2,32 +2,10 @@
 
 #include "doctest/doctest.h"
 
-#include <vector>
-
 #include "src/game_rules.h"
 
 namespace poker {
 namespace {
-
-SolverConfig TestConfig() {
-  SolverConfig config;
-  config.bet_sizes.push_back(0.5);
-  config.starting_stack_size = 100;
-  config.small_blind = 1;
-  config.big_blind = 2;
-  return config;
-}
-
-BettingState PreflopState() {
-  BettingState state;
-  state.stack[0] = 99;
-  state.stack[1] = 98;
-  state.street = StreetKind::kPreflop;
-  state.folded_player = -1;
-  state.committed = {1, 2};
-  state.player_to_act = 0;
-  return state;
-}
 
 BettingState FlopState() {
   BettingState state;
@@ -40,10 +18,11 @@ BettingState FlopState() {
   return state;
 }
 
-bool HasAction(const std::vector<GameAction>& actions,
+bool HasAction(const ActionMenu& menu,
                ActionKind kind,
                int amount = 0) {
-  for (const GameAction& action : actions) {
+  for (uint8_t i = 0; i < menu.count; ++i) {
+    const GameAction& action = menu.actions[i];
     if (action.kind == kind && action.amount == amount) {
       return true;
     }
@@ -51,54 +30,15 @@ bool HasAction(const std::vector<GameAction>& actions,
   return false;
 }
 
-std::vector<GameAction> AvailableActions(const BettingAbstraction& betting,
-                                     const BettingState& state) {
-  const auto menu = betting.actions_for_betting_node(state);
-  return std::vector<GameAction>(menu.actions.begin(),
-                                 menu.actions.begin() + menu.count);
-}
-
-TEST_CASE("betting action menu follows config") {
-  BettingAbstraction betting(TestConfig());
-  const std::vector<GameAction> preflop =
-      AvailableActions(betting, PreflopState());
-  CHECK(HasAction(preflop, ActionKind::kFold));
-  CHECK(HasAction(preflop, ActionKind::kCall, 1));
-  CHECK(HasAction(preflop, ActionKind::kRaise, 2));
-  CHECK(HasAction(preflop, ActionKind::kAllIn, 99));
-
-  SolverConfig dedup_config;
-  dedup_config.bet_sizes = {0.5, 0.51};
-  BettingAbstraction dedup_betting(dedup_config);
-  const std::vector<GameAction> dedup_actions =
-      AvailableActions(dedup_betting, FlopState());
-  CHECK(dedup_actions.size() == 3);
-  CHECK(HasAction(dedup_actions, ActionKind::kBet, 2));
-
-  SolverConfig street_config;
-  street_config.bet_sizes.push_back(0.5);
-  street_config.flop_bet_sizes.push_back(1.0);
-  BettingAbstraction street_betting(street_config);
-  CHECK(HasAction(AvailableActions(street_betting, FlopState()),
-                  ActionKind::kBet, 4));
-}
-
-TEST_CASE("sized betting actions are sorted and deduplicated") {
+TEST_CASE("street-specific bet sizes override defaults") {
   SolverConfig config;
-  config.bet_sizes = {1.0, 0.5, 0.51, 0.25};
+  config.bet_sizes = {0.5};
+  config.flop_bet_sizes = {1.0};
   BettingAbstraction betting(config);
 
-  const std::vector<GameAction> actions = AvailableActions(betting, FlopState());
-
-  REQUIRE(actions.size() == 5);
-  CHECK(actions[0].kind == ActionKind::kCheck);
-  CHECK(actions[1].kind == ActionKind::kBet);
-  CHECK(actions[1].amount == 1);
-  CHECK(actions[2].kind == ActionKind::kBet);
-  CHECK(actions[2].amount == 2);
-  CHECK(actions[3].kind == ActionKind::kBet);
-  CHECK(actions[3].amount == 4);
-  CHECK(actions[4].kind == ActionKind::kAllIn);
+  const ActionMenu menu = betting.actions_for_betting_node(FlopState());
+  CHECK(HasAction(menu, ActionKind::kBet, 4));
+  CHECK_FALSE(HasAction(menu, ActionKind::kBet, 2));
 }
 
 TEST_CASE("bet sizes use exact pot and stack values") {
@@ -113,11 +53,9 @@ TEST_CASE("bet sizes use exact pot and stack values") {
   state.player_to_act = 0;
   state.folded_player = -1;
 
-  const auto menu = betting.actions_for_betting_node(state);
-  const std::vector<GameAction> actions(menu.actions.begin(),
-                                        menu.actions.begin() + menu.count);
-  CHECK(HasAction(actions, ActionKind::kBet, 50));
-  CHECK(HasAction(actions, ActionKind::kAllIn, 200));
+  const ActionMenu menu = betting.actions_for_betting_node(state);
+  CHECK(HasAction(menu, ActionKind::kBet, 50));
+  CHECK(HasAction(menu, ActionKind::kAllIn, 200));
 }
 
 }  // namespace

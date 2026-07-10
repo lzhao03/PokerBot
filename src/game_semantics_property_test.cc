@@ -1,5 +1,3 @@
-#include "src/betting_abstraction.h"
-
 #include "doctest/doctest.h"
 #include "rapidcheck.h"
 #include "src/card_utils.h"
@@ -17,6 +15,7 @@ namespace {
 
 struct ReachableScenario {
   int starting_stack = 20;
+  std::vector<uint8_t> bet_size_points;
   std::vector<uint16_t> choices;
 };
 
@@ -26,6 +25,11 @@ std::ostream& operator<<(std::ostream& out,
   for (size_t i = 0; i < scenario.choices.size(); ++i) {
     out << (i == 0 ? "" : ",") << scenario.choices[i];
   }
+  out << "] sizes=[";
+  for (size_t i = 0; i < scenario.bet_size_points.size(); ++i) {
+    out << (i == 0 ? "" : ",")
+        << static_cast<int>(scenario.bet_size_points[i]);
+  }
   return out << "]";
 }
 
@@ -33,31 +37,19 @@ auto ReachableScenarios() {
   return rc::gen::build<ReachableScenario>(
       rc::gen::set(&ReachableScenario::starting_stack,
                    rc::gen::inRange(4, 33)),
+      rc::gen::set(&ReachableScenario::bet_size_points,
+                   rc::gen::resize(
+                       5, rc::gen::arbitrary<std::vector<uint8_t>>())),
       rc::gen::set(&ReachableScenario::choices,
                    rc::gen::resize(
                        64, rc::gen::arbitrary<std::vector<uint16_t>>())))
       .as("scenario");
 }
 
-SolverConfig TestConfig() {
-  SolverConfig config;
-  config.starting_stack_size = 20;
-  config.small_blind = 1;
-  config.big_blind = 2;
-  config.bet_sizes = {0.5, 1.0};
-  return config;
-}
-
-ExactGameState InitialState(const SolverConfig& config) {
-  const int small_blind = config.small_blind > 0 ? config.small_blind : 1;
-  const int big_blind = config.big_blind > 0 ? config.big_blind : 2;
-
+ExactGameState InitialState(int starting_stack) {
   ExactGameState state;
-  state.betting.stack[0] =
-      std::max(0, config.starting_stack_size - small_blind);
-  state.betting.stack[1] =
-      std::max(0, config.starting_stack_size - big_blind);
-  state.betting.committed = {small_blind, big_blind};
+  state.betting.stack = {starting_stack - 1, starting_stack - 2};
+  state.betting.committed = {1, 2};
   return state;
 }
 
@@ -103,6 +95,60 @@ void CheckActionTransition(const ExactGameState& parent,
   RC_ASSERT(child.board.mask == parent.board.mask);
 }
 
+ActionMenu CheckLegalMenu(const ExactGameState& state,
+                          absl::Span<const double> bet_sizes,
+                          int total_chips) {
+  const BettingState& betting = state.betting;
+  const ActionMenu menu = LegalActions(betting, bet_sizes);
+  RC_ASSERT(menu.count > 0);
+
+  std::vector<double> sorted_sizes(bet_sizes.begin(), bet_sizes.end());
+  std::sort(sorted_sizes.begin(), sorted_sizes.end());
+  const ActionMenu sorted_menu = LegalActions(betting, sorted_sizes);
+  RC_ASSERT(menu.count == sorted_menu.count);
+
+  for (uint8_t i = 0; i < menu.count; ++i) {
+    const GameAction action = menu.actions[i];
+    RC_ASSERT(action == sorted_menu.actions[i]);
+    for (uint8_t j = 0; j < i; ++j) {
+      RC_ASSERT(action != menu.actions[j]);
+    }
+
+    ExactGameState child = state;
+    child.betting = ApplyAction(betting, action);
+    CheckActionTransition(state, child, betting.player_to_act, total_chips);
+  }
+
+  uint8_t index = 0;
+  const Chips to_call = ToCall(betting, betting.player_to_act);
+  if (to_call > 0) {
+    RC_ASSERT(menu.actions[index++] == GameAction{ActionKind::kFold});
+    RC_ASSERT((menu.actions[index++] ==
+               GameAction{ActionKind::kCall,
+                          std::min(to_call,
+                                   betting.stack[betting.player_to_act])}));
+  } else {
+    RC_ASSERT(menu.actions[index++] == GameAction{ActionKind::kCheck});
+  }
+
+  const ActionKind sized_kind =
+      to_call > 0 ? ActionKind::kRaise : ActionKind::kBet;
+  Chips previous_amount = 0;
+  while (index < menu.count && menu.actions[index].kind == sized_kind) {
+    RC_ASSERT(menu.actions[index].amount > previous_amount);
+    previous_amount = menu.actions[index].amount;
+    ++index;
+  }
+  if (index < menu.count) {
+    RC_ASSERT((menu.actions[index] ==
+               GameAction{ActionKind::kAllIn,
+                          betting.stack[betting.player_to_act]}));
+    ++index;
+  }
+  RC_ASSERT(index == menu.count);
+  return menu;
+}
+
 CardId SelectAvailableCard(CardMask blocked, uint16_t choice) {
   std::array<CardId, kDeckCardCount> available = {};
   size_t count = 0;
@@ -136,10 +182,13 @@ void CheckChanceTransition(const ExactGameState& parent,
 }
 
 void ReplayAndValidate(const ReachableScenario& scenario) {
-  SolverConfig config = TestConfig();
-  config.starting_stack_size = scenario.starting_stack;
-  const BettingAbstraction betting(config);
-  ExactGameState state = InitialState(config);
+  std::vector<double> bet_sizes;
+  bet_sizes.reserve(scenario.bet_size_points.size());
+  for (uint8_t points : scenario.bet_size_points) {
+    bet_sizes.push_back((static_cast<double>(points) + 1.0) / 100.0);
+  }
+
+  ExactGameState state = InitialState(scenario.starting_stack);
   const int total_chips = TotalChips(state);
   size_t cursor = 0;
 
@@ -151,14 +200,7 @@ void ReplayAndValidate(const ReachableScenario& scenario) {
 
     const int player = state.betting.player_to_act;
     if (IsPlayer(player)) {
-      const ActionMenu menu =
-          betting.actions_for_betting_node(state.betting);
-      RC_ASSERT(menu.count > 0);
-      for (uint8_t i = 0; i < menu.count; ++i) {
-        ExactGameState child = state;
-        child.betting = ApplyAction(state.betting, menu.actions[i]);
-        CheckActionTransition(state, child, player, total_chips);
-      }
+      const ActionMenu menu = CheckLegalMenu(state, bet_sizes, total_chips);
       if (cursor == scenario.choices.size()) {
         return;
       }
@@ -188,8 +230,8 @@ void ReplayAndValidate(const ReachableScenario& scenario) {
   }
 }
 
-TEST_CASE("reachable states preserve poker invariants") {
-  const bool passed = rc::check("reachable game trace", [] {
+TEST_CASE("reachable legal menus are canonical and applicable") {
+  const bool passed = rc::check("reachable legal menu", [] {
     const ReachableScenario scenario = *ReachableScenarios();
     ReplayAndValidate(scenario);
   });

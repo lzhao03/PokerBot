@@ -197,6 +197,21 @@ TEST_CASE("representative invalid actions are rejected") {
   CHECK_THROWS(ApplyAction(broke.betting, {ActionKind::kCheck}));
 }
 
+TEST_CASE("non-sized action amounts are ignored") {
+  const BettingState preflop = PreflopState().betting;
+  CHECK(ApplyAction(preflop, {ActionKind::kCall}) ==
+        ApplyAction(preflop, {ActionKind::kCall, 999}));
+  CHECK(ApplyAction(preflop, {ActionKind::kFold}) ==
+        ApplyAction(preflop, {ActionKind::kFold, 999}));
+
+  const BettingState flop = FlopState().betting;
+  CHECK(ApplyAction(flop, {ActionKind::kCheck}) ==
+        ApplyAction(flop, {ActionKind::kCheck, 999}));
+  CHECK(ApplyAction(flop, {ActionKind::kAllIn}) ==
+        ApplyAction(flop, {ActionKind::kAllIn, 999}));
+  CHECK_NOTHROW(ApplyAction(flop, {ActionKind::kFold, 999}));
+}
+
 TEST_CASE("terminal utility matches an independent oracle") {
   const ExactGameState folded =
       ApplySequence(PreflopState(), {{ActionKind::kFold}});

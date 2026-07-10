@@ -222,7 +222,6 @@ cc_test(
     name = "game_semantics_property_test",
     srcs = ["game_semantics_property_test.cc"],
     deps = DOCTEST_DEPS + RAPIDCHECK_DEPS + [
-        ":betting_abstraction",
         ":card_utils",
         ":game_rules",
     ],
