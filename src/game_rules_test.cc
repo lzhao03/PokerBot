@@ -124,7 +124,7 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   short_call.betting.total_committed = {1, 8};
   short_call.betting.street_committed = {1, 8};
   short_call.betting = ApplyAction(short_call.betting,
-                                   {ActionKind::kCall, 8});
+                                   {ActionKind::kCall, 4});
   CHECK(IsBettingRoundOver(short_call.betting));
   CHECK(short_call.betting.stack[0] == 0);
   CHECK(short_call.betting.total_committed ==

@@ -91,6 +91,30 @@ Chips ConcreteBetAmount(const BettingState& state, double size) {
       static_cast<Chips>(std::max(Chips{1}, Pot(state)) * size));
 }
 
+struct ActionLimits {
+  Chips current = 0;
+  Chips highest = 0;
+  Chips call_target = 0;
+  Chips maximum_target = 0;
+  Chips minimum_aggressive_target = 0;
+  bool wager_open = false;
+};
+
+ActionLimits LimitsFor(const BettingState& state, int player) {
+  ActionLimits limits;
+  limits.current = state.street_committed[player];
+  limits.highest = HighestStreetCommitment(state);
+  limits.call_target =
+      std::min(limits.highest, limits.current + state.stack[player]);
+  limits.maximum_target =
+      limits.current + MaxContestableAdditional(state, player);
+  limits.wager_open = limits.highest > 0;
+  limits.minimum_aggressive_target =
+      limits.wager_open ? limits.highest + state.last_full_raise
+                        : limits.current + state.last_full_raise;
+  return limits;
+}
+
 bool IsLegalAction(const BettingState& state, const GameAction& action) {
   const int player = state.player_to_act;
   if (!IsPlayer(player) || state.folded_player >= 0 ||
@@ -98,27 +122,27 @@ bool IsLegalAction(const BettingState& state, const GameAction& action) {
     return false;
   }
 
-  const Chips to_call = ToCall(state, player);
-  const Chips current = state.street_committed[player];
-  const Chips highest = HighestStreetCommitment(state);
+  const ActionLimits limits = LimitsFor(state, player);
+  const Chips to_call = limits.highest - limits.current;
   const Chips target = action.target_street_commitment;
-  const Chips delta = target - current;
   switch (action.kind) {
     case ActionKind::kFold:
-      return target == 0;
+      return to_call > 0 && target == 0;
     case ActionKind::kCheck:
       return to_call == 0 && target == 0;
     case ActionKind::kCall:
-      return to_call > 0 && target == highest;
+      return to_call > 0 && target == limits.call_target;
     case ActionKind::kBet:
-      return to_call == 0 && target > current &&
-             delta < state.stack[player];
+      return !limits.wager_open &&
+             target >= limits.minimum_aggressive_target &&
+             target < limits.maximum_target;
     case ActionKind::kRaise:
-      return to_call > 0 && target > highest &&
-             state.stack[player] > to_call &&
-             delta < state.stack[player];
+      return limits.wager_open &&
+             target >= limits.minimum_aggressive_target &&
+             target < limits.maximum_target;
     case ActionKind::kAllIn:
-      return target == current + state.stack[player];
+      return limits.maximum_target > limits.call_target &&
+             target == limits.maximum_target;
     case ActionKind::kNoAction:
       return false;
   }
@@ -145,11 +169,9 @@ BettingState ApplyActionUnchecked(const BettingState& state,
   assert(IsPlayer(child.player_to_act));
   const int player = child.player_to_act;
   const int opponent = Opponent(player);
-  const Chips to_call_before = ToCall(child, player);
   const Chips highest_before = HighestStreetCommitment(child);
   const Chips current = child.street_committed[player];
   const Chips delta = action.target_street_commitment - current;
-  Chips committed = 0;
 
   switch (action.kind) {
     case ActionKind::kFold:
@@ -163,7 +185,7 @@ BettingState ApplyActionUnchecked(const BettingState& state,
     case ActionKind::kBet:
     case ActionKind::kRaise:
     case ActionKind::kAllIn:
-      committed = CommitChips(child, player, delta);
+      CommitChips(child, player, delta);
       child.player_to_act = opponent;
       break;
     case ActionKind::kNoAction:
@@ -171,9 +193,7 @@ BettingState ApplyActionUnchecked(const BettingState& state,
   }
 
   const bool aggressive =
-      action.kind == ActionKind::kBet ||
-      action.kind == ActionKind::kRaise ||
-      (action.kind == ActionKind::kAllIn && committed > to_call_before);
+      action.target_street_commitment > highest_before;
   if (aggressive) {
     const Chips raise_size =
         child.street_committed[player] - highest_before;
@@ -204,13 +224,19 @@ bool IsBettingRoundOver(const BettingState& state) noexcept {
   if (state.folded_player >= 0) {
     return true;
   }
-  if (AnyPlayerAllIn(state)) {
-    const int player = state.player_to_act;
-    return !IsPlayer(player) || state.stack[player] == 0 ||
-           ToCall(state, player) == 0;
+  const bool commitments_match =
+      state.street_committed[0] == state.street_committed[1];
+  if (state.pending_action_mask == 0 && commitments_match) {
+    return true;
   }
-  return state.pending_action_mask == 0 && ToCall(state, 0) == 0 &&
-         ToCall(state, 1) == 0;
+  if (!AnyPlayerAllIn(state)) {
+    return false;
+  }
+  if (state.stack[0] == 0 && state.stack[1] == 0) {
+    return true;
+  }
+  const int live_player = state.stack[0] > 0 ? 0 : 1;
+  return ToCall(state, live_player) == 0;
 }
 
 bool IsTerminal(const BettingState& state, const BoardRunout& board) {
@@ -226,26 +252,23 @@ ActionMenu LegalActions(const BettingState& state,
   }
 
   ActionMenu menu;
-  const Chips stack = state.stack[player];
-  const Chips current = state.street_committed[player];
-  const Chips highest = HighestStreetCommitment(state);
-  const Chips outstanding_call = ToCall(state, player);
+  const ActionLimits limits = LimitsFor(state, player);
+  const Chips outstanding_call = limits.highest - limits.current;
   if (outstanding_call > 0) {
     AddAction(menu, state, ActionKind::kFold, 0);
-    AddAction(menu, state, ActionKind::kCall, highest);
+    AddAction(menu, state, ActionKind::kCall, limits.call_target);
   } else {
     AddAction(menu, state, ActionKind::kCheck, 0);
   }
 
-  ActionKind sized_kind = ActionKind::kBet;
-  if (outstanding_call > 0) {
-    sized_kind = ActionKind::kRaise;
-  }
+  const ActionKind sized_kind =
+      limits.wager_open ? ActionKind::kRaise : ActionKind::kBet;
   absl::InlinedVector<GameAction, kMaxActionsPerNode> sized_actions;
   for (double bet_size : bet_sizes) {
     const Chips bet = ConcreteBetAmount(state, bet_size);
-    const Chips target = highest + bet;
-    if (target - current < stack) {
+    const Chips target = limits.highest + bet;
+    if (target >= limits.minimum_aggressive_target &&
+        target < limits.maximum_target) {
       sized_actions.push_back({sized_kind, target});
     }
   }
@@ -263,8 +286,8 @@ ActionMenu LegalActions(const BettingState& state,
               action.target_street_commitment);
   }
 
-  if (outstanding_call == 0 || stack > outstanding_call) {
-    AddAction(menu, state, ActionKind::kAllIn, current + stack);
+  if (limits.maximum_target > limits.call_target) {
+    AddAction(menu, state, ActionKind::kAllIn, limits.maximum_target);
   }
   return menu;
 }
