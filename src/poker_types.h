@@ -72,7 +72,6 @@ struct BettingState {
   int8_t folded_player = -1;
   uint8_t actions_this_street = 0;
   GameAction last_action;
-  bool all_in = false;
 };
 
 struct SolverConfig {

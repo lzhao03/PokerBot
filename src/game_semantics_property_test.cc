@@ -99,7 +99,7 @@ std::string StateString(const ExactGameState& state) {
       << betting.committed[1] << "}"
       << " player_to_act=" << static_cast<int>(betting.player_to_act)
       << " folded=" << static_cast<int>(betting.folded_player)
-      << " all_in=" << betting.all_in
+      << " all_in=" << AnyPlayerAllIn(betting)
       << " board=";
   for (CardId card : state.board.span()) {
     out << CardString(card);
@@ -465,6 +465,20 @@ TEST_CASE("deterministic action transitions preserve chip accounting") {
   CHECK(root.betting.committed[0] == config.small_blind);
   CHECK(root.betting.committed[1] == config.big_blind);
 
+  SolverConfig blind_config = config;
+  blind_config.starting_stack_size = blind_config.big_blind;
+  ReachableTrace blind_trace{0, 0, blind_config, {}};
+  ExactGameState blind_root = InitialState(blind_config);
+  const int blind_total = TotalChips(blind_root);
+  CHECK(blind_root.betting.stack[1] == 0);
+  CHECK(AnyPlayerAllIn(blind_root.betting));
+  CHECK(!BettingRoundOver(blind_root));
+  blind_root = ApplyChecked(
+      blind_root, {ActionKind::kCall}, blind_total, blind_trace);
+  CHECK(blind_root.betting.stack[0] == 0);
+  CHECK(blind_root.betting.stack[1] == 0);
+  CheckCompletedRound(blind_root, false);
+
   ExactGameState call_check =
       ApplyChecked(root, {ActionKind::kCall, 1}, total_chips, trace);
   call_check = ApplyChecked(call_check, {ActionKind::kCheck}, total_chips,
@@ -497,10 +511,27 @@ TEST_CASE("deterministic action transitions preserve chip accounting") {
       ApplyChecked(bet_raise_call, {ActionKind::kCall}, 40, trace);
   CheckCompletedRound(bet_raise_call, false);
 
-  ExactGameState all_in =
+  ExactGameState all_in_raise =
+      ApplyChecked(FlopState(), {ActionKind::kBet, 4}, 40, trace);
+  all_in_raise =
+      ApplyChecked(all_in_raise, {ActionKind::kAllIn}, 40, trace);
+  CHECK(all_in_raise.betting.stack[0] == 0);
+  CHECK(AnyPlayerAllIn(all_in_raise.betting));
+  CHECK(!BettingRoundOver(all_in_raise));
+  all_in_raise =
+      ApplyChecked(all_in_raise, {ActionKind::kCall}, 40, trace);
+  CHECK(all_in_raise.betting.stack[1] == 0);
+  CheckCompletedRound(all_in_raise, false);
+
+  ExactGameState all_in_bet =
       ApplyChecked(FlopState(), {ActionKind::kAllIn}, 40, trace);
-  all_in = ApplyChecked(all_in, {ActionKind::kCall}, 40, trace);
-  CheckCompletedRound(all_in, false);
+  CHECK(all_in_bet.betting.stack[1] == 0);
+  CHECK(AnyPlayerAllIn(all_in_bet.betting));
+  CHECK(!BettingRoundOver(all_in_bet));
+  all_in_bet = ApplyChecked(all_in_bet, {ActionKind::kCall}, 40, trace);
+  CHECK(all_in_bet.betting.stack[0] == 0);
+  CHECK(all_in_bet.betting.stack[1] == 0);
+  CheckCompletedRound(all_in_bet, false);
 
   ExactGameState short_call = root;
   short_call.betting.stack[0] = 3;
@@ -509,6 +540,7 @@ TEST_CASE("deterministic action transitions preserve chip accounting") {
   short_call = ApplyChecked(short_call, {ActionKind::kCall}, 24, trace);
   CheckCompletedRound(short_call, false);
   CHECK(short_call.betting.stack[0] == 0);
+  CHECK(AnyPlayerAllIn(short_call.betting));
   CHECK(short_call.betting.committed[0] <
         short_call.betting.committed[1]);
 
@@ -582,10 +614,10 @@ TEST_CASE("betting-round completion cases agree") {
   CHECK(short_call.betting.committed[0] <
         short_call.betting.committed[1]);
 
-  ExactGameState all_in =
+  ExactGameState all_in_bet =
       ApplyStateAction(FlopState(), {ActionKind::kAllIn});
-  all_in = ApplyStateAction(all_in, {ActionKind::kCall});
-  CheckCompletedRound(all_in, false);
+  all_in_bet = ApplyStateAction(all_in_bet, {ActionKind::kCall});
+  CheckCompletedRound(all_in_bet, false);
 
   ExactGameState runout =
       ApplyStateAction(root, {ActionKind::kCall, 1, -1});

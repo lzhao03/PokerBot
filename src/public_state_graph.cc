@@ -201,8 +201,7 @@ bool SameBettingState(const BettingState& first, const BettingState& second) {
          first.actions_this_street == second.actions_this_street &&
          first.last_action.kind == second.last_action.kind &&
          first.last_action.amount == second.last_action.amount &&
-         first.last_action.player == second.last_action.player &&
-         first.all_in == second.all_in;
+         first.last_action.player == second.last_action.player;
 }
 
 }  // namespace

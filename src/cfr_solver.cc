@@ -90,7 +90,6 @@ ExactGameState DefaultInitialState(const SolverConfig& config) {
   betting.stack[1] = std::max(0, starting_stack - big_blind);
   betting.folded_player = -1;
   betting.street = StreetKind::kPreflop;
-  betting.all_in = false;
   betting.player_to_act = 0;
   betting.committed = {small_blind, big_blind};
   return ExactGameState{betting, Board{}};
