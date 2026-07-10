@@ -80,21 +80,21 @@ int WorkerCountForSamples(int samples) {
   return std::min(worker_count, samples);
 }
 
-CompactPublicState DefaultInitialState(const SolverConfig& config) {
+ExactGameState DefaultInitialState(const SolverConfig& config) {
   const int small_blind = config.small_blind > 0 ? config.small_blind : 1;
   const int big_blind = config.big_blind > 0 ? config.big_blind : 2;
   const int starting_stack = config.starting_stack_size;
 
-  CompactPublicState initial_state;
-  initial_state.stack[0] = std::max(0, starting_stack - small_blind);
-  initial_state.stack[1] = std::max(0, starting_stack - big_blind);
-  initial_state.pot = small_blind + big_blind;
-  initial_state.folded_player = -1;
-  initial_state.street = StreetKind::kPreflop;
-  initial_state.all_in = false;
-  initial_state.player_to_act = 0;
-  initial_state.player_contribution = {small_blind, big_blind};
-  return initial_state;
+  BettingState betting;
+  betting.stack[0] = std::max(0, starting_stack - small_blind);
+  betting.stack[1] = std::max(0, starting_stack - big_blind);
+  betting.pot = small_blind + big_blind;
+  betting.folded_player = -1;
+  betting.street = StreetKind::kPreflop;
+  betting.all_in = false;
+  betting.player_to_act = 0;
+  betting.contribution = {small_blind, big_blind};
+  return ExactGameState{betting, Board{}};
 }
 
 }  // namespace
@@ -105,6 +105,10 @@ CFRSolver::CFRSolver(const SolverConfig& config)
 
 CFRSolver::CFRSolver(const SolverConfig& config,
                      const CompactPublicState& initial_state)
+    : CFRSolver(config, ExactGameStateFromCompact(initial_state)) {}
+
+CFRSolver::CFRSolver(const SolverConfig& config,
+                     const ExactGameState& initial_state)
     : config_(NormalizedSolverConfig(config)),
       initial_state_(initial_state),
       rng_(12345),
@@ -1204,18 +1208,6 @@ double CFRSolver::get_expected_value(int player_id) const {
 
 bool CFRSolver::traversal_stats_enabled() {
   return kTraversalStatsEnabled;
-}
-
-double CFRSolver::terminal_utility(const CompactPublicState& exact_state,
-                                   const PrivateCards& player_a_cards,
-                                   const PrivateCards& player_b_cards) {
-  const auto utility = UtilityBeforeShowdown(
-      BettingStateFromCompact(exact_state), exact_state.board_count);
-  if (utility.has_value()) {
-    return *utility;
-  }
-
-  return GetUtility(exact_state, player_a_cards.combo, player_b_cards.combo);
 }
 
 double CFRSolver::terminal_utility(const PublicStateRow& row,

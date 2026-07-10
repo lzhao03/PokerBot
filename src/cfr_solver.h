@@ -31,6 +31,8 @@ class CFRSolver {
   CFRSolver(const SolverConfig& config);
   CFRSolver(const SolverConfig& config,
             const CompactPublicState& initial_state);
+  CFRSolver(const SolverConfig& config,
+            const ExactGameState& initial_state);
 
   void run(int iterations, const HandRange& player_a_range,
            const HandRange& player_b_range);
@@ -363,9 +365,6 @@ class CFRSolver {
       int player,
       absl::Span<const int> action_ids,
       RangeScratchFrame& scratch_frame);
-  double terminal_utility(const CompactPublicState& exact_state,
-                          const PrivateCards& player_a_cards,
-                          const PrivateCards& player_b_cards);
   double terminal_utility(const PublicStateRow& row,
                           const Board& board,
                           const PrivateCards& player_a_cards,
@@ -379,7 +378,7 @@ class CFRSolver {
       const RangeSampler& sampler,
       bool allow_parallel);
   SolverConfig config_;
-  CompactPublicState initial_state_;
+  ExactGameState initial_state_;
   std::mt19937 rng_;
   double cumulative_root_utility_ = 0.0;
   int iterations_run_ = 0;
