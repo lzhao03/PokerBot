@@ -211,6 +211,29 @@ BettingState ApplyActionUnchecked(const BettingState& state,
 
 }  // namespace
 
+ExactPublicState MakeInitialState(
+    const BettingRules& rules,
+    std::array<Chips, kPlayerCount> stacks,
+    std::array<Chips, kPlayerCount> blinds) {
+  if (rules.minimum_bet <= 0) {
+    throw std::invalid_argument("minimum bet must be positive");
+  }
+  for (size_t player = 0; player < kPlayerCount; ++player) {
+    if (blinds[player] < 0 || stacks[player] < blinds[player]) {
+      throw std::invalid_argument("stacks must cover posted blinds");
+    }
+  }
+
+  BettingState betting;
+  for (size_t player = 0; player < kPlayerCount; ++player) {
+    betting.stack[player] = stacks[player] - blinds[player];
+  }
+  betting.total_committed = blinds;
+  betting.street_committed = blinds;
+  betting.last_full_raise = rules.minimum_bet;
+  return ExactPublicState{betting, BoardRunout::Preflop()};
+}
+
 bool IsBettingRoundOver(const BettingState& state) noexcept {
   if (state.folded_player >= 0) {
     return true;

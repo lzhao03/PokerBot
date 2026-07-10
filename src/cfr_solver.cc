@@ -52,20 +52,11 @@ int WorkerCountForSamples(int samples) {
 }
 
 ExactPublicState DefaultInitialState(const SolverConfig& config) {
-  const int small_blind = config.small_blind > 0 ? config.small_blind : 1;
-  const int big_blind = config.big_blind > 0 ? config.big_blind : 2;
-  const int starting_stack = config.starting_stack_size;
-
-  BettingState betting;
-  betting.stack[0] = std::max(0, starting_stack - small_blind);
-  betting.stack[1] = std::max(0, starting_stack - big_blind);
-  betting.folded_player = -1;
-  betting.street = StreetKind::kPreflop;
-  betting.player_to_act = 0;
-  betting.total_committed = {small_blind, big_blind};
-  betting.street_committed = {small_blind, big_blind};
-  betting.last_full_raise = big_blind;
-  return ExactPublicState{betting, BoardRunout::Preflop()};
+  const Chips small_blind = config.small_blind > 0 ? config.small_blind : 1;
+  const Chips big_blind = config.big_blind > 0 ? config.big_blind : 2;
+  const Chips stack = config.starting_stack_size;
+  return MakeInitialState(BettingRules{big_blind}, {stack, stack},
+                          {small_blind, big_blind});
 }
 
 }  // namespace

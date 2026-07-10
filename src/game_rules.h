@@ -13,6 +13,10 @@ struct ActionMenu {
   std::array<GameAction, kMaxActionsPerNode> actions = {};
 };
 
+ExactPublicState MakeInitialState(
+    const BettingRules& rules,
+    std::array<Chips, kPlayerCount> stacks,
+    std::array<Chips, kPlayerCount> blinds);
 ActionMenu LegalActions(const BettingState& state,
                         absl::Span<const double> bet_sizes);
 BettingState ApplyAction(const BettingState& state,
