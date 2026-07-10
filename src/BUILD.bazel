@@ -209,14 +209,22 @@ cc_library(
 )
 
 cc_test(
+    name = "game_rules_test",
+    srcs = ["game_rules_test.cc"],
+    deps = DOCTEST_DEPS + [
+        ":combo",
+        ":game_rules",
+        ":hand_evaluator",
+    ],
+)
+
+cc_test(
     name = "game_semantics_property_test",
     srcs = ["game_semantics_property_test.cc"],
     deps = DOCTEST_DEPS + RAPIDCHECK_DEPS + [
         ":betting_abstraction",
         ":card_utils",
-        ":combo",
         ":game_rules",
-        ":hand_evaluator",
     ],
 )
 
