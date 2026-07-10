@@ -73,8 +73,7 @@ class CFRSolver {
     return tables().nodes;
   }
 
-  using PrivateBucketId = StrategyTables::PrivateBucketId;
-  using InfoSetAddress = StrategyTables::InfoSetAddress;
+  using InfoSetKey = StrategyTables::InfoSetKey;
   using Node = StrategyTables::Node;
 
   struct Deal {
@@ -104,7 +103,6 @@ class CFRSolver {
   struct Position {
     NodeId node = kInvalidNodeId;
     BoardRunout exact_board = BoardRunout::Preflop();
-    BoardFeatures board_features;
   };
 
   class MutableTraversalGraph {
@@ -234,11 +232,8 @@ class CFRSolver {
                               absl::Span<const std::optional<BoardRunout>> node_boards);
   absl::Span<TrainingRangeView> condition_ranges_for_actions(
       const TrainingRangeView& range,
-      StreetKind street,
       const BoardRunout& board,
-      const BoardFeatures& features,
       NodeId node_id,
-      int player,
       size_t action_count,
       RangeScratchFrame& scratch_frame);
   double nonterminal_leaf_value() const noexcept;

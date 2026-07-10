@@ -98,6 +98,7 @@ void SolverStorage::freeze() {
   mutable_tables->node_ids.rehash(0);
   mutable_tables->public_chance_child_ids.clear();
   mutable_tables->public_chance_child_ids.rehash(0);
+  mutable_tables->growing_info_sets.clear();
   frozen_tables = mutable_tables;
   mutable_tables.reset();
 }
@@ -266,34 +267,42 @@ std::optional<ActionBlock> StrategyStore::block_for_row(
 }
 
 std::optional<ActionBlock> StrategyStore::find(
-    InfoSetAddress address,
+    InfoSetKey key,
     size_t expected_action_count) {
-  return block_for_row(find_info_set_row(address), expected_action_count);
+  if (!action_count_matches(key.node_id, expected_action_count)) {
+    return std::nullopt;
+  }
+  if (storage_.is_frozen()) {
+    return find_frozen(key, expected_action_count);
+  }
+  return block_for_row(find_growing_row(key), expected_action_count);
 }
 
 std::optional<ActionBlock> StrategyStore::get_or_create(
-    InfoSetAddress address,
+    InfoSetKey key,
     size_t action_count) {
-  return block_for_row(get_or_create_info_set_row(address, action_count),
+  if (!action_count_matches(key.node_id, action_count)) {
+    return std::nullopt;
+  }
+  if (storage_.is_frozen()) {
+    return find_frozen(key, action_count);
+  }
+  return block_for_row(get_or_create_info_set_row(key, action_count),
                        action_count);
 }
 
 std::optional<ActionBlock> StrategyStore::find_frozen(
-    NodeId node_id,
-    PrivateBucketId bucket,
+    InfoSetKey key,
     size_t expected_action_count) {
-  if (node_id >= frozen_tables().frozen_info_set_action_offsets.size()) {
+  if (!action_count_matches(key.node_id, expected_action_count)) {
     return std::nullopt;
   }
-  if (expected_action_count > std::numeric_limits<uint16_t>::max()) {
-    throw std::logic_error("infoset action count exceeds uint16_t");
-  }
-
-  const uint32_t offset = frozen_info_set_action_offset(node_id, bucket);
-  if (offset == StrategyTables::kInvalidActionOffset) {
+  const FrozenInfoSetEntry* entry = find_frozen_entry(key);
+  if (entry == nullptr) {
     return std::nullopt;
   }
-  return ActionBlock(this, offset, static_cast<uint16_t>(expected_action_count));
+  return ActionBlock(this, entry->action_offset,
+                     static_cast<uint16_t>(expected_action_count));
 }
 
 void StrategyStore::regret_matching_or_uniform(
@@ -314,8 +323,7 @@ void StrategyStore::regret_matching_or_uniform(
   block->regret_matching(load_mode, out);
 }
 
-void StrategyStore::average_strategy(NodeId node_id,
-                                     PrivateBucketId bucket,
+void StrategyStore::average_strategy(InfoSetKey key,
                                      size_t action_count,
                                      bool regret_only_training,
                                      absl::Span<double> out) {
@@ -327,8 +335,7 @@ void StrategyStore::average_strategy(NodeId node_id,
   }
 
   const double uniform_probability = 1.0 / out.size();
-  std::optional<ActionBlock> block =
-      find({node_id, bucket}, action_count);
+  std::optional<ActionBlock> block = find(key, action_count);
   if (!block.has_value()) {
     std::fill(out.begin(), out.end(), uniform_probability);
     return;
@@ -336,10 +343,10 @@ void StrategyStore::average_strategy(NodeId node_id,
   block->average_strategy(regret_only_training, uniform_probability, out);
 }
 
-void StrategyStore::regret_matching_for_bucket(NodeId node_id,
-                                               PrivateBucketId bucket,
-                                               size_t action_count,
-                                               absl::Span<double> out) {
+void StrategyStore::regret_matching_for_observation(
+    InfoSetKey key,
+    size_t action_count,
+    absl::Span<double> out) {
   if (out.size() != action_count) {
     throw std::logic_error("conditioned strategy span size mismatch");
   }
@@ -347,8 +354,7 @@ void StrategyStore::regret_matching_for_bucket(NodeId node_id,
     return;
   }
 
-  std::optional<ActionBlock> block =
-      find({node_id, bucket}, action_count);
+  std::optional<ActionBlock> block = find(key, action_count);
   if (!block.has_value()) {
     FillUniform(out);
     return;
@@ -356,143 +362,116 @@ void StrategyStore::regret_matching_for_bucket(NodeId node_id,
   block->regret_matching(RegretLoadMode::kAtomic, out);
 }
 
-bool StrategyStore::prebuild_frozen_info_set_action_offsets() {
+bool StrategyStore::build_frozen_info_set_index() {
   if (storage_.is_frozen()) {
     return true;
   }
 
   StrategyTables& tables = tables_for_growth();
-  tables.frozen_info_set_action_offsets.resize(tables.nodes.size());
-  for (auto& offset_row : tables.frozen_info_set_action_offsets) {
-    offset_row.fill(StrategyTables::kInvalidActionOffset);
-  }
+  tables.frozen_info_set_entries.clear();
+  tables.frozen_info_set_entries.reserve(tables.info_set_count);
+  tables.frozen_info_set_ranges.assign(tables.nodes.size(), {});
 
-  for (size_t node_id = 0; node_id < tables.nodes.size();
-       ++node_id) {
+  for (NodeId node_id = 0; node_id < tables.nodes.size(); ++node_id) {
+    const GrowingPublicInfoSets* rows = growing_rows(node_id);
+    if (rows == nullptr) {
+      continue;
+    }
     const Node& row = tables.nodes[node_id];
     if (row.betting_node_id >= tables.betting_nodes.size()) {
       return false;
     }
-    const auto& node = tables.betting_nodes[row.betting_node_id];
-    const PublicInfoSetSlab* slab =
-        public_info_set_slab(static_cast<uint32_t>(node_id));
-    if (slab == nullptr) {
-      continue;
-    }
-    const int player = node.state.player_to_act;
-    if (!IsPlayer(player)) {
-      continue;
+    const size_t action_count =
+        tables.betting_nodes[row.betting_node_id].action_count;
+    if (!action_count_matches(node_id, action_count)) {
+      return false;
     }
 
-    auto& offset_row = tables.frozen_info_set_action_offsets[node_id];
-    const PublicInfoSetSlabPlayer& player_slab = slab->players[player];
-    for (uint32_t bucket = 0; bucket < StrategyTables::kPrivateBucketCount;
-         ++bucket) {
-      const auto private_bucket = static_cast<PrivateBucketId>(bucket);
-      const InfoSetRow* info_row = find_info_set_row(player_slab,
-                                                     private_bucket);
-      if (info_row == nullptr) {
-        continue;
-      }
-      if (info_row->action_count != node.action_count) {
+    FrozenPublicInfoSetRange& range =
+        tables.frozen_info_set_ranges[node_id];
+    range.begin = static_cast<uint32_t>(tables.frozen_info_set_entries.size());
+    for (const auto& [private_observation, row] : rows->rows) {
+      if (row.action_count != action_count) {
         return false;
       }
-      offset_row[static_cast<size_t>(bucket)] = info_row->action_offset;
+      tables.frozen_info_set_entries.push_back(
+          {private_observation, row.action_offset});
     }
+    auto first = tables.frozen_info_set_entries.begin() + range.begin;
+    std::sort(first, tables.frozen_info_set_entries.end(),
+              [](const FrozenInfoSetEntry& a,
+                 const FrozenInfoSetEntry& b) {
+                return a.private_observation < b.private_observation;
+              });
+    range.count = static_cast<uint32_t>(rows->rows.size());
   }
   return true;
 }
 
-const StrategyStore::PublicInfoSetSlab* StrategyStore::public_info_set_slab(
+const StrategyStore::GrowingPublicInfoSets* StrategyStore::growing_rows(
     NodeId node_id) const {
-  const auto& slabs = frozen_tables().public_info_set_slabs;
-  if (node_id >= slabs.size()) {
+  const auto& rows = frozen_tables().growing_info_sets;
+  if (node_id >= rows.size()) {
     return nullptr;
   }
-  return slabs[node_id].get();
+  return rows[node_id].get();
 }
 
-StrategyStore::PublicInfoSetSlab&
-StrategyStore::get_or_create_public_info_set_slab(NodeId node_id) {
+StrategyStore::GrowingPublicInfoSets&
+StrategyStore::get_or_create_growing_rows(NodeId node_id) {
   StrategyTables& tables = tables_for_growth();
-  if (tables.public_info_set_slabs.size() <= node_id) {
-    tables.public_info_set_slabs.resize(static_cast<size_t>(node_id) + 1);
+  if (tables.growing_info_sets.size() <= node_id) {
+    tables.growing_info_sets.resize(static_cast<size_t>(node_id) + 1);
   }
-  std::unique_ptr<PublicInfoSetSlab>& slab =
-      tables.public_info_set_slabs[node_id];
-  if (slab == nullptr) {
-    slab = std::make_unique<PublicInfoSetSlab>();
+  std::unique_ptr<GrowingPublicInfoSets>& rows =
+      tables.growing_info_sets[node_id];
+  if (rows == nullptr) {
+    rows = std::make_unique<GrowingPublicInfoSets>();
   }
-  return *slab;
+  return *rows;
 }
 
-const StrategyStore::InfoSetRow* StrategyStore::find_info_set_row(
-    InfoSetAddress address) const {
-  if (address.private_bucket >= StrategyTables::kPrivateBucketCount) {
+const StrategyStore::InfoSetRow* StrategyStore::find_growing_row(
+    InfoSetKey key) const {
+  const GrowingPublicInfoSets* rows = growing_rows(key.node_id);
+  if (rows == nullptr) {
     return nullptr;
   }
-  const int player = player_for_node(address.node_id);
-  if (player < 0 || player >= kPlayerCount) {
-    return nullptr;
-  }
-  const PublicInfoSetSlab* slab = public_info_set_slab(address.node_id);
-  if (slab == nullptr) {
-    return nullptr;
-  }
-  const PublicInfoSetSlabPlayer& player_slab = slab->players[player];
-  return find_info_set_row(player_slab, address.private_bucket);
+  const auto row = rows->rows.find(key.private_observation);
+  return row == rows->rows.end() ? nullptr : &row->second;
 }
 
-const StrategyStore::InfoSetRow* StrategyStore::find_info_set_row(
-    const PublicInfoSetSlabPlayer& player_slab,
-    PrivateBucketId private_bucket) {
-  if (private_bucket >= StrategyTables::kPrivateBucketCount) {
+const StrategyStore::FrozenInfoSetEntry* StrategyStore::find_frozen_entry(
+    InfoSetKey key) const {
+  const auto& tables = frozen_tables();
+  if (key.node_id >= tables.frozen_info_set_ranges.size()) {
     return nullptr;
   }
-  const size_t chunk_index =
-      private_bucket / StrategyTables::kPrivateBucketChunkSize;
-  const size_t chunk_offset =
-      private_bucket % StrategyTables::kPrivateBucketChunkSize;
-  const std::unique_ptr<PrivateRowChunk>& chunk =
-      player_slab.private_row_chunks[chunk_index];
-  if (chunk == nullptr) {
+  const FrozenPublicInfoSetRange& range =
+      tables.frozen_info_set_ranges[key.node_id];
+  const size_t end = static_cast<size_t>(range.begin) + range.count;
+  if (end > tables.frozen_info_set_entries.size()) {
     return nullptr;
   }
-  const int32_t node_id = chunk->rows[chunk_offset];
-  if (node_id < 0 ||
-      static_cast<size_t>(node_id) >= player_slab.rows.size()) {
+  const auto first = tables.frozen_info_set_entries.begin() + range.begin;
+  const auto last = tables.frozen_info_set_entries.begin() + end;
+  const auto entry = std::lower_bound(
+      first, last, key.private_observation,
+      [](const FrozenInfoSetEntry& candidate,
+         PrivateObservationId observation) {
+        return candidate.private_observation < observation;
+      });
+  if (entry == last ||
+      entry->private_observation != key.private_observation) {
     return nullptr;
   }
-  return &player_slab.rows[node_id];
-}
-
-int32_t& StrategyStore::get_or_create_private_row_slot(
-    PublicInfoSetSlabPlayer& player_slab,
-    PrivateBucketId private_bucket) {
-  const size_t chunk_index =
-      private_bucket / StrategyTables::kPrivateBucketChunkSize;
-  const size_t chunk_offset =
-      private_bucket % StrategyTables::kPrivateBucketChunkSize;
-  std::unique_ptr<PrivateRowChunk>& chunk =
-      player_slab.private_row_chunks[chunk_index];
-  if (chunk == nullptr) {
-    chunk = std::make_unique<PrivateRowChunk>();
-  }
-  return chunk->rows[chunk_offset];
+  return &*entry;
 }
 
 const StrategyStore::InfoSetRow* StrategyStore::get_or_create_info_set_row(
-    InfoSetAddress address,
+    InfoSetKey key,
     size_t action_count) {
-  if (address.private_bucket >= StrategyTables::kPrivateBucketCount) {
-    return nullptr;
-  }
-  const int player = player_for_node(address.node_id);
-  if (player < 0 || player >= kPlayerCount) {
-    return nullptr;
-  }
-
-  if (const InfoSetRow* row = find_info_set_row(address)) {
+  if (const InfoSetRow* row = find_growing_row(key)) {
     return row;
   }
 
@@ -504,15 +483,14 @@ const StrategyStore::InfoSetRow* StrategyStore::get_or_create_info_set_row(
   }
 
   InfoSetRow row = append_info_set_actions(action_count);
-  PublicInfoSetSlab& slab =
-      get_or_create_public_info_set_slab(address.node_id);
-  PublicInfoSetSlabPlayer& player_slab = slab.players[player];
-  int32_t& node_id =
-      get_or_create_private_row_slot(player_slab, address.private_bucket);
-  node_id = static_cast<int32_t>(player_slab.rows.size());
-  player_slab.rows.push_back(row);
+  GrowingPublicInfoSets& rows = get_or_create_growing_rows(key.node_id);
+  const auto [entry, inserted] =
+      rows.rows.try_emplace(key.private_observation, row);
+  if (!inserted) {
+    return &entry->second;
+  }
   ++tables_for_growth().info_set_count;
-  return &player_slab.rows.back();
+  return &entry->second;
 }
 
 StrategyStore::InfoSetRow StrategyStore::append_info_set_actions(
@@ -548,23 +526,23 @@ StrategyStore::InfoSetRow StrategyStore::append_info_set_actions(
   return row;
 }
 
-uint32_t StrategyStore::frozen_info_set_action_offset(
-    NodeId node_id,
-    PrivateBucketId private_bucket) const {
-  return frozen_tables().frozen_info_set_action_offsets[node_id]
-                                                       [private_bucket];
-}
-
-int StrategyStore::player_for_node(NodeId node_id) const {
+bool StrategyStore::action_count_matches(NodeId node_id,
+                                         size_t action_count) const {
+  if (action_count > std::numeric_limits<uint16_t>::max()) {
+    return false;
+  }
   const auto& tables = frozen_tables();
   if (node_id >= tables.nodes.size()) {
-    return -1;
+    return false;
   }
   const auto& row = tables.nodes[node_id];
   if (row.betting_node_id >= tables.betting_nodes.size()) {
-    return -1;
+    return false;
   }
-  return tables.betting_nodes[row.betting_node_id].state.player_to_act;
+  const auto& node = tables.betting_nodes[row.betting_node_id];
+  return node.kind == StrategyTables::NodeKind::kDecision &&
+         IsPlayer(node.state.player_to_act) &&
+         node.action_count == action_count;
 }
 
 }  // namespace poker

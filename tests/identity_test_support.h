@@ -77,7 +77,6 @@ struct GraphBuilderTestAccess {
 namespace test {
 
 using PublicObservationTrace = std::vector<PublicObservationId>;
-using PrivateObservationTrace = std::vector<PrivateBucketId>;
 
 inline SolverConfig IdentityConfig() {
   SolverConfig config;
@@ -178,13 +177,6 @@ class IdentityGraph {
 inline PublicObservationId PublicObservation(
     const ExactPublicState& state) {
   return public_observation_id(state.betting.street, state.board);
-}
-
-inline PrivateBucketId PrivateObservation(
-    ComboId hand,
-    const ExactPublicState& state) {
-  return private_bucket(hand, state.betting.street,
-                        board_features(state.board));
 }
 
 inline NodeId ClosePreflop(IdentityGraph& graph,

@@ -10,7 +10,7 @@ using CardId = uint8_t;
 using CardMask = uint64_t;
 using BoardBucketId = uint64_t;
 using PublicObservationId = uint64_t;
-using PrivateObservationId = uint32_t;
+using PrivateObservationId = uint64_t;
 using Chips = int32_t;
 
 constexpr int kDeckCardCount = 52;

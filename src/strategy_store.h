@@ -6,7 +6,6 @@
 #include <optional>
 
 #include "absl/types/span.h"
-#include "src/card_abstraction.h"
 #include "src/poker_types.h"
 #include "src/strategy_tables.h"
 #include "src/solver_stats.h"
@@ -79,14 +78,12 @@ struct SolverStorage {
 
 class StrategyStore {
  public:
-  using PrivateBucketId = StrategyTables::PrivateBucketId;
-  using InfoSetAddress = StrategyTables::InfoSetAddress;
+  using InfoSetKey = StrategyTables::InfoSetKey;
   using InfoSetRow = StrategyTables::InfoSetRow;
   using Node = StrategyTables::Node;
-  using PrivateRowChunk = StrategyTables::PrivateRowChunk;
-  using PublicInfoSetSlabPlayer =
-      StrategyTables::PublicInfoSetSlabPlayer;
-  using PublicInfoSetSlab = StrategyTables::PublicInfoSetSlab;
+  using GrowingPublicInfoSets = StrategyTables::GrowingPublicInfoSets;
+  using FrozenInfoSetEntry = StrategyTables::FrozenInfoSetEntry;
+  using FrozenPublicInfoSetRange = StrategyTables::FrozenPublicInfoSetRange;
 
   StrategyStore(
       const SolverConfig& config,
@@ -95,29 +92,26 @@ class StrategyStore {
 
   StrategyTables& mutable_tables();
 
-  std::optional<ActionBlock> find(InfoSetAddress address,
+  std::optional<ActionBlock> find(InfoSetKey key,
                                   size_t expected_action_count);
-  std::optional<ActionBlock> get_or_create(InfoSetAddress address,
+  std::optional<ActionBlock> get_or_create(InfoSetKey key,
                                            size_t action_count);
-  std::optional<ActionBlock> find_frozen(NodeId node_id,
-                                         PrivateBucketId private_bucket,
+  std::optional<ActionBlock> find_frozen(InfoSetKey key,
                                          size_t expected_action_count);
 
   void regret_matching_or_uniform(std::optional<ActionBlock> block,
                                   size_t legal_action_count,
                                   RegretLoadMode load_mode,
                                   absl::Span<double> out);
-  void average_strategy(NodeId node_id,
-                        PrivateBucketId private_bucket,
+  void average_strategy(InfoSetKey key,
                         size_t action_count,
                         bool regret_only_training,
                         absl::Span<double> out);
-  void regret_matching_for_bucket(NodeId node_id,
-                                  PrivateBucketId private_bucket,
-                                  size_t action_count,
-                                  absl::Span<double> out);
+  void regret_matching_for_observation(InfoSetKey key,
+                                       size_t action_count,
+                                       absl::Span<double> out);
 
-  bool prebuild_frozen_info_set_action_offsets();
+  bool build_frozen_info_set_index();
 
  private:
   friend class ActionBlock;
@@ -130,24 +124,15 @@ class StrategyStore {
   ActionBlock block_for_row(const InfoSetRow& row);
   std::optional<ActionBlock> block_for_row(const InfoSetRow* row,
                                            size_t expected_action_count);
-  const PublicInfoSetSlab* public_info_set_slab(NodeId node_id) const;
-  PublicInfoSetSlab& get_or_create_public_info_set_slab(
-      NodeId node_id);
-  const InfoSetRow* find_info_set_row(InfoSetAddress address) const;
-  static const InfoSetRow* find_info_set_row(
-      const PublicInfoSetSlabPlayer& player_slab,
-      PrivateBucketId private_bucket);
-  static int32_t& get_or_create_private_row_slot(
-      PublicInfoSetSlabPlayer& player_slab,
-      PrivateBucketId private_bucket);
+  const GrowingPublicInfoSets* growing_rows(NodeId node_id) const;
+  GrowingPublicInfoSets& get_or_create_growing_rows(NodeId node_id);
+  const InfoSetRow* find_growing_row(InfoSetKey key) const;
+  const FrozenInfoSetEntry* find_frozen_entry(InfoSetKey key) const;
   const InfoSetRow* get_or_create_info_set_row(
-      InfoSetAddress address,
+      InfoSetKey key,
       size_t action_count);
   InfoSetRow append_info_set_actions(size_t action_count);
-  uint32_t frozen_info_set_action_offset(
-      NodeId node_id,
-      PrivateBucketId private_bucket) const;
-  int player_for_node(NodeId node_id) const;
+  bool action_count_matches(NodeId node_id, size_t action_count) const;
 
   const SolverConfig& config_;
   SolverStorage& storage_;

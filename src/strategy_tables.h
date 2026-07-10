@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -11,9 +10,6 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "src/build_flags.h"
-#include "src/card_abstraction.h"
-#include "src/combo.h"
 #include "src/game_state.h"
 #include "src/poker_types.h"
 
@@ -68,11 +64,7 @@ bool operator!=(const CacheLineAlignedAllocator<T>&,
 
 class StrategyTables {
  public:
-  using PrivateBucketId = uint16_t;
   using BoardBucketId = poker::BoardBucketId;
-  static constexpr uint32_t kPrivateBucketCount =
-      kCoarsePrivateBuckets ? kCoarsePrivateStreetObservationCount
-                            : kComboCount;
   static constexpr uint32_t kInvalidActionOffset =
       std::numeric_limits<uint32_t>::max();
 
@@ -135,9 +127,23 @@ class StrategyTables {
     NodeId node_id = kInvalidNodeId;
   };
 
-  struct InfoSetAddress {
+  struct InfoSetKey {
     NodeId node_id = 0;
-    PrivateBucketId private_bucket = 0;
+    PrivateObservationId private_observation = 0;
+  };
+
+  struct GrowingPublicInfoSets {
+    absl::flat_hash_map<PrivateObservationId, InfoSetRow> rows;
+  };
+
+  struct FrozenInfoSetEntry {
+    PrivateObservationId private_observation = 0;
+    uint32_t action_offset = kInvalidActionOffset;
+  };
+
+  struct FrozenPublicInfoSetRange {
+    uint32_t begin = 0;
+    uint32_t count = 0;
   };
 
   struct Node {
@@ -154,30 +160,6 @@ class StrategyTables {
       NodeId parent_node_id,
       PublicObservationId child_public_observation) const;
 
-  static constexpr int kPrivateBucketChunkSize = 64;
-  static constexpr int kPrivateBucketChunkCount =
-      (kPrivateBucketCount + kPrivateBucketChunkSize - 1) /
-      kPrivateBucketChunkSize;
-
-  struct PrivateRowChunk {
-    PrivateRowChunk() { rows.fill(-1); }
-
-    std::array<int32_t, kPrivateBucketChunkSize> rows;
-  };
-
-  struct PublicInfoSetSlabPlayer {
-    std::array<std::unique_ptr<PrivateRowChunk>, kPrivateBucketChunkCount>
-        private_row_chunks;
-    std::vector<InfoSetRow> rows;
-  };
-
-  struct PublicInfoSetSlab {
-    std::array<PublicInfoSetSlabPlayer, kPlayerCount> players;
-  };
-
-  using FrozenInfoSetActionOffsetRow =
-      std::array<uint32_t, kPrivateBucketCount>;
-
   BettingNodeId root_betting_node_id = kInvalidBettingNodeId;
   NodeId root_node_id = kInvalidNodeId;
   std::vector<BettingNode> betting_nodes;
@@ -187,9 +169,10 @@ class StrategyTables {
   std::vector<NodeId> action_child_ids;
   absl::flat_hash_map<ChanceTransitionKey, NodeId> public_chance_child_ids;
   std::vector<ChanceChildEntry> chance_child_entries;
-  std::vector<FrozenInfoSetActionOffsetRow> frozen_info_set_action_offsets;
+  std::vector<FrozenInfoSetEntry> frozen_info_set_entries;
+  std::vector<FrozenPublicInfoSetRange> frozen_info_set_ranges;
   size_t info_set_count = 0;
-  std::vector<std::unique_ptr<PublicInfoSetSlab>> public_info_set_slabs;
+  std::vector<std::unique_ptr<GrowingPublicInfoSets>> growing_info_sets;
 };
 
 struct MutableCumulativeArrays {

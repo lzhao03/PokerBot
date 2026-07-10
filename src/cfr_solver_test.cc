@@ -4,6 +4,7 @@
 
 #include "doctest/doctest.h"
 
+#include <algorithm>
 #include <cmath>
 #include <optional>
 #include <stdexcept>
@@ -116,8 +117,14 @@ TEST_CASE("strategy storage performs regret matching, averaging, and freezing") 
   for (double probability : probabilities)
     CHECK(probability == doctest::Approx(1.0 / 3.0));
 
-  const auto created = store.get_or_create({0, 0}, 3);
+  const ComboId exact_hand = H(14, S::kHearts, 13, S::kHearts);
+  const StrategyTables::InfoSetKey base_key{
+      0, initial_private_observation(exact_hand)};
+  const auto created = store.get_or_create(base_key, 3);
   REQUIRE(created.has_value());
+  CHECK(store.get_or_create(base_key, 3).has_value());
+  CHECK(storage.mutable_tables->info_set_count == 1);
+  CHECK_FALSE(store.get_or_create(base_key, 2).has_value());
   ActionBlock block = *created;
   const RegretUpdateOptions plain{RegretUpdateMode::kPlain, false};
   block.add_cfr_plus_regret(0, 1.0f, plain);
@@ -138,9 +145,29 @@ TEST_CASE("strategy storage performs regret matching, averaging, and freezing") 
   CHECK(probabilities[1] == doctest::Approx(0.3));
   CHECK(probabilities[2] == doctest::Approx(0.5));
 
-  REQUIRE(store.prebuild_frozen_info_set_action_offsets());
-  const auto frozen = store.find_frozen(0, 0, 3);
+  const PrivateObservationId history_a =
+      (PrivateObservationId{5} << 6) | 1;
+  const PrivateObservationId history_b =
+      (PrivateObservationId{5} << 6) | 2;
+  const PrivateObservationId high_id =
+      (PrivateObservationId{1} << 40) | 7;
+  CHECK(store.get_or_create({0, history_b}, 3).has_value());
+  CHECK(store.get_or_create({0, high_id}, 3).has_value());
+  CHECK(store.get_or_create({0, history_a}, 3).has_value());
+  CHECK(storage.mutable_tables->info_set_count == 4);
+
+  REQUIRE(store.build_frozen_info_set_index());
+  const auto& entries = storage.mutable_tables->frozen_info_set_entries;
+  CHECK(std::is_sorted(
+      entries.begin(), entries.end(), [](const auto& a, const auto& b) {
+        return a.private_observation < b.private_observation;
+      }));
+  storage.freeze();
+  const auto frozen = store.find_frozen(base_key, 3);
   REQUIRE(frozen.has_value());
+  CHECK(store.find_frozen({0, high_id}, 3).has_value());
+  CHECK_FALSE(store.find_frozen({0, high_id + 1}, 3).has_value());
+  CHECK(store.find(base_key, 3).has_value());
   double frozen_probabilities[3] = {};
   frozen->regret_matching(RegretLoadMode::kPlain,
                           absl::Span<double>(frozen_probabilities));

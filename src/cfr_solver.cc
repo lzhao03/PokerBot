@@ -1,4 +1,5 @@
 #include "src/cfr_solver.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/log/log.h"
 #include "absl/types/span.h"
 #include "src/build_flags.h"
@@ -97,9 +98,8 @@ CFRSolver::CFRSolver(const SolverConfig& config,
     storage_.mutable_ref().public_chance_child_ids.reserve(node_cap);
     storage_.mutable_ref().action_child_ids.reserve(node_cap * 4);
     storage_.mutable_ref().chance_child_entries.reserve(node_cap);
-    storage_.mutable_ref().frozen_info_set_action_offsets.reserve(
-        node_cap);
-    storage_.mutable_ref().public_info_set_slabs.reserve(node_cap);
+    storage_.mutable_ref().frozen_info_set_ranges.reserve(node_cap);
+    storage_.mutable_ref().growing_info_sets.reserve(node_cap);
     storage_.mutable_ref().betting_nodes.reserve(node_cap);
     storage_.mutable_ref().betting_edges.reserve(node_cap);
   }
@@ -161,7 +161,7 @@ CFRSolver::MutableTraversalGraph::action_child(Position parent,
       *child_id >= solver_.nodes().size()) {
     return std::nullopt;
   }
-  return Position{*child_id, parent.exact_board, parent.board_features};
+  return Position{*child_id, parent.exact_board};
 }
 
 std::optional<CFRSolver::Position>
@@ -196,7 +196,6 @@ CFRSolver::MutableTraversalGraph::sample_chance_child(
   return Position{
       *child_id,
       exact_child_state.board,
-      board_features(exact_child_state.board),
   };
 }
 
@@ -262,7 +261,6 @@ CFRSolver::Position CFRSolver::FrozenTraversalGraph::action_child(
   return Position{
       required_action_child_id(parent.node, action_index),
       parent.exact_board,
-      parent.board_features,
   };
 }
 
@@ -289,7 +287,6 @@ CFRSolver::Position CFRSolver::FrozenTraversalGraph::sample_chance_child(
   return Position{
       required_chance_child_id(parent.node, exact_child_state),
       exact_child_state.board,
-      board_features(exact_child_state.board),
   };
 }
 
@@ -301,39 +298,7 @@ bool CFRSolver::prebuild_info_set_rows(
     return true;
   }
 
-  if constexpr (kCoarsePublicBuckets) {
-    for (NodeId node_id = 0; node_id < nodes().size(); ++node_id) {
-      if (node_id >= node_boards.size() || !node_boards[node_id].has_value()) {
-        continue;
-      }
-      const Node& graph_node = nodes()[node_id];
-      if (graph_node.betting_node_id >= tables().betting_nodes.size()) {
-        continue;
-      }
-      const auto& betting_node =
-          tables().betting_nodes[graph_node.betting_node_id];
-      if (betting_node.kind != StrategyTables::NodeKind::kDecision ||
-          betting_node.action_count == 0 ||
-          !IsPlayer(betting_node.state.player_to_act)) {
-        continue;
-      }
-      for (uint32_t bucket = 0; bucket < StrategyTables::kPrivateBucketCount;
-           ++bucket) {
-        const PrivateBucketId private_bucket =
-            static_cast<PrivateBucketId>(bucket);
-        const InfoSetAddress infoset{node_id, private_bucket};
-        if (!strategy_store_.get_or_create(infoset,
-                                           betting_node.action_count)
-                 .has_value()) {
-          return false;
-        }
-      }
-    }
-    return true;
-  }
-
-  std::vector<uint32_t> seen_buckets;
-  uint32_t seen_generation = 1;
+  absl::flat_hash_set<PrivateObservationId> seen_observations;
 
   for (NodeId node_id = 0; node_id < nodes().size(); ++node_id) {
     if (node_id >= node_boards.size() || !node_boards[node_id].has_value()) {
@@ -358,21 +323,7 @@ bool CFRSolver::prebuild_info_set_rows(
     }
 
     const BoardRunout& board = *node_boards[node_id];
-    const BoardFeatures features = board_features(board);
-    const uint32_t bucket_count =
-        private_bucket_count(betting_node.state.street);
-    if (bucket_count == 0 ||
-        bucket_count > StrategyTables::kPrivateBucketCount) {
-      return false;
-    }
-    if (seen_buckets.size() < bucket_count) {
-      seen_buckets.resize(bucket_count, 0);
-    }
-    if (seen_generation == 0) {
-      std::fill(seen_buckets.begin(), seen_buckets.end(), 0);
-      seen_generation = 1;
-    }
-    const uint32_t generation = seen_generation++;
+    seen_observations.clear();
     const CardMask board_mask = board.mask();
     for (size_t i = 0; i < range.size(); ++i) {
       if (range.weight(i) <= 0.0f) {
@@ -382,17 +333,15 @@ bool CFRSolver::prebuild_info_set_rows(
       if ((ComboMask(combo_id) & board_mask) != 0) {
         continue;
       }
-      const PrivateBucketId bucket =
-          private_bucket(combo_id, betting_node.state.street, features);
-      if (bucket >= bucket_count) {
-        return false;
-      }
-      if (seen_buckets[bucket] == generation) {
+      const PrivateObservationId observation =
+          private_observation_for_runout(
+              combo_id, board, graph_node.public_observation);
+      if (!seen_observations.insert(observation).second) {
         continue;
       }
-      seen_buckets[bucket] = generation;
       if (!strategy_store_
-               .get_or_create({node_id, bucket}, betting_node.action_count)
+               .get_or_create({node_id, observation},
+                              betting_node.action_count)
                .has_value()) {
         return false;
       }
@@ -461,6 +410,9 @@ bool CFRSolver::prepare_prebuilt_training(
   if (storage_.is_frozen()) {
     return true;
   }
+  if constexpr (kCoarsePrivateBuckets) {
+    return false;
+  }
 
   auto record_public_counts = [&] {
     const int64_t public_states = static_cast<int64_t>(get_public_state_count());
@@ -511,13 +463,13 @@ bool CFRSolver::prepare_prebuilt_training(
   }
 
   StrategyStore& store = strategy_store_;
-  const bool frozen_lookup_complete = store.prebuild_frozen_info_set_action_offsets();
+  const bool frozen_lookup_complete = store.build_frozen_info_set_index();
   stats.frozen_info_set_lookup_prebuild_complete = frozen_lookup_complete;
   if (!stats.frozen_info_set_lookup_prebuild_complete) {
     return false;
   }
   const int64_t frozen_lookup_rows =
-      static_cast<int64_t>(tables().frozen_info_set_action_offsets.size());
+      static_cast<int64_t>(tables().frozen_info_set_ranges.size());
   stats.prebuild_frozen_info_set_lookup_rows = frozen_lookup_rows;
   return true;
 }
@@ -536,7 +488,6 @@ void CFRSolver::run_growing_iterations(
   const Position root_node{
       root_id,
       initial_state_.board,
-      board_features(initial_state_.board),
   };
   TraversalScratch scratch(ScratchDepthReserve(config_, max_depth));
   const int64_t warmup_start_updates = cfr_update_count_;
@@ -681,7 +632,6 @@ void CFRSolver::run_fixed_storage_iterations(
           const Position root_node{
               root_id,
               root_board,
-              board_features(root_board),
           };
           for (int i = 0; i < shard; ++i) {
             const RangeDeal sampled = sampler.sample(worker.rng_);
@@ -826,15 +776,13 @@ double CFRSolver::CfrTraversal<Graph>::decision(
 
   const bool update_player = player == run_.options.update_player;
   const size_t action_count = betting_node.action_count;
-  const PrivateBucketId bucket =
-      private_bucket(hand, betting_node.state.street,
-                     position.board_features);
+  const PrivateObservationId observation = private_observation_for_runout(
+      hand, position.exact_board, node.public_observation);
+  const InfoSetKey infoset{node_id, observation};
   std::optional<ActionBlock> actions;
   if (run_.options.use_fixed_infoset_lookup) {
-    actions = solver_.strategy_store_.find_frozen(node_id, bucket,
-                                                  action_count);
+    actions = solver_.strategy_store_.find_frozen(infoset, action_count);
   } else {
-    const InfoSetAddress infoset{node_id, bucket};
     if (update_player) {
       actions = solver_.strategy_store_.get_or_create(infoset, action_count);
     } else {
@@ -859,9 +807,8 @@ double CFRSolver::CfrTraversal<Graph>::decision(
     RangeScratchFrame& scratch =
         run_.scratch->frame(static_cast<size_t>(frame.scratch_depth));
     conditioned_ranges = solver_.condition_ranges_for_actions(
-        *frame.ranges[static_cast<size_t>(player)], betting_node.state.street,
-        position.exact_board, position.board_features, node_id, player,
-        action_count, scratch);
+        *frame.ranges[static_cast<size_t>(player)], position.exact_board,
+        node_id, action_count, scratch);
   }
 
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
@@ -977,11 +924,8 @@ template double CFRSolver::cfr<CFRSolver::FrozenTraversalGraph>(
 
 absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
     const TrainingRangeView& range,
-    StreetKind street,
     const BoardRunout& board,
-    const BoardFeatures& features,
     NodeId node_id,
-    int player,
     size_t action_count,
     RangeScratchFrame& scratch_frame) {
   if (action_count == 0) {
@@ -998,6 +942,8 @@ absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
   }
 
   const CardMask board_mask = board.mask();
+  const PublicObservationId public_observation =
+      nodes()[node_id].public_observation;
   std::array<double, kMaxActionsPerNode> action_probabilities_storage{};
   absl::Span<double> action_probabilities(
       action_probabilities_storage.data(), action_count);
@@ -1008,9 +954,11 @@ absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
       continue;
     }
 
-    const PrivateBucketId bucket = private_bucket(combo_id, street, features);
-    strategy_store_.regret_matching_for_bucket(
-        node_id, bucket, action_count, action_probabilities);
+    const PrivateObservationId observation =
+        private_observation_for_runout(
+            combo_id, board, public_observation);
+    strategy_store_.regret_matching_for_observation(
+        {node_id, observation}, action_count, action_probabilities);
 
     for (size_t action_index = 0; action_index < action_count; ++action_index) {
       const double probability = action_probabilities[action_index];
@@ -1035,7 +983,6 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
   const Position root_node{
       root_id,
       initial_state_.board,
-      board_features(initial_state_.board),
   };
   const Deal deal{{player_a_hand, player_b_hand},
                   ComboMask(player_a_hand) | ComboMask(player_b_hand)};
@@ -1107,7 +1054,6 @@ double CFRSolver::evaluate_strategy_samples(
   const Position root_node{
       root_id,
       root_board,
-      board_features(root_board),
   };
   if (storage_.is_frozen()) {
     FrozenTraversalGraph graph(*this);
@@ -1188,11 +1134,10 @@ double CFRSolver::evaluate_strategy_node_impl(
   std::array<double, kMaxActionsPerNode> probabilities_storage{};
   absl::Span<double> probabilities(
       probabilities_storage.data(), betting_node.action_count);
-  const PrivateBucketId bucket =
-      private_bucket(deal.hand(player), betting_node.state.street,
-                     position.board_features);
+  const PrivateObservationId observation = private_observation_for_runout(
+      deal.hand(player), position.exact_board, node.public_observation);
   strategy_store_.average_strategy(
-      node_id, bucket, betting_node.action_count,
+      {node_id, observation}, betting_node.action_count,
       config_.regret_only_training, probabilities);
 
   double value = 0.0;

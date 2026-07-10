@@ -538,9 +538,4 @@ inline PrivateObservationId private_observation_for_runout(
       observation, hand, StreetKind::kRiver, prefix, public_observation);
 }
 
-inline uint32_t private_bucket_count(StreetKind) {
-  return kCoarsePrivateBuckets ? kCoarsePrivateStreetObservationCount
-                               : kComboCount;
-}
-
 }  // namespace poker

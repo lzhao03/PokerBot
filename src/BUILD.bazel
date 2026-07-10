@@ -191,9 +191,6 @@ cc_library(
     srcs = ["strategy_tables.cc"],
     hdrs = ["strategy_tables.h"],
     deps = [
-        ":build_flags",
-        ":card_abstraction",
-        ":combo",
         ":game_state",
         ":poker_types",
         "@abseil-cpp//absl/container:flat_hash_map",
@@ -210,7 +207,6 @@ cc_library(
     ],
     deps = [
         ":build_flags",
-        ":card_abstraction",
         ":poker_types",
         ":strategy_tables",
         "@abseil-cpp//absl/types:span",
@@ -228,7 +224,6 @@ cc_library(
     copts = ["-DPOKER_ENABLE_TRAVERSAL_STATS=0"],
     deps = [
         ":build_flags",
-        ":card_abstraction",
         ":poker_types",
         ":strategy_tables",
         "@abseil-cpp//absl/types:span",
@@ -248,7 +243,6 @@ cc_library(
     ],
     deps = [
         ":build_flags",
-        ":card_abstraction",
         ":poker_types",
         ":strategy_tables",
         "@abseil-cpp//absl/types:span",
@@ -270,7 +264,6 @@ cc_library(
     ],
     deps = [
         ":build_flags",
-        ":card_abstraction",
         ":poker_types",
         ":strategy_tables",
         "@abseil-cpp//absl/types:span",
