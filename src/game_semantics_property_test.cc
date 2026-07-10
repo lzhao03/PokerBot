@@ -4,7 +4,7 @@
 #include "rapidcheck.h"
 #include "src/card_utils.h"
 #include "src/combo.h"
-#include "src/game_tree.h"
+#include "src/game_rules.h"
 #include "src/hand_evaluator.h"
 
 #include <algorithm>
@@ -48,10 +48,6 @@ ExactGameState InitialState(const SolverConfig& config) {
 
 bool Terminal(const ExactGameState& state) {
   return IsTerminal(state.betting, state.board);
-}
-
-int PlayerToAct(const ExactGameState& state) {
-  return GetPlayerToAct(state.betting, state.board);
 }
 
 bool BettingRoundOver(const ExactGameState& state) {
@@ -210,7 +206,7 @@ ExactGameState ApplyChecked(const ExactGameState& parent,
                             const GameAction& action,
                             int total_chips,
                             const ReachableTrace& trace) {
-  const int player = PlayerToAct(parent);
+  const int player = parent.betting.player_to_act;
   Require(IsPlayer(player), trace, "action transition needs an acting player");
   ExactGameState child = parent;
   child.betting = ApplyAction(parent.betting, action);
@@ -245,10 +241,9 @@ void ValidateChanceTransition(const ExactGameState& parent,
   }
 }
 
-std::vector<GameAction> LegalActions(const BettingAbstraction& betting,
-                                     const ExactGameState& state) {
-  const auto menu = betting.actions_for_betting_node(
-      state.betting, state.betting.player_to_act);
+std::vector<GameAction> AvailableActions(const BettingAbstraction& betting,
+                                         const ExactGameState& state) {
+  const auto menu = betting.actions_for_betting_node(state.betting);
   return std::vector<GameAction>(menu.actions.begin(),
                                  menu.actions.begin() + menu.count);
 }
@@ -264,9 +259,9 @@ void TraverseBettingTree(const BettingAbstraction& betting,
     return;
   }
 
-  const int player = PlayerToAct(state);
+  const int player = state.betting.player_to_act;
   Require(IsPlayer(player), trace, "betting tree node must have a player");
-  const std::vector<GameAction> actions = LegalActions(betting, state);
+  const std::vector<GameAction> actions = AvailableActions(betting, state);
   Require(!actions.empty(), trace, "betting tree node must have actions");
 
   for (const GameAction& action : actions) {
@@ -295,9 +290,9 @@ void CheckReachableCase(uint32_t seed, int max_steps) {
   ValidateState(state, total_chips, trace);
 
   for (int step = 0; step < max_steps && !Terminal(state); ++step) {
-    const int player = PlayerToAct(state);
+    const int player = state.betting.player_to_act;
     if (IsPlayer(player)) {
-      const std::vector<GameAction> actions = LegalActions(betting, state);
+      const std::vector<GameAction> actions = AvailableActions(betting, state);
       Require(!actions.empty(), trace, "player node must have legal actions");
       for (const GameAction& action : actions) {
         ExactGameState child = state;
@@ -362,7 +357,7 @@ ExactGameState RiverState() {
 void CheckCompletedRound(const ExactGameState& state, bool terminal) {
   CAPTURE(StateString(state));
   CHECK(BettingRoundOver(state));
-  CHECK(PlayerToAct(state) == -1);
+  CHECK(state.betting.player_to_act == -1);
   CHECK(state.betting.player_to_act == -1);
   CHECK(Terminal(state) == terminal);
 }
@@ -639,7 +634,7 @@ TEST_CASE("betting-round completion cases agree") {
   CHECK(runout.betting.player_to_act == -1);
   runout = ApplyChance(runout, {MakeCardId(3, SuitKind::kHearts)});
   CHECK(Terminal(runout));
-  CHECK(PlayerToAct(runout) == -1);
+  CHECK(runout.betting.player_to_act == -1);
   CHECK(runout.betting.player_to_act == -1);
 }
 

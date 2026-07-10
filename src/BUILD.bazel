@@ -29,8 +29,14 @@ cc_library(
 cc_library(
     name = "poker_types",
     hdrs = ["poker_types.h"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "game_state",
+    hdrs = ["game_state.h"],
     deps = [
-        "@abseil-cpp//absl/container:inlined_vector",
+        ":poker_types",
         "@abseil-cpp//absl/types:span",
     ],
     visibility = ["//visibility:public"],
@@ -45,6 +51,7 @@ cc_library(
     ],
     deps = [
         ":combo",
+        ":game_state",
         ":poker_types",
         "@abseil-cpp//absl/types:span",
     ],
@@ -60,6 +67,7 @@ cc_library(
     ],
     deps = [
         ":combo",
+        ":game_state",
         ":poker_types",
         "@abseil-cpp//absl/types:span",
     ],
@@ -85,7 +93,9 @@ cc_library(
     srcs = ["card_utils.cc"],
     hdrs = ["card_utils.h"],
     deps = [
+        ":game_state",
         ":poker_types",
+        "@abseil-cpp//absl/container:inlined_vector",
     ],
     visibility = ["//visibility:public"],
 )
@@ -131,6 +141,7 @@ cc_library(
     deps = [
         ":build_flags",
         ":combo",
+        ":game_state",
         ":poker_types",
     ],
     visibility = ["//visibility:public"],
@@ -141,9 +152,8 @@ cc_library(
     srcs = ["betting_abstraction.cc"],
     hdrs = ["betting_abstraction.h"],
     deps = [
-        ":build_flags",
-        ":game_tree",
-        ":strategy_tables",
+        ":game_rules",
+        ":poker_types",
     ],
     visibility = ["//visibility:public"],
 )
@@ -157,9 +167,8 @@ cc_library(
         "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
     ],
     deps = [
-        ":build_flags",
-        ":game_tree",
-        ":strategy_tables",
+        ":game_rules",
+        ":poker_types",
     ],
 )
 
@@ -184,22 +193,25 @@ cc_test(
 )
 
 cc_library(
-    name = "game_tree",
-    srcs = ["game_tree.cc"],
-    hdrs = ["game_tree.h"],
+    name = "game_rules",
+    srcs = ["game_rules.cc"],
+    hdrs = ["game_rules.h"],
     deps = [
         ":combo",
+        ":game_state",
         ":hand_evaluator",
         ":poker_types",
+        "@abseil-cpp//absl/container:inlined_vector",
+        "@abseil-cpp//absl/types:span",
     ],
     visibility = ["//visibility:public"],
 )
 
 cc_test(
-    name = "game_tree_test",
-    srcs = ["game_tree_test.cc"],
+    name = "game_rules_test",
+    srcs = ["game_rules_test.cc"],
     deps = DOCTEST_DEPS + [
-        ":game_tree",
+        ":game_rules",
     ],
 )
 
@@ -210,7 +222,7 @@ cc_test(
         ":betting_abstraction",
         ":card_utils",
         ":combo",
-        ":game_tree",
+        ":game_rules",
         ":hand_evaluator",
     ],
 )
@@ -220,7 +232,7 @@ cc_test(
     srcs = ["betting_abstraction_test.cc"],
     deps = DOCTEST_DEPS + [
         ":betting_abstraction",
-        ":game_tree",
+        ":game_rules",
     ],
 )
 
@@ -285,6 +297,7 @@ cc_library(
     deps = [
         ":build_flags",
         ":combo",
+        ":game_state",
         ":poker_types",
         "@abseil-cpp//absl/container:flat_hash_map",
     ],
@@ -378,7 +391,8 @@ CFR_SOLVER_DEPS = [
     ":build_flags",
     ":card_abstraction",
     ":card_utils",
-    ":game_tree",
+    ":game_rules",
+    ":game_state",
     ":hand_range",
     ":strategy_tables",
     ":thread_pool",

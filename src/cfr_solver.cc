@@ -4,7 +4,7 @@
 #include "src/build_flags.h"
 #include "src/card_abstraction.h"
 #include "src/card_utils.h"
-#include "src/game_tree.h"
+#include "src/game_rules.h"
 #include "src/hand_evaluator.h"
 #include "src/hand_range.h"
 #include "src/strategy_tables.h"

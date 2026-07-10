@@ -1,9 +1,11 @@
-#include "src/game_tree.h"
+#include "src/game_rules.h"
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <stdexcept>
 
+#include "absl/container/inlined_vector.h"
 #include "src/hand_evaluator.h"
 
 namespace poker {
@@ -58,31 +60,13 @@ bool HandOver(const BettingState& state, const Board& board) {
   return BoardComplete(state, board) && IsBettingRoundOver(state);
 }
 
-}  // namespace
-
-bool IsBettingRoundOver(const BettingState& state) noexcept {
-  if (state.folded_player >= 0) {
-    return true;
+Chips ConcreteBetAmount(const BettingState& state, double size) {
+  if (size <= 0.0) {
+    return 0;
   }
-  if (AnyPlayerAllIn(state)) {
-    const int player = state.player_to_act;
-    return !IsPlayer(player) || state.stack[player] == 0 ||
-           ToCall(state, player) == 0;
-  }
-  return state.pending_action_mask == 0 && ToCall(state, 0) == 0 &&
-         ToCall(state, 1) == 0;
-}
-
-bool IsTerminal(const BettingState& state, const Board& board) {
-  return state.folded_player >= 0 || HandOver(state, board);
-}
-
-int GetPlayerToAct(const BettingState& state, const Board& board) {
-  if (IsTerminal(state, board) || IsBettingRoundOver(state)) {
-    return -1;
-  }
-  assert(IsPlayer(state.player_to_act));
-  return state.player_to_act;
+  return std::max(
+      Chips{1},
+      static_cast<Chips>(std::max(Chips{1}, Pot(state)) * size));
 }
 
 bool IsLegalAction(const BettingState& state, const GameAction& action) {
@@ -114,8 +98,23 @@ bool IsLegalAction(const BettingState& state, const GameAction& action) {
   }
 }
 
-BettingState ApplyLegalActionUnchecked(const BettingState& state,
-                                       const GameAction& action) {
+void AddAction(ActionMenu& menu,
+               const BettingState& state,
+               ActionKind kind,
+               Chips amount) {
+  if (menu.count >= kMaxActionsPerNode) {
+    throw std::logic_error("Legal action table exceeded kMaxActionsPerNode");
+  }
+  const GameAction action{kind, amount};
+  if (!IsLegalAction(state, action)) {
+    throw std::logic_error("Generated an illegal poker action");
+  }
+  menu.actions[static_cast<size_t>(menu.count)] = action;
+  ++menu.count;
+}
+
+BettingState ApplyActionUnchecked(const BettingState& state,
+                                  const GameAction& action) {
   BettingState child = state;
   assert(IsPlayer(child.player_to_act));
   const int player = child.player_to_act;
@@ -168,18 +167,91 @@ BettingState ApplyLegalActionUnchecked(const BettingState& state,
   return child;
 }
 
+}  // namespace
+
+bool IsBettingRoundOver(const BettingState& state) noexcept {
+  if (state.folded_player >= 0) {
+    return true;
+  }
+  if (AnyPlayerAllIn(state)) {
+    const int player = state.player_to_act;
+    return !IsPlayer(player) || state.stack[player] == 0 ||
+           ToCall(state, player) == 0;
+  }
+  return state.pending_action_mask == 0 && ToCall(state, 0) == 0 &&
+         ToCall(state, 1) == 0;
+}
+
+bool IsTerminal(const BettingState& state, const Board& board) {
+  return state.folded_player >= 0 || HandOver(state, board);
+}
+
+ActionMenu LegalActions(const BettingState& state,
+                        absl::Span<const double> bet_sizes) {
+  const int player = state.player_to_act;
+  if (!IsPlayer(player) || state.folded_player >= 0 ||
+      state.stack[player] <= 0) {
+    throw std::logic_error("LegalActions requires a decision state");
+  }
+
+  ActionMenu menu;
+  const Chips stack = state.stack[player];
+  const Chips outstanding_call = ToCall(state, player);
+  if (outstanding_call > 0) {
+    AddAction(menu, state, ActionKind::kFold, 0);
+    AddAction(menu, state, ActionKind::kCall,
+              std::min(outstanding_call, stack));
+  } else {
+    AddAction(menu, state, ActionKind::kCheck, 0);
+  }
+
+  ActionKind sized_kind = ActionKind::kBet;
+  if (outstanding_call > 0) {
+    sized_kind = ActionKind::kRaise;
+  }
+  absl::InlinedVector<GameAction, kMaxActionsPerNode> sized_actions;
+  for (double bet_size : bet_sizes) {
+    const Chips bet = ConcreteBetAmount(state, bet_size);
+    const Chips amount = outstanding_call + bet;
+    if (amount < stack) {
+      sized_actions.push_back({sized_kind, amount});
+    }
+  }
+  std::sort(sized_actions.begin(), sized_actions.end(),
+            [](const GameAction& left, const GameAction& right) {
+              return left.amount < right.amount;
+            });
+  const auto unique_end =
+      std::unique(sized_actions.begin(), sized_actions.end(),
+                  [](const GameAction& left, const GameAction& right) {
+                    return left.kind == right.kind &&
+                           left.amount == right.amount;
+                  });
+  sized_actions.erase(unique_end, sized_actions.end());
+
+  for (const GameAction& action : sized_actions) {
+    AddAction(menu, state, action.kind, action.amount);
+  }
+
+  if (outstanding_call == 0 || stack > outstanding_call) {
+    AddAction(menu, state, ActionKind::kAllIn, stack);
+  }
+  return menu;
+}
+
 BettingState ApplyAction(const BettingState& state,
                          const GameAction& action) {
   if (!IsLegalAction(state, action)) {
     throw std::invalid_argument("illegal poker action");
   }
-  return ApplyLegalActionUnchecked(state, action);
+  return ApplyActionUnchecked(state, action);
 }
 
 ExactGameState ApplyChance(const ExactGameState& state,
                            absl::Span<const CardId> cards) {
   if (IsTerminal(state.betting, state.board) ||
-      GetPlayerToAct(state.betting, state.board) != -1) {
+      !IsBettingRoundOver(state.betting) ||
+      state.betting.player_to_act != -1) {
     throw std::invalid_argument("State is not a chance node");
   }
 

@@ -4,7 +4,7 @@
 
 #include <vector>
 
-#include "src/game_tree.h"
+#include "src/game_rules.h"
 
 namespace poker {
 namespace {
@@ -55,10 +55,9 @@ bool HasAction(const std::vector<GameAction>& actions,
   return false;
 }
 
-std::vector<GameAction> LegalActions(const BettingAbstraction& betting,
+std::vector<GameAction> AvailableActions(const BettingAbstraction& betting,
                                      const BettingState& state) {
-  const auto menu =
-      betting.actions_for_betting_node(state, state.player_to_act);
+  const auto menu = betting.actions_for_betting_node(state);
   return std::vector<GameAction>(menu.actions.begin(),
                                  menu.actions.begin() + menu.count);
 }
@@ -74,7 +73,7 @@ TEST_CASE("generated betting actions preserve state invariants") {
 
   for (const BettingState& state : states) {
     const int total_chips = TotalChips(state);
-    const std::vector<GameAction> actions = LegalActions(betting, state);
+    const std::vector<GameAction> actions = AvailableActions(betting, state);
     REQUIRE(!actions.empty());
     for (const GameAction& action : actions) {
       CAPTURE(action.kind);
@@ -89,7 +88,7 @@ TEST_CASE("generated betting actions preserve state invariants") {
         CHECK(next.player_to_act == -1);
       }
       if (IsBettingRoundOver(next)) {
-        CHECK(GetPlayerToAct(next, Board{}) == -1);
+        CHECK(next.player_to_act == -1);
       }
     }
   }
@@ -98,7 +97,7 @@ TEST_CASE("generated betting actions preserve state invariants") {
 TEST_CASE("betting action menu follows config") {
   BettingAbstraction betting(TestConfig());
   const std::vector<GameAction> preflop =
-      LegalActions(betting, PreflopState());
+      AvailableActions(betting, PreflopState());
   CHECK(HasAction(preflop, ActionKind::kFold));
   CHECK(HasAction(preflop, ActionKind::kCall, 1));
   CHECK(HasAction(preflop, ActionKind::kRaise, 2));
@@ -108,7 +107,7 @@ TEST_CASE("betting action menu follows config") {
   dedup_config.bet_sizes = {0.5, 0.51};
   BettingAbstraction dedup_betting(dedup_config);
   const std::vector<GameAction> dedup_actions =
-      LegalActions(dedup_betting, FlopState());
+      AvailableActions(dedup_betting, FlopState());
   CHECK(dedup_actions.size() == 3);
   CHECK(HasAction(dedup_actions, ActionKind::kBet, 2));
 
@@ -116,8 +115,8 @@ TEST_CASE("betting action menu follows config") {
   street_config.bet_sizes.push_back(0.5);
   street_config.flop_bet_sizes.push_back(1.0);
   BettingAbstraction street_betting(street_config);
-  CHECK(HasAction(LegalActions(street_betting, FlopState()), ActionKind::kBet,
-                  4));
+  CHECK(HasAction(AvailableActions(street_betting, FlopState()),
+                  ActionKind::kBet, 4));
 }
 
 TEST_CASE("sized betting actions are sorted and deduplicated") {
@@ -125,7 +124,7 @@ TEST_CASE("sized betting actions are sorted and deduplicated") {
   config.bet_sizes = {1.0, 0.5, 0.51, 0.25};
   BettingAbstraction betting(config);
 
-  const std::vector<GameAction> actions = LegalActions(betting, FlopState());
+  const std::vector<GameAction> actions = AvailableActions(betting, FlopState());
 
   REQUIRE(actions.size() == 5);
   CHECK(actions[0].kind == ActionKind::kCheck);
@@ -150,7 +149,7 @@ TEST_CASE("bet sizes use exact pot and stack values") {
   state.player_to_act = 0;
   state.folded_player = -1;
 
-  const auto menu = betting.actions_for_betting_node(state, 0);
+  const auto menu = betting.actions_for_betting_node(state);
   const std::vector<GameAction> actions(menu.actions.begin(),
                                         menu.actions.begin() + menu.count);
   CHECK(HasAction(actions, ActionKind::kBet, 50));

@@ -17,7 +17,7 @@
 #include "src/build_flags.h"
 #include "src/card_utils.h"
 #include "src/coarse_chance_transitions.h"
-#include "src/game_tree.h"
+#include "src/game_rules.h"
 
 namespace poker {
 namespace {
@@ -219,8 +219,7 @@ GraphBuilder::BettingNodeId GraphBuilder::append_betting_node(
   ValidateBettingNode(node);
 
   if (node.kind == StrategyTables::NodeKind::kDecision) {
-    const auto menu = betting_abstraction_.actions_for_betting_node(
-        state, node.state.player_to_act);
+    const auto menu = betting_abstraction_.actions_for_betting_node(state);
     node.action_begin = static_cast<uint32_t>(tables.betting_edges.size());
     node.action_count = menu.count;
     for (uint8_t i = 0; i < menu.count; ++i) {
@@ -275,8 +274,7 @@ GraphBuilder::get_or_create_action_betting_child(
   }
 
   const GameAction action = tables.betting_edges[edge_index].action;
-  const BettingState child_state =
-      ApplyLegalActionUnchecked(parent.state, action);
+  const BettingState child_state = ApplyAction(parent.state, action);
   const BettingNodeId child_node_id = append_betting_node(child_state);
   tables.betting_edges[edge_index].child = child_node_id;
   return child_node_id;
@@ -540,8 +538,7 @@ GraphBuilder::get_or_create_action_child(
   const size_t edge_index =
       static_cast<size_t>(parent.action_begin) + action_slot;
   const GameAction action = tables().betting_edges[edge_index].action;
-  const BettingState child_betting =
-      ApplyLegalActionUnchecked(parent.state, action);
+  const BettingState child_betting = ApplyAction(parent.state, action);
   const ExactGameState child_state{child_betting, parent_board};
   const BettingNodeId child_betting_node_id =
       get_or_create_action_betting_child(parent_node.betting_node_id,

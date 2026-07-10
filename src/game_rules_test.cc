@@ -1,4 +1,4 @@
-#include "src/game_tree.h"
+#include "src/game_rules.h"
 
 #include "doctest/doctest.h"
 

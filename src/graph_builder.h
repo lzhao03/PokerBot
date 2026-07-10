@@ -7,6 +7,7 @@
 #include "absl/types/span.h"
 #include "src/betting_abstraction.h"
 #include "src/card_abstraction.h"
+#include "src/game_state.h"
 #include "src/poker_types.h"
 #include "src/strategy_store.h"
 #include "src/strategy_tables.h"
