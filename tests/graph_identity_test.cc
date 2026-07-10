@@ -168,5 +168,31 @@ TEST_CASE("exact observations contain only the current street reveal") {
         hand);
 }
 
+TEST_CASE("exact private observation is always the hand") {
+  const ComboId hand = CardsToComboId(
+      C(14, S::kHearts), C(13, S::kHearts));
+  test::IdentityGraph graph;
+  ExactPublicState state = graph.initial_state();
+  NodeId node = graph.root(state);
+  const PrivateObservationId initial = initial_private_observation(hand);
+  CHECK(initial == hand);
+
+  node = graph.action_child(node, state, {ActionKind::kCall, 2});
+  CHECK(private_observation_for_runout(
+            hand, state.board,
+            graph.access().public_observation(node)) == initial);
+  node = graph.action_child(node, state, {ActionKind::kCheck, 0});
+  const std::array<CardId, 3> flop = {
+      C(2, S::kHearts), C(7, S::kDiamonds), C(12, S::kClubs)};
+  node = graph.chance_child(node, state, flop);
+  const PublicObservationId public_observation =
+      graph.access().public_observation(node);
+  CHECK(advance_private_observation(
+            initial, hand, StreetKind::kFlop, state.board,
+            public_observation) == hand);
+  CHECK(private_observation_for_runout(
+            hand, state.board, public_observation) == hand);
+}
+
 }  // namespace
 }  // namespace poker

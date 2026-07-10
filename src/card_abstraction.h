@@ -17,6 +17,7 @@ using PrivateBucketId = uint16_t;
 
 inline constexpr uint32_t kCoarsePrivateStreetObservationCount = 36;
 inline constexpr uint32_t kCoarsePublicStreetObservationCount = 108;
+inline constexpr int kPrivateObservationBitsPerStreet = 6;
 inline constexpr int kPublicObservationBitsPerStreet = 7;
 
 struct ExactChanceObservation {
@@ -432,6 +433,109 @@ inline PrivateBucketId private_bucket(ComboId combo_id,
                                       StreetKind street,
                                       const BoardFeatures& features) {
   return observe_private_street(combo_id, street, features).value;
+}
+
+inline PrivateObservationId exact_private_observation(ComboId hand) {
+  return PrivateObservationId{hand};
+}
+
+inline PrivateObservationId initial_private_observation(ComboId hand) {
+  if constexpr (!kCoarsePrivateBuckets) {
+    return exact_private_observation(hand);
+  }
+  const auto preflop = observe_private_street(
+      hand, StreetKind::kPreflop, BoardRunout::Preflop());
+  return preflop.value + 1;
+}
+
+inline PrivateObservationId advance_private_observation(
+    PrivateObservationId previous,
+    ComboId hand,
+    StreetKind new_street,
+    const BoardRunout& exact_board,
+    PublicObservationId public_observation) {
+  if (new_street == StreetKind::kPreflop) {
+    throw std::invalid_argument("preflop private observation is initial");
+  }
+  if (public_observation != public_observation_id(new_street, exact_board)) {
+    throw std::invalid_argument("public observation does not match runout");
+  }
+  if constexpr (!kCoarsePrivateBuckets) {
+    if (previous != exact_private_observation(hand)) {
+      throw std::invalid_argument("exact private observation changed");
+    }
+    return previous;
+  }
+
+  const auto current = observe_private_street(hand, new_street, exact_board);
+  if (current.value >= kCoarsePrivateStreetObservationCount) {
+    throw std::invalid_argument("private street observation is out of range");
+  }
+  constexpr PrivateObservationId kSlotMask =
+      (PrivateObservationId{1} << kPrivateObservationBitsPerStreet) - 1;
+  const int shift = static_cast<int>(new_street) *
+                    kPrivateObservationBitsPerStreet;
+  const PrivateObservationId slot_mask = kSlotMask << shift;
+  const PrivateObservationId later =
+      previous >> (shift + kPrivateObservationBitsPerStreet);
+  const PrivateObservationId prior =
+      (previous >> (shift - kPrivateObservationBitsPerStreet)) & kSlotMask;
+  if ((previous & slot_mask) != 0 || later != 0 || prior == 0) {
+    throw std::invalid_argument("private observation history is invalid");
+  }
+  return previous | ((current.value + 1) << shift);
+}
+
+inline PrivateObservationId private_observation_for_runout(
+    ComboId hand,
+    const BoardRunout& runout,
+    PublicObservationId public_observation) {
+  StreetKind street = StreetKind::kPreflop;
+  switch (runout.count()) {
+    case 0:
+      break;
+    case 3:
+      street = StreetKind::kFlop;
+      break;
+    case 4:
+      street = StreetKind::kTurn;
+      break;
+    case 5:
+      street = StreetKind::kRiver;
+      break;
+    default:
+      throw std::invalid_argument("invalid board runout count");
+  }
+  if (public_observation != public_observation_id(street, runout)) {
+    throw std::invalid_argument("public observation does not match runout");
+  }
+  if constexpr (!kCoarsePrivateBuckets) {
+    return exact_private_observation(hand);
+  }
+
+  PrivateObservationId observation = initial_private_observation(hand);
+  if (street == StreetKind::kPreflop) {
+    return observation;
+  }
+  const auto cards = runout.cards();
+  BoardRunout prefix = BoardRunout::Preflop();
+  prefix.deal_flop(cards.first(3));
+  observation = advance_private_observation(
+      observation, hand, StreetKind::kFlop, prefix,
+      public_observation_id(StreetKind::kFlop, prefix));
+  if (street == StreetKind::kFlop) {
+    return observation;
+  }
+  prefix.deal_turn(cards[3]);
+  observation = advance_private_observation(
+      observation, hand, StreetKind::kTurn, prefix,
+      public_observation_id(StreetKind::kTurn, prefix));
+  if (street == StreetKind::kTurn) {
+    return observation;
+  }
+  prefix.deal_river(cards[4]);
+  return advance_private_observation(
+      observation, hand, StreetKind::kRiver, prefix, public_observation);
 }
 
 inline uint32_t private_bucket_count(StreetKind) {
