@@ -18,31 +18,31 @@ SolverConfig TestConfig() {
   return config;
 }
 
-CompactPublicState PreflopState() {
-  CompactPublicState state;
+BettingState PreflopState() {
+  BettingState state;
   state.stack[0] = 99;
   state.stack[1] = 98;
   state.pot = 3;
   state.street = StreetKind::kPreflop;
   state.folded_player = -1;
-  state.player_contribution = {1, 2};
+  state.contribution = {1, 2};
   state.player_to_act = 0;
   return state;
 }
 
-CompactPublicState FlopState() {
-  CompactPublicState state;
+BettingState FlopState() {
+  BettingState state;
   state.stack[0] = 98;
   state.stack[1] = 98;
   state.pot = 4;
   state.street = StreetKind::kFlop;
   state.folded_player = -1;
-  state.player_contribution = {2, 2};
+  state.contribution = {2, 2};
   state.player_to_act = 1;
   return state;
 }
 
-int TotalChips(const CompactPublicState& state) {
+int TotalChips(const BettingState& state) {
   return state.stack[0] + state.stack[1] + state.pot;
 }
 
@@ -58,40 +58,30 @@ bool HasAction(const std::vector<GameAction>& actions,
 }
 
 std::vector<GameAction> LegalActions(const BettingAbstraction& betting,
-                                     const CompactPublicState& state) {
-  const auto menu = betting.actions_for_betting_node(
-      BettingStateFromCompact(state), state.player_to_act);
+                                     const BettingState& state) {
+  const auto menu =
+      betting.actions_for_betting_node(state, state.player_to_act);
   return std::vector<GameAction>(menu.actions.begin(),
                                  menu.actions.begin() + menu.count);
 }
 
-bool CompactTerminal(const CompactPublicState& state) {
-  const ExactGameState exact = ExactGameStateFromCompact(state);
-  return IsTerminal(exact.betting, exact.board);
-}
-
-int CompactPlayerToAct(const CompactPublicState& state) {
-  const ExactGameState exact = ExactGameStateFromCompact(state);
-  return GetPlayerToAct(exact.betting, exact.board);
-}
-
 TEST_CASE("generated betting actions preserve state invariants") {
   BettingAbstraction betting(TestConfig());
-  const std::vector<CompactPublicState> states = {
+  const std::vector<BettingState> states = {
       PreflopState(),
       FlopState(),
       ApplyAction(PreflopState(), {ActionKind::kRaise, 4, -1}),
       ApplyAction(FlopState(), {ActionKind::kCheck, 0, -1}),
   };
 
-  for (const CompactPublicState& state : states) {
+  for (const BettingState& state : states) {
     const int total_chips = TotalChips(state);
     const std::vector<GameAction> actions = LegalActions(betting, state);
     REQUIRE(!actions.empty());
     for (const GameAction& action : actions) {
       CAPTURE(action.kind);
       CAPTURE(action.amount);
-      const CompactPublicState next = ApplyAction(state, action);
+      const BettingState next = ApplyAction(state, action);
       CHECK(TotalChips(next) == total_chips);
       CHECK(next.stack[0] >= 0);
       CHECK(next.stack[1] >= 0);
@@ -100,11 +90,11 @@ TEST_CASE("generated betting actions preserve state invariants") {
       CHECK(next.last_action.kind == action.kind);
       CHECK(next.last_action.player == state.player_to_act);
       if (next.folded_player >= 0) {
-        CHECK(CompactTerminal(next));
+        CHECK(IsTerminal(next, Board{}));
         CHECK(next.player_to_act == -1);
       }
-      if (IsBettingRoundOver(BettingStateFromCompact(next))) {
-        CHECK(CompactPlayerToAct(next) == -1);
+      if (IsBettingRoundOver(next)) {
+        CHECK(GetPlayerToAct(next, Board{}) == -1);
       }
     }
   }

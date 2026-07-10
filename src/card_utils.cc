@@ -101,12 +101,4 @@ absl::InlinedVector<CardId, 5> SampleStreetCards(
                            known_private_cards, rng);
 }
 
-absl::InlinedVector<CardId, 5> SampleStreetCards(
-    const CompactPublicState& state,
-    CardMask known_private_cards,
-    std::mt19937& rng) {
-  return SampleStreetCards(state.street, BoardFromCompact(state),
-                           known_private_cards, rng);
-}
-
 }  // namespace poker

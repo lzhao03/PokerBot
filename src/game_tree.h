@@ -8,8 +8,6 @@ namespace poker {
 
 BettingState ApplyAction(const BettingState& state,
                          const GameAction& action);
-CompactPublicState ApplyAction(const CompactPublicState& state,
-                               const GameAction& action);
 bool IsLegalAction(const BettingState& state, const GameAction& action);
 BettingState ApplyLegalActionUnchecked(const BettingState& state,
                                        const GameAction& action);

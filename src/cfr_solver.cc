@@ -104,10 +104,6 @@ CFRSolver::CFRSolver(const SolverConfig& config)
 }
 
 CFRSolver::CFRSolver(const SolverConfig& config,
-                     const CompactPublicState& initial_state)
-    : CFRSolver(config, ExactGameStateFromCompact(initial_state)) {}
-
-CFRSolver::CFRSolver(const SolverConfig& config,
                      const ExactGameState& initial_state)
     : config_(NormalizedSolverConfig(config)),
       initial_state_(initial_state),

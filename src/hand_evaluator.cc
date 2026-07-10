@@ -39,12 +39,6 @@ class SevenCardHand {
 
   static SevenCardHand FromHoleAndBoard(
       ComboId hole_cards,
-      const CompactPublicState& board_state) {
-    return FromHoleAndBoard(hole_cards, BoardFromCompact(board_state));
-  }
-
-  static SevenCardHand FromHoleAndBoard(
-      ComboId hole_cards,
       const std::array<CardId, kMaxBoardCards>& board_cards,
       uint8_t board_count) {
     return FromHoleAndBoard(
@@ -189,21 +183,9 @@ HandEvaluation HandEvaluator::evaluate_hand(
   return find_best_hand(cards.cards());
 }
 
-HandEvaluation HandEvaluator::evaluate_hand(
-    ComboId hole_cards,
-    const CompactPublicState& board_state) const {
-  return evaluate_hand(hole_cards, BoardFromCompact(board_state));
-}
-
 uint16_t HandEvaluator::hand_value(ComboId hand, const Board& board) const {
   const SevenCardHand cards = SevenCardHand::FromHoleAndBoard(hand, board);
   return EvalBestCactus(cards.cards());
-}
-
-uint16_t HandEvaluator::hand_value(
-    ComboId hand,
-    const CompactPublicState& board_state) const {
-  return hand_value(hand, BoardFromCompact(board_state));
 }
 
 uint16_t HandEvaluator::hand_value(
@@ -221,13 +203,6 @@ int HandEvaluator::compare_hands(
     const Board& board) const {
   return CompareCactusValues(hand_value(hand1, board),
                              hand_value(hand2, board));
-}
-
-int HandEvaluator::compare_hands(
-    ComboId hand1,
-    ComboId hand2,
-    const CompactPublicState& board_state) const {
-  return compare_hands(hand1, hand2, BoardFromCompact(board_state));
 }
 
 int HandEvaluator::compare_hands(

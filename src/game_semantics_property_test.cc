@@ -30,38 +30,39 @@ SolverConfig TestConfig() {
   return config;
 }
 
-CompactPublicState InitialState(const SolverConfig& config) {
+ExactGameState InitialState(const SolverConfig& config) {
   const int small_blind = config.small_blind > 0 ? config.small_blind : 1;
   const int big_blind = config.big_blind > 0 ? config.big_blind : 2;
 
-  CompactPublicState state;
-  state.stack[0] = std::max(0, config.starting_stack_size - small_blind);
-  state.stack[1] = std::max(0, config.starting_stack_size - big_blind);
-  state.pot = small_blind + big_blind;
-  state.street = StreetKind::kPreflop;
-  state.folded_player = -1;
-  state.player_to_act = 0;
-  state.player_contribution = {small_blind, big_blind};
+  ExactGameState state;
+  state.betting.stack[0] =
+      std::max(0, config.starting_stack_size - small_blind);
+  state.betting.stack[1] =
+      std::max(0, config.starting_stack_size - big_blind);
+  state.betting.pot = small_blind + big_blind;
+  state.betting.street = StreetKind::kPreflop;
+  state.betting.folded_player = -1;
+  state.betting.player_to_act = 0;
+  state.betting.contribution = {small_blind, big_blind};
   return state;
 }
 
-bool CompactTerminal(const CompactPublicState& state) {
-  const ExactGameState exact = ExactGameStateFromCompact(state);
-  return IsTerminal(exact.betting, exact.board);
+bool Terminal(const ExactGameState& state) {
+  return IsTerminal(state.betting, state.board);
 }
 
-int CompactPlayerToAct(const CompactPublicState& state) {
-  const ExactGameState exact = ExactGameStateFromCompact(state);
-  return GetPlayerToAct(exact.betting, exact.board);
+int PlayerToAct(const ExactGameState& state) {
+  return GetPlayerToAct(state.betting, state.board);
 }
 
-bool CompactBettingRoundOver(const CompactPublicState& state) {
-  return IsBettingRoundOver(BettingStateFromCompact(state));
+bool BettingRoundOver(const ExactGameState& state) {
+  return IsBettingRoundOver(state.betting);
 }
 
-CompactPublicState CompactApplyChance(const CompactPublicState& state,
-                                      absl::Span<const CardId> cards) {
-  return ToCompact(ApplyChance(ExactGameStateFromCompact(state), cards));
+ExactGameState ApplyStateAction(ExactGameState state,
+                                const GameAction& action) {
+  state.betting = ApplyAction(state.betting, action);
+  return state;
 }
 
 ComboId Combo(int first_rank,
@@ -89,19 +90,20 @@ std::string ActionString(const GameAction& action) {
   return out.str();
 }
 
-std::string StateString(const CompactPublicState& state) {
+std::string StateString(const ExactGameState& state) {
+  const BettingState& betting = state.betting;
   std::ostringstream out;
-  out << "street=" << static_cast<int>(state.street)
-      << " pot=" << state.pot
-      << " stack={" << state.stack[0] << "," << state.stack[1] << "}"
-      << " contrib={" << state.player_contribution[0] << ","
-      << state.player_contribution[1] << "}"
-      << " player_to_act=" << state.player_to_act
-      << " folded=" << state.folded_player
-      << " all_in=" << state.all_in
+  out << "street=" << static_cast<int>(betting.street)
+      << " pot=" << betting.pot
+      << " stack={" << betting.stack[0] << "," << betting.stack[1] << "}"
+      << " contrib={" << betting.contribution[0] << ","
+      << betting.contribution[1] << "}"
+      << " player_to_act=" << static_cast<int>(betting.player_to_act)
+      << " folded=" << static_cast<int>(betting.folded_player)
+      << " all_in=" << betting.all_in
       << " board=";
-  for (uint8_t i = 0; i < state.board_count; ++i) {
-    out << CardString(state.board_cards[static_cast<size_t>(i)]);
+  for (CardId card : state.board.span()) {
+    out << CardString(card);
   }
   return out.str();
 }
@@ -133,95 +135,105 @@ void Require(bool condition,
   }
 }
 
-int TotalChips(const CompactPublicState& state) {
-  return state.pot + state.stack[0] + state.stack[1];
+int TotalChips(const ExactGameState& state) {
+  return state.betting.pot + state.betting.stack[0] +
+         state.betting.stack[1];
 }
 
-void ValidateBoard(const CompactPublicState& state,
+void ValidateBoard(const ExactGameState& state,
                    const ReachableTrace& trace) {
-  Require(std::popcount(state.board_mask) == state.board_count, trace,
+  Require(std::popcount(state.board.mask) == state.board.count, trace,
           "board mask popcount must equal board count");
 
   CardMask seen = 0;
-  for (uint8_t i = 0; i < state.board_count; ++i) {
-    const CardId card = state.board_cards[static_cast<size_t>(i)];
+  for (CardId card : state.board.span()) {
     const CardMask bit = CardBit(card);
     Require((seen & bit) == 0, trace, "board cards must be unique");
-    Require((state.board_mask & bit) != 0, trace,
+    Require((state.board.mask & bit) != 0, trace,
             "board card must be present in mask");
     seen |= bit;
   }
 
-  Require(BoardCardsForStreet(state.street) == state.board_count, trace,
+  Require(BoardCardsForStreet(state.betting.street) == state.board.count,
+          trace,
           "street and board count must agree");
 }
 
-void ValidateState(const CompactPublicState& state,
+void ValidateState(const ExactGameState& state,
                    int total_chips,
                    const ReachableTrace& trace) {
-  Require(state.pot >= 0, trace, "pot must be non-negative");
-  Require(state.stack[0] >= 0, trace, "player A stack must be non-negative");
-  Require(state.stack[1] >= 0, trace, "player B stack must be non-negative");
-  Require(state.player_contribution[0] >= 0, trace,
+  const BettingState& betting = state.betting;
+  Require(betting.pot >= 0, trace, "pot must be non-negative");
+  Require(betting.stack[0] >= 0, trace,
+          "player A stack must be non-negative");
+  Require(betting.stack[1] >= 0, trace,
+          "player B stack must be non-negative");
+  Require(betting.contribution[0] >= 0, trace,
           "player A contribution must be non-negative");
-  Require(state.player_contribution[1] >= 0, trace,
+  Require(betting.contribution[1] >= 0, trace,
           "player B contribution must be non-negative");
   Require(TotalChips(state) == total_chips, trace,
           "pot plus stacks must conserve chips");
-  Require(state.pot == state.player_contribution[0] +
-                           state.player_contribution[1],
+  Require(betting.pot ==
+              betting.contribution[0] + betting.contribution[1],
           trace, "pot must equal total contributions");
   ValidateBoard(state, trace);
 }
 
-void ValidateActionTransition(const CompactPublicState& parent,
-                              const CompactPublicState& child,
+void ValidateActionTransition(const ExactGameState& parent,
+                              const ExactGameState& child,
                               int player,
                               int total_chips,
                               const ReachableTrace& trace) {
   ValidateState(child, total_chips, trace);
-  const int committed = parent.stack[player] - child.stack[player];
+  const int committed =
+      parent.betting.stack[player] - child.betting.stack[player];
   Require(committed >= 0, trace, "action cannot add chips to stack");
-  Require(child.pot == parent.pot + committed, trace,
+  Require(child.betting.pot == parent.betting.pot + committed, trace,
           "pot must increase by committed chips");
-  Require(child.player_contribution[player] ==
-              parent.player_contribution[player] + committed,
+  Require(child.betting.contribution[player] ==
+              parent.betting.contribution[player] + committed,
           trace, "acting player contribution must increase by committed chips");
-  Require(child.player_contribution[Opponent(player)] ==
-              parent.player_contribution[Opponent(player)],
+  Require(child.betting.contribution[Opponent(player)] ==
+              parent.betting.contribution[Opponent(player)],
           trace, "opponent contribution must not change");
+  Require(child.board.mask == parent.board.mask, trace,
+          "action cannot change the board");
 }
 
-CompactPublicState ApplyChecked(const CompactPublicState& parent,
-                                const GameAction& action,
-                                int total_chips,
-                                const ReachableTrace& trace) {
-  const int player = CompactPlayerToAct(parent);
+ExactGameState ApplyChecked(const ExactGameState& parent,
+                            const GameAction& action,
+                            int total_chips,
+                            const ReachableTrace& trace) {
+  const int player = PlayerToAct(parent);
   Require(IsPlayer(player), trace, "action transition needs an acting player");
-  const CompactPublicState child = ApplyAction(parent, action);
+  ExactGameState child = parent;
+  child.betting = ApplyAction(parent.betting, action);
   ValidateActionTransition(parent, child, player, total_chips, trace);
   return child;
 }
 
-void ValidateChanceTransition(const CompactPublicState& parent,
-                              const CompactPublicState& child,
+void ValidateChanceTransition(const ExactGameState& parent,
+                              const ExactGameState& child,
                               absl::Span<const CardId> cards,
                               int total_chips,
                               const ReachableTrace& trace) {
   ValidateState(child, total_chips, trace);
   Require(TotalChips(child) == TotalChips(parent), trace,
           "chance cannot change chips");
-  Require(child.street == StreetAfterChance(parent.street), trace,
+  Require(child.betting.street == StreetAfterChance(parent.betting.street),
+          trace,
           "chance must advance street");
-  Require(child.board_count == BoardCardsForStreet(child.street), trace,
+  Require(child.board.count == BoardCardsForStreet(child.betting.street),
+          trace,
           "chance must produce exact board count for street");
-  Require(child.actions_this_street == 0, trace,
+  Require(child.betting.actions_this_street == 0, trace,
           "chance must reset street action count");
 
   CardMask dealt = 0;
   for (CardId card : cards) {
     const CardMask bit = CardBit(card);
-    Require((parent.board_mask & bit) == 0, trace,
+    Require((parent.board.mask & bit) == 0, trace,
             "chance card cannot overlap old board");
     Require((dealt & bit) == 0, trace, "chance cards must be unique");
     dealt |= bit;
@@ -229,32 +241,31 @@ void ValidateChanceTransition(const CompactPublicState& parent,
 }
 
 std::vector<GameAction> LegalActions(const BettingAbstraction& betting,
-                                     const CompactPublicState& state) {
+                                     const ExactGameState& state) {
   const auto menu = betting.actions_for_betting_node(
-      BettingStateFromCompact(state), state.player_to_act);
+      state.betting, state.betting.player_to_act);
   return std::vector<GameAction>(menu.actions.begin(),
                                  menu.actions.begin() + menu.count);
 }
 
 void TraverseBettingTree(const BettingAbstraction& betting,
-                         const CompactPublicState& state,
+                         const ExactGameState& state,
                          int total_chips,
                          int depth,
                          int max_depth,
                          ReachableTrace trace) {
   ValidateState(state, total_chips, trace);
-  if (depth >= max_depth || CompactTerminal(state) ||
-      CompactBettingRoundOver(state)) {
+  if (depth >= max_depth || Terminal(state) || BettingRoundOver(state)) {
     return;
   }
 
-  const int player = CompactPlayerToAct(state);
+  const int player = PlayerToAct(state);
   Require(IsPlayer(player), trace, "betting tree node must have a player");
   const std::vector<GameAction> actions = LegalActions(betting, state);
   Require(!actions.empty(), trace, "betting tree node must have actions");
 
   for (const GameAction& action : actions) {
-    CompactPublicState child =
+    ExactGameState child =
         ApplyChecked(state, action, total_chips, trace);
     trace.steps.push_back("depth " + std::to_string(depth) + " " +
                           ActionString(action) + "\n  before " +
@@ -274,32 +285,34 @@ void CheckReachableCase(uint32_t seed, int max_steps) {
   ReachableTrace trace{seed, max_steps, config, {}};
   std::mt19937 rng(seed);
   BettingAbstraction betting(config);
-  CompactPublicState state = InitialState(config);
+  ExactGameState state = InitialState(config);
   const int total_chips = TotalChips(state);
   ValidateState(state, total_chips, trace);
 
-  for (int step = 0; step < max_steps && !CompactTerminal(state); ++step) {
-    const int player = CompactPlayerToAct(state);
+  for (int step = 0; step < max_steps && !Terminal(state); ++step) {
+    const int player = PlayerToAct(state);
     if (IsPlayer(player)) {
       const std::vector<GameAction> actions = LegalActions(betting, state);
       Require(!actions.empty(), trace, "player node must have legal actions");
       for (const GameAction& action : actions) {
-        const CompactPublicState child = ApplyAction(state, action);
+        ExactGameState child = state;
+        child.betting = ApplyAction(state.betting, action);
         ValidateActionTransition(state, child, player, total_chips, trace);
       }
 
       std::uniform_int_distribution<size_t> choose(0, actions.size() - 1);
       const GameAction action = actions[choose(rng)];
-      const CompactPublicState parent = state;
-      state = ApplyAction(state, action);
+      const ExactGameState parent = state;
+      state.betting = ApplyAction(state.betting, action);
       trace.steps.push_back("action " + ActionString(action) + "\n  before " +
                             StateString(parent) + "\n  after  " +
                             StateString(state));
       ValidateActionTransition(parent, state, player, total_chips, trace);
     } else {
-      const CompactPublicState parent = state;
-      const auto cards = SampleStreetCards(state, 0, rng);
-      state = CompactApplyChance(state, cards);
+      const ExactGameState parent = state;
+      const auto cards = SampleStreetCards(
+          state.betting.street, state.board, 0, rng);
+      state = ApplyChance(state, cards);
       std::ostringstream step_text;
       step_text << "chance";
       for (CardId card : cards) {
@@ -313,90 +326,90 @@ void CheckReachableCase(uint32_t seed, int max_steps) {
   }
 }
 
-CompactPublicState FlopState() {
-  CompactPublicState state;
-  state.stack = {18, 18};
-  state.pot = 4;
-  state.street = StreetKind::kFlop;
-  state.player_to_act = 1;
-  state.folded_player = -1;
-  state.player_contribution = {2, 2};
-  AddBoardCard(state, MakeCardId(2, SuitKind::kHearts));
-  AddBoardCard(state, MakeCardId(7, SuitKind::kDiamonds));
-  AddBoardCard(state, MakeCardId(12, SuitKind::kClubs));
+ExactGameState FlopState() {
+  ExactGameState state;
+  state.betting.stack = {18, 18};
+  state.betting.pot = 4;
+  state.betting.street = StreetKind::kFlop;
+  state.betting.player_to_act = 1;
+  state.betting.folded_player = -1;
+  state.betting.contribution = {2, 2};
+  state.board.add(MakeCardId(2, SuitKind::kHearts));
+  state.board.add(MakeCardId(7, SuitKind::kDiamonds));
+  state.board.add(MakeCardId(12, SuitKind::kClubs));
   return state;
 }
 
-CompactPublicState RiverState() {
-  CompactPublicState state;
-  state.stack = {20, 20};
-  state.pot = 20;
-  state.street = StreetKind::kRiver;
-  state.player_to_act = 1;
-  state.folded_player = -1;
-  state.player_contribution = {10, 10};
-  AddBoardCard(state, MakeCardId(2, SuitKind::kHearts));
-  AddBoardCard(state, MakeCardId(7, SuitKind::kDiamonds));
-  AddBoardCard(state, MakeCardId(12, SuitKind::kClubs));
-  AddBoardCard(state, MakeCardId(9, SuitKind::kSpades));
-  AddBoardCard(state, MakeCardId(3, SuitKind::kHearts));
+ExactGameState RiverState() {
+  ExactGameState state;
+  state.betting.stack = {20, 20};
+  state.betting.pot = 20;
+  state.betting.street = StreetKind::kRiver;
+  state.betting.player_to_act = 1;
+  state.betting.folded_player = -1;
+  state.betting.contribution = {10, 10};
+  state.board.add(MakeCardId(2, SuitKind::kHearts));
+  state.board.add(MakeCardId(7, SuitKind::kDiamonds));
+  state.board.add(MakeCardId(12, SuitKind::kClubs));
+  state.board.add(MakeCardId(9, SuitKind::kSpades));
+  state.board.add(MakeCardId(3, SuitKind::kHearts));
   return state;
 }
 
-void CheckCompletedRound(const CompactPublicState& state,
-                         bool terminal) {
+void CheckCompletedRound(const ExactGameState& state, bool terminal) {
   CAPTURE(StateString(state));
-  CHECK(CompactBettingRoundOver(state));
-  CHECK(CompactPlayerToAct(state) == -1);
-  CHECK(CompactTerminal(state) == terminal);
+  CHECK(BettingRoundOver(state));
+  CHECK(PlayerToAct(state) == -1);
+  CHECK(Terminal(state) == terminal);
 }
 
-CompactPublicState RiverShowdown(std::initializer_list<CardId> board) {
-  CompactPublicState state;
-  state.stack = {0, 0};
-  state.pot = 20;
-  state.street = StreetKind::kRiver;
-  state.player_to_act = -1;
-  state.folded_player = -1;
-  state.player_contribution = {10, 10};
+ExactGameState RiverShowdown(std::initializer_list<CardId> board) {
+  ExactGameState state;
+  state.betting.stack = {0, 0};
+  state.betting.pot = 20;
+  state.betting.street = StreetKind::kRiver;
+  state.betting.player_to_act = -1;
+  state.betting.folded_player = -1;
+  state.betting.contribution = {10, 10};
   for (CardId card : board) {
-    AddBoardCard(state, card);
+    state.board.add(card);
   }
   return state;
 }
 
-double OracleUtility(const CompactPublicState& state,
+double OracleUtility(const ExactGameState& state,
                      ComboId a_hand,
                      ComboId b_hand,
                      int player) {
-  const double contribution = state.player_contribution[player];
-  if (state.folded_player == player) {
+  const BettingState& betting = state.betting;
+  const double contribution = betting.contribution[player];
+  if (betting.folded_player == player) {
     return -contribution;
   }
-  if (state.folded_player == Opponent(player)) {
-    return state.pot - contribution;
+  if (betting.folded_player == Opponent(player)) {
+    return betting.pot - contribution;
   }
 
   HandEvaluator evaluator;
-  const int comparison = evaluator.compare_hands(a_hand, b_hand, state);
+  const int comparison =
+      evaluator.compare_hands(a_hand, b_hand, state.board);
   const int player_comparison = player == 0 ? comparison : -comparison;
   if (player_comparison > 0) {
-    return state.pot - contribution;
+    return betting.pot - contribution;
   }
   if (player_comparison < 0) {
     return -contribution;
   }
-  return state.pot / 2.0 - contribution;
+  return betting.pot / 2.0 - contribution;
 }
 
-void CheckUtility(const CompactPublicState& state,
+void CheckUtility(const ExactGameState& state,
                   ComboId a_hand,
                   ComboId b_hand,
                   double expected_a) {
   CAPTURE(expected_a);
   CAPTURE(StateString(state));
-  const double actual_a =
-      GetUtility(ExactGameStateFromCompact(state), a_hand, b_hand);
+  const double actual_a = GetUtility(state, a_hand, b_hand);
   const double oracle_a = OracleUtility(state, a_hand, b_hand, 0);
   const double oracle_b = OracleUtility(state, a_hand, b_hand, 1);
   CHECK(actual_a == doctest::Approx(expected_a));
@@ -425,53 +438,55 @@ TEST_CASE("reachable random states preserve poker invariants") {
 
 TEST_CASE("representative invalid actions are rejected") {
   const SolverConfig config = TestConfig();
-  const CompactPublicState root = InitialState(config);
-  CHECK_THROWS(ApplyAction(root, {ActionKind::kCheck, 0, -1}));
-  CHECK_THROWS(ApplyAction(root, {ActionKind::kRaise, 1, -1}));
-  CHECK_THROWS(ApplyAction(root, {ActionKind::kRaise, root.stack[0], -1}));
+  const ExactGameState root = InitialState(config);
+  CHECK_THROWS(ApplyAction(root.betting, {ActionKind::kCheck, 0, -1}));
+  CHECK_THROWS(ApplyAction(root.betting, {ActionKind::kRaise, 1, -1}));
+  CHECK_THROWS(ApplyAction(
+      root.betting, {ActionKind::kRaise, root.betting.stack[0], -1}));
 
-  const CompactPublicState flop = FlopState();
-  CHECK_THROWS(ApplyAction(flop, {ActionKind::kCall, 0, -1}));
-  CHECK_THROWS(ApplyAction(flop, {ActionKind::kBet, flop.stack[1], -1}));
+  const ExactGameState flop = FlopState();
+  CHECK_THROWS(ApplyAction(flop.betting, {ActionKind::kCall, 0, -1}));
+  CHECK_THROWS(ApplyAction(
+      flop.betting, {ActionKind::kBet, flop.betting.stack[1], -1}));
 
-  const CompactPublicState folded =
-      ApplyAction(root, {ActionKind::kFold, 0, -1});
-  CHECK_THROWS(ApplyAction(folded, {ActionKind::kCall, 1, -1}));
+  const ExactGameState folded =
+      ApplyStateAction(root, {ActionKind::kFold, 0, -1});
+  CHECK_THROWS(ApplyAction(folded.betting, {ActionKind::kCall, 1, -1}));
 
-  CompactPublicState broke = flop;
-  broke.stack[1] = 0;
-  broke.player_to_act = 1;
-  CHECK_THROWS(ApplyAction(broke, {ActionKind::kCheck, 0, -1}));
+  ExactGameState broke = flop;
+  broke.betting.stack[1] = 0;
+  broke.betting.player_to_act = 1;
+  CHECK_THROWS(ApplyAction(broke.betting, {ActionKind::kCheck, 0, -1}));
 }
 
 TEST_CASE("deterministic action transitions preserve chip accounting") {
   const SolverConfig config = TestConfig();
   ReachableTrace trace{0, 0, config, {}};
-  const CompactPublicState root = InitialState(config);
+  const ExactGameState root = InitialState(config);
   const int total_chips = TotalChips(root);
   ValidateState(root, total_chips, trace);
-  CHECK(root.street == StreetKind::kPreflop);
-  CHECK(root.player_to_act == 0);
-  CHECK(root.player_contribution[0] == config.small_blind);
-  CHECK(root.player_contribution[1] == config.big_blind);
+  CHECK(root.betting.street == StreetKind::kPreflop);
+  CHECK(root.betting.player_to_act == 0);
+  CHECK(root.betting.contribution[0] == config.small_blind);
+  CHECK(root.betting.contribution[1] == config.big_blind);
 
-  CompactPublicState call_check =
+  ExactGameState call_check =
       ApplyChecked(root, {ActionKind::kCall, 1}, total_chips, trace);
   call_check = ApplyChecked(call_check, {ActionKind::kCheck}, total_chips,
                             trace);
   CheckCompletedRound(call_check, false);
 
-  CompactPublicState fold =
+  ExactGameState fold =
       ApplyChecked(root, {ActionKind::kFold}, total_chips, trace);
   CheckCompletedRound(fold, true);
 
-  CompactPublicState raise_call =
+  ExactGameState raise_call =
       ApplyChecked(root, {ActionKind::kRaise, 4}, total_chips, trace);
   raise_call = ApplyChecked(raise_call, {ActionKind::kCall}, total_chips,
                             trace);
   CheckCompletedRound(raise_call, false);
 
-  CompactPublicState check_bet_call =
+  ExactGameState check_bet_call =
       ApplyChecked(FlopState(), {ActionKind::kCheck}, 40, trace);
   check_bet_call =
       ApplyChecked(check_bet_call, {ActionKind::kBet, 2}, 40, trace);
@@ -479,7 +494,7 @@ TEST_CASE("deterministic action transitions preserve chip accounting") {
       ApplyChecked(check_bet_call, {ActionKind::kCall}, 40, trace);
   CheckCompletedRound(check_bet_call, false);
 
-  CompactPublicState bet_raise_call =
+  ExactGameState bet_raise_call =
       ApplyChecked(FlopState(), {ActionKind::kBet, 4}, 40, trace);
   bet_raise_call =
       ApplyChecked(bet_raise_call, {ActionKind::kRaise, 8}, 40, trace);
@@ -487,32 +502,33 @@ TEST_CASE("deterministic action transitions preserve chip accounting") {
       ApplyChecked(bet_raise_call, {ActionKind::kCall}, 40, trace);
   CheckCompletedRound(bet_raise_call, false);
 
-  CompactPublicState all_in =
+  ExactGameState all_in =
       ApplyChecked(FlopState(), {ActionKind::kAllIn}, 40, trace);
   all_in = ApplyChecked(all_in, {ActionKind::kCall}, 40, trace);
   CheckCompletedRound(all_in, false);
 
-  CompactPublicState short_call = root;
-  short_call.stack[0] = 3;
-  short_call.stack[1] = 12;
-  short_call.pot = 9;
-  short_call.player_contribution = {1, 8};
+  ExactGameState short_call = root;
+  short_call.betting.stack[0] = 3;
+  short_call.betting.stack[1] = 12;
+  short_call.betting.pot = 9;
+  short_call.betting.contribution = {1, 8};
   short_call = ApplyChecked(short_call, {ActionKind::kCall}, 24, trace);
   CheckCompletedRound(short_call, false);
-  CHECK(short_call.stack[0] == 0);
-  CHECK(short_call.player_contribution[0] < short_call.player_contribution[1]);
+  CHECK(short_call.betting.stack[0] == 0);
+  CHECK(short_call.betting.contribution[0] <
+        short_call.betting.contribution[1]);
 
-  CompactPublicState river_check =
+  ExactGameState river_check =
       ApplyChecked(RiverState(), {ActionKind::kCheck}, 60, trace);
   river_check = ApplyChecked(river_check, {ActionKind::kCheck}, 60, trace);
   CheckCompletedRound(river_check, true);
 
-  CompactPublicState river_call =
+  ExactGameState river_call =
       ApplyChecked(RiverState(), {ActionKind::kBet, 10}, 60, trace);
   river_call = ApplyChecked(river_call, {ActionKind::kCall}, 60, trace);
   CheckCompletedRound(river_call, true);
 
-  CompactPublicState river_fold =
+  ExactGameState river_fold =
       ApplyChecked(RiverState(), {ActionKind::kBet, 10}, 60, trace);
   river_fold = ApplyChecked(river_fold, {ActionKind::kFold}, 60, trace);
   CheckCompletedRound(river_fold, true);
@@ -525,7 +541,7 @@ TEST_CASE("tiny betting tree is exhaustively valid to bounded depth") {
   config.big_blind = 2;
   config.bet_sizes = {0.5, 1.0};
 
-  const CompactPublicState root = InitialState(config);
+  const ExactGameState root = InitialState(config);
   const int total_chips = TotalChips(root);
   ReachableTrace trace{0, 8, config, {}};
   TraverseBettingTree(BettingAbstraction(config), root, total_chips, 0, 8,
@@ -534,60 +550,67 @@ TEST_CASE("tiny betting tree is exhaustively valid to bounded depth") {
 
 TEST_CASE("betting-round completion cases agree") {
   const SolverConfig config = TestConfig();
-  const CompactPublicState root = InitialState(config);
-  CompactPublicState preflop_complete =
-      ApplyAction(root, {ActionKind::kCall, 1, -1});
-  CHECK(!CompactBettingRoundOver(preflop_complete));
-  preflop_complete = ApplyAction(preflop_complete, {ActionKind::kCheck});
+  const ExactGameState root = InitialState(config);
+  ExactGameState preflop_complete =
+      ApplyStateAction(root, {ActionKind::kCall, 1, -1});
+  CHECK(!BettingRoundOver(preflop_complete));
+  preflop_complete =
+      ApplyStateAction(preflop_complete, {ActionKind::kCheck});
   CheckCompletedRound(preflop_complete, false);
 
-  CompactPublicState checked = ApplyAction(FlopState(), {ActionKind::kCheck});
-  checked = ApplyAction(checked, {ActionKind::kCheck});
+  ExactGameState checked =
+      ApplyStateAction(FlopState(), {ActionKind::kCheck});
+  checked = ApplyStateAction(checked, {ActionKind::kCheck});
   CheckCompletedRound(checked, false);
 
-  CompactPublicState bet_call = ApplyAction(FlopState(), {ActionKind::kBet, 4});
-  bet_call = ApplyAction(bet_call, {ActionKind::kCall, 4});
+  ExactGameState bet_call =
+      ApplyStateAction(FlopState(), {ActionKind::kBet, 4});
+  bet_call = ApplyStateAction(bet_call, {ActionKind::kCall, 4});
   CheckCompletedRound(bet_call, false);
 
-  CompactPublicState bet_fold = ApplyAction(FlopState(), {ActionKind::kBet, 4});
-  bet_fold = ApplyAction(bet_fold, {ActionKind::kFold});
+  ExactGameState bet_fold =
+      ApplyStateAction(FlopState(), {ActionKind::kBet, 4});
+  bet_fold = ApplyStateAction(bet_fold, {ActionKind::kFold});
   CheckCompletedRound(bet_fold, true);
 
-  CompactPublicState raise_call =
-      ApplyAction(root, {ActionKind::kRaise, 4, -1});
-  raise_call = ApplyAction(raise_call, {ActionKind::kCall, 3, -1});
+  ExactGameState raise_call =
+      ApplyStateAction(root, {ActionKind::kRaise, 4, -1});
+  raise_call = ApplyStateAction(raise_call, {ActionKind::kCall, 3, -1});
   CheckCompletedRound(raise_call, false);
 
-  CompactPublicState short_call = root;
-  short_call.stack[0] = 3;
-  short_call.stack[1] = 12;
-  short_call.pot = 9;
-  short_call.player_contribution = {1, 8};
-  short_call = ApplyAction(short_call, {ActionKind::kCall, 7, -1});
+  ExactGameState short_call = root;
+  short_call.betting.stack[0] = 3;
+  short_call.betting.stack[1] = 12;
+  short_call.betting.pot = 9;
+  short_call.betting.contribution = {1, 8};
+  short_call = ApplyStateAction(short_call, {ActionKind::kCall, 7, -1});
   CheckCompletedRound(short_call, false);
-  CHECK(short_call.stack[0] == 0);
-  CHECK(short_call.player_contribution[0] < short_call.player_contribution[1]);
+  CHECK(short_call.betting.stack[0] == 0);
+  CHECK(short_call.betting.contribution[0] <
+        short_call.betting.contribution[1]);
 
-  CompactPublicState all_in = ApplyAction(FlopState(), {ActionKind::kAllIn});
-  all_in = ApplyAction(all_in, {ActionKind::kCall});
+  ExactGameState all_in =
+      ApplyStateAction(FlopState(), {ActionKind::kAllIn});
+  all_in = ApplyStateAction(all_in, {ActionKind::kCall});
   CheckCompletedRound(all_in, false);
 
-  CompactPublicState runout = ApplyAction(root, {ActionKind::kCall, 1, -1});
-  runout = ApplyAction(runout, {ActionKind::kCheck});
-  runout = CompactApplyChance(runout, {MakeCardId(2, SuitKind::kHearts),
-                                       MakeCardId(7, SuitKind::kDiamonds),
-                                       MakeCardId(12, SuitKind::kClubs)});
-  runout = ApplyAction(runout, {ActionKind::kAllIn});
-  runout = ApplyAction(runout, {ActionKind::kCall});
-  runout = CompactApplyChance(runout, {MakeCardId(9, SuitKind::kSpades)});
-  runout = CompactApplyChance(runout, {MakeCardId(3, SuitKind::kHearts)});
-  CHECK(CompactTerminal(runout));
-  CHECK(CompactPlayerToAct(runout) == -1);
+  ExactGameState runout =
+      ApplyStateAction(root, {ActionKind::kCall, 1, -1});
+  runout = ApplyStateAction(runout, {ActionKind::kCheck});
+  runout = ApplyChance(runout, {MakeCardId(2, SuitKind::kHearts),
+                                MakeCardId(7, SuitKind::kDiamonds),
+                                MakeCardId(12, SuitKind::kClubs)});
+  runout = ApplyStateAction(runout, {ActionKind::kAllIn});
+  runout = ApplyStateAction(runout, {ActionKind::kCall});
+  runout = ApplyChance(runout, {MakeCardId(9, SuitKind::kSpades)});
+  runout = ApplyChance(runout, {MakeCardId(3, SuitKind::kHearts)});
+  CHECK(Terminal(runout));
+  CHECK(PlayerToAct(runout) == -1);
 }
 
 TEST_CASE("chance sampling excludes known cards") {
-  CompactPublicState state = InitialState(TestConfig());
-  state = ApplyAction(state, {ActionKind::kCall, 1, -1});
+  ExactGameState state = InitialState(TestConfig());
+  state = ApplyStateAction(state, {ActionKind::kCall, 1, -1});
 
   const ComboId a_hand =
       Combo(14, SuitKind::kHearts, 13, SuitKind::kHearts);
@@ -596,7 +619,8 @@ TEST_CASE("chance sampling excludes known cards") {
   const CardMask blocked = ComboMask(a_hand) | ComboMask(b_hand);
   std::mt19937 rng(123);
   for (int i = 0; i < 500; ++i) {
-    const auto cards = SampleStreetCards(state, blocked, rng);
+    const auto cards = SampleStreetCards(
+        state.betting.street, state.board, blocked, rng);
     CHECK(cards.size() == 3);
     for (CardId card : cards) {
       CHECK((blocked & CardBit(card)) == 0);
@@ -605,8 +629,8 @@ TEST_CASE("chance sampling excludes known cards") {
 }
 
 TEST_CASE("terminal utility matches independent oracle") {
-  CompactPublicState folded = InitialState(TestConfig());
-  folded = ApplyAction(folded, {ActionKind::kFold});
+  ExactGameState folded = InitialState(TestConfig());
+  folded = ApplyStateAction(folded, {ActionKind::kFold});
   CheckUtility(folded,
                Combo(14, SuitKind::kHearts, 13, SuitKind::kHearts),
                Combo(12, SuitKind::kClubs, 11, SuitKind::kClubs),

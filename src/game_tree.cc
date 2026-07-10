@@ -210,13 +210,6 @@ BettingState ApplyAction(const BettingState& state,
   return ApplyLegalActionUnchecked(state, action);
 }
 
-CompactPublicState ApplyAction(const CompactPublicState& state,
-                               const GameAction& action) {
-  const BettingState child =
-      ApplyAction(BettingStateFromCompact(state), action);
-  return ToCompact(child, BoardFromCompact(state));
-}
-
 ExactGameState ApplyChance(const ExactGameState& state,
                            absl::Span<const CardId> cards) {
   if (IsTerminal(state.betting, state.board) ||

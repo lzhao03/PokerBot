@@ -6,26 +6,19 @@
 namespace poker {
 namespace {
 
-CompactPublicState PublicState(StreetKind street,
-                               CardId first,
-                               CardId second,
-                               CardId third,
-                               CardId fourth = 0) {
-  CompactPublicState state;
-  state.street = street;
-  AddBoardCard(state, first);
-  AddBoardCard(state, second);
-  AddBoardCard(state, third);
+Board TestBoard(StreetKind street,
+                CardId first,
+                CardId second,
+                CardId third,
+                CardId fourth = 0) {
+  Board board;
+  board.add(first);
+  board.add(second);
+  board.add(third);
   if (street == StreetKind::kTurn || street == StreetKind::kRiver) {
-    AddBoardCard(state, fourth);
+    board.add(fourth);
   }
-  return state;
-}
-
-CompactPublicState PreflopState() {
-  CompactPublicState state;
-  state.street = StreetKind::kPreflop;
-  return state;
+  return board;
 }
 
 ComboId ExactCombo(int first_rank,
@@ -72,84 +65,70 @@ void CheckTextureTransitions(
 }
 
 TEST_CASE("exact public buckets use the board mask") {
-  const CompactPublicState first =
-      PublicState(StreetKind::kFlop,
-                  MakeCardId(2, SuitKind::kHearts),
-                  MakeCardId(7, SuitKind::kDiamonds),
-                  MakeCardId(11, SuitKind::kClubs));
-  const CompactPublicState reordered =
-      PublicState(StreetKind::kFlop,
-                  MakeCardId(11, SuitKind::kClubs),
-                  MakeCardId(2, SuitKind::kHearts),
-                  MakeCardId(7, SuitKind::kDiamonds));
+  const Board first = TestBoard(
+      StreetKind::kFlop, MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(7, SuitKind::kDiamonds),
+      MakeCardId(11, SuitKind::kClubs));
+  const Board reordered = TestBoard(
+      StreetKind::kFlop, MakeCardId(11, SuitKind::kClubs),
+      MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(7, SuitKind::kDiamonds));
 
-  CHECK(exact_public_bucket(BoardFromCompact(first)) == first.board_mask);
-  CHECK(exact_public_bucket(BoardFromCompact(first)) ==
-        exact_public_bucket(BoardFromCompact(reordered)));
+  CHECK(exact_public_bucket(first) == first.mask);
+  CHECK(exact_public_bucket(first) == exact_public_bucket(reordered));
 }
 
 TEST_CASE("texture public buckets group by board texture") {
-  const CompactPublicState first_flop =
-      PublicState(StreetKind::kFlop,
-                  MakeCardId(2, SuitKind::kHearts),
-                  MakeCardId(7, SuitKind::kDiamonds),
-                  MakeCardId(11, SuitKind::kClubs));
-  const CompactPublicState same_texture_flop =
-      PublicState(StreetKind::kFlop,
-                  MakeCardId(3, SuitKind::kHearts),
-                  MakeCardId(8, SuitKind::kDiamonds),
-                  MakeCardId(12, SuitKind::kClubs));
-  const CompactPublicState paired_flop =
-      PublicState(StreetKind::kFlop,
-                  MakeCardId(2, SuitKind::kHearts),
-                  MakeCardId(2, SuitKind::kDiamonds),
-                  MakeCardId(11, SuitKind::kClubs));
-  const CompactPublicState monotone_flop =
-      PublicState(StreetKind::kFlop,
-                  MakeCardId(2, SuitKind::kHearts),
-                  MakeCardId(7, SuitKind::kHearts),
-                  MakeCardId(11, SuitKind::kHearts));
-  const CompactPublicState turn =
-      PublicState(StreetKind::kTurn,
-                  MakeCardId(2, SuitKind::kHearts),
-                  MakeCardId(7, SuitKind::kDiamonds),
-                  MakeCardId(11, SuitKind::kClubs),
-                  MakeCardId(14, SuitKind::kSpades));
+  const Board first = TestBoard(
+      StreetKind::kFlop, MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(7, SuitKind::kDiamonds),
+      MakeCardId(11, SuitKind::kClubs));
+  const Board same_texture = TestBoard(
+      StreetKind::kFlop, MakeCardId(3, SuitKind::kHearts),
+      MakeCardId(8, SuitKind::kDiamonds),
+      MakeCardId(12, SuitKind::kClubs));
+  const Board paired = TestBoard(
+      StreetKind::kFlop, MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(2, SuitKind::kDiamonds),
+      MakeCardId(11, SuitKind::kClubs));
+  const Board monotone = TestBoard(
+      StreetKind::kFlop, MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(7, SuitKind::kHearts),
+      MakeCardId(11, SuitKind::kHearts));
+  const Board turn = TestBoard(
+      StreetKind::kTurn, MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(7, SuitKind::kDiamonds),
+      MakeCardId(11, SuitKind::kClubs),
+      MakeCardId(14, SuitKind::kSpades));
 
-  const Board first = BoardFromCompact(first_flop);
-  const Board same_texture = BoardFromCompact(same_texture_flop);
-  const Board paired = BoardFromCompact(paired_flop);
-  const Board monotone = BoardFromCompact(monotone_flop);
-  const Board turn_board = BoardFromCompact(turn);
-  CHECK(board_texture_public_bucket(first_flop.street,
+  CHECK(board_texture_public_bucket(StreetKind::kFlop,
                                     board_features(first)) ==
-        board_texture_public_bucket(same_texture_flop.street,
+        board_texture_public_bucket(StreetKind::kFlop,
                                     board_features(same_texture)));
-  CHECK(board_texture_public_bucket(first_flop.street,
+  CHECK(board_texture_public_bucket(StreetKind::kFlop,
                                     board_features(first)) !=
-        board_texture_public_bucket(paired_flop.street,
+        board_texture_public_bucket(StreetKind::kFlop,
                                     board_features(paired)));
-  CHECK(board_texture_public_bucket(first_flop.street,
+  CHECK(board_texture_public_bucket(StreetKind::kFlop,
                                     board_features(first)) !=
-        board_texture_public_bucket(monotone_flop.street,
+        board_texture_public_bucket(StreetKind::kFlop,
                                     board_features(monotone)));
-  CHECK(board_texture_public_bucket(first_flop.street,
+  CHECK(board_texture_public_bucket(StreetKind::kFlop,
                                     board_features(first)) !=
-        board_texture_public_bucket(turn.street, board_features(turn_board)));
+        board_texture_public_bucket(StreetKind::kTurn,
+                                    board_features(turn)));
 }
 
 TEST_CASE("exact private buckets use exact combo ids") {
-  const CompactPublicState state = PreflopState();
   const ComboId aces =
       ExactCombo(14, SuitKind::kSpades, 14, SuitKind::kHearts);
 
   CHECK(exact_private_bucket(aces) == aces);
   const uint32_t expected_count = kCoarsePrivateBuckets ? 36 : kComboCount;
-  CHECK(private_bucket_count(state.street) == expected_count);
+  CHECK(private_bucket_count(StreetKind::kPreflop) == expected_count);
 }
 
 TEST_CASE("coarse private buckets merge equivalent combos") {
-  const CompactPublicState state = PreflopState();
   const ComboId ace_king_spades =
       ExactCombo(14, SuitKind::kSpades, 13, SuitKind::kSpades);
   const ComboId ace_king_hearts =
@@ -158,12 +137,16 @@ TEST_CASE("coarse private buckets merge equivalent combos") {
       ExactCombo(14, SuitKind::kSpades, 13, SuitKind::kHearts);
 
   CHECK(ace_king_spades != ace_king_hearts);
-  const Board board = BoardFromCompact(state);
+  const Board board;
   const BoardFeatures features = board_features(board);
-  CHECK(coarse_private_bucket(ace_king_spades, state.street, features) ==
-        coarse_private_bucket(ace_king_hearts, state.street, features));
-  CHECK(coarse_private_bucket(ace_king_spades, state.street, features) !=
-        coarse_private_bucket(ace_king_offsuit, state.street, features));
+  CHECK(coarse_private_bucket(ace_king_spades, StreetKind::kPreflop,
+                              features) ==
+        coarse_private_bucket(ace_king_hearts, StreetKind::kPreflop,
+                              features));
+  CHECK(coarse_private_bucket(ace_king_spades, StreetKind::kPreflop,
+                              features) !=
+        coarse_private_bucket(ace_king_offsuit, StreetKind::kPreflop,
+                              features));
 }
 
 TEST_CASE("coarse private bucket ids are local to street") {

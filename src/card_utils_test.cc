@@ -61,14 +61,14 @@ TEST_CASE("street sampling returns unique unblocked cards") {
 
   std::mt19937 rng(12345);
   for (const Scenario& scenario : scenarios) {
-    CompactPublicState state;
-    state.street = scenario.street;
+    Board board;
     for (uint8_t i = 0; i < scenario.board_count; ++i) {
-      AddBoardCard(state, scenario.board[i]);
+      board.add(scenario.board[i]);
     }
 
-    CheckSample(known_private_cards | state.board_mask,
-                SampleStreetCards(state, known_private_cards, rng),
+    CheckSample(known_private_cards | board.mask,
+                SampleStreetCards(scenario.street, board,
+                                  known_private_cards, rng),
                 scenario.expected_count);
   }
 }
@@ -83,11 +83,9 @@ TEST_CASE("one-card sampling returns the only unblocked card") {
     }
   }
 
-  CompactPublicState state;
-  state.street = StreetKind::kFlop;
-
   std::mt19937 rng(12345);
-  const auto sampled = SampleStreetCards(state, blocked_cards, rng);
+  const auto sampled = SampleStreetCards(
+      StreetKind::kFlop, Board{}, blocked_cards, rng);
   REQUIRE(sampled.size() == 1);
   CHECK(sampled[0] == legal_card);
 }
@@ -98,11 +96,9 @@ TEST_CASE("sampling throws when too few cards remain") {
     blocked_cards |= CardBit(static_cast<CardId>(card_id));
   }
 
-  CompactPublicState state;
-  state.street = StreetKind::kPreflop;
-
   std::mt19937 rng(12345);
-  CHECK_THROWS_AS(SampleStreetCards(state, blocked_cards, rng),
+  CHECK_THROWS_AS(SampleStreetCards(StreetKind::kPreflop, Board{},
+                                    blocked_cards, rng),
                   std::runtime_error);
 }
 

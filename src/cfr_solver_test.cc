@@ -54,15 +54,13 @@ TEST_CASE("public-state cap prevents fixed-storage training") {
 
 TEST_CASE("fixed terminal run counts iteration and utility") {
   SolverConfig config = SmallConfig();
-  CompactPublicState terminal;
-  terminal.stack[0] = 0;
-  terminal.stack[1] = 0;
-  terminal.pot = 10;
-  terminal.street = StreetKind::kRiver;
-  terminal.player_to_act = -1;
-  terminal.folded_player = 1;
-  terminal.player_contribution = {5, 5};
-  terminal.player_contribution_count = 2;
+  ExactGameState terminal;
+  terminal.betting.stack = {0, 0};
+  terminal.betting.pot = 10;
+  terminal.betting.street = StreetKind::kRiver;
+  terminal.betting.player_to_act = -1;
+  terminal.betting.folded_player = 1;
+  terminal.betting.contribution = {5, 5};
 
   CFRSolver solver(config, terminal);
   HandRange player_a = ExactRange(Combo(14, SuitKind::kHearts,

@@ -28,10 +28,10 @@ ComboId TestCombo(CardId first, CardId second) {
   return CardsToComboId(first, second);
 }
 
-CompactPublicState TestBoard(std::initializer_list<CardId> cards) {
-  CompactPublicState board;
+Board TestBoard(std::initializer_list<CardId> cards) {
+  Board board;
   for (CardId card : cards) {
-    AddBoardCard(board, card);
+    board.add(card);
   }
   return board;
 }
@@ -46,14 +46,14 @@ HandEvaluation ToHandEvaluation(
 }
 
 HandEvaluation ReferenceBestHandFromFiveCardEvaluation(
-    ComboId hand, const CompactPublicState& board) {
+    ComboId hand, const Board& board) {
   std::array<CardId, 7> cards = {};
   const ComboInfo& combo = GetComboInfo(hand);
   cards[0] = combo.card0;
   cards[1] = combo.card1;
   size_t count = 2;
-  for (uint8_t i = 0; i < board.board_count; ++i) {
-    cards[count] = board.board_cards[i];
+  for (CardId card : board.span()) {
+    cards[count] = card;
     ++count;
   }
 
@@ -88,7 +88,7 @@ HandEvaluation ReferenceBestHandFromFiveCardEvaluation(
 
 int ReferenceCompare(ComboId first,
                      ComboId second,
-                     const CompactPublicState& board) {
+                     const Board& board) {
   const HandEvaluation first_eval =
       ReferenceBestHandFromFiveCardEvaluation(first, board);
   const HandEvaluation second_eval =
@@ -104,7 +104,7 @@ int ReferenceCompare(ComboId first,
 
 void CheckCompareMatchesReference(ComboId first,
                                   ComboId second,
-                                  const CompactPublicState& board,
+                                  const Board& board,
                                   const char* message) {
   CAPTURE(message);
   HandEvaluator evaluator;
@@ -167,7 +167,7 @@ TEST_CASE("wheel straight is scored as five high") {
   CHECK(wheel_flush_eval.kicker_count == 1);
   CHECK(wheel_flush_eval.kickers[0] == 5);
 
-  const CompactPublicState straight_board =
+  const Board straight_board =
       TestBoard({TestCard(14, SuitKind::kClubs),
                  TestCard(5, SuitKind::kDiamonds),
                  TestCard(4, SuitKind::kHearts),
@@ -185,7 +185,7 @@ TEST_CASE("representative Cactus comparisons match reference evaluator") {
   struct CompareCase {
     ComboId first;
     ComboId second;
-    CompactPublicState board;
+    Board board;
     const char* label;
   };
 
@@ -282,7 +282,7 @@ TEST_CASE("random Cactus comparisons match reference evaluator") {
     std::shuffle(deck.begin(), deck.end(), rng);
     const ComboId first = TestCombo(deck[0], deck[1]);
     const ComboId second = TestCombo(deck[2], deck[3]);
-    const CompactPublicState board =
+    const Board board =
         TestBoard({deck[4], deck[5], deck[6], deck[7], deck[8]});
     CheckCompareMatchesReference(
         first, second, board,

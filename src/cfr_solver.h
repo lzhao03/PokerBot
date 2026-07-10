@@ -30,8 +30,6 @@ class CFRSolver {
 
   CFRSolver(const SolverConfig& config);
   CFRSolver(const SolverConfig& config,
-            const CompactPublicState& initial_state);
-  CFRSolver(const SolverConfig& config,
             const ExactGameState& initial_state);
 
   void run(int iterations, const HandRange& player_a_range,
