@@ -48,10 +48,9 @@ TEST_CASE("missing action block regret matching is uniform") {
 TEST_CASE("positive regrets normalize into action probabilities") {
   StoreFixture fixture;
   ActionBlock block = CreateBlock(fixture, 3);
-  const size_t offset = block.action_offset();
-  fixture.storage.cumulative->cumulative_regrets[offset] = 0.0f;
-  fixture.storage.cumulative->cumulative_regrets[offset + 1] = 2.0f;
-  fixture.storage.cumulative->cumulative_regrets[offset + 2] = 6.0f;
+  const RegretUpdateOptions plain{RegretUpdateMode::kPlain, false};
+  block.add_cfr_plus_regret(1, 2.0f, plain);
+  block.add_cfr_plus_regret(2, 6.0f, plain);
 
   double probabilities[3] = {};
   block.regret_matching(RegretLoadMode::kPlain,
@@ -65,13 +64,17 @@ TEST_CASE("positive regrets normalize into action probabilities") {
 TEST_CASE("CFR plus regret update clips at zero") {
   StoreFixture fixture;
   ActionBlock block = CreateBlock(fixture, 2);
-  fixture.storage.cumulative->cumulative_regrets[block.action_offset()] = 1.0f;
+  const RegretUpdateOptions plain{RegretUpdateMode::kPlain, false};
+  block.add_cfr_plus_regret(0, 1.0f, plain);
+  block.add_cfr_plus_regret(0, -3.0f, plain);
+  block.add_cfr_plus_regret(0, 1.0f, plain);
+  block.add_cfr_plus_regret(1, 0.5f, plain);
 
-  block.add_cfr_plus_regret(
-      0, -3.0f, RegretUpdateOptions{RegretUpdateMode::kPlain, false});
-
-  CHECK(fixture.storage.cumulative->cumulative_regrets[block.action_offset()] ==
-        doctest::Approx(0.0));
+  double probabilities[2] = {};
+  block.regret_matching(RegretLoadMode::kPlain,
+                        absl::Span<double>(probabilities));
+  CHECK(probabilities[0] == doctest::Approx(2.0 / 3.0));
+  CHECK(probabilities[1] == doctest::Approx(1.0 / 3.0));
 }
 
 TEST_CASE("average strategy falls back to uniform and normalizes mass") {
@@ -83,9 +86,9 @@ TEST_CASE("average strategy falls back to uniform and normalizes mass") {
   CHECK(probabilities[0] == doctest::Approx(0.5));
   CHECK(probabilities[1] == doctest::Approx(0.5));
 
-  const size_t offset = block.action_offset();
-  fixture.storage.cumulative->cumulative_strategies[offset] = 1.0f;
-  fixture.storage.cumulative->cumulative_strategies[offset + 1] = 3.0f;
+  const double strategy[2] = {0.25, 0.75};
+  block.add_average_strategy(absl::Span<const double>(strategy), 4.0,
+                             RegretUpdateMode::kPlain);
   block.average_strategy(false, 0.5, absl::Span<double>(probabilities));
   CHECK(probabilities[0] == doctest::Approx(0.25));
   CHECK(probabilities[1] == doctest::Approx(0.75));
@@ -96,13 +99,22 @@ TEST_CASE("frozen lookup matches slow slab lookup") {
   auto& tables = *fixture.storage.mutable_tables;
   tables.betting_nodes[0].action_count = 2;
   ActionBlock block = CreateBlock(fixture, 2);
+  const RegretUpdateOptions plain{RegretUpdateMode::kPlain, false};
+  block.add_cfr_plus_regret(0, 1.0f, plain);
+  block.add_cfr_plus_regret(1, 3.0f, plain);
 
   REQUIRE(fixture.store.prebuild_frozen_info_set_action_offsets());
   std::optional<ActionBlock> frozen_block =
       fixture.store.find_frozen(0, 0, 2);
 
   REQUIRE(frozen_block.has_value());
-  CHECK(frozen_block->action_offset() == block.action_offset());
+  double expected[2] = {};
+  double actual[2] = {};
+  block.regret_matching(RegretLoadMode::kPlain, absl::Span<double>(expected));
+  frozen_block->regret_matching(RegretLoadMode::kPlain,
+                                absl::Span<double>(actual));
+  CHECK(actual[0] == doctest::Approx(expected[0]));
+  CHECK(actual[1] == doctest::Approx(expected[1]));
 }
 
 }  // namespace

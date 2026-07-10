@@ -32,11 +32,7 @@ class StrategyStore;
 
 class ActionBlock {
  public:
-  ActionBlock() = default;
-
-  bool valid() const { return store_ != nullptr; }
   size_t action_count() const { return action_count_; }
-  uint32_t action_offset() const { return action_offset_; }
 
   void regret_matching(RegretLoadMode mode, absl::Span<double> out) const;
   void add_cfr_plus_regret(size_t action_index,
@@ -59,9 +55,9 @@ class ActionBlock {
         action_offset_(action_offset),
         action_count_(action_count) {}
 
-  StrategyStore* store_ = nullptr;
-  uint32_t action_offset_ = 0;
-  uint16_t action_count_ = 0;
+  StrategyStore* store_;
+  uint32_t action_offset_;
+  uint16_t action_count_;
 };
 
 struct SolverStorage {

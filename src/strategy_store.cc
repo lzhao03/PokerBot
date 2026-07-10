@@ -115,7 +115,7 @@ void SolverStorage::bind_frozen(
 
 void ActionBlock::regret_matching(RegretLoadMode mode,
                                   absl::Span<double> out) const {
-  if (!valid() || out.size() != action_count_) {
+  if (out.size() != action_count_) {
     throw std::logic_error("regret-matching action count mismatch");
   }
 
@@ -145,7 +145,7 @@ void ActionBlock::add_cfr_plus_regret(
     size_t action_index,
     float delta,
     RegretUpdateOptions options) const {
-  if (!valid() || action_index >= action_count_) {
+  if (action_index >= action_count_) {
     throw std::logic_error("regret update action index out of range");
   }
 
@@ -170,7 +170,7 @@ void ActionBlock::add_cfr_plus_regret(
 void ActionBlock::add_average_strategy(absl::Span<const double> probs,
                                        double reach_weight,
                                        RegretUpdateMode mode) const {
-  if (!valid() || probs.size() != action_count_) {
+  if (probs.size() != action_count_) {
     throw std::logic_error("average-strategy probability span size mismatch");
   }
 
@@ -194,7 +194,7 @@ void ActionBlock::add_average_strategy(absl::Span<const double> probs,
 void ActionBlock::average_strategy(bool regret_only_training,
                                    double fallback_probability,
                                    absl::Span<double> out) const {
-  if (!valid() || out.size() != action_count_) {
+  if (out.size() != action_count_) {
     throw std::logic_error("average-strategy action count mismatch");
   }
 
