@@ -79,7 +79,9 @@ TEST_CASE("solver lifecycle respects training, limits, and root contracts") {
     SolverConfig config = Config();
     ExactPublicState terminal;
     terminal.betting.stack = {0, 0};
-    terminal.betting.committed = {5, 5};
+    terminal.betting.total_committed = {5, 5};
+    terminal.betting.street_committed = {5, 5};
+    terminal.betting.last_full_raise = config.big_blind;
     terminal.betting.street = StreetKind::kRiver;
     terminal.betting.player_to_act = -1;
     terminal.betting.folded_player = 1;
@@ -104,6 +106,7 @@ TEST_CASE("strategy storage performs regret matching, averaging, and freezing") 
   auto& node = storage.mutable_tables->betting_nodes[0];
   node.kind = StrategyTables::NodeKind::kDecision;
   node.state.player_to_act = 0;
+  node.state.last_full_raise = 1;
   node.action_count = 3;
   StrategyStore store(config, storage, &stats);
 

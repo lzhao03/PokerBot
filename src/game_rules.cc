@@ -27,12 +27,15 @@ Chips CommitChips(BettingState& state, int player, Chips requested) {
   }
 
   const Chips committed = std::min(requested, state.stack[player]);
-  state.committed[player] += committed;
   state.stack[player] -= committed;
+  state.total_committed[player] += committed;
+  state.street_committed[player] += committed;
   return committed;
 }
 
-void AdvanceStreet(ExactPublicState& state, absl::Span<const CardId> cards) {
+void AdvanceStreet(ExactPublicState& state,
+                   absl::Span<const CardId> cards,
+                   const BettingRules& rules) {
   switch (state.betting.street) {
     case StreetKind::kPreflop:
       state.board.deal_flop(cards);
@@ -49,12 +52,30 @@ void AdvanceStreet(ExactPublicState& state, absl::Span<const CardId> cards) {
     case StreetKind::kRiver:
       break;
   }
+  state.betting.street_committed = {0, 0};
+  state.betting.last_full_raise = rules.minimum_bet;
   state.betting.pending_action_mask = kAllPlayersMask;
   state.betting.player_to_act = FirstPlayerForStreet(state.betting.street);
   if (IsBettingRoundOver(state.betting)) {
     state.betting.player_to_act = -1;
   }
   assert(IsValidBettingState(state.betting));
+}
+
+void RefundUnmatchedCommitment(BettingState& state) {
+  if (state.folded_player >= 0 ||
+      state.street_committed[0] == state.street_committed[1]) {
+    return;
+  }
+  const int player = state.street_committed[0] > state.street_committed[1]
+                         ? 0
+                         : 1;
+  const Chips excess =
+      state.street_committed[player] -
+      state.street_committed[Opponent(player)];
+  state.street_committed[player] -= excess;
+  state.total_committed[player] -= excess;
+  state.stack[player] += excess;
 }
 
 bool HandOver(const BettingState& state, const BoardRunout& board) {
@@ -121,6 +142,7 @@ BettingState ApplyActionUnchecked(const BettingState& state,
   const int player = child.player_to_act;
   const int opponent = Opponent(player);
   const Chips to_call_before = ToCall(child, player);
+  const Chips highest_before = HighestStreetCommitment(child);
   Chips committed = 0;
 
   switch (action.kind) {
@@ -152,6 +174,13 @@ BettingState ApplyActionUnchecked(const BettingState& state,
       action.kind == ActionKind::kBet ||
       action.kind == ActionKind::kRaise ||
       (action.kind == ActionKind::kAllIn && committed > to_call_before);
+  if (aggressive) {
+    const Chips raise_size =
+        child.street_committed[player] - highest_before;
+    if (raise_size >= child.last_full_raise) {
+      child.last_full_raise = raise_size;
+    }
+  }
   if (action.kind != ActionKind::kFold) {
     if (aggressive) {
       child.pending_action_mask = PlayerBit(opponent);
@@ -161,6 +190,7 @@ BettingState ApplyActionUnchecked(const BettingState& state,
     }
   }
   if (IsBettingRoundOver(child)) {
+    RefundUnmatchedCommitment(child);
     child.player_to_act = -1;
   }
 
@@ -245,7 +275,11 @@ BettingState ApplyAction(const BettingState& state,
 }
 
 ExactPublicState ApplyChance(const ExactPublicState& state,
-                           absl::Span<const CardId> cards) {
+                             absl::Span<const CardId> cards,
+                             const BettingRules& rules) {
+  if (rules.minimum_bet <= 0) {
+    throw std::invalid_argument("minimum bet must be positive");
+  }
   if (IsTerminal(state.betting, state.board) ||
       !IsBettingRoundOver(state.betting) ||
       state.betting.player_to_act != -1) {
@@ -257,7 +291,7 @@ ExactPublicState ApplyChance(const ExactPublicState& state,
   }
 
   ExactPublicState child = state;
-  AdvanceStreet(child, cards);
+  AdvanceStreet(child, cards, rules);
   return child;
 }
 
@@ -265,7 +299,7 @@ double GetUtility(const ExactPublicState& state,
                   ComboId player_a_hand,
                   ComboId player_b_hand) {
   static const HandEvaluator evaluator;
-  const double a_committed = state.betting.committed[0];
+  const double a_committed = state.betting.total_committed[0];
 
   if (state.betting.folded_player >= 0) {
     if (state.betting.folded_player == 0) {

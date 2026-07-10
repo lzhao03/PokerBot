@@ -13,6 +13,10 @@ namespace poker {
 
 using Chips = int32_t;
 
+struct BettingRules {
+  Chips minimum_bet = 0;
+};
+
 constexpr uint8_t PlayerBit(int player) {
   return static_cast<uint8_t>(1u << player);
 }
@@ -22,7 +26,9 @@ constexpr uint8_t kAllPlayersMask =
 
 struct BettingState {
   std::array<Chips, kPlayerCount> stack = {0, 0};
-  std::array<Chips, kPlayerCount> committed = {0, 0};
+  std::array<Chips, kPlayerCount> total_committed = {0, 0};
+  std::array<Chips, kPlayerCount> street_committed = {0, 0};
+  Chips last_full_raise = 0;
   StreetKind street = StreetKind::kPreflop;
   int8_t player_to_act = 0;
   int8_t folded_player = -1;
@@ -108,13 +114,21 @@ struct ExactPublicState {
 };
 
 inline Chips Pot(const BettingState& state) noexcept {
-  return state.committed[0] + state.committed[1];
+  return state.total_committed[0] + state.total_committed[1];
+}
+
+inline Chips HighestStreetCommitment(const BettingState& state) noexcept {
+  return std::max(state.street_committed[0], state.street_committed[1]);
 }
 
 inline Chips ToCall(const BettingState& state, int player) noexcept {
-  return std::max(Chips{0},
-                  state.committed[Opponent(player)] -
-                      state.committed[player]);
+  return HighestStreetCommitment(state) - state.street_committed[player];
+}
+
+inline Chips MaxContestableAdditional(const BettingState& state,
+                                      int player) noexcept {
+  return std::min(state.stack[player],
+                  ToCall(state, player) + state.stack[Opponent(player)]);
 }
 
 inline bool AnyPlayerAllIn(const BettingState& state) noexcept {
@@ -122,11 +136,21 @@ inline bool AnyPlayerAllIn(const BettingState& state) noexcept {
 }
 
 inline bool IsValidBettingState(const BettingState& state) noexcept {
+  const bool completed_non_fold =
+      state.folded_player < 0 && state.player_to_act == -1;
   return state.stack[0] >= 0 && state.stack[1] >= 0 &&
-         state.committed[0] >= 0 && state.committed[1] >= 0 &&
+         state.total_committed[0] >= 0 &&
+         state.total_committed[1] >= 0 &&
+         state.street_committed[0] >= 0 &&
+         state.street_committed[1] >= 0 &&
+         state.street_committed[0] <= state.total_committed[0] &&
+         state.street_committed[1] <= state.total_committed[1] &&
+         state.last_full_raise > 0 &&
          (state.pending_action_mask & ~kAllPlayersMask) == 0 &&
          state.folded_player >= -1 && state.folded_player < kPlayerCount &&
-         state.player_to_act >= -1 && state.player_to_act < kPlayerCount;
+         state.player_to_act >= -1 && state.player_to_act < kPlayerCount &&
+         (!completed_non_fold ||
+          state.street_committed[0] == state.street_committed[1]);
 }
 
 }  // namespace poker

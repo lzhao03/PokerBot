@@ -263,6 +263,7 @@ class CFRSolver {
       const RangeSampler& sampler,
       bool allow_parallel);
   SolverConfig config_;
+  BettingRules betting_rules_;
   ExactPublicState initial_state_;
   std::mt19937 rng_;
   double cumulative_root_utility_ = 0.0;

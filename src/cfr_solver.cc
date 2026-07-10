@@ -34,7 +34,7 @@ SolverConfig NormalizedSolverConfig(SolverConfig config) {
 
 std::optional<double> UtilityBeforeShowdown(const BettingState& state,
                                             uint8_t board_count) {
-  const double player_a_committed = state.committed[0];
+  const double player_a_committed = state.total_committed[0];
   if (state.folded_player == 0) {
     return -player_a_committed;
   }
@@ -49,7 +49,7 @@ std::optional<double> UtilityBeforeShowdown(const BettingState& state,
 
 double ShowdownUtilityFromComparison(const BettingState& state,
                                      int comparison) {
-  const double player_a_committed = state.committed[0];
+  const double player_a_committed = state.total_committed[0];
   if (comparison > 0) {
     return Pot(state) - player_a_committed;
   }
@@ -90,7 +90,9 @@ ExactPublicState DefaultInitialState(const SolverConfig& config) {
   betting.folded_player = -1;
   betting.street = StreetKind::kPreflop;
   betting.player_to_act = 0;
-  betting.committed = {small_blind, big_blind};
+  betting.total_committed = {small_blind, big_blind};
+  betting.street_committed = {small_blind, big_blind};
+  betting.last_full_raise = big_blind;
   return ExactPublicState{betting, BoardRunout::Preflop()};
 }
 
@@ -103,13 +105,14 @@ CFRSolver::CFRSolver(const SolverConfig& config)
 CFRSolver::CFRSolver(const SolverConfig& config,
                      const ExactPublicState& initial_state)
     : config_(NormalizedSolverConfig(config)),
+      betting_rules_{config_.big_blind > 0 ? config_.big_blind : 2},
       initial_state_(initial_state),
       rng_(12345),
       cumulative_root_utility_(0.0),
       betting_abstraction_(config_),
       storage_(),
       strategy_store_(config_, storage_, &traversal_stats_),
-      graph_builder_(config_, storage_, betting_abstraction_,
+      graph_builder_(config_, betting_rules_, storage_, betting_abstraction_,
                      traversal_stats_) {
   if (!IsValidBettingState(initial_state_.betting)) {
     throw std::invalid_argument("initial betting state is invalid");
@@ -217,7 +220,8 @@ CFRSolver::MutableTraversalGraph::sample_chance_child(
   const auto cards = SampleStreetCards(exact_parent_state.betting.street,
                                        exact_parent_state.board,
                                        known_private_cards, solver_.rng_);
-  ExactPublicState exact_child_state = ApplyChance(exact_parent_state, cards);
+  ExactPublicState exact_child_state =
+      ApplyChance(exact_parent_state, cards, solver_.betting_rules_);
   const auto child_id = solver_.graph_builder_.get_or_create_chance_child(
       parent.node, exact_child_state);
   if (!child_id.has_value() ||
@@ -310,7 +314,8 @@ CFRSolver::Position CFRSolver::FrozenTraversalGraph::sample_chance_child(
   const auto cards = SampleStreetCards(exact_parent_state.betting.street,
                                        exact_parent_state.board,
                                        known_private_cards, solver_.rng_);
-  ExactPublicState exact_child_state = ApplyChance(exact_parent_state, cards);
+  ExactPublicState exact_child_state =
+      ApplyChance(exact_parent_state, cards, solver_.betting_rules_);
   return Position{
       required_chance_child_id(parent.node, exact_child_state),
       exact_child_state.board,

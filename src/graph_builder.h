@@ -20,6 +20,7 @@ class GraphBuilder {
   using Node = StrategyTables::Node;
 
   GraphBuilder(const SolverConfig& config,
+               const BettingRules& rules,
                SolverStorage& storage,
                const BettingAbstraction& betting_abstraction,
                TraversalStats& stats);
@@ -92,6 +93,7 @@ class GraphBuilder {
   void rebuild_chance_child_entries();
 
   const SolverConfig& config_;
+  const BettingRules& rules_;
   SolverStorage& storage_;
   const BettingAbstraction& betting_abstraction_;
   TraversalStats& stats_;

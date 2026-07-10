@@ -18,7 +18,8 @@ ActionMenu LegalActions(const BettingState& state,
 BettingState ApplyAction(const BettingState& state,
                          const GameAction& action);
 ExactPublicState ApplyChance(const ExactPublicState& state,
-                           absl::Span<const CardId> cards);
+                             absl::Span<const CardId> cards,
+                             const BettingRules& rules);
 double GetUtility(const ExactPublicState& state,
                   ComboId player_a_hand,
                   ComboId player_b_hand);

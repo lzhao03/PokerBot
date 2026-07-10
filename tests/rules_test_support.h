@@ -13,7 +13,9 @@ inline ExactPublicState InitialHeadsUpState(Chips player0_stack,
       player0_stack - small_blind,
       player1_stack - big_blind,
   };
-  state.betting.committed = {small_blind, big_blind};
+  state.betting.total_committed = {small_blind, big_blind};
+  state.betting.street_committed = {small_blind, big_blind};
+  state.betting.last_full_raise = big_blind;
   return state;
 }
 

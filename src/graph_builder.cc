@@ -147,6 +147,7 @@ bool ForEachCoarseChanceTransition(
     const std::array<CoarseChanceTransition, N>& transitions,
     BoardBucketId parent_bucket,
     const BettingState& betting,
+    const BettingRules& rules,
     Callback&& callback) {
   for (const CoarseChanceTransition& transition : transitions) {
     if (transition.parent_bucket != parent_bucket) {
@@ -157,7 +158,7 @@ bool ForEachCoarseChanceTransition(
     const BoardRunout parent = RunoutFromCards(parent_cards);
     const absl::Span<const CardId> cards(
         transition.cards.data(), transition.card_count);
-    if (!callback(ApplyChance({betting, parent}, cards), cards)) {
+    if (!callback(ApplyChance({betting, parent}, cards, rules), cards)) {
       return false;
     }
   }
@@ -168,19 +169,20 @@ template <typename Callback>
 bool ForEachCoarseChanceTransition(StreetKind street,
                                    BoardBucketId parent_bucket,
                                    const BettingState& betting,
+                                   const BettingRules& rules,
                                    Callback&& callback) {
   switch (street) {
     case StreetKind::kPreflop:
       return ForEachCoarseChanceTransition(kPreflopTextureTransitions,
-                                           parent_bucket, betting,
+                                           parent_bucket, betting, rules,
                                            std::forward<Callback>(callback));
     case StreetKind::kFlop:
       return ForEachCoarseChanceTransition(kFlopTextureTransitions,
-                                           parent_bucket, betting,
+                                           parent_bucket, betting, rules,
                                            std::forward<Callback>(callback));
     case StreetKind::kTurn:
       return ForEachCoarseChanceTransition(kTurnTextureTransitions,
-                                           parent_bucket, betting,
+                                           parent_bucket, betting, rules,
                                            std::forward<Callback>(callback));
     case StreetKind::kRiver:
       return true;
@@ -211,10 +213,12 @@ void ValidateBettingNode(const StrategyTables::BettingNode& node) {
 
 GraphBuilder::GraphBuilder(
     const SolverConfig& config,
+    const BettingRules& rules,
     SolverStorage& storage,
     const BettingAbstraction& betting_abstraction,
     TraversalStats& stats)
     : config_(config),
+      rules_(rules),
       storage_(storage),
       betting_abstraction_(betting_abstraction),
       stats_(stats) {}
@@ -416,12 +420,12 @@ bool GraphBuilder::for_each_required_chance_transition(
       tables().betting_nodes[graph_node.betting_node_id].state;
   if constexpr (kCoarsePublicBuckets) {
     return ForEachCoarseChanceTransition(
-        betting.street, graph_node.board_bucket, betting,
+        betting.street, graph_node.board_bucket, betting, rules_,
         std::forward<Callback>(callback));
   } else {
     return ForEachNextStreetDeal(
         betting.street, board, [&](absl::Span<const CardId> cards) {
-      return callback(ApplyChance({betting, board}, cards), cards);
+      return callback(ApplyChance({betting, board}, cards, rules_), cards);
     });
   }
 }
