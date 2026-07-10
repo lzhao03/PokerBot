@@ -391,12 +391,12 @@ void StrategyStore::regret_matching_or_uniform(
 }
 
 void StrategyStore::average_strategy(uint32_t node_id,
-                                     const PublicStateRow& row,
                                      int player,
                                      PrivateBucketId bucket,
+                                     absl::Span<const int> legal_action_ids,
                                      bool regret_only_training,
                                      absl::Span<double> out) {
-  if (out.size() != row.action_count) {
+  if (out.size() != legal_action_ids.size()) {
     throw std::logic_error("average-strategy probability span size mismatch");
   }
   if (out.empty()) {
@@ -405,15 +405,14 @@ void StrategyStore::average_strategy(uint32_t node_id,
 
   const double uniform_probability = 1.0 / out.size();
   std::optional<ActionBlock> block =
-      find({node_id, player, bucket}, row.action_count);
+      find({node_id, player, bucket}, legal_action_ids.size());
   if (!block.has_value()) {
     std::fill(out.begin(), out.end(), uniform_probability);
     return;
   }
   block->average_strategy(
       regret_only_training,
-      absl::Span<const int>(row.action_ids.data(), row.action_count),
-      uniform_probability, out);
+      legal_action_ids, uniform_probability, out);
 }
 
 void StrategyStore::regret_matching_for_bucket(uint32_t node_id,
@@ -453,6 +452,10 @@ bool StrategyStore::prebuild_frozen_info_set_action_offsets() {
   for (size_t node_id = 0; node_id < tables.public_state_rows.size();
        ++node_id) {
     const PublicStateRow& row = tables.public_state_rows[node_id];
+    if (row.betting_node_id >= tables.betting_nodes.size()) {
+      return false;
+    }
+    const auto& node = tables.betting_nodes[row.betting_node_id];
     const PublicInfoSetSlab* slab =
         public_info_set_slab(static_cast<uint32_t>(node_id));
     if (slab == nullptr) {
@@ -471,7 +474,7 @@ bool StrategyStore::prebuild_frozen_info_set_action_offsets() {
         if (info_row == nullptr) {
           continue;
         }
-        if (info_row->action_count != row.action_count) {
+        if (info_row->action_count != node.action_count) {
           return false;
         }
         player_offsets[static_cast<size_t>(bucket)] =

@@ -117,9 +117,9 @@ class StrategyStore {
                                   RegretLoadMode load_mode,
                                   absl::Span<double> out);
   void average_strategy(uint32_t public_state_id,
-                        const PublicStateRow& row,
                         int player,
                         PrivateBucketId private_bucket,
+                        absl::Span<const int> legal_action_ids,
                         bool regret_only_training,
                         absl::Span<double> out);
   void regret_matching_for_bucket(uint32_t public_state_id,

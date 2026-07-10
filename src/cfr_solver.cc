@@ -284,8 +284,14 @@ std::optional<CFRSolver::NodeRef> CFRSolver::root_node_ref(
 
 std::optional<CFRSolver::DecisionFrame> CFRSolver::make_decision_frame(
     uint32_t node_id,
-    const PublicStateRow& row) {
-  if (row.is_terminal || row.is_chance_node || row.action_count == 0 ||
+    const PublicStateRow& row) const {
+  const auto& betting_nodes = tables().betting_nodes;
+  const auto& betting_edges = tables().betting_edges;
+  if (row.betting_node_id >= betting_nodes.size()) {
+    return std::nullopt;
+  }
+  const auto& node = betting_nodes[row.betting_node_id];
+  if (row.is_terminal || row.is_chance_node || node.action_count == 0 ||
       !IsPlayer(row.player_to_act)) {
     return std::nullopt;
   }
@@ -294,9 +300,15 @@ std::optional<CFRSolver::DecisionFrame> CFRSolver::make_decision_frame(
   frame.public_state_id = node_id;
   frame.player = static_cast<Player>(row.player_to_act);
   frame.street = row.betting.street;
-  frame.action_count = static_cast<uint8_t>(row.action_count);
-  std::copy_n(row.action_ids.begin(), row.action_count,
-              frame.action_ids.begin());
+  frame.action_count = node.action_count;
+  const size_t begin = node.action_begin;
+  for (uint8_t i = 0; i < node.action_count; ++i) {
+    const size_t edge_index = begin + i;
+    if (edge_index >= betting_edges.size()) {
+      return std::nullopt;
+    }
+    frame.action_ids[i] = betting_edges[edge_index].action_id;
+  }
   return frame;
 }
 
@@ -403,7 +415,7 @@ bool CFRSolver::prebuild_info_set_rows(
         continue;
       }
       const int player = PlayerIndex(decision->player);
-      const absl::Span<const int> action_ids(row.action_ids.data(), row.action_count);
+      const absl::Span<const int> action_ids = decision->action_ids_span();
       for (uint32_t bucket = 0; bucket < StrategyTables::kPrivateBucketCount;
            ++bucket) {
         const PrivateBucketId private_bucket = static_cast<PrivateBucketId>(bucket);
@@ -453,8 +465,7 @@ bool CFRSolver::prebuild_info_set_rows(
       seen_generation = 1;
     }
     const uint32_t generation = seen_generation++;
-    const absl::Span<const int> action_ids(row.action_ids.data(),
-                                           row.action_count);
+    const absl::Span<const int> action_ids = decision->action_ids_span();
     const CardMask board_mask = board.mask;
     for (size_t i = 0; i < range.size(); ++i) {
       if (range.weight(i) <= 0.0f) {
@@ -505,9 +516,11 @@ void CFRSolver::run(int iterations,
   }
   const uint32_t root_id = *maybe_root_id;
   const auto& root_row = rows()[root_id];
-  VLOG(1) << "Root row has "
-          << static_cast<int>(root_row.action_count)
-          << " actions";
+  int root_actions = 0;
+  if (root_row.betting_node_id < tables().betting_nodes.size()) {
+    root_actions = tables().betting_nodes[root_row.betting_node_id].action_count;
+  }
+  VLOG(1) << "Root row has " << root_actions << " actions";
 
   const int threads = config_.num_training_threads;
   const int max_depth = config_.max_depth;
@@ -1217,7 +1230,8 @@ double CFRSolver::evaluate_strategy_node(
       card_abstraction_.private_bucket(player_cards.combo, decision.street,
                                        node.exact_board);
   strategy_store_.average_strategy(
-      node_id, row, player, bucket, config_.regret_only_training,
+      node_id, player, bucket, decision.action_ids_span(),
+      config_.regret_only_training,
       probabilities);
 
   double value = 0.0;

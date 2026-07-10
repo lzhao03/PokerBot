@@ -345,9 +345,9 @@ class CFRSolver {
                    WorkerFn&& worker_fn,
                    AccumulateFn&& accumulate_fn);
   std::optional<NodeRef> root_node_ref(uint32_t root_id) const;
-  static std::optional<DecisionFrame> make_decision_frame(
+  std::optional<DecisionFrame> make_decision_frame(
       uint32_t node_id,
-      const PublicStateRow& row);
+      const PublicStateRow& row) const;
   double cfr(NodeRef node, TraversalContext& ctx, NodeGraph& graph);
   template <typename EvalChild>
   double sample_chance_children(int samples,

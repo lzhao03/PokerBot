@@ -183,7 +183,6 @@ class StrategyTables {
 
   struct PublicStateRow {
     PublicStateRow() {
-      action_ids.fill(0);
       action_child_ids.fill(kInvalidPublicStateId);
     }
 
@@ -194,9 +193,6 @@ class StrategyTables {
     bool is_terminal = false;
     bool is_chance_node = false;
     int player_to_act = -1;
-    uint8_t action_count = 0;
-    std::array<GameAction, kMaxActionsPerNode> actions = {};
-    std::array<int, kMaxActionsPerNode> action_ids = {};
     std::array<uint32_t, kMaxActionsPerNode> action_child_ids = {};
     uint32_t chance_child_offset = 0;
     uint32_t chance_child_count = 0;

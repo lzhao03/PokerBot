@@ -310,21 +310,23 @@ PublicStateGraph::get_or_create_action_betting_child(
   if (parent_node_id >= tables.betting_nodes.size()) {
     throw std::logic_error("action betting parent node is invalid");
   }
-  BettingNode& parent = tables.betting_nodes[parent_node_id];
+  const BettingNode& parent = tables.betting_nodes[parent_node_id];
   if (action_index < 0 || action_index >= parent.action_count) {
     throw std::logic_error("action betting child index out of range");
   }
 
   const size_t edge_index = static_cast<size_t>(parent.action_begin) +
                             static_cast<size_t>(action_index);
-  BettingEdge& edge = tables.betting_edges[edge_index];
-  if (edge.child != kInvalidBettingNodeId) {
-    return edge.child;
+  const BettingNodeId existing_child = tables.betting_edges[edge_index].child;
+  if (existing_child != kInvalidBettingNodeId) {
+    return existing_child;
   }
 
-  const BettingState child_state = ApplyAction(parent.state, edge.action);
-  edge.child = append_betting_node(child_state);
-  return edge.child;
+  const GameAction action = tables.betting_edges[edge_index].action;
+  const BettingState child_state = ApplyAction(parent.state, action);
+  const BettingNodeId child_node_id = append_betting_node(child_state);
+  tables.betting_edges[edge_index].child = child_node_id;
+  return child_node_id;
 }
 
 PublicStateGraph::BettingNodeId
@@ -335,18 +337,20 @@ PublicStateGraph::get_or_create_chance_betting_child(
   if (parent_node_id >= tables.betting_nodes.size()) {
     throw std::logic_error("chance betting parent node is invalid");
   }
-  BettingNode& parent = tables.betting_nodes[parent_node_id];
-  if (parent.chance_child == kInvalidBettingNodeId) {
-    parent.chance_child = append_betting_node(child_state);
-    return parent.chance_child;
+  const BettingNodeId existing_child =
+      tables.betting_nodes[parent_node_id].chance_child;
+  if (existing_child == kInvalidBettingNodeId) {
+    const BettingNodeId child_node_id = append_betting_node(child_state);
+    tables.betting_nodes[parent_node_id].chance_child = child_node_id;
+    return child_node_id;
   }
 
-  if (parent.chance_child >= tables.betting_nodes.size() ||
-      !SameBettingState(tables.betting_nodes[parent.chance_child].state,
+  if (existing_child >= tables.betting_nodes.size() ||
+      !SameBettingState(tables.betting_nodes[existing_child].state,
                         child_state)) {
     throw std::logic_error("chance betting child state mismatch");
   }
-  return parent.chance_child;
+  return existing_child;
 }
 
 PublicStateGraph::PublicStateKey
@@ -383,18 +387,6 @@ PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
   row.player_to_act = GetPlayerToAct(row.betting, state.board);
   row.is_chance_node = !row.is_terminal && row.player_to_act == -1;
 
-  if (!row.is_terminal && !row.is_chance_node && IsPlayer(row.player_to_act)) {
-    const auto menu = betting_abstraction_.actions_for_betting_node(
-        row.betting, row.player_to_act);
-    row.action_count = menu.count;
-    row.actions = menu.actions;
-    for (int i = 0; i < row.action_count; ++i) {
-      row.action_ids[static_cast<size_t>(i)] =
-          betting_abstraction_.action_key(
-              row.actions[static_cast<size_t>(i)]);
-    }
-  }
-
   const auto& nodes = tables().betting_nodes;
   if (betting_node_id >= nodes.size()) {
     throw std::logic_error("public row betting node is invalid");
@@ -403,18 +395,8 @@ PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
   if (!SameBettingState(node.state, row.betting)) {
     throw std::logic_error("public row betting node state mismatch");
   }
-  if (node.player_to_act != row.player_to_act ||
-      node.action_count != row.action_count) {
+  if (node.player_to_act != row.player_to_act) {
     throw std::logic_error("public row betting node metadata mismatch");
-  }
-  for (uint8_t i = 0; i < row.action_count; ++i) {
-    const size_t edge_index = static_cast<size_t>(node.action_begin) + i;
-    if (edge_index >= tables().betting_edges.size() ||
-        node.action_count != row.action_count ||
-        tables().betting_edges[edge_index].action_id !=
-            row.action_ids[static_cast<size_t>(i)]) {
-      throw std::logic_error("public row betting action mismatch");
-    }
   }
 
   return row;
@@ -560,17 +542,22 @@ void PublicStateGraph::cache_betting_history_actions(
     uint32_t betting_history_id,
     const PublicStateRow& row) {
   StrategyTables& tables = mtables();
-  if (row.action_count == 0 ||
+  if (row.betting_node_id >= tables.betting_nodes.size() ||
       betting_history_id >= tables.betting_history_rows.size()) {
     return;
   }
 
+  const BettingNode& node = tables.betting_nodes[row.betting_node_id];
+  if (node.action_count == 0) {
+    return;
+  }
   BettingHistoryRow& betting_history =
       tables.betting_history_rows[static_cast<size_t>(betting_history_id)];
-  betting_history.action_count = row.action_count;
-  for (int i = 0; i < row.action_count; ++i) {
+  betting_history.action_count = node.action_count;
+  for (uint8_t i = 0; i < node.action_count; ++i) {
+    const size_t edge_index = static_cast<size_t>(node.action_begin) + i;
     betting_history.action_ids[static_cast<size_t>(i)] =
-        row.action_ids[static_cast<size_t>(i)];
+        tables.betting_edges[edge_index].action_id;
   }
 }
 
@@ -582,7 +569,11 @@ std::optional<uint32_t> PublicStateGraph::find_action_child(
     return std::nullopt;
   }
   const PublicStateRow& row = public_rows[parent_public_state_id];
-  if (action_index < 0 || action_index >= row.action_count) {
+  if (row.betting_node_id >= tables().betting_nodes.size()) {
+    return std::nullopt;
+  }
+  const BettingNode& node = tables().betting_nodes[row.betting_node_id];
+  if (action_index < 0 || action_index >= node.action_count) {
     throw std::logic_error("action child index out of range");
   }
   const uint32_t child_id =
@@ -665,7 +656,11 @@ std::optional<uint32_t> PublicStateGraph::find_or_cache_action_child(
     return std::nullopt;
   }
   const PublicStateRow& row = public_rows[parent_public_state_id];
-  if (action_index < 0 || action_index >= row.action_count) {
+  if (row.betting_node_id >= tables().betting_nodes.size()) {
+    return std::nullopt;
+  }
+  const BettingNode& node = tables().betting_nodes[row.betting_node_id];
+  if (action_index < 0 || action_index >= node.action_count) {
     throw std::logic_error(
         "find_or_cache_action_child: action index out of range");
   }
@@ -733,7 +728,11 @@ PublicStateGraph::get_or_create_action_child(
     return std::nullopt;
   }
   const PublicStateRow& read_row = public_rows[parent_public_state_id];
-  if (action_index < 0 || action_index >= read_row.action_count) {
+  if (read_row.betting_node_id >= tables().betting_nodes.size()) {
+    return std::nullopt;
+  }
+  const BettingNode& parent = tables().betting_nodes[read_row.betting_node_id];
+  if (action_index < 0 || action_index >= parent.action_count) {
     throw std::logic_error(
         "get_or_create_action_child: action index out of range");
   }
@@ -759,8 +758,10 @@ PublicStateGraph::get_or_create_action_child(
   }
 
   const uint32_t parent_history_id = read_row.betting_history_id;
-  const BettingState child_betting =
-      ApplyAction(read_row.betting, read_row.actions[action_slot]);
+  const size_t edge_index =
+      static_cast<size_t>(parent.action_begin) + action_slot;
+  const GameAction action = tables().betting_edges[edge_index].action;
+  const BettingState child_betting = ApplyAction(read_row.betting, action);
   const ExactGameState child_state{child_betting, parent_board};
   const BettingNodeId child_betting_node_id =
       get_or_create_action_betting_child(read_row.betting_node_id,
@@ -933,8 +934,12 @@ bool PublicStateGraph::prebuild_reachable_rows(
       continue;
     }
 
-    for (int action_index = 0; action_index < row.action_count;
-         ++action_index) {
+    if (row.betting_node_id >= tables().betting_nodes.size()) {
+      return false;
+    }
+    const int action_count =
+        tables().betting_nodes[row.betting_node_id].action_count;
+    for (int action_index = 0; action_index < action_count; ++action_index) {
       auto child_id = get_or_create_action_child(entry.node_id, action_index,
                                                  entry.board);
       if (!child_id.has_value()) {
@@ -1081,7 +1086,12 @@ bool PublicStateGraph::validate_prebuilt_rows(
       continue;
     }
 
-    for (int action_index = 0; action_index < row.action_count;
+    if (row.betting_node_id >= tables().betting_nodes.size()) {
+      stats.action_transition_prebuild_complete = false;
+      return false;
+    }
+    const BettingNode& node = tables().betting_nodes[row.betting_node_id];
+    for (int action_index = 0; action_index < node.action_count;
          ++action_index) {
       ++stats.prebuild_action_transitions;
       const size_t action_slot = static_cast<size_t>(action_index);

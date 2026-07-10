@@ -60,25 +60,44 @@ struct CFRSolverTestAccess {
     std::vector<uint64_t> out;
     const StrategyTables& tables = solver.tables();
     out.reserve(tables.public_state_rows.size() +
-                tables.chance_child_entries.size());
+                tables.chance_child_entries.size() +
+                tables.betting_nodes.size() + tables.betting_edges.size());
     for (const StrategyTables::PublicStateRow& row :
          tables.public_state_rows) {
       uint64_t hash = 0;
-      hash = Mix(hash, row.betting_history_id);
+      hash = Mix(hash, row.betting_node_id);
       hash = Mix(hash, row.public_bucket);
       hash = Mix(hash, row.is_terminal);
       hash = Mix(hash, row.is_chance_node);
       hash = Mix(hash, static_cast<uint64_t>(row.player_to_act + 2));
-      hash = Mix(hash, row.action_count);
       hash = Mix(hash, row.chance_child_offset);
       hash = Mix(hash, row.chance_child_count);
       hash = Mix(hash, row.betting.pot);
       hash = Mix(hash, row.betting.stack[0]);
       hash = Mix(hash, row.betting.stack[1]);
-      for (uint8_t i = 0; i < row.action_count; ++i) {
-        hash = Mix(hash, row.action_ids[static_cast<size_t>(i)]);
-        hash = Mix(hash, row.action_child_ids[static_cast<size_t>(i)]);
+      for (uint32_t child_id : row.action_child_ids) {
+        hash = Mix(hash, child_id);
       }
+      out.push_back(hash);
+    }
+    for (const StrategyTables::BettingNode& node : tables.betting_nodes) {
+      uint64_t hash = 0;
+      hash = Mix(hash, node.action_begin);
+      hash = Mix(hash, node.action_count);
+      hash = Mix(hash, node.chance_child);
+      hash = Mix(hash, static_cast<uint64_t>(node.kind));
+      hash = Mix(hash, static_cast<uint64_t>(node.player_to_act + 2));
+      hash = Mix(hash, node.state.pot);
+      hash = Mix(hash, node.state.stack[0]);
+      hash = Mix(hash, node.state.stack[1]);
+      out.push_back(hash);
+    }
+    for (const StrategyTables::BettingEdge& edge : tables.betting_edges) {
+      uint64_t hash = 0;
+      hash = Mix(hash, static_cast<uint64_t>(edge.action.kind));
+      hash = Mix(hash, edge.action.amount);
+      hash = Mix(hash, edge.action_id);
+      hash = Mix(hash, edge.child);
       out.push_back(hash);
     }
     for (const StrategyTables::ChanceChildEntry& entry :

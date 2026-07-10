@@ -88,8 +88,11 @@ TEST_CASE("average strategy falls back to uniform and remaps action ids") {
 
 TEST_CASE("frozen lookup matches slow slab lookup") {
   StoreFixture fixture;
-  fixture.storage.mutable_tables->public_state_rows.resize(1);
-  fixture.storage.mutable_tables->public_state_rows[0].action_count = 2;
+  auto& tables = *fixture.storage.mutable_tables;
+  tables.public_state_rows.resize(1);
+  tables.betting_nodes.resize(1);
+  tables.public_state_rows[0].betting_node_id = 0;
+  tables.betting_nodes[0].action_count = 2;
   const int actions[] = {10, 20};
   ActionBlock block = CreateBlock(fixture, actions);
 
