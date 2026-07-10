@@ -1,6 +1,6 @@
 #include "src/cfr_solver.h"
-
 #include "src/combo.h"
+
 #include "doctest/doctest.h"
 
 #include <cmath>
@@ -9,7 +9,7 @@ namespace poker {
 namespace {
 
 #if !POKER_COARSE_PUBLIC_BUCKETS
-#error "cfr_board_bucket_test must be compiled with coarse public buckets"
+#error "cfr_coarse_test must be compiled with coarse public buckets"
 #endif
 
 ComboId Combo(int first_rank,
@@ -20,13 +20,13 @@ ComboId Combo(int first_rank,
                         MakeCardId(second_rank, second_suit));
 }
 
-HandRange ExactRange(ComboId combo_id) {
+HandRange ExactRange(ComboId combo) {
   HandRange range;
-  range.add_combo(combo_id, 1.0);
+  range.add_combo(combo, 1.0);
   return range;
 }
 
-SolverConfig CoarseConfig() {
+TEST_CASE("coarse training prebuilds and stays in fixed storage") {
   SolverConfig config;
   config.starting_stack_size = 8;
   config.small_blind = 1;
@@ -38,18 +38,14 @@ SolverConfig CoarseConfig() {
   config.max_info_sets = 500000;
   config.max_public_states = 200000;
   config.num_training_threads = 1;
-  return config;
-}
 
-TEST_CASE("coarse training reaches fixed-storage phase") {
-  SolverConfig config = CoarseConfig();
   CFRSolver solver(config);
-  HandRange player_a = ExactRange(Combo(14, SuitKind::kHearts,
-                                        13, SuitKind::kHearts));
-  HandRange player_b = ExactRange(Combo(12, SuitKind::kClubs,
-                                        11, SuitKind::kClubs));
-
+  const HandRange player_a = ExactRange(
+      Combo(14, SuitKind::kHearts, 13, SuitKind::kHearts));
+  const HandRange player_b = ExactRange(
+      Combo(12, SuitKind::kClubs, 11, SuitKind::kClubs));
   solver.run(4, player_a, player_b);
+
   const CFRSolver::TrainingRunStats stats =
       solver.get_last_training_run_stats();
   CHECK(solver.get_iterations_run() == 4);
@@ -67,11 +63,11 @@ TEST_CASE("coarse training reaches fixed-storage phase") {
   CHECK(stats.missing_chance_transitions == 0);
 
   solver.run(2, player_a, player_b);
-  const CFRSolver::TrainingRunStats second_stats =
+  const CFRSolver::TrainingRunStats second =
       solver.get_last_training_run_stats();
   CHECK(solver.get_iterations_run() == 6);
-  CHECK(second_stats.warmup_iterations == 0);
-  CHECK(second_stats.frozen_iterations == 2);
+  CHECK(second.warmup_iterations == 0);
+  CHECK(second.frozen_iterations == 2);
 }
 
 }  // namespace
