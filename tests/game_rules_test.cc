@@ -3,6 +3,8 @@
 #include "doctest/doctest.h"
 #include "src/game_rules.h"
 
+#include <array>
+
 namespace poker {
 namespace {
 
@@ -10,9 +12,12 @@ TEST_CASE("check-check completes a betting round") {
   ExactPublicState state = test::InitialHeadsUpState(20, 20, 2, 2);
   state.betting.street = StreetKind::kFlop;
   state.betting.player_to_act = 1;
-  state.board.add(MakeCardId(2, SuitKind::kHearts));
-  state.board.add(MakeCardId(7, SuitKind::kDiamonds));
-  state.board.add(MakeCardId(12, SuitKind::kClubs));
+  const std::array<CardId, 3> flop = {
+      MakeCardId(2, SuitKind::kHearts),
+      MakeCardId(7, SuitKind::kDiamonds),
+      MakeCardId(12, SuitKind::kClubs),
+  };
+  state.board.deal_flop(flop);
 
   state.betting = ApplyAction(state.betting, {ActionKind::kCheck});
   CHECK_FALSE(IsBettingRoundOver(state.betting));

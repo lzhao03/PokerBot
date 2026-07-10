@@ -19,7 +19,7 @@ absl::InlinedVector<CardId, 5> SampleStreetCards(
     std::mt19937& rng);
 absl::InlinedVector<CardId, 5> SampleStreetCards(
     StreetKind street,
-    const Board& board,
+    const BoardRunout& board,
     CardMask known_private_cards,
     std::mt19937& rng);
 

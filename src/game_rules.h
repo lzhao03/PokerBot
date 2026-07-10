@@ -22,7 +22,7 @@ ExactPublicState ApplyChance(const ExactPublicState& state,
 double GetUtility(const ExactPublicState& state,
                   ComboId player_a_hand,
                   ComboId player_b_hand);
-bool IsTerminal(const BettingState& state, const Board& board);
+bool IsTerminal(const BettingState& state, const BoardRunout& board);
 bool IsBettingRoundOver(const BettingState& state) noexcept;
 
 }  // namespace poker

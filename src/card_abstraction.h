@@ -129,11 +129,10 @@ inline int DrawBucket(const ComboInfo& combo, const BoardFeatures& features) {
 
 }  // namespace card_abstraction_detail
 
-inline BoardFeatures board_features(const Board& board) {
+inline BoardFeatures board_features(const BoardRunout& board) {
   BoardFeatures features;
-  features.card_count = board.count;
-  for (uint8_t i = 0; i < board.count; ++i) {
-    const CardId card = board.cards[static_cast<size_t>(i)];
+  features.card_count = board.count();
+  for (CardId card : board.cards()) {
     const int rank = RankFromCardId(card);
     const size_t rank_index = static_cast<size_t>(rank - 2);
     const size_t suit_index =
@@ -154,8 +153,8 @@ inline uint8_t straight_density(uint16_t rank_mask) {
   return card_abstraction_detail::kStraightDensity[rank_mask & 0x1FFF];
 }
 
-inline BoardBucketId exact_board_bucket(const Board& board) {
-  return board.mask;
+inline BoardBucketId exact_board_bucket(const BoardRunout& board) {
+  return board.mask();
 }
 
 inline BoardBucketId board_texture_bucket(
@@ -195,7 +194,7 @@ inline BoardBucketId board_texture_bucket(
 }
 
 inline BoardBucketId board_bucket(StreetKind street,
-                                    const Board& board,
+                                    const BoardRunout& board,
                                     const BoardFeatures& features) {
   if constexpr (kCoarsePublicBuckets) {
     return board_texture_bucket(street, features);
@@ -204,7 +203,7 @@ inline BoardBucketId board_bucket(StreetKind street,
   }
 }
 
-inline BoardBucketId board_bucket(StreetKind street, const Board& board) {
+inline BoardBucketId board_bucket(StreetKind street, const BoardRunout& board) {
   return board_bucket(street, board, board_features(board));
 }
 

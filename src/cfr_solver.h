@@ -103,7 +103,7 @@ class CFRSolver {
 
   struct Position {
     NodeId node = kInvalidNodeId;
-    Board exact_board;
+    BoardRunout exact_board = BoardRunout::Preflop();
     BoardFeatures board_features;
   };
 
@@ -205,7 +205,7 @@ class CFRSolver {
       int iterations,
       int num_threads,
       NodeId root_id,
-      const Board& root_board,
+      const BoardRunout& root_board,
       const RangeSampler& sampler,
       const TrainingRange& a_range,
       const TrainingRange& b_range);
@@ -232,18 +232,18 @@ class CFRSolver {
 
   bool prebuild_info_set_rows(const TrainingRangeView& a_view,
                               const TrainingRangeView& b_view,
-                              absl::Span<const std::optional<Board>> node_boards);
+                              absl::Span<const std::optional<BoardRunout>> node_boards);
   absl::Span<TrainingRangeView> condition_ranges_for_actions(
       const TrainingRangeView& range,
       StreetKind street,
-      const Board& board,
+      const BoardRunout& board,
       const BoardFeatures& features,
       NodeId node_id,
       int player,
       size_t action_count,
       RangeScratchFrame& scratch_frame);
   double terminal_utility(const Node& node,
-                          const Board& board,
+                          const BoardRunout& board,
                           ComboId player_a_hand,
                           ComboId player_b_hand);
   double evaluate_strategy_node(Position position,
@@ -259,7 +259,7 @@ class CFRSolver {
   double evaluate_strategy_samples(
       int samples,
       NodeId root_id,
-      const Board& root_board,
+      const BoardRunout& root_board,
       const RangeSampler& sampler,
       bool allow_parallel);
   SolverConfig config_;

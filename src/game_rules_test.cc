@@ -23,6 +23,14 @@ ComboId H(int r0, S s0, int r1, S s1) {
   return CardsToComboId(C(r0, s0), C(r1, s1));
 }
 
+BoardRunout RiverRunout(std::array<CardId, 5> cards) {
+  BoardRunout runout = BoardRunout::Preflop();
+  runout.deal_flop(absl::Span<const CardId>(cards.data(), 3));
+  runout.deal_turn(cards[3]);
+  runout.deal_river(cards[4]);
+  return runout;
+}
+
 ExactPublicState Root() {
   ExactPublicState state;
   state.betting.stack = {19, 18};
@@ -39,8 +47,8 @@ void CheckState(const ExactPublicState& state, int total) {
   CHECK(ChipsInPlay(state) == total);
   CHECK(Pot(state.betting) ==
         state.betting.committed[0] + state.betting.committed[1]);
-  CHECK(BoardCardsForStreet(state.betting.street) == state.board.count);
-  CHECK(std::popcount(state.board.mask) == state.board.count);
+  CHECK(BoardCardsForStreet(state.betting.street) == state.board.count());
+  CHECK(std::popcount(state.board.mask()) == state.board.count());
   CHECK(IsBettingRoundOver(state.betting) ==
         !IsPlayer(state.betting.player_to_act));
 }
@@ -67,7 +75,7 @@ void Rollout(uint32_t seed) {
         ExactPublicState child = state;
         child.betting = ApplyAction(state.betting, menu.actions[i]);
         CheckState(child, total);
-        CHECK(child.board.mask == state.board.mask);
+        CHECK(child.board.mask() == state.board.mask());
       }
       state.betting = ApplyAction(
           state.betting, menu.actions[rng() % static_cast<uint32_t>(menu.count)]);
@@ -83,12 +91,12 @@ void Rollout(uint32_t seed) {
         break;
     }
     const BettingState before = state.betting;
-    const CardMask board_before = state.board.mask;
+    const CardMask board_before = state.board.mask();
     state = ApplyChance(state, cards);
     CheckState(state, total);
     CHECK(state.betting.stack == before.stack);
     CHECK(state.betting.committed == before.committed);
-    CHECK((state.board.mask & board_before) == board_before);
+    CHECK((state.board.mask() & board_before) == board_before);
   }
   CheckState(state, total);
   CHECK(IsTerminal(state.betting, state.board));
@@ -149,17 +157,23 @@ TEST_CASE("terminal utility handles fold, win, and tie") {
   showdown.betting.player_to_act = -1;
   showdown.betting.pending_action_mask = 0;
   showdown.betting.committed = {10, 10};
-  for (CardId card : {C(10, S::kHearts), C(11, S::kHearts),
-                      C(12, S::kHearts), C(2, S::kClubs),
-                      C(3, S::kDiamonds)})
-    showdown.board.add(card);
+  showdown.board = RiverRunout({
+      C(10, S::kHearts),
+      C(11, S::kHearts),
+      C(12, S::kHearts),
+      C(2, S::kClubs),
+      C(3, S::kDiamonds),
+  });
   CHECK(GetUtility(showdown, H(14, S::kHearts, 13, S::kHearts),
                    H(9, S::kHearts, 8, S::kHearts)) == doctest::Approx(10.0));
 
-  showdown.board = Board{};
-  for (CardId card : {C(2, S::kHearts), C(3, S::kDiamonds),
-                      C(4, S::kClubs), C(5, S::kSpades), C(6, S::kHearts)})
-    showdown.board.add(card);
+  showdown.board = RiverRunout({
+      C(2, S::kHearts),
+      C(3, S::kDiamonds),
+      C(4, S::kClubs),
+      C(5, S::kSpades),
+      C(6, S::kHearts),
+  });
   CHECK(GetUtility(showdown, H(14, S::kClubs, 13, S::kDiamonds),
                    H(12, S::kClubs, 11, S::kDiamonds)) == doctest::Approx(0.0));
 }

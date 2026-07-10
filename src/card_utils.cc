@@ -94,10 +94,10 @@ absl::InlinedVector<CardId, 5> SampleStreetCards(
 
 absl::InlinedVector<CardId, 5> SampleStreetCards(
     StreetKind street,
-    const Board& board,
+    const BoardRunout& board,
     CardMask known_private_cards,
     std::mt19937& rng) {
-  return SampleStreetCards(street, board.count, board.mask,
+  return SampleStreetCards(street, board.count(), board.mask(),
                            known_private_cards, rng);
 }
 

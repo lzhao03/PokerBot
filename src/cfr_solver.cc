@@ -91,7 +91,7 @@ ExactPublicState DefaultInitialState(const SolverConfig& config) {
   betting.street = StreetKind::kPreflop;
   betting.player_to_act = 0;
   betting.committed = {small_blind, big_blind};
-  return ExactPublicState{betting, Board{}};
+  return ExactPublicState{betting, BoardRunout::Preflop()};
 }
 
 }  // namespace
@@ -321,7 +321,7 @@ CFRSolver::Position CFRSolver::FrozenTraversalGraph::sample_chance_child(
 bool CFRSolver::prebuild_info_set_rows(
     const TrainingRangeView& a_view,
     const TrainingRangeView& b_view,
-    absl::Span<const std::optional<Board>> node_boards) {
+    absl::Span<const std::optional<BoardRunout>> node_boards) {
   if (storage_.is_frozen()) {
     return true;
   }
@@ -382,7 +382,7 @@ bool CFRSolver::prebuild_info_set_rows(
       continue;
     }
 
-    const Board& board = *node_boards[node_id];
+    const BoardRunout& board = *node_boards[node_id];
     const BoardFeatures features = board_features(board);
     const uint32_t bucket_count =
         private_bucket_count(betting_node.state.street);
@@ -398,7 +398,7 @@ bool CFRSolver::prebuild_info_set_rows(
       seen_generation = 1;
     }
     const uint32_t generation = seen_generation++;
-    const CardMask board_mask = board.mask;
+    const CardMask board_mask = board.mask();
     for (size_t i = 0; i < range.size(); ++i) {
       if (range.weight(i) <= 0.0f) {
         continue;
@@ -501,7 +501,7 @@ bool CFRSolver::prepare_prebuilt_training(
 
   VLOG(1) << "Prebuilding graph nodes...";
   GraphBuilder& graph = graph_builder_;
-  std::vector<std::optional<Board>> node_boards;
+  std::vector<std::optional<BoardRunout>> node_boards;
   const auto prebuild_start = std::chrono::steady_clock::now();
   const bool nodes_complete = graph.prebuild_reachable_nodes(
       root_id, initial_state_.board, max_depth, node_boards);
@@ -645,7 +645,7 @@ void CFRSolver::run_fixed_storage_iterations(
     int iterations,
     int num_threads,
     NodeId root_id,
-    const Board& root_board,
+    const BoardRunout& root_board,
     const RangeSampler& sampler,
     const TrainingRange& a_range,
     const TrainingRange& b_range) {
@@ -821,7 +821,7 @@ double CFRSolver::CfrTraversal<Graph>::chance(
             }
             child_frame.ranges[player] =
                 &frame.ranges[player]->copy_without_mask_into(
-                    child.exact_board.mask, scratch.filtered_ranges[player]);
+                    child.exact_board.mask(), scratch.filtered_ranges[player]);
           }
         }
         return value(child, child_frame);
@@ -1014,7 +1014,7 @@ template double CFRSolver::cfr<CFRSolver::FrozenTraversalGraph>(
 absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
     const TrainingRangeView& range,
     StreetKind street,
-    const Board& board,
+    const BoardRunout& board,
     const BoardFeatures& features,
     NodeId node_id,
     int player,
@@ -1033,7 +1033,7 @@ absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
     return absl::Span<TrainingRangeView>(ranges.data(), action_count);
   }
 
-  const CardMask board_mask = board.mask;
+  const CardMask board_mask = board.mask();
   std::array<double, kMaxActionsPerNode> action_probabilities_storage{};
   absl::Span<double> action_probabilities(
       action_probabilities_storage.data(), action_count);
@@ -1103,7 +1103,7 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
 double CFRSolver::evaluate_strategy_samples(
     int samples,
     NodeId root_id,
-    const Board& root_board,
+    const BoardRunout& root_board,
     const RangeSampler& sampler,
     bool allow_parallel) {
   if (samples <= 0) {
@@ -1259,7 +1259,7 @@ bool CFRSolver::traversal_stats_enabled() {
 }
 
 double CFRSolver::terminal_utility(const Node& node,
-                                   const Board& board,
+                                   const BoardRunout& board,
                                    ComboId player_a_hand,
                                    ComboId player_b_hand) {
   if (node.betting_node_id >= tables().betting_nodes.size()) {
@@ -1267,7 +1267,7 @@ double CFRSolver::terminal_utility(const Node& node,
   }
   const BettingState& state =
       tables().betting_nodes[node.betting_node_id].state;
-  const auto utility = UtilityBeforeShowdown(state, board.count);
+  const auto utility = UtilityBeforeShowdown(state, board.count());
   if (utility.has_value()) {
     return *utility;
   }

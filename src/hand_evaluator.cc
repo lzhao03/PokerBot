@@ -33,8 +33,8 @@ class SevenCardHand {
 
   static SevenCardHand FromHoleAndBoard(
       ComboId hole_cards,
-      const Board& board) {
-    return FromHoleAndBoard(hole_cards, board.span());
+      const BoardRunout& board) {
+    return FromHoleAndBoard(hole_cards, board.cards());
   }
 
   static SevenCardHand FromHoleAndBoard(
@@ -177,13 +177,13 @@ HandEvaluation HandEvaluator::evaluate(
 
 HandEvaluation HandEvaluator::evaluate_hand(
     ComboId hole_cards,
-    const Board& board) const {
+    const BoardRunout& board) const {
   const SevenCardHand cards =
       SevenCardHand::FromHoleAndBoard(hole_cards, board);
   return find_best_hand(cards.cards());
 }
 
-uint16_t HandEvaluator::hand_value(ComboId hand, const Board& board) const {
+uint16_t HandEvaluator::hand_value(ComboId hand, const BoardRunout& board) const {
   const SevenCardHand cards = SevenCardHand::FromHoleAndBoard(hand, board);
   return EvalBestCactus(cards.cards());
 }
@@ -200,7 +200,7 @@ uint16_t HandEvaluator::hand_value(
 int HandEvaluator::compare_hands(
     ComboId hand1,
     ComboId hand2,
-    const Board& board) const {
+    const BoardRunout& board) const {
   return CompareCactusValues(hand_value(hand1, board),
                              hand_value(hand2, board));
 }

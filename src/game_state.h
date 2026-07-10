@@ -31,35 +31,80 @@ struct BettingState {
   friend bool operator==(const BettingState&, const BettingState&) = default;
 };
 
-struct Board {
-  std::array<CardId, kMaxBoardCards> cards = {};
-  CardMask mask = 0;
-  uint8_t count = 0;
+class BoardRunout {
+ public:
+  static BoardRunout Preflop() { return BoardRunout(); }
 
-  absl::Span<const CardId> span() const {
-    return absl::Span<const CardId>(cards.data(), count);
+  void deal_flop(absl::Span<const CardId> cards) {
+    if (count_ != 0) {
+      throw std::logic_error("flop requires a preflop runout");
+    }
+    if (cards.size() != 3) {
+      throw std::invalid_argument("flop requires exactly three cards");
+    }
+
+    CardMask dealt_mask = 0;
+    for (CardId card : cards) {
+      const CardMask bit = CardBit(card);
+      if ((dealt_mask & bit) != 0) {
+        throw std::invalid_argument("duplicate board card");
+      }
+      dealt_mask |= bit;
+    }
+
+    std::copy(cards.begin(), cards.end(), cards_.begin());
+    std::sort(cards_.begin(), cards_.begin() + 3);
+    mask_ = dealt_mask;
+    count_ = 3;
   }
+
+  void deal_turn(CardId card) {
+    if (count_ != 3) {
+      throw std::logic_error("turn requires a dealt flop");
+    }
+    deal_card(card, 3);
+  }
+
+  void deal_river(CardId card) {
+    if (count_ != 4) {
+      throw std::logic_error("river requires a dealt turn");
+    }
+    deal_card(card, 4);
+  }
+
+  absl::Span<const CardId> cards() const {
+    return absl::Span<const CardId>(cards_.data(), count_);
+  }
+
+  CardMask mask() const { return mask_; }
+  uint8_t count() const { return count_; }
 
   bool contains(CardId card) const {
-    return (mask & CardBit(card)) != 0;
+    return (mask_ & CardBit(card)) != 0;
   }
 
-  void add(CardId card) {
-    if (count >= cards.size()) {
-      throw std::logic_error("board is full");
-    }
+  bool operator==(const BoardRunout&) const = default;
+
+ private:
+  BoardRunout() = default;
+
+  void deal_card(CardId card, size_t index) {
     if (contains(card)) {
       throw std::invalid_argument("duplicate board card");
     }
-    cards[static_cast<size_t>(count)] = card;
-    ++count;
-    mask |= CardBit(card);
+    cards_[index] = card;
+    mask_ |= CardBit(card);
+    ++count_;
   }
+
+  std::array<CardId, kMaxBoardCards> cards_ = {};
+  CardMask mask_ = 0;
+  uint8_t count_ = 0;
 };
 
 struct ExactPublicState {
   BettingState betting;
-  Board board;
+  BoardRunout board = BoardRunout::Preflop();
 };
 
 inline Chips Pot(const BettingState& state) noexcept {

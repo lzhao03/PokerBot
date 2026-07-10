@@ -16,8 +16,9 @@ int FirstPlayerForStreet(StreetKind street) {
   return street == StreetKind::kPreflop ? 0 : 1;
 }
 
-bool BoardComplete(const BettingState& state, const Board& board) {
-  return state.street == StreetKind::kRiver && board.count >= kMaxBoardCards;
+bool BoardComplete(const BettingState& state, const BoardRunout& board) {
+  return state.street == StreetKind::kRiver &&
+         board.count() == kMaxBoardCards;
 }
 
 Chips CommitChips(BettingState& state, int player, Chips requested) {
@@ -34,20 +35,19 @@ Chips CommitChips(BettingState& state, int player, Chips requested) {
 void AdvanceStreet(ExactPublicState& state, absl::Span<const CardId> cards) {
   switch (state.betting.street) {
     case StreetKind::kPreflop:
+      state.board.deal_flop(cards);
       state.betting.street = StreetKind::kFlop;
       break;
     case StreetKind::kFlop:
+      state.board.deal_turn(cards[0]);
       state.betting.street = StreetKind::kTurn;
       break;
     case StreetKind::kTurn:
+      state.board.deal_river(cards[0]);
       state.betting.street = StreetKind::kRiver;
       break;
     case StreetKind::kRiver:
       break;
-  }
-
-  for (CardId card : cards) {
-    state.board.add(card);
   }
   state.betting.pending_action_mask = kAllPlayersMask;
   state.betting.player_to_act = FirstPlayerForStreet(state.betting.street);
@@ -57,7 +57,7 @@ void AdvanceStreet(ExactPublicState& state, absl::Span<const CardId> cards) {
   assert(IsValidBettingState(state.betting));
 }
 
-bool HandOver(const BettingState& state, const Board& board) {
+bool HandOver(const BettingState& state, const BoardRunout& board) {
   return BoardComplete(state, board) && IsBettingRoundOver(state);
 }
 
@@ -183,7 +183,7 @@ bool IsBettingRoundOver(const BettingState& state) noexcept {
          ToCall(state, 1) == 0;
 }
 
-bool IsTerminal(const BettingState& state, const Board& board) {
+bool IsTerminal(const BettingState& state, const BoardRunout& board) {
   return state.folded_player >= 0 || HandOver(state, board);
 }
 
@@ -274,7 +274,7 @@ double GetUtility(const ExactPublicState& state,
     return Pot(state.betting) - a_committed;
   }
 
-  if (state.board.count + 2 < 5) {
+  if (state.board.count() + 2 < 5) {
     return 0.0;
   }
 

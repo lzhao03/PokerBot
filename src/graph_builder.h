@@ -28,16 +28,16 @@ class GraphBuilder {
   std::optional<NodeId> get_or_create_action_child(
       NodeId parent_node_id,
       int action_index,
-      const Board& parent_board);
+      const BoardRunout& parent_board);
   std::optional<NodeId> get_or_create_chance_child(
       NodeId parent_node_id,
       const ExactPublicState& child_state);
   bool prebuild_reachable_nodes(NodeId root_id,
-                                const Board& root_board,
+                                const BoardRunout& root_board,
                                 int max_depth,
-                                std::vector<std::optional<Board>>& node_boards);
+                                std::vector<std::optional<BoardRunout>>& node_boards);
   bool validate_prebuilt_nodes(NodeId root_id,
-                               const Board& root_board,
+                               const BoardRunout& root_board,
                                int max_depth,
                                TrainingRunStats& stats) const;
 
@@ -65,11 +65,11 @@ class GraphBuilder {
       const BettingState& child_state);
   NodeKey node_key(BettingNodeId betting_node_id,
                    StreetKind street,
-                   const Board& board) const;
+                   const BoardRunout& board) const;
   std::optional<NodeId> find_node(
       BettingNodeId betting_node_id,
       StreetKind street,
-      const Board& board) const;
+      const BoardRunout& board) const;
   Node make_node(BettingNodeId betting_node_id,
                  const ExactPublicState& state);
   std::optional<NodeId> get_or_create_node(
@@ -85,7 +85,7 @@ class GraphBuilder {
   bool can_insert_node() const;
   template <typename Callback>
   bool for_each_required_chance_transition(const Node& node,
-                                           const Board& board,
+                                           const BoardRunout& board,
                                            Callback&& callback) const;
   BoardBucketId chance_outcome_id(
       const ExactPublicState& child_state) const;

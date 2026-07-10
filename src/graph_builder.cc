@@ -26,11 +26,11 @@ class NodeBfs {
  public:
   struct Entry {
     NodeId node_id = 0;
-    Board board;
+    BoardRunout board = BoardRunout::Preflop();
     int depth = 0;
   };
 
-  NodeBfs(NodeId root_id, Board root_board, size_t node_count) {
+  NodeBfs(NodeId root_id, BoardRunout root_board, size_t node_count) {
     queue_.reserve(1024);
     queued_.resize(node_count, 0);
     enqueue_growing(root_id, std::move(root_board), 0);
@@ -44,7 +44,7 @@ class NodeBfs {
   }
 
   bool enqueue_existing(NodeId node_id,
-                        Board board,
+                        BoardRunout board,
                         int depth,
                         size_t node_count) {
     if (node_id >= node_count || node_id >= queued_.size()) {
@@ -54,7 +54,7 @@ class NodeBfs {
     return true;
   }
 
-  void enqueue_growing(NodeId node_id, Board board, int depth) {
+  void enqueue_growing(NodeId node_id, BoardRunout board, int depth) {
     if (node_id >= queued_.size()) {
       queued_.resize(static_cast<size_t>(node_id) + 1, 0);
     }
@@ -62,7 +62,7 @@ class NodeBfs {
   }
 
  private:
-  void enqueue_known_index(NodeId node_id, Board board, int depth) {
+  void enqueue_known_index(NodeId node_id, BoardRunout board, int depth) {
     if (queued_[node_id]) {
       return;
     }
@@ -104,10 +104,10 @@ bool ForEachCardCombination(int count,
 
 template <typename Callback>
 bool ForEachNextStreetDeal(StreetKind street,
-                           const Board& board,
+                           const BoardRunout& board,
                            Callback callback) {
   const int remaining_board_slots =
-      std::max(0, kMaxBoardCards - static_cast<int>(board.count));
+      std::max(0, kMaxBoardCards - static_cast<int>(board.count()));
   const int count =
       std::min(CardsForNextStreet(street), remaining_board_slots);
   if (count <= 0) {
@@ -116,11 +116,30 @@ bool ForEachNextStreetDeal(StreetKind street,
 
   const int available_cards =
       kDeckCardCount -
-      static_cast<int>(std::popcount(board.mask));
+      static_cast<int>(std::popcount(board.mask()));
   if (available_cards < count) {
     throw std::runtime_error("Not enough cards to enumerate next street");
   }
-  return ForEachCardCombination(count, board.mask, callback);
+  return ForEachCardCombination(count, board.mask(), callback);
+}
+
+[[maybe_unused]] BoardRunout RunoutFromCards(
+    absl::Span<const CardId> cards) {
+  BoardRunout runout = BoardRunout::Preflop();
+  if (cards.empty()) {
+    return runout;
+  }
+  if (cards.size() < 3 || cards.size() > kMaxBoardCards) {
+    throw std::logic_error("stored board has an invalid card count");
+  }
+  runout.deal_flop(cards.first(3));
+  if (cards.size() >= 4) {
+    runout.deal_turn(cards[3]);
+  }
+  if (cards.size() == 5) {
+    runout.deal_river(cards[4]);
+  }
+  return runout;
 }
 
 template <size_t N, typename Callback>
@@ -133,10 +152,9 @@ bool ForEachCoarseChanceTransition(
     if (transition.parent_bucket != parent_bucket) {
       continue;
     }
-    Board parent;
-    for (uint8_t i = 0; i < transition.parent_count; ++i) {
-      parent.add(transition.parent_cards[static_cast<size_t>(i)]);
-    }
+    const absl::Span<const CardId> parent_cards(
+        transition.parent_cards.data(), transition.parent_count);
+    const BoardRunout parent = RunoutFromCards(parent_cards);
     const absl::Span<const CardId> cards(
         transition.cards.data(), transition.card_count);
     if (!callback(ApplyChance({betting, parent}, cards), cards)) {
@@ -298,14 +316,14 @@ GraphBuilder::NodeKey
 GraphBuilder::node_key(
     BettingNodeId betting_node_id,
     StreetKind street,
-    const Board& board) const {
+    const BoardRunout& board) const {
   return {betting_node_id, board_bucket(street, board)};
 }
 
 std::optional<NodeId> GraphBuilder::find_node(
     BettingNodeId betting_node_id,
     StreetKind street,
-    const Board& board) const {
+    const BoardRunout& board) const {
   const auto existing =
       tables().node_ids.find(node_key(betting_node_id, street, board));
   if (existing == tables().node_ids.end()) {
@@ -389,7 +407,7 @@ std::optional<NodeId> GraphBuilder::get_or_create_node(
 template <typename Callback>
 bool GraphBuilder::for_each_required_chance_transition(
     const Node& graph_node,
-    const Board& board,
+    const BoardRunout& board,
     Callback&& callback) const {
   if (graph_node.betting_node_id >= tables().betting_nodes.size()) {
     return false;
@@ -490,7 +508,7 @@ std::optional<NodeId>
 GraphBuilder::get_or_create_action_child(
     NodeId parent_node_id,
     int action_index,
-    const Board& parent_board) {
+    const BoardRunout& parent_board) {
   const auto& graph_nodes = nodes();
   if (parent_node_id >= graph_nodes.size()) {
     return std::nullopt;
@@ -635,9 +653,9 @@ GraphBuilder::get_or_create_chance_child(
 
 bool GraphBuilder::prebuild_reachable_nodes(
     NodeId root_id,
-    const Board& root_board,
+    const BoardRunout& root_board,
     int max_depth,
-    std::vector<std::optional<Board>>& node_boards) {
+    std::vector<std::optional<BoardRunout>>& node_boards) {
   if (storage_.is_frozen()) {
     return true;
   }
@@ -769,7 +787,7 @@ void GraphBuilder::rebuild_chance_child_entries() {
 
 bool GraphBuilder::validate_prebuilt_nodes(
     NodeId root_id,
-    const Board& root_board,
+    const BoardRunout& root_board,
     int max_depth,
     TrainingRunStats& stats) const {
   const auto& graph_nodes = nodes();
@@ -786,7 +804,7 @@ bool GraphBuilder::validate_prebuilt_nodes(
            node_id != kCappedNodeId &&
            node_id < graph_nodes.size();
   };
-  auto enqueue_child = [&](NodeId node_id, Board board, int depth) {
+  auto enqueue_child = [&](NodeId node_id, BoardRunout board, int depth) {
     return bfs.enqueue_existing(node_id, std::move(board), depth,
                                 graph_nodes.size());
   };
