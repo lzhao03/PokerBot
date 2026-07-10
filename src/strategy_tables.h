@@ -16,11 +16,13 @@
 
 namespace poker {
 
-inline constexpr uint32_t kInvalidPublicStateId =
+using NodeId = uint32_t;
+
+inline constexpr NodeId kInvalidNodeId =
     std::numeric_limits<uint32_t>::max();
 inline constexpr uint32_t kInvalidBettingNodeId =
     std::numeric_limits<uint32_t>::max();
-inline constexpr uint32_t kCappedPublicStateId = kInvalidPublicStateId - 1;
+inline constexpr NodeId kCappedNodeId = kInvalidNodeId - 1;
 
 inline constexpr size_t kCacheLineBytes = 64;
 inline constexpr size_t kCumulativeActionBlockAlignment =
@@ -63,7 +65,7 @@ bool operator!=(const CacheLineAlignedAllocator<T>&,
 class StrategyTables {
  public:
   using PrivateBucketId = uint16_t;
-  using PublicBucketId = uint64_t;
+  using BoardBucketId = poker::BoardBucketId;
   static constexpr uint32_t kPrivateBucketCount =
       kCoarsePrivateBuckets ? 36 : kComboCount;
   static constexpr uint32_t kInvalidActionOffset =
@@ -91,20 +93,20 @@ class StrategyTables {
     NodeKind kind = NodeKind::kDecision;
   };
 
-  struct PublicStateKey {
+  struct NodeKey {
     BettingNodeId betting_node_id = 0;
-    PublicBucketId public_bucket = 0;
+    BoardBucketId board_bucket = 0;
 
-    bool operator==(const PublicStateKey& other) const;
+    bool operator==(const NodeKey& other) const;
   };
 
-  struct PublicStateKeyHash {
-    size_t operator()(const PublicStateKey& key) const;
+  struct NodeKeyHash {
+    size_t operator()(const NodeKey& key) const;
   };
 
   struct ChanceTransitionKey {
-    uint32_t parent_public_state_id = 0;
-    PublicBucketId outcome_id = 0;
+    NodeId parent_node_id = 0;
+    BoardBucketId outcome_id = 0;
 
     bool operator==(const ChanceTransitionKey& other) const;
   };
@@ -119,28 +121,28 @@ class StrategyTables {
   };
 
   struct ChanceChildEntry {
-    PublicBucketId outcome_id = 0;
-    uint32_t public_state_id = kInvalidPublicStateId;
+    BoardBucketId outcome_id = 0;
+    NodeId node_id = kInvalidNodeId;
   };
 
   struct InfoSetAddress {
-    uint32_t public_state_id = 0;
+    NodeId node_id = 0;
     PrivateBucketId private_bucket = 0;
   };
 
-  struct PublicStateRow {
+  struct Node {
     BettingNodeId betting_node_id = kInvalidBettingNodeId;
-    PublicBucketId public_bucket = 0;
+    BoardBucketId board_bucket = 0;
     uint32_t action_child_offset = 0;
     uint32_t chance_child_offset = 0;
     uint32_t chance_child_count = 0;
   };
 
-  std::optional<uint32_t> action_child(uint32_t parent_public_state_id,
-                                       int action_index) const;
-  std::optional<uint32_t> chance_child(
-      uint32_t parent_public_state_id,
-      PublicBucketId outcome_id) const;
+  std::optional<NodeId> action_child(NodeId parent_node_id,
+                                     int action_index) const;
+  std::optional<NodeId> chance_child(
+      NodeId parent_node_id,
+      BoardBucketId outcome_id) const;
 
   static constexpr int kPrivateBucketChunkSize = 64;
   static constexpr int kPrivateBucketChunkCount =
@@ -167,14 +169,14 @@ class StrategyTables {
       std::array<uint32_t, kPrivateBucketCount>;
 
   BettingNodeId root_betting_node_id = kInvalidBettingNodeId;
-  uint32_t root_public_state_id = kInvalidPublicStateId;
+  NodeId root_node_id = kInvalidNodeId;
   std::vector<BettingNode> betting_nodes;
   std::vector<BettingEdge> betting_edges;
-  absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>
-      public_state_ids;
-  std::vector<PublicStateRow> public_state_rows;
-  std::vector<uint32_t> action_child_ids;
-  absl::flat_hash_map<ChanceTransitionKey, uint32_t, ChanceTransitionKeyHash>
+  absl::flat_hash_map<NodeKey, NodeId, NodeKeyHash>
+      node_ids;
+  std::vector<Node> nodes;
+  std::vector<NodeId> action_child_ids;
+  absl::flat_hash_map<ChanceTransitionKey, NodeId, ChanceTransitionKeyHash>
       public_chance_child_ids;
   std::vector<ChanceChildEntry> chance_child_entries;
   std::vector<FrozenInfoSetActionOffsetRow> frozen_info_set_action_offsets;

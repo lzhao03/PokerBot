@@ -11,7 +11,6 @@
 
 namespace poker {
 
-using PublicBucketId = uint64_t;
 using PrivateBucketId = uint16_t;
 
 struct BoardFeatures {
@@ -152,11 +151,11 @@ inline uint8_t straight_density(uint16_t rank_mask) {
   return card_abstraction_detail::kStraightDensity[rank_mask & 0x1FFF];
 }
 
-inline PublicBucketId exact_public_bucket(const Board& board) {
+inline BoardBucketId exact_board_bucket(const Board& board) {
   return board.mask;
 }
 
-inline PublicBucketId board_texture_public_bucket(
+inline BoardBucketId board_texture_bucket(
     StreetKind street,
     const BoardFeatures& features) {
   if (features.card_count == 0) {
@@ -187,23 +186,23 @@ inline PublicBucketId board_texture_public_bucket(
        straight_bucket) *
           card_abstraction_detail::kHighBuckets +
       high_bucket;
-  return 1 + static_cast<PublicBucketId>(street) *
+  return 1 + static_cast<BoardBucketId>(street) *
                  card_abstraction_detail::kTextureBucketsPerStreet +
-         static_cast<PublicBucketId>(texture);
+         static_cast<BoardBucketId>(texture);
 }
 
-inline PublicBucketId public_bucket(StreetKind street,
+inline BoardBucketId board_bucket(StreetKind street,
                                     const Board& board,
                                     const BoardFeatures& features) {
   if constexpr (kCoarsePublicBuckets) {
-    return board_texture_public_bucket(street, features);
+    return board_texture_bucket(street, features);
   } else {
-    return exact_public_bucket(board);
+    return exact_board_bucket(board);
   }
 }
 
-inline PublicBucketId public_bucket(StreetKind street, const Board& board) {
-  return public_bucket(street, board, board_features(board));
+inline BoardBucketId board_bucket(StreetKind street, const Board& board) {
+  return board_bucket(street, board, board_features(board));
 }
 
 inline PrivateBucketId exact_private_bucket(ComboId combo_id) {

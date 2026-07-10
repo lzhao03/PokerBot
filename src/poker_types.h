@@ -14,6 +14,7 @@ namespace poker {
 
 using CardId = uint8_t;
 using CardMask = uint64_t;
+using BoardBucketId = uint64_t;
 using Chips = int32_t;
 
 constexpr int kDeckCardCount = 52;
@@ -93,10 +94,10 @@ struct SolverConfig {
   std::vector<double> river_bet_sizes;
   bool regret_only_training = false;
   // Maximum number of info sets to allocate. 0 means unlimited.
-  // Once this limit is reached, new (combo, public_state) pairs fall back to
+  // Once this limit is reached, new (combo, node) pairs fall back to
   // uniform strategy rather than allocating new entries. Controls peak memory.
   int max_info_sets = 0;
-  // Maximum number of compact public-state rows to allocate. 0 means
+  // Maximum number of graph nodes to allocate. 0 means
   // unlimited. Once this limit is reached, new public states are skipped
   // instead of expanding the sampled branch. Controls peak traversal memory.
   int max_public_states = 0;

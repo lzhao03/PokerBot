@@ -8,8 +8,8 @@
 namespace poker {
 
 struct CoarseChanceTransition {
-  PublicBucketId parent_bucket = 0;
-  PublicBucketId child_bucket = 0;
+  BoardBucketId parent_bucket = 0;
+  BoardBucketId child_bucket = 0;
   std::array<CardId, kMaxBoardCards> parent_cards = {};
   uint8_t parent_count = 0;
   std::array<CardId, kMaxBoardCards> cards = {};

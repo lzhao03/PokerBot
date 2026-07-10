@@ -95,8 +95,8 @@ void SolverStorage::freeze() {
     frozen = true;
     return;
   }
-  mutable_tables->public_state_ids.clear();
-  mutable_tables->public_state_ids.rehash(0);
+  mutable_tables->node_ids.clear();
+  mutable_tables->node_ids.rehash(0);
   mutable_tables->public_chance_child_ids.clear();
   mutable_tables->public_chance_child_ids.rehash(0);
   frozen_tables = mutable_tables;
@@ -282,7 +282,7 @@ std::optional<ActionBlock> StrategyStore::get_or_create(
 }
 
 std::optional<ActionBlock> StrategyStore::find_frozen(
-    uint32_t node_id,
+    NodeId node_id,
     PrivateBucketId bucket,
     size_t expected_action_count) {
   if (node_id >= frozen_tables().frozen_info_set_action_offsets.size()) {
@@ -317,7 +317,7 @@ void StrategyStore::regret_matching_or_uniform(
   block->regret_matching(load_mode, out);
 }
 
-void StrategyStore::average_strategy(uint32_t node_id,
+void StrategyStore::average_strategy(NodeId node_id,
                                      PrivateBucketId bucket,
                                      size_t action_count,
                                      bool regret_only_training,
@@ -339,7 +339,7 @@ void StrategyStore::average_strategy(uint32_t node_id,
   block->average_strategy(regret_only_training, uniform_probability, out);
 }
 
-void StrategyStore::regret_matching_for_bucket(uint32_t node_id,
+void StrategyStore::regret_matching_for_bucket(NodeId node_id,
                                                PrivateBucketId bucket,
                                                size_t action_count,
                                                absl::Span<double> out) {
@@ -365,14 +365,14 @@ bool StrategyStore::prebuild_frozen_info_set_action_offsets() {
   }
 
   StrategyTables& tables = tables_for_growth();
-  tables.frozen_info_set_action_offsets.resize(tables.public_state_rows.size());
+  tables.frozen_info_set_action_offsets.resize(tables.nodes.size());
   for (auto& offset_row : tables.frozen_info_set_action_offsets) {
     offset_row.fill(StrategyTables::kInvalidActionOffset);
   }
 
-  for (size_t node_id = 0; node_id < tables.public_state_rows.size();
+  for (size_t node_id = 0; node_id < tables.nodes.size();
        ++node_id) {
-    const PublicStateRow& row = tables.public_state_rows[node_id];
+    const Node& row = tables.nodes[node_id];
     if (row.betting_node_id >= tables.betting_nodes.size()) {
       return false;
     }
@@ -407,7 +407,7 @@ bool StrategyStore::prebuild_frozen_info_set_action_offsets() {
 }
 
 const StrategyStore::PublicInfoSetSlab* StrategyStore::public_info_set_slab(
-    uint32_t node_id) const {
+    NodeId node_id) const {
   const auto& slabs = frozen_tables().public_info_set_slabs;
   if (node_id >= slabs.size()) {
     return nullptr;
@@ -416,7 +416,7 @@ const StrategyStore::PublicInfoSetSlab* StrategyStore::public_info_set_slab(
 }
 
 StrategyStore::PublicInfoSetSlab&
-StrategyStore::get_or_create_public_info_set_slab(uint32_t node_id) {
+StrategyStore::get_or_create_public_info_set_slab(NodeId node_id) {
   StrategyTables& tables = tables_for_growth();
   if (tables.public_info_set_slabs.size() <= node_id) {
     tables.public_info_set_slabs.resize(static_cast<size_t>(node_id) + 1);
@@ -434,11 +434,11 @@ const StrategyStore::InfoSetRow* StrategyStore::find_info_set_row(
   if (address.private_bucket >= StrategyTables::kPrivateBucketCount) {
     return nullptr;
   }
-  const int player = player_for_public_state(address.public_state_id);
+  const int player = player_for_node(address.node_id);
   if (player < 0 || player >= kPlayerCount) {
     return nullptr;
   }
-  const PublicInfoSetSlab* slab = public_info_set_slab(address.public_state_id);
+  const PublicInfoSetSlab* slab = public_info_set_slab(address.node_id);
   if (slab == nullptr) {
     return nullptr;
   }
@@ -461,12 +461,12 @@ const StrategyStore::InfoSetRow* StrategyStore::find_info_set_row(
   if (chunk == nullptr) {
     return nullptr;
   }
-  const int32_t row_id = chunk->rows[chunk_offset];
-  if (row_id < 0 ||
-      static_cast<size_t>(row_id) >= player_slab.rows.size()) {
+  const int32_t node_id = chunk->rows[chunk_offset];
+  if (node_id < 0 ||
+      static_cast<size_t>(node_id) >= player_slab.rows.size()) {
     return nullptr;
   }
-  return &player_slab.rows[row_id];
+  return &player_slab.rows[node_id];
 }
 
 int32_t& StrategyStore::get_or_create_private_row_slot(
@@ -490,7 +490,7 @@ const StrategyStore::InfoSetRow* StrategyStore::get_or_create_info_set_row(
   if (address.private_bucket >= StrategyTables::kPrivateBucketCount) {
     return nullptr;
   }
-  const int player = player_for_public_state(address.public_state_id);
+  const int player = player_for_node(address.node_id);
   if (player < 0 || player >= kPlayerCount) {
     return nullptr;
   }
@@ -508,11 +508,11 @@ const StrategyStore::InfoSetRow* StrategyStore::get_or_create_info_set_row(
 
   InfoSetRow row = append_info_set_actions(action_count);
   PublicInfoSetSlab& slab =
-      get_or_create_public_info_set_slab(address.public_state_id);
+      get_or_create_public_info_set_slab(address.node_id);
   PublicInfoSetSlabPlayer& player_slab = slab.players[player];
-  int32_t& row_id =
+  int32_t& node_id =
       get_or_create_private_row_slot(player_slab, address.private_bucket);
-  row_id = static_cast<int32_t>(player_slab.rows.size());
+  node_id = static_cast<int32_t>(player_slab.rows.size());
   player_slab.rows.push_back(row);
   ++tables_for_growth().info_set_count;
   return &player_slab.rows.back();
@@ -552,18 +552,18 @@ StrategyStore::InfoSetRow StrategyStore::append_info_set_actions(
 }
 
 uint32_t StrategyStore::frozen_info_set_action_offset(
-    uint32_t public_state_id,
+    NodeId node_id,
     PrivateBucketId private_bucket) const {
-  return frozen_tables().frozen_info_set_action_offsets[public_state_id]
+  return frozen_tables().frozen_info_set_action_offsets[node_id]
                                                        [private_bucket];
 }
 
-int StrategyStore::player_for_public_state(uint32_t public_state_id) const {
+int StrategyStore::player_for_node(NodeId node_id) const {
   const auto& tables = frozen_tables();
-  if (public_state_id >= tables.public_state_rows.size()) {
+  if (node_id >= tables.nodes.size()) {
     return -1;
   }
-  const auto& row = tables.public_state_rows[public_state_id];
+  const auto& row = tables.nodes[node_id];
   if (row.betting_node_id >= tables.betting_nodes.size()) {
     return -1;
   }

@@ -65,24 +65,24 @@ struct CFRSolverTestAccess {
   static std::vector<uint64_t> GraphFingerprint(const CFRSolver& solver) {
     std::vector<uint64_t> out;
     const StrategyTables& tables = solver.tables();
-    out.reserve(tables.public_state_rows.size() +
+    out.reserve(tables.nodes.size() +
                 tables.chance_child_entries.size() +
                 tables.betting_nodes.size() + tables.betting_edges.size());
-    for (size_t row_id = 0; row_id < tables.public_state_rows.size();
-         ++row_id) {
-      const StrategyTables::PublicStateRow& row =
-          tables.public_state_rows[row_id];
+    for (size_t node_id = 0; node_id < tables.nodes.size();
+         ++node_id) {
+      const StrategyTables::Node& row =
+          tables.nodes[node_id];
       uint64_t hash = 0;
       hash = Mix(hash, row.betting_node_id);
-      hash = Mix(hash, row.public_bucket);
+      hash = Mix(hash, row.board_bucket);
       hash = Mix(hash, row.action_child_offset);
       hash = Mix(hash, row.chance_child_offset);
       hash = Mix(hash, row.chance_child_count);
       const auto& node = tables.betting_nodes[row.betting_node_id];
       for (int action = 0; action < node.action_count; ++action) {
-        const uint32_t child_id =
-            tables.action_child(static_cast<uint32_t>(row_id), action)
-                .value_or(kInvalidPublicStateId);
+        const NodeId child_id =
+            tables.action_child(static_cast<uint32_t>(node_id), action)
+                .value_or(kInvalidNodeId);
         hash = Mix(hash, child_id);
       }
       out.push_back(hash);
@@ -109,7 +109,7 @@ struct CFRSolverTestAccess {
     }
     for (const StrategyTables::ChanceChildEntry& entry :
          tables.chance_child_entries) {
-      out.push_back(Mix(entry.outcome_id, entry.public_state_id));
+      out.push_back(Mix(entry.outcome_id, entry.node_id));
     }
     return out;
   }
@@ -127,10 +127,10 @@ struct CFRSolverTestAccess {
     TrainingRangeView b_view(b_range);
 
     CFRSolver solver(EquivalenceConfig());
-    const std::optional<uint32_t> maybe_root =
-        solver.graph_builder_.get_or_create_row(solver.initial_state_);
+    const std::optional<NodeId> maybe_root =
+        solver.graph_builder_.get_or_create_node(solver.initial_state_);
     REQUIRE(maybe_root.has_value());
-    const uint32_t root_id = *maybe_root;
+    const NodeId root_id = *maybe_root;
     REQUIRE(solver.prepare_prebuilt_training(root_id, solver.config_.max_depth,
                                              a_view, b_view));
 
@@ -138,7 +138,7 @@ struct CFRSolverTestAccess {
       solver.storage_.freeze();
     }
 
-    const CFRSolver::NodeRef root{
+    const CFRSolver::Position root{
         root_id,
         solver.initial_state_.board,
     };

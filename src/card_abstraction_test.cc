@@ -51,14 +51,14 @@ void CheckTextureTransitions(
     for (uint8_t i = 0; i < transition.parent_count; ++i) {
       parent.add(transition.parent_cards[static_cast<size_t>(i)]);
     }
-    CHECK(board_texture_public_bucket(street, board_features(parent)) ==
+    CHECK(board_texture_bucket(street, board_features(parent)) ==
           transition.parent_bucket);
 
     Board child = parent;
     for (uint8_t i = 0; i < transition.card_count; ++i) {
       child.add(transition.cards[static_cast<size_t>(i)]);
     }
-    CHECK(board_texture_public_bucket(NextStreet(street),
+    CHECK(board_texture_bucket(NextStreet(street),
                                       board_features(child)) ==
           transition.child_bucket);
   }
@@ -74,8 +74,8 @@ TEST_CASE("exact public buckets use the board mask") {
       MakeCardId(2, SuitKind::kHearts),
       MakeCardId(7, SuitKind::kDiamonds));
 
-  CHECK(exact_public_bucket(first) == first.mask);
-  CHECK(exact_public_bucket(first) == exact_public_bucket(reordered));
+  CHECK(exact_board_bucket(first) == first.mask);
+  CHECK(exact_board_bucket(first) == exact_board_bucket(reordered));
 }
 
 TEST_CASE("texture public buckets group by board texture") {
@@ -101,21 +101,21 @@ TEST_CASE("texture public buckets group by board texture") {
       MakeCardId(11, SuitKind::kClubs),
       MakeCardId(14, SuitKind::kSpades));
 
-  CHECK(board_texture_public_bucket(StreetKind::kFlop,
+  CHECK(board_texture_bucket(StreetKind::kFlop,
                                     board_features(first)) ==
-        board_texture_public_bucket(StreetKind::kFlop,
+        board_texture_bucket(StreetKind::kFlop,
                                     board_features(same_texture)));
-  CHECK(board_texture_public_bucket(StreetKind::kFlop,
+  CHECK(board_texture_bucket(StreetKind::kFlop,
                                     board_features(first)) !=
-        board_texture_public_bucket(StreetKind::kFlop,
+        board_texture_bucket(StreetKind::kFlop,
                                     board_features(paired)));
-  CHECK(board_texture_public_bucket(StreetKind::kFlop,
+  CHECK(board_texture_bucket(StreetKind::kFlop,
                                     board_features(first)) !=
-        board_texture_public_bucket(StreetKind::kFlop,
+        board_texture_bucket(StreetKind::kFlop,
                                     board_features(monotone)));
-  CHECK(board_texture_public_bucket(StreetKind::kFlop,
+  CHECK(board_texture_bucket(StreetKind::kFlop,
                                     board_features(first)) !=
-        board_texture_public_bucket(StreetKind::kTurn,
+        board_texture_bucket(StreetKind::kTurn,
                                     board_features(turn)));
 }
 
@@ -183,9 +183,9 @@ TEST_CASE("coarse private buckets still use exact board within public bucket") {
   unpaired_for_hand.add(MakeCardId(3, SuitKind::kClubs));
   unpaired_for_hand.add(MakeCardId(8, SuitKind::kDiamonds));
 
-  CHECK(board_texture_public_bucket(
+  CHECK(board_texture_bucket(
             StreetKind::kFlop, board_features(paired_with_hand)) ==
-        board_texture_public_bucket(
+        board_texture_bucket(
             StreetKind::kFlop, board_features(unpaired_for_hand)));
   CHECK(coarse_private_bucket(hand, StreetKind::kFlop,
                               board_features(paired_with_hand)) !=

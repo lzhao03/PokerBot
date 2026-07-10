@@ -88,7 +88,7 @@ void PrintUsage(const char* program) {
       << "  --river-bet-size=X\n"
       << "  --max-info-sets=N               cap info set allocations (default "
       << kDefaultMaxInfoSets << ", 0 = unlimited)\n"
-      << "  --max-public-states=N           cap public-state rows (default "
+      << "  --max-public-states=N           cap graph nodes (default "
       << kDefaultMaxPublicStates << ", 0 = unlimited)\n"
       << "  --threads=N                     parallel training threads (0 or 1 = single-threaded)\n"
       << "  --max-memory-mb=N                hard memory limit in MB (default "

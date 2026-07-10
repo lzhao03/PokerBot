@@ -1,4 +1,4 @@
-#include "src/public_state_graph.h"
+#include "src/graph_builder.h"
 
 #include <algorithm>
 #include <bit>
@@ -22,17 +22,17 @@
 namespace poker {
 namespace {
 
-class PublicStateBfs {
+class NodeBfs {
  public:
   struct Entry {
-    uint32_t node_id = 0;
+    NodeId node_id = 0;
     Board board;
     int depth = 0;
   };
 
-  PublicStateBfs(uint32_t root_id, Board root_board, size_t row_count) {
+  NodeBfs(NodeId root_id, Board root_board, size_t node_count) {
     queue_.reserve(1024);
-    queued_.resize(row_count, 0);
+    queued_.resize(node_count, 0);
     enqueue_growing(root_id, std::move(root_board), 0);
   }
 
@@ -43,18 +43,18 @@ class PublicStateBfs {
     return queue_[cursor_++];
   }
 
-  bool enqueue_existing(uint32_t node_id,
+  bool enqueue_existing(NodeId node_id,
                         Board board,
                         int depth,
-                        size_t row_count) {
-    if (node_id >= row_count || node_id >= queued_.size()) {
+                        size_t node_count) {
+    if (node_id >= node_count || node_id >= queued_.size()) {
       return false;
     }
     enqueue_known_index(node_id, std::move(board), depth);
     return true;
   }
 
-  void enqueue_growing(uint32_t node_id, Board board, int depth) {
+  void enqueue_growing(NodeId node_id, Board board, int depth) {
     if (node_id >= queued_.size()) {
       queued_.resize(static_cast<size_t>(node_id) + 1, 0);
     }
@@ -62,7 +62,7 @@ class PublicStateBfs {
   }
 
  private:
-  void enqueue_known_index(uint32_t node_id, Board board, int depth) {
+  void enqueue_known_index(NodeId node_id, Board board, int depth) {
     if (queued_[node_id]) {
       return;
     }
@@ -126,7 +126,7 @@ bool ForEachNextStreetDeal(StreetKind street,
 template <size_t N, typename Callback>
 bool ForEachCoarseChanceTransition(
     const std::array<CoarseChanceTransition, N>& transitions,
-    PublicBucketId parent_bucket,
+    BoardBucketId parent_bucket,
     const BettingState& betting,
     Callback&& callback) {
   for (const CoarseChanceTransition& transition : transitions) {
@@ -148,7 +148,7 @@ bool ForEachCoarseChanceTransition(
 
 template <typename Callback>
 bool ForEachCoarseChanceTransition(StreetKind street,
-                                   PublicBucketId parent_bucket,
+                                   BoardBucketId parent_bucket,
                                    const BettingState& betting,
                                    Callback&& callback) {
   switch (street) {
@@ -306,84 +306,84 @@ GraphBuilder::get_or_create_chance_betting_child(
   return existing_child;
 }
 
-GraphBuilder::PublicStateKey
-GraphBuilder::row_key(
+GraphBuilder::NodeKey
+GraphBuilder::node_key(
     BettingNodeId betting_node_id,
     StreetKind street,
     const Board& board) const {
-  return {betting_node_id, public_bucket(street, board)};
+  return {betting_node_id, board_bucket(street, board)};
 }
 
-std::optional<uint32_t> GraphBuilder::find_row(
+std::optional<NodeId> GraphBuilder::find_node(
     BettingNodeId betting_node_id,
     StreetKind street,
     const Board& board) const {
   const auto existing =
-      tables().public_state_ids.find(row_key(betting_node_id, street, board));
-  if (existing == tables().public_state_ids.end()) {
+      tables().node_ids.find(node_key(betting_node_id, street, board));
+  if (existing == tables().node_ids.end()) {
     return std::nullopt;
   }
   return existing->second;
 }
 
-GraphBuilder::PublicStateRow GraphBuilder::make_row(
+GraphBuilder::Node GraphBuilder::make_node(
     BettingNodeId betting_node_id,
     const ExactGameState& state) {
-  PublicStateRow row;
-  row.betting_node_id = betting_node_id;
-  row.public_bucket = public_bucket(state.betting.street, state.board);
+  Node graph_node;
+  graph_node.betting_node_id = betting_node_id;
+  graph_node.board_bucket = board_bucket(state.betting.street, state.board);
 
   StrategyTables& tables = mtables();
   const auto& nodes = tables.betting_nodes;
   if (betting_node_id >= nodes.size()) {
-    throw std::logic_error("public row betting node is invalid");
+    throw std::logic_error("graph node betting node is invalid");
   }
   const BettingNode& node = nodes[betting_node_id];
   if (!SameBettingState(node.state, state.betting)) {
-    throw std::logic_error("public row betting node state mismatch");
+    throw std::logic_error("graph node betting state mismatch");
   }
   if (node.action_count > 0) {
-    row.action_child_offset =
+    graph_node.action_child_offset =
         static_cast<uint32_t>(tables.action_child_ids.size());
     const size_t new_size = tables.action_child_ids.size() +
                             node.action_count;
-    tables.action_child_ids.resize(new_size, kInvalidPublicStateId);
+    tables.action_child_ids.resize(new_size, kInvalidNodeId);
   }
 
-  return row;
+  return graph_node;
 }
 
-std::optional<uint32_t> GraphBuilder::get_or_create_row(
+std::optional<NodeId> GraphBuilder::get_or_create_node(
     BettingNodeId betting_node_id,
     const ExactGameState& state) {
-  if (std::optional<uint32_t> existing =
-          find_row(betting_node_id, state.betting.street, state.board)) {
+  if (std::optional<NodeId> existing =
+          find_node(betting_node_id, state.betting.street, state.board)) {
     return existing;
   }
 
-  if (storage_.frozen || row_limit_reached()) {
+  if (storage_.frozen || node_limit_reached()) {
     return std::nullopt;
   }
 
   StrategyTables& tables = mtables();
-  const uint32_t public_state_id =
-      static_cast<uint32_t>(tables.public_state_rows.size());
-  const auto [state_iter, inserted] = tables.public_state_ids.try_emplace(
-      row_key(betting_node_id, state.betting.street, state.board),
-      public_state_id);
+  const NodeId node_id =
+      static_cast<uint32_t>(tables.nodes.size());
+  const auto [state_iter, inserted] = tables.node_ids.try_emplace(
+      node_key(betting_node_id, state.betting.street, state.board),
+      node_id);
   if (!inserted) {
     return state_iter->second;
   }
-  tables.public_state_rows.push_back(make_row(betting_node_id, state));
-  return public_state_id;
+  tables.nodes.push_back(make_node(betting_node_id, state));
+  return node_id;
 }
 
-std::optional<uint32_t> GraphBuilder::get_or_create_row(
+std::optional<NodeId> GraphBuilder::get_or_create_node(
     const ExactGameState& state) {
   if (storage_.frozen) {
-    const uint32_t root_id = tables().root_public_state_id;
-    if (root_id == kInvalidPublicStateId ||
-        root_id >= tables().public_state_rows.size()) {
+    const NodeId root_id = tables().root_node_id;
+    if (root_id == kInvalidNodeId ||
+        root_id >= tables().nodes.size()) {
       return std::nullopt;
     }
     return root_id;
@@ -391,26 +391,26 @@ std::optional<uint32_t> GraphBuilder::get_or_create_row(
 
   const BettingNodeId betting_node_id =
       get_or_create_root_betting_node(state.betting);
-  auto root_id = get_or_create_row(betting_node_id, state);
+  auto root_id = get_or_create_node(betting_node_id, state);
   if (root_id.has_value()) {
-    mtables().root_public_state_id = *root_id;
+    mtables().root_node_id = *root_id;
   }
   return root_id;
 }
 
 template <typename Callback>
 bool GraphBuilder::for_each_required_chance_transition(
-    const PublicStateRow& row,
+    const Node& graph_node,
     const Board& board,
     Callback&& callback) const {
-  if (row.betting_node_id >= tables().betting_nodes.size()) {
+  if (graph_node.betting_node_id >= tables().betting_nodes.size()) {
     return false;
   }
   const BettingState& betting =
-      tables().betting_nodes[row.betting_node_id].state;
+      tables().betting_nodes[graph_node.betting_node_id].state;
   if constexpr (kCoarsePublicBuckets) {
     return ForEachCoarseChanceTransition(
-        betting.street, row.public_bucket, betting,
+        betting.street, graph_node.board_bucket, betting,
         std::forward<Callback>(callback));
   } else {
     return ForEachNextStreetDeal(
@@ -420,46 +420,46 @@ bool GraphBuilder::for_each_required_chance_transition(
   }
 }
 
-GraphBuilder::PublicBucketId GraphBuilder::chance_outcome_id(
+GraphBuilder::BoardBucketId GraphBuilder::chance_outcome_id(
     const ExactGameState& child_state) const {
-  return public_bucket(child_state.betting.street, child_state.board);
+  return board_bucket(child_state.betting.street, child_state.board);
 }
 
-std::optional<uint32_t> GraphBuilder::find_or_cache_action_child(
-    uint32_t parent_public_state_id,
+std::optional<NodeId> GraphBuilder::find_or_cache_action_child(
+    NodeId parent_node_id,
     int action_index) {
-  const auto& public_rows = rows();
-  if (parent_public_state_id >= public_rows.size()) {
+  const auto& graph_nodes = nodes();
+  if (parent_node_id >= graph_nodes.size()) {
     return std::nullopt;
   }
-  const PublicStateRow& row = public_rows[parent_public_state_id];
-  if (row.betting_node_id >= tables().betting_nodes.size()) {
+  const Node& graph_node = graph_nodes[parent_node_id];
+  if (graph_node.betting_node_id >= tables().betting_nodes.size()) {
     return std::nullopt;
   }
-  const BettingNode& node = tables().betting_nodes[row.betting_node_id];
+  const BettingNode& node = tables().betting_nodes[graph_node.betting_node_id];
   if (action_index < 0 || action_index >= node.action_count) {
     throw std::logic_error(
         "find_or_cache_action_child: action index out of range");
   }
 
   const size_t action_slot = static_cast<size_t>(action_index);
-  const size_t child_slot = static_cast<size_t>(row.action_child_offset) +
+  const size_t child_slot = static_cast<size_t>(graph_node.action_child_offset) +
                             action_slot;
   if (child_slot >= tables().action_child_ids.size()) {
     return std::nullopt;
   }
-  const uint32_t row_child_id = tables().action_child_ids[child_slot];
-  if (row_child_id != kInvalidPublicStateId) {
-    return row_child_id;
+  const NodeId cached_child_id = tables().action_child_ids[child_slot];
+  if (cached_child_id != kInvalidNodeId) {
+    return cached_child_id;
   }
 
   const auto& betting_nodes = tables().betting_nodes;
   const auto& betting_edges = tables().betting_edges;
-  if (row.betting_node_id >= betting_nodes.size()) {
+  if (graph_node.betting_node_id >= betting_nodes.size()) {
     return std::nullopt;
   }
 
-  const BettingNode& parent = betting_nodes[row.betting_node_id];
+  const BettingNode& parent = betting_nodes[graph_node.betting_node_id];
   if (action_index >= parent.action_count) {
     return std::nullopt;
   }
@@ -474,12 +474,12 @@ std::optional<uint32_t> GraphBuilder::find_or_cache_action_child(
     return std::nullopt;
   }
 
-  const PublicStateKey child_key{
+  const NodeKey child_key{
       child_node_id,
-      row.public_bucket,
+      graph_node.board_bucket,
   };
-  auto child_id = tables().public_state_ids.find(child_key);
-  if (child_id == tables().public_state_ids.end()) {
+  auto child_id = tables().node_ids.find(child_key);
+  if (child_id == tables().node_ids.end()) {
     return std::nullopt;
   }
 
@@ -489,49 +489,49 @@ std::optional<uint32_t> GraphBuilder::find_or_cache_action_child(
   return child_id->second;
 }
 
-bool GraphBuilder::row_limit_reached() const {
+bool GraphBuilder::node_limit_reached() const {
   return config_.max_public_states > 0 &&
-         static_cast<int>(rows().size()) >= config_.max_public_states;
+         static_cast<int>(nodes().size()) >= config_.max_public_states;
 }
 
-bool GraphBuilder::can_insert_row() const {
-  return !storage_.frozen && !row_limit_reached();
+bool GraphBuilder::can_insert_node() const {
+  return !storage_.frozen && !node_limit_reached();
 }
 
-std::optional<uint32_t>
+std::optional<NodeId>
 GraphBuilder::get_or_create_action_child(
-    uint32_t parent_public_state_id,
+    NodeId parent_node_id,
     int action_index,
     const Board& parent_board) {
-  const auto& public_rows = rows();
-  if (parent_public_state_id >= public_rows.size()) {
+  const auto& graph_nodes = nodes();
+  if (parent_node_id >= graph_nodes.size()) {
     return std::nullopt;
   }
-  const PublicStateRow& read_row = public_rows[parent_public_state_id];
-  if (read_row.betting_node_id >= tables().betting_nodes.size()) {
+  const Node& parent_node = graph_nodes[parent_node_id];
+  if (parent_node.betting_node_id >= tables().betting_nodes.size()) {
     return std::nullopt;
   }
-  const BettingNode& parent = tables().betting_nodes[read_row.betting_node_id];
+  const BettingNode& parent = tables().betting_nodes[parent_node.betting_node_id];
   if (action_index < 0 || action_index >= parent.action_count) {
     throw std::logic_error(
         "get_or_create_action_child: action index out of range");
   }
 
   const size_t action_slot = static_cast<size_t>(action_index);
-  const size_t child_slot = static_cast<size_t>(read_row.action_child_offset) +
+  const size_t child_slot = static_cast<size_t>(parent_node.action_child_offset) +
                             action_slot;
-  if (std::optional<uint32_t> existing_child_id =
-          find_or_cache_action_child(parent_public_state_id, action_index)) {
+  if (std::optional<NodeId> existing_child_id =
+          find_or_cache_action_child(parent_node_id, action_index)) {
     stats_.record_transition_hit();
-    if (*existing_child_id == kCappedPublicStateId) {
+    if (*existing_child_id == kCappedNodeId) {
       return std::nullopt;
     }
     return existing_child_id;
   }
 
-  if (!can_insert_row()) {
+  if (!can_insert_node()) {
     if (!storage_.frozen) {
-      mtables().action_child_ids[child_slot] = kCappedPublicStateId;
+      mtables().action_child_ids[child_slot] = kCappedNodeId;
     }
     stats_.record_transition_miss();
     return std::nullopt;
@@ -544,16 +544,16 @@ GraphBuilder::get_or_create_action_child(
       ApplyLegalActionUnchecked(parent.state, action);
   const ExactGameState child_state{child_betting, parent_board};
   const BettingNodeId child_betting_node_id =
-      get_or_create_action_betting_child(read_row.betting_node_id,
+      get_or_create_action_betting_child(parent_node.betting_node_id,
                                          action_index);
   if (!SameBettingState(
           tables().betting_nodes[child_betting_node_id].state,
           child_betting)) {
     throw std::logic_error("action betting child state mismatch");
   }
-  auto child_id = get_or_create_row(child_betting_node_id, child_state);
+  auto child_id = get_or_create_node(child_betting_node_id, child_state);
   if (!child_id.has_value()) {
-    mtables().action_child_ids[child_slot] = kCappedPublicStateId;
+    mtables().action_child_ids[child_slot] = kCappedNodeId;
     stats_.record_transition_miss();
     return std::nullopt;
   }
@@ -564,16 +564,16 @@ GraphBuilder::get_or_create_action_child(
   return child_id;
 }
 
-std::optional<uint32_t> GraphBuilder::find_or_cache_chance_child(
-    uint32_t parent_public_state_id,
+std::optional<NodeId> GraphBuilder::find_or_cache_chance_child(
+    NodeId parent_node_id,
     const ExactGameState& child_state) {
-  const auto& public_rows = rows();
-  if (parent_public_state_id >= public_rows.size()) {
+  const auto& graph_nodes = nodes();
+  if (parent_node_id >= graph_nodes.size()) {
     return std::nullopt;
   }
-  const PublicStateRow& row = public_rows[parent_public_state_id];
-  const PublicBucketId outcome_id = chance_outcome_id(child_state);
-  const ChanceTransitionKey transition_key{parent_public_state_id, outcome_id};
+  const Node& graph_node = graph_nodes[parent_node_id];
+  const BoardBucketId outcome_id = chance_outcome_id(child_state);
+  const ChanceTransitionKey transition_key{parent_node_id, outcome_id};
   auto existing = tables().public_chance_child_ids.find(transition_key);
   if (existing != tables().public_chance_child_ids.end()) {
     return existing->second;
@@ -581,22 +581,22 @@ std::optional<uint32_t> GraphBuilder::find_or_cache_chance_child(
 
   if constexpr (kCoarsePublicBuckets) {
     const auto& betting_nodes = tables().betting_nodes;
-    if (row.betting_node_id >= betting_nodes.size()) {
+    if (graph_node.betting_node_id >= betting_nodes.size()) {
       return std::nullopt;
     }
 
     const BettingNodeId child_node_id =
-        betting_nodes[row.betting_node_id].chance_child;
+        betting_nodes[graph_node.betting_node_id].chance_child;
     if (child_node_id == kInvalidBettingNodeId) {
       return std::nullopt;
     }
 
-    const PublicStateKey child_public_key{
+    const NodeKey child_key{
         child_node_id,
         outcome_id,
     };
-    auto child_id = tables().public_state_ids.find(child_public_key);
-    if (child_id == tables().public_state_ids.end()) {
+    auto child_id = tables().node_ids.find(child_key);
+    if (child_id == tables().node_ids.end()) {
       return std::nullopt;
     }
 
@@ -610,89 +610,89 @@ std::optional<uint32_t> GraphBuilder::find_or_cache_chance_child(
   return std::nullopt;
 }
 
-std::optional<uint32_t>
+std::optional<NodeId>
 GraphBuilder::get_or_create_chance_child(
-    uint32_t parent_public_state_id,
+    NodeId parent_node_id,
     const ExactGameState& exact_child_state) {
-  const auto& public_rows = rows();
-  if (parent_public_state_id >= public_rows.size()) {
+  const auto& graph_nodes = nodes();
+  if (parent_node_id >= graph_nodes.size()) {
     return std::nullopt;
   }
-  const PublicBucketId outcome_id = chance_outcome_id(exact_child_state);
-  if (std::optional<uint32_t> existing_child_id =
-          find_or_cache_chance_child(parent_public_state_id,
+  const BoardBucketId outcome_id = chance_outcome_id(exact_child_state);
+  if (std::optional<NodeId> existing_child_id =
+          find_or_cache_chance_child(parent_node_id,
                                      exact_child_state)) {
     stats_.record_transition_hit();
     return *existing_child_id;
   }
 
-  if (!can_insert_row()) {
+  if (!can_insert_node()) {
     stats_.record_transition_miss();
     return std::nullopt;
   }
 
-  const PublicStateRow& parent_row = public_rows[parent_public_state_id];
+  const Node& parent_node = graph_nodes[parent_node_id];
   const BettingNodeId child_betting_node_id =
-      get_or_create_chance_betting_child(parent_row.betting_node_id,
+      get_or_create_chance_betting_child(parent_node.betting_node_id,
                                          exact_child_state.betting);
-  auto child_id = get_or_create_row(child_betting_node_id, exact_child_state);
+  auto child_id = get_or_create_node(child_betting_node_id, exact_child_state);
   if (!child_id.has_value()) {
     stats_.record_transition_miss();
     return std::nullopt;
   }
 
   mtables().public_chance_child_ids.emplace(
-      ChanceTransitionKey{parent_public_state_id, outcome_id}, *child_id);
+      ChanceTransitionKey{parent_node_id, outcome_id}, *child_id);
   stats_.record_transition_miss();
   stats_.record_child_node_created();
   return child_id;
 }
 
-bool GraphBuilder::prebuild_reachable_rows(
-    uint32_t root_id,
+bool GraphBuilder::prebuild_reachable_nodes(
+    NodeId root_id,
     const Board& root_board,
     int max_depth,
-    std::vector<std::optional<Board>>& row_boards) {
+    std::vector<std::optional<Board>>& node_boards) {
   if (storage_.frozen) {
     return true;
   }
-  if (root_id >= rows().size()) {
+  if (root_id >= nodes().size()) {
     return false;
   }
 
-  row_boards.clear();
-  row_boards.resize(rows().size());
-  row_boards[root_id] = root_board;
-  PublicStateBfs bfs(root_id, root_board, rows().size());
-  while (std::optional<PublicStateBfs::Entry> maybe_entry = bfs.next()) {
-    const PublicStateBfs::Entry entry = *maybe_entry;
-    if (entry.node_id >= rows().size()) {
+  node_boards.clear();
+  node_boards.resize(nodes().size());
+  node_boards[root_id] = root_board;
+  NodeBfs bfs(root_id, root_board, nodes().size());
+  while (std::optional<NodeBfs::Entry> maybe_entry = bfs.next()) {
+    const NodeBfs::Entry entry = *maybe_entry;
+    if (entry.node_id >= nodes().size()) {
       return false;
     }
-    // Copy before creating children; child creation can append to rows and
+    // Copy before creating children; child creation can append to nodes and
     // invalidate references.
-    const PublicStateRow row = rows()[entry.node_id];
-    if (row.betting_node_id >= tables().betting_nodes.size()) {
+    const Node graph_node = nodes()[entry.node_id];
+    if (graph_node.betting_node_id >= tables().betting_nodes.size()) {
       return false;
     }
-    const BettingNode node = tables().betting_nodes[row.betting_node_id];
+    const BettingNode node = tables().betting_nodes[graph_node.betting_node_id];
     if (node.kind == StrategyTables::NodeKind::kTerminal) {
       continue;
     }
 
     if (node.kind == StrategyTables::NodeKind::kChance) {
       const bool complete = for_each_required_chance_transition(
-          row, entry.board, [&](const ExactGameState& child_state,
+          graph_node, entry.board, [&](const ExactGameState& child_state,
                                 absl::Span<const CardId>) {
             auto child_id = get_or_create_chance_child(entry.node_id, child_state);
             if (!child_id.has_value()) {
               return false;
             }
-            if (row_boards.size() <= *child_id) {
-              row_boards.resize(static_cast<size_t>(*child_id) + 1);
+            if (node_boards.size() <= *child_id) {
+              node_boards.resize(static_cast<size_t>(*child_id) + 1);
             }
-            if (!row_boards[*child_id].has_value()) {
-              row_boards[*child_id] = child_state.board;
+            if (!node_boards[*child_id].has_value()) {
+              node_boards[*child_id] = child_state.board;
             }
             bfs.enqueue_growing(*child_id, child_state.board, entry.depth);
             return true;
@@ -714,11 +714,11 @@ bool GraphBuilder::prebuild_reachable_rows(
       if (!child_id.has_value()) {
         return false;
       }
-      if (row_boards.size() <= *child_id) {
-        row_boards.resize(static_cast<size_t>(*child_id) + 1);
+      if (node_boards.size() <= *child_id) {
+        node_boards.resize(static_cast<size_t>(*child_id) + 1);
       }
-      if (!row_boards[*child_id].has_value()) {
-        row_boards[*child_id] = entry.board;
+      if (!node_boards[*child_id].has_value()) {
+        node_boards[*child_id] = entry.board;
       }
       bfs.enqueue_growing(*child_id, entry.board, entry.depth + 1);
     }
@@ -732,8 +732,8 @@ void GraphBuilder::rebuild_chance_child_entries() {
   StrategyTables& tables = mtables();
   struct PendingChanceChild {
     uint32_t parent_id = 0;
-    PublicBucketId outcome_id = 0;
-    uint32_t child_id = kInvalidPublicStateId;
+    BoardBucketId outcome_id = 0;
+    NodeId child_id = kInvalidNodeId;
 
     bool operator<(const PendingChanceChild& other) const {
       return std::tie(parent_id, outcome_id) <
@@ -745,8 +745,8 @@ void GraphBuilder::rebuild_chance_child_entries() {
   pending.reserve(tables.public_chance_child_ids.size());
   for (const auto& [transition_key, child_id] :
        tables.public_chance_child_ids) {
-    const uint32_t parent_id = transition_key.parent_public_state_id;
-    if (parent_id >= tables.public_state_rows.size()) {
+    const uint32_t parent_id = transition_key.parent_node_id;
+    if (parent_id >= tables.nodes.size()) {
       continue;
     }
     pending.push_back({
@@ -758,52 +758,52 @@ void GraphBuilder::rebuild_chance_child_entries() {
 
   std::sort(pending.begin(), pending.end());
 
-  for (PublicStateRow& row : tables.public_state_rows) {
-    row.chance_child_offset = 0;
-    row.chance_child_count = 0;
+  for (Node& graph_node : tables.nodes) {
+    graph_node.chance_child_offset = 0;
+    graph_node.chance_child_count = 0;
   }
   tables.chance_child_entries.clear();
   tables.chance_child_entries.reserve(pending.size());
-  uint32_t current_parent_id = kInvalidPublicStateId;
+  NodeId current_parent_id = kInvalidNodeId;
   for (const PendingChanceChild& child : pending) {
-    if (child.child_id >= tables.public_state_rows.size()) {
+    if (child.child_id >= tables.nodes.size()) {
       continue;
     }
     if (child.parent_id != current_parent_id) {
       current_parent_id = child.parent_id;
-      tables.public_state_rows[current_parent_id].chance_child_offset =
+      tables.nodes[current_parent_id].chance_child_offset =
           static_cast<uint32_t>(tables.chance_child_entries.size());
     }
     tables.chance_child_entries.push_back({
         child.outcome_id,
         child.child_id,
     });
-    ++tables.public_state_rows[current_parent_id].chance_child_count;
+    ++tables.nodes[current_parent_id].chance_child_count;
   }
 }
 
-bool GraphBuilder::validate_prebuilt_rows(
-    uint32_t root_id,
+bool GraphBuilder::validate_prebuilt_nodes(
+    NodeId root_id,
     const Board& root_board,
     int max_depth,
     TrainingRunStats& stats) const {
-  const auto& public_rows = rows();
-  if (root_id >= public_rows.size()) {
+  const auto& graph_nodes = nodes();
+  if (root_id >= graph_nodes.size()) {
     return false;
   }
   stats.action_transition_prebuild_complete = true;
   stats.chance_transition_prebuild_complete = true;
 
-  PublicStateBfs bfs(root_id, root_board, public_rows.size());
+  NodeBfs bfs(root_id, root_board, graph_nodes.size());
 
-  auto valid_public_child = [&](uint32_t node_id) {
-    return node_id != kInvalidPublicStateId &&
-           node_id != kCappedPublicStateId &&
-           node_id < public_rows.size();
+  auto valid_child_id = [&](NodeId node_id) {
+    return node_id != kInvalidNodeId &&
+           node_id != kCappedNodeId &&
+           node_id < graph_nodes.size();
   };
-  auto enqueue_child = [&](uint32_t node_id, Board board, int depth) {
+  auto enqueue_child = [&](NodeId node_id, Board board, int depth) {
     return bfs.enqueue_existing(node_id, std::move(board), depth,
-                                public_rows.size());
+                                graph_nodes.size());
   };
   auto mark_missing_action = [&] {
     ++stats.missing_action_transitions;
@@ -814,20 +814,20 @@ bool GraphBuilder::validate_prebuilt_rows(
     stats.chance_transition_prebuild_complete = false;
   };
 
-  while (std::optional<PublicStateBfs::Entry> maybe_entry = bfs.next()) {
-    const PublicStateBfs::Entry entry = *maybe_entry;
-    if (entry.node_id >= public_rows.size()) {
+  while (std::optional<NodeBfs::Entry> maybe_entry = bfs.next()) {
+    const NodeBfs::Entry entry = *maybe_entry;
+    if (entry.node_id >= graph_nodes.size()) {
       stats.action_transition_prebuild_complete = false;
       stats.chance_transition_prebuild_complete = false;
       return false;
     }
-    const PublicStateRow& row = public_rows[entry.node_id];
-    if (row.betting_node_id >= tables().betting_nodes.size()) {
+    const Node& graph_node = graph_nodes[entry.node_id];
+    if (graph_node.betting_node_id >= tables().betting_nodes.size()) {
       stats.action_transition_prebuild_complete = false;
       stats.chance_transition_prebuild_complete = false;
       return false;
     }
-    const BettingNode& node = tables().betting_nodes[row.betting_node_id];
+    const BettingNode& node = tables().betting_nodes[graph_node.betting_node_id];
     ValidateBettingNode(node);
     if (node.kind == StrategyTables::NodeKind::kTerminal) {
       continue;
@@ -835,13 +835,13 @@ bool GraphBuilder::validate_prebuilt_rows(
 
     if (node.kind == StrategyTables::NodeKind::kChance) {
       const bool chance_complete = for_each_required_chance_transition(
-          row, entry.board, [&](const ExactGameState& child_state,
+          graph_node, entry.board, [&](const ExactGameState& child_state,
                                 absl::Span<const CardId>) {
         ++stats.prebuild_chance_transitions;
         const auto child = tables().chance_child(
             entry.node_id, chance_outcome_id(child_state));
-        const uint32_t child_id = child.value_or(kInvalidPublicStateId);
-        const bool valid_child = valid_public_child(child_id);
+        const NodeId child_id = child.value_or(kInvalidNodeId);
+        const bool valid_child = valid_child_id(child_id);
         if (!valid_child) {
           mark_missing_chance();
         }
@@ -864,10 +864,10 @@ bool GraphBuilder::validate_prebuilt_rows(
     for (int action_index = 0; action_index < node.action_count;
          ++action_index) {
       ++stats.prebuild_action_transitions;
-      const uint32_t child_id =
+      const NodeId child_id =
           tables().action_child(entry.node_id, action_index)
-              .value_or(kInvalidPublicStateId);
-      const bool valid_child = valid_public_child(child_id);
+              .value_or(kInvalidNodeId);
+      const bool valid_child = valid_child_id(child_id);
       if (!valid_child) {
         mark_missing_action();
       }

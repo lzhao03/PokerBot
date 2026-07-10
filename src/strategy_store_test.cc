@@ -10,9 +10,9 @@ namespace {
 
 struct StoreFixture {
   StoreFixture() {
-    storage.mutable_tables->public_state_rows.resize(1);
+    storage.mutable_tables->nodes.resize(1);
     storage.mutable_tables->betting_nodes.resize(1);
-    storage.mutable_tables->public_state_rows[0].betting_node_id = 0;
+    storage.mutable_tables->nodes[0].betting_node_id = 0;
     storage.mutable_tables->betting_nodes[0].kind =
         StrategyTables::NodeKind::kDecision;
     storage.mutable_tables->betting_nodes[0].state.player_to_act = 0;

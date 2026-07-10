@@ -86,7 +86,7 @@ class StrategyStore {
   using PrivateBucketId = StrategyTables::PrivateBucketId;
   using InfoSetAddress = StrategyTables::InfoSetAddress;
   using InfoSetRow = StrategyTables::InfoSetRow;
-  using PublicStateRow = StrategyTables::PublicStateRow;
+  using Node = StrategyTables::Node;
   using PrivateRowChunk = StrategyTables::PrivateRowChunk;
   using PublicInfoSetSlabPlayer =
       StrategyTables::PublicInfoSetSlabPlayer;
@@ -103,7 +103,7 @@ class StrategyStore {
                                   size_t expected_action_count);
   std::optional<ActionBlock> get_or_create(InfoSetAddress address,
                                            size_t action_count);
-  std::optional<ActionBlock> find_frozen(uint32_t public_state_id,
+  std::optional<ActionBlock> find_frozen(NodeId node_id,
                                          PrivateBucketId private_bucket,
                                          size_t expected_action_count);
 
@@ -111,12 +111,12 @@ class StrategyStore {
                                   size_t legal_action_count,
                                   RegretLoadMode load_mode,
                                   absl::Span<double> out);
-  void average_strategy(uint32_t public_state_id,
+  void average_strategy(NodeId node_id,
                         PrivateBucketId private_bucket,
                         size_t action_count,
                         bool regret_only_training,
                         absl::Span<double> out);
-  void regret_matching_for_bucket(uint32_t public_state_id,
+  void regret_matching_for_bucket(NodeId node_id,
                                   PrivateBucketId private_bucket,
                                   size_t action_count,
                                   absl::Span<double> out);
@@ -134,9 +134,9 @@ class StrategyStore {
   ActionBlock block_for_row(const InfoSetRow& row);
   std::optional<ActionBlock> block_for_row(const InfoSetRow* row,
                                            size_t expected_action_count);
-  const PublicInfoSetSlab* public_info_set_slab(uint32_t public_state_id) const;
+  const PublicInfoSetSlab* public_info_set_slab(NodeId node_id) const;
   PublicInfoSetSlab& get_or_create_public_info_set_slab(
-      uint32_t public_state_id);
+      NodeId node_id);
   const InfoSetRow* find_info_set_row(InfoSetAddress address) const;
   static const InfoSetRow* find_info_set_row(
       const PublicInfoSetSlabPlayer& player_slab,
@@ -149,9 +149,9 @@ class StrategyStore {
       size_t action_count);
   InfoSetRow append_info_set_actions(size_t action_count);
   uint32_t frozen_info_set_action_offset(
-      uint32_t public_state_id,
+      NodeId node_id,
       PrivateBucketId private_bucket) const;
-  int player_for_public_state(uint32_t public_state_id) const;
+  int player_for_node(NodeId node_id) const;
 
   const SolverConfig& config_;
   SolverStorage& storage_;

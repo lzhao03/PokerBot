@@ -39,42 +39,42 @@ struct TrainingRunStats {
 
 class GraphBuilder {
  public:
-  using PublicStateRow = StrategyTables::PublicStateRow;
+  using Node = StrategyTables::Node;
 
   GraphBuilder(const SolverConfig& config,
                SolverStorage& storage,
                const BettingAbstraction& betting_abstraction,
                TraversalStats& stats);
 
-  std::optional<uint32_t> get_or_create_row(const ExactGameState& state);
-  std::optional<uint32_t> get_or_create_action_child(
-      uint32_t parent_public_state_id,
+  std::optional<NodeId> get_or_create_node(const ExactGameState& state);
+  std::optional<NodeId> get_or_create_action_child(
+      NodeId parent_node_id,
       int action_index,
       const Board& parent_board);
-  std::optional<uint32_t> get_or_create_chance_child(
-      uint32_t parent_public_state_id,
+  std::optional<NodeId> get_or_create_chance_child(
+      NodeId parent_node_id,
       const ExactGameState& child_state);
-  bool prebuild_reachable_rows(uint32_t root_id,
+  bool prebuild_reachable_nodes(NodeId root_id,
+                                const Board& root_board,
+                                int max_depth,
+                                std::vector<std::optional<Board>>& node_boards);
+  bool validate_prebuilt_nodes(NodeId root_id,
                                const Board& root_board,
                                int max_depth,
-                               std::vector<std::optional<Board>>& row_boards);
-  bool validate_prebuilt_rows(uint32_t root_id,
-                              const Board& root_board,
-                              int max_depth,
-                              TrainingRunStats& stats) const;
+                               TrainingRunStats& stats) const;
 
  private:
-  using PublicBucketId = StrategyTables::PublicBucketId;
+  using BoardBucketId = StrategyTables::BoardBucketId;
   using BettingNodeId = StrategyTables::BettingNodeId;
   using BettingNode = StrategyTables::BettingNode;
   using BettingEdge = StrategyTables::BettingEdge;
-  using PublicStateKey = StrategyTables::PublicStateKey;
+  using NodeKey = StrategyTables::NodeKey;
   using ChanceTransitionKey = StrategyTables::ChanceTransitionKey;
 
   const StrategyTables& tables() const { return storage_.frozen_ref(); }
   StrategyTables& mtables() { return storage_.mutable_ref(); }
-  const std::vector<PublicStateRow>& rows() const {
-    return tables().public_state_rows;
+  const std::vector<Node>& nodes() const {
+    return tables().nodes;
   }
 
   BettingNodeId append_betting_node(const BettingState& state);
@@ -85,31 +85,31 @@ class GraphBuilder {
   BettingNodeId get_or_create_chance_betting_child(
       BettingNodeId parent_node_id,
       const BettingState& child_state);
-  PublicStateKey row_key(BettingNodeId betting_node_id,
-                         StreetKind street,
-                         const Board& board) const;
-  std::optional<uint32_t> find_row(
+  NodeKey node_key(BettingNodeId betting_node_id,
+                   StreetKind street,
+                   const Board& board) const;
+  std::optional<NodeId> find_node(
       BettingNodeId betting_node_id,
       StreetKind street,
       const Board& board) const;
-  PublicStateRow make_row(BettingNodeId betting_node_id,
-                          const ExactGameState& state);
-  std::optional<uint32_t> get_or_create_row(
+  Node make_node(BettingNodeId betting_node_id,
+                 const ExactGameState& state);
+  std::optional<NodeId> get_or_create_node(
       BettingNodeId betting_node_id,
       const ExactGameState& state);
-  std::optional<uint32_t> find_or_cache_action_child(
-      uint32_t parent_public_state_id,
+  std::optional<NodeId> find_or_cache_action_child(
+      NodeId parent_node_id,
       int action_index);
-  std::optional<uint32_t> find_or_cache_chance_child(
-      uint32_t parent_public_state_id,
+  std::optional<NodeId> find_or_cache_chance_child(
+      NodeId parent_node_id,
       const ExactGameState& child_state);
-  bool row_limit_reached() const;
-  bool can_insert_row() const;
+  bool node_limit_reached() const;
+  bool can_insert_node() const;
   template <typename Callback>
-  bool for_each_required_chance_transition(const PublicStateRow& row,
+  bool for_each_required_chance_transition(const Node& node,
                                            const Board& board,
                                            Callback&& callback) const;
-  PublicBucketId chance_outcome_id(
+  BoardBucketId chance_outcome_id(
       const ExactGameState& child_state) const;
   void rebuild_chance_child_entries();
 

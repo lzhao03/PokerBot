@@ -7,7 +7,7 @@ namespace poker {
 namespace {
 
 #if !POKER_COARSE_PUBLIC_BUCKETS
-#error "cfr_public_bucket_test must be compiled with coarse public buckets"
+#error "cfr_board_bucket_test must be compiled with coarse public buckets"
 #endif
 
 ComboId Combo(int first_rank,

@@ -14,7 +14,7 @@
 #include "src/card_abstraction.h"
 #include "src/hand_range.h"
 #include "src/poker_types.h"
-#include "src/public_state_graph.h"
+#include "src/graph_builder.h"
 #include "src/strategy_store.h"
 #include "src/strategy_tables.h"
 #include "src/training_range.h"
@@ -46,7 +46,7 @@ class CFRSolver {
     return tables().info_set_count;
   }
   size_t get_public_state_count() const {
-    return rows().size();
+    return nodes().size();
   }
   TraversalStats get_traversal_stats() const { return traversal_stats_; }
   TrainingRunStats get_last_training_run_stats() const {
@@ -66,13 +66,13 @@ class CFRSolver {
   MutableCumulativeArrays& arrays() {
     return storage_.cumulative_ref();
   }
-  const std::vector<StrategyTables::PublicStateRow>& rows() const {
-    return tables().public_state_rows;
+  const std::vector<StrategyTables::Node>& nodes() const {
+    return tables().nodes;
   }
 
   using PrivateBucketId = StrategyTables::PrivateBucketId;
   using InfoSetAddress = StrategyTables::InfoSetAddress;
-  using PublicStateRow = StrategyTables::PublicStateRow;
+  using Node = StrategyTables::Node;
 
   struct Deal {
     std::array<ComboId, kPlayerCount> hands = {};
@@ -98,8 +98,8 @@ class CFRSolver {
     bool record_atomic_retry_stats = false;
   };
 
-  struct NodeRef {
-    uint32_t public_state_id = kInvalidPublicStateId;
+  struct Position {
+    NodeId node = kInvalidNodeId;
     Board exact_board;
     BoardFeatures board_features;
   };
@@ -108,11 +108,11 @@ class CFRSolver {
    public:
     explicit MutableTraversalGraph(CFRSolver& solver);
 
-    std::optional<NodeRef> action_child(
-        NodeRef parent,
+    std::optional<Position> action_child(
+        Position parent,
         int action_index);
-    std::optional<NodeRef> sample_chance_child(
-        NodeRef parent,
+    std::optional<Position> sample_chance_child(
+        Position parent,
         CardMask known_private_cards);
 
    private:
@@ -123,15 +123,15 @@ class CFRSolver {
    public:
     explicit FrozenTraversalGraph(CFRSolver& solver);
 
-    NodeRef action_child(NodeRef parent, int action_index) const;
-    NodeRef sample_chance_child(NodeRef parent,
+    Position action_child(Position parent, int action_index) const;
+    Position sample_chance_child(Position parent,
                                 CardMask known_private_cards);
 
    private:
-    uint32_t required_action_child_id(uint32_t parent_public_state_id,
-                                      int action_index) const;
-    uint32_t required_chance_child_id(
-        uint32_t parent_public_state_id,
+    NodeId required_action_child_id(NodeId parent_node_id,
+                                    int action_index) const;
+    NodeId required_chance_child_id(
+        NodeId parent_node_id,
         const ExactGameState& child_state) const;
 
     CFRSolver& solver_;
@@ -171,14 +171,14 @@ class CFRSolver {
                  Graph& graph)
         : solver_(solver), run_(run), graph_(graph) {}
 
-    double value(NodeRef node, const TraversalFrame& frame);
+    double value(Position position, const TraversalFrame& frame);
 
    private:
-    double terminal(NodeRef node, const PublicStateRow& row);
-    double chance(NodeRef node, const TraversalFrame& frame);
-    double depth_limit_value(NodeRef node, const PublicStateRow& row);
-    double decision(NodeRef node,
-                    const PublicStateRow& row,
+    double terminal(Position position, const Node& node);
+    double chance(Position position, const TraversalFrame& frame);
+    double depth_limit_value(Position position, const Node& node);
+    double decision(Position position,
+                    const Node& node,
                     const TraversalFrame& frame);
 
     CFRSolver& solver_;
@@ -187,13 +187,13 @@ class CFRSolver {
   };
 
   bool prepare_prebuilt_training(
-      uint32_t root_id,
+      NodeId root_id,
       int max_depth,
       const TrainingRangeView& a_view,
       const TrainingRangeView& b_view);
   void run_growing_iterations(
       int iterations,
-      uint32_t root_id,
+      NodeId root_id,
       RangeSampler& sampler,
       const TrainingRangeView& a_view,
       const TrainingRangeView& b_view,
@@ -201,7 +201,7 @@ class CFRSolver {
   void run_fixed_storage_iterations(
       int iterations,
       int num_threads,
-      uint32_t root_id,
+      NodeId root_id,
       const Board& root_board,
       const RangeSampler& sampler,
       const TrainingRange& a_range,
@@ -216,46 +216,46 @@ class CFRSolver {
                    WorkerFn&& worker_fn,
                    AccumulateFn&& accumulate_fn);
   template <typename Graph>
-  double cfr(NodeRef node,
+  double cfr(Position position,
              TraversalRun& run,
              const TraversalFrame& frame,
              Graph& graph);
   template <typename Graph, typename EvalChild>
   double sample_chance_children(int samples,
-                                NodeRef node,
+                                Position position,
                                 CardMask known_private_cards,
                                 Graph& graph,
                                 EvalChild&& eval_child);
 
   bool prebuild_info_set_rows(const TrainingRangeView& a_view,
                               const TrainingRangeView& b_view,
-                              absl::Span<const std::optional<Board>> row_boards);
+                              absl::Span<const std::optional<Board>> node_boards);
   absl::Span<TrainingRangeView> condition_ranges_for_actions(
       const TrainingRangeView& range,
       StreetKind street,
       const Board& board,
       const BoardFeatures& features,
-      uint32_t node_id,
+      NodeId node_id,
       int player,
       size_t action_count,
       RangeScratchFrame& scratch_frame);
-  double terminal_utility(const PublicStateRow& row,
+  double terminal_utility(const Node& node,
                           const Board& board,
                           ComboId player_a_hand,
                           ComboId player_b_hand);
-  double evaluate_strategy_node(NodeRef node,
+  double evaluate_strategy_node(Position position,
                                 const Deal& deal,
                                 MutableTraversalGraph& graph);
-  double evaluate_strategy_node(NodeRef node,
+  double evaluate_strategy_node(Position position,
                                 const Deal& deal,
                                 FrozenTraversalGraph& graph);
   template <typename Graph>
-  double evaluate_strategy_node_impl(NodeRef node,
+  double evaluate_strategy_node_impl(Position position,
                                      const Deal& deal,
                                      Graph& graph);
   double evaluate_strategy_samples(
       int samples,
-      uint32_t root_id,
+      NodeId root_id,
       const Board& root_board,
       const RangeSampler& sampler,
       bool allow_parallel);
