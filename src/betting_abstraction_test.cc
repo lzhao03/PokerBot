@@ -22,7 +22,6 @@ BettingState PreflopState() {
   BettingState state;
   state.stack[0] = 99;
   state.stack[1] = 98;
-  state.pot = 3;
   state.street = StreetKind::kPreflop;
   state.folded_player = -1;
   state.committed = {1, 2};
@@ -34,7 +33,6 @@ BettingState FlopState() {
   BettingState state;
   state.stack[0] = 98;
   state.stack[1] = 98;
-  state.pot = 4;
   state.street = StreetKind::kFlop;
   state.folded_player = -1;
   state.committed = {2, 2};
@@ -85,7 +83,7 @@ TEST_CASE("generated betting actions preserve state invariants") {
       CHECK(TotalChips(next) == total_chips);
       CHECK(next.stack[0] >= 0);
       CHECK(next.stack[1] >= 0);
-      CHECK(next.pot >= 0);
+      CHECK(Pot(next) >= 0);
       CHECK(next.actions_this_street == state.actions_this_street + 1);
       CHECK(next.last_action.kind == action.kind);
       CHECK(next.last_action.player == state.player_to_act);
@@ -149,9 +147,8 @@ TEST_CASE("bet sizes use exact pot and stack values") {
   BettingAbstraction betting(config);
 
   BettingState state;
-  state.pot = 100;
   state.stack = {200, 200};
-  state.committed = {0, 0};
+  state.committed = {50, 50};
   state.street = StreetKind::kFlop;
   state.player_to_act = 0;
   state.folded_player = -1;

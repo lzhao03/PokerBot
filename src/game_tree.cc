@@ -24,7 +24,6 @@ Chips CommitChips(BettingState& state, int player, Chips requested) {
   const Chips committed = std::min(requested, state.stack[player]);
   state.committed[player] += committed;
   state.stack[player] -= committed;
-  state.pot += committed;
   if (state.stack[player] == 0) {
     state.all_in = true;
   }

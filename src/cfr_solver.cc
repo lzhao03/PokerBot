@@ -88,7 +88,6 @@ ExactGameState DefaultInitialState(const SolverConfig& config) {
   BettingState betting;
   betting.stack[0] = std::max(0, starting_stack - small_blind);
   betting.stack[1] = std::max(0, starting_stack - big_blind);
-  betting.pot = small_blind + big_blind;
   betting.folded_player = -1;
   betting.street = StreetKind::kPreflop;
   betting.all_in = false;

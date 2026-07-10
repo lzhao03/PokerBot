@@ -56,7 +56,6 @@ TEST_CASE("fixed terminal run counts iteration and utility") {
   SolverConfig config = SmallConfig();
   ExactGameState terminal;
   terminal.betting.stack = {0, 0};
-  terminal.betting.pot = 10;
   terminal.betting.street = StreetKind::kRiver;
   terminal.betting.player_to_act = -1;
   terminal.betting.folded_player = 1;

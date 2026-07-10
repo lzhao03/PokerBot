@@ -67,7 +67,6 @@ inline constexpr int kMaxActionsPerNode = 8;
 struct BettingState {
   std::array<Chips, kPlayerCount> stack = {0, 0};
   std::array<Chips, kPlayerCount> committed = {0, 0};
-  Chips pot = 0;
   StreetKind street = StreetKind::kPreflop;
   int8_t player_to_act = 0;
   int8_t folded_player = -1;
@@ -174,7 +173,7 @@ inline int Opponent(int player) {
 }
 
 inline Chips Pot(const BettingState& state) noexcept {
-  return state.pot;
+  return state.committed[0] + state.committed[1];
 }
 
 inline Chips ToCall(const BettingState& state, int player) noexcept {
@@ -192,7 +191,6 @@ inline void ValidateBettingState(const BettingState& state) {
   assert(state.stack[1] >= 0);
   assert(state.committed[0] >= 0);
   assert(state.committed[1] >= 0);
-  assert(state.pot == state.committed[0] + state.committed[1]);
   assert(state.folded_player >= -1 &&
          state.folded_player < kPlayerCount);
   assert(state.player_to_act >= -1 &&

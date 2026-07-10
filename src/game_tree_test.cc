@@ -10,7 +10,6 @@ namespace {
 ExactGameState PreflopState() {
   ExactGameState state;
   state.betting.stack = {99, 98};
-  state.betting.pot = 3;
   state.betting.street = StreetKind::kPreflop;
   state.betting.folded_player = -1;
   state.betting.committed = {1, 2};
@@ -21,7 +20,6 @@ ExactGameState PreflopState() {
 ExactGameState ShowdownState() {
   ExactGameState state;
   state.betting.stack = {90, 90};
-  state.betting.pot = 20;
   state.betting.street = StreetKind::kRiver;
   state.betting.folded_player = -1;
   state.betting.committed = {10, 10};

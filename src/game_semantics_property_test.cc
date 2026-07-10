@@ -39,7 +39,6 @@ ExactGameState InitialState(const SolverConfig& config) {
       std::max(0, config.starting_stack_size - small_blind);
   state.betting.stack[1] =
       std::max(0, config.starting_stack_size - big_blind);
-  state.betting.pot = small_blind + big_blind;
   state.betting.street = StreetKind::kPreflop;
   state.betting.folded_player = -1;
   state.betting.player_to_act = 0;
@@ -163,7 +162,7 @@ void ValidateState(const ExactGameState& state,
                    int total_chips,
                    const ReachableTrace& trace) {
   const BettingState& betting = state.betting;
-  Require(betting.pot >= 0, trace, "pot must be non-negative");
+  Require(Pot(betting) >= 0, trace, "pot must be non-negative");
   Require(betting.stack[0] >= 0, trace,
           "player A stack must be non-negative");
   Require(betting.stack[1] >= 0, trace,
@@ -174,7 +173,7 @@ void ValidateState(const ExactGameState& state,
           "player B committed chips must be non-negative");
   Require(TotalChips(state) == total_chips, trace,
           "pot plus stacks must conserve chips");
-  Require(betting.pot == betting.committed[0] + betting.committed[1],
+  Require(Pot(betting) == betting.committed[0] + betting.committed[1],
           trace, "pot must equal total committed chips");
   ValidateBoard(state, trace);
 }
@@ -188,7 +187,7 @@ void ValidateActionTransition(const ExactGameState& parent,
   const int committed =
       parent.betting.stack[player] - child.betting.stack[player];
   Require(committed >= 0, trace, "action cannot add chips to stack");
-  Require(child.betting.pot == parent.betting.pot + committed, trace,
+  Require(Pot(child.betting) == Pot(parent.betting) + committed, trace,
           "pot must increase by committed chips");
   Require(child.betting.committed[player] ==
               parent.betting.committed[player] + committed,
@@ -328,7 +327,6 @@ void CheckReachableCase(uint32_t seed, int max_steps) {
 ExactGameState FlopState() {
   ExactGameState state;
   state.betting.stack = {18, 18};
-  state.betting.pot = 4;
   state.betting.street = StreetKind::kFlop;
   state.betting.player_to_act = 1;
   state.betting.folded_player = -1;
@@ -342,7 +340,6 @@ ExactGameState FlopState() {
 ExactGameState RiverState() {
   ExactGameState state;
   state.betting.stack = {20, 20};
-  state.betting.pot = 20;
   state.betting.street = StreetKind::kRiver;
   state.betting.player_to_act = 1;
   state.betting.folded_player = -1;
@@ -365,7 +362,6 @@ void CheckCompletedRound(const ExactGameState& state, bool terminal) {
 ExactGameState RiverShowdown(std::initializer_list<CardId> board) {
   ExactGameState state;
   state.betting.stack = {0, 0};
-  state.betting.pot = 20;
   state.betting.street = StreetKind::kRiver;
   state.betting.player_to_act = -1;
   state.betting.folded_player = -1;
@@ -509,7 +505,6 @@ TEST_CASE("deterministic action transitions preserve chip accounting") {
   ExactGameState short_call = root;
   short_call.betting.stack[0] = 3;
   short_call.betting.stack[1] = 12;
-  short_call.betting.pot = 9;
   short_call.betting.committed = {1, 8};
   short_call = ApplyChecked(short_call, {ActionKind::kCall}, 24, trace);
   CheckCompletedRound(short_call, false);
@@ -580,7 +575,6 @@ TEST_CASE("betting-round completion cases agree") {
   ExactGameState short_call = root;
   short_call.betting.stack[0] = 3;
   short_call.betting.stack[1] = 12;
-  short_call.betting.pot = 9;
   short_call.betting.committed = {1, 8};
   short_call = ApplyStateAction(short_call, {ActionKind::kCall, 7, -1});
   CheckCompletedRound(short_call, false);

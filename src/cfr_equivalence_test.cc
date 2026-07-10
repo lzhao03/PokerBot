@@ -94,7 +94,7 @@ struct CFRSolverTestAccess {
       hash = Mix(hash, node.chance_child);
       hash = Mix(hash, static_cast<uint64_t>(node.kind));
       hash = Mix(hash, static_cast<uint64_t>(node.player_to_act + 2));
-      hash = Mix(hash, node.state.pot);
+      hash = Mix(hash, Pot(node.state));
       hash = Mix(hash, node.state.stack[0]);
       hash = Mix(hash, node.state.stack[1]);
       out.push_back(hash);
