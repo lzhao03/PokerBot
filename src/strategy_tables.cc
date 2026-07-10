@@ -2,46 +2,9 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <functional>
 #include <optional>
 
 namespace poker {
-namespace {
-
-void HashCombine(size_t& seed, uint64_t value) {
-  seed ^= std::hash<uint64_t>{}(value) + 0x9e3779b9 + (seed << 6) +
-          (seed >> 2);
-}
-
-}  // namespace
-
-bool StrategyTables::NodeKey::operator==(
-    const NodeKey& other) const {
-  return betting_node_id == other.betting_node_id &&
-         board_bucket == other.board_bucket;
-}
-
-size_t StrategyTables::NodeKeyHash::operator()(
-    const NodeKey& key) const {
-  size_t seed = 0;
-  HashCombine(seed, static_cast<uint64_t>(key.betting_node_id));
-  HashCombine(seed, key.board_bucket);
-  return seed;
-}
-
-bool StrategyTables::ChanceTransitionKey::operator==(
-    const ChanceTransitionKey& other) const {
-  return parent_node_id == other.parent_node_id &&
-         outcome_id == other.outcome_id;
-}
-
-size_t StrategyTables::ChanceTransitionKeyHash::operator()(
-    const ChanceTransitionKey& key) const {
-  size_t seed = 0;
-  HashCombine(seed, static_cast<uint64_t>(key.parent_node_id));
-  HashCombine(seed, key.outcome_id);
-  return seed;
-}
 
 std::optional<NodeId> StrategyTables::chance_child(
     NodeId parent_node_id,

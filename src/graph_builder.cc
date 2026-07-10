@@ -189,15 +189,6 @@ void ValidateBettingNode(const StrategyTables::BettingNode& node) {
   }
 }
 
-bool SameBettingState(const BettingState& first, const BettingState& second) {
-  return first.stack == second.stack &&
-         first.committed == second.committed &&
-         first.street == second.street &&
-         first.player_to_act == second.player_to_act &&
-         first.folded_player == second.folded_player &&
-         first.pending_action_mask == second.pending_action_mask;
-}
-
 }  // namespace
 
 GraphBuilder::GraphBuilder(
@@ -247,7 +238,7 @@ GraphBuilder::get_or_create_root_betting_node(const BettingState& state) {
 
   const BettingNodeId node_id = tables.root_betting_node_id;
   if (node_id >= tables.betting_nodes.size() ||
-      !SameBettingState(tables.betting_nodes[node_id].state, state)) {
+      tables.betting_nodes[node_id].state != state) {
     throw std::logic_error("root betting node does not match root state");
   }
   return node_id;
@@ -297,8 +288,7 @@ GraphBuilder::get_or_create_chance_betting_child(
   }
 
   if (existing_child >= tables.betting_nodes.size() ||
-      !SameBettingState(tables.betting_nodes[existing_child].state,
-                        child_state)) {
+      tables.betting_nodes[existing_child].state != child_state) {
     throw std::logic_error("chance betting child state mismatch");
   }
   return existing_child;
@@ -337,7 +327,7 @@ GraphBuilder::Node GraphBuilder::make_node(
     throw std::logic_error("graph node betting node is invalid");
   }
   const BettingNode& node = nodes[betting_node_id];
-  if (!SameBettingState(node.state, state.betting)) {
+  if (node.state != state.betting) {
     throw std::logic_error("graph node betting state mismatch");
   }
   if (node.action_count > 0) {
@@ -543,9 +533,7 @@ GraphBuilder::get_or_create_action_child(
   const BettingNodeId child_betting_node_id =
       get_or_create_action_betting_child(parent_node.betting_node_id,
                                          action_index);
-  if (!SameBettingState(
-          tables().betting_nodes[child_betting_node_id].state,
-          child_betting)) {
+  if (tables().betting_nodes[child_betting_node_id].state != child_betting) {
     throw std::logic_error("action betting child state mismatch");
   }
   auto child_id = get_or_create_node(child_betting_node_id, child_state);

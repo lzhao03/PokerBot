@@ -222,11 +222,7 @@ ActionMenu LegalActions(const BettingState& state,
               return left.amount < right.amount;
             });
   const auto unique_end =
-      std::unique(sized_actions.begin(), sized_actions.end(),
-                  [](const GameAction& left, const GameAction& right) {
-                    return left.kind == right.kind &&
-                           left.amount == right.amount;
-                  });
+      std::unique(sized_actions.begin(), sized_actions.end());
   sized_actions.erase(unique_end, sized_actions.end());
 
   for (const GameAction& action : sized_actions) {

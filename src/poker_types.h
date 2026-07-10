@@ -50,6 +50,8 @@ enum class ActionKind : uint8_t {
 struct GameAction {
   ActionKind kind = ActionKind::kNoAction;
   int32_t amount = 0;
+
+  friend bool operator==(const GameAction&, const GameAction&) = default;
 };
 
 // Maximum number of legal actions at any decision node.

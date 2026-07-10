@@ -28,6 +28,8 @@ struct BettingState {
   int8_t player_to_act = 0;
   int8_t folded_player = -1;
   uint8_t pending_action_mask = kAllPlayersMask;
+
+  friend bool operator==(const BettingState&, const BettingState&) = default;
 };
 
 struct Board {

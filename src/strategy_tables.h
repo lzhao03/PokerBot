@@ -7,6 +7,7 @@
 #include <memory>
 #include <new>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -98,22 +99,26 @@ class StrategyTables {
     BettingNodeId betting_node_id = 0;
     BoardBucketId board_bucket = 0;
 
-    bool operator==(const NodeKey& other) const;
-  };
+    friend bool operator==(const NodeKey&, const NodeKey&) = default;
 
-  struct NodeKeyHash {
-    size_t operator()(const NodeKey& key) const;
+    template <typename H>
+    friend H AbslHashValue(H h, const NodeKey& key) {
+      return H::combine(std::move(h), key.betting_node_id,
+                        key.board_bucket);
+    }
   };
 
   struct ChanceTransitionKey {
     NodeId parent_node_id = 0;
     BoardBucketId outcome_id = 0;
 
-    bool operator==(const ChanceTransitionKey& other) const;
-  };
+    friend bool operator==(const ChanceTransitionKey&,
+                           const ChanceTransitionKey&) = default;
 
-  struct ChanceTransitionKeyHash {
-    size_t operator()(const ChanceTransitionKey& key) const;
+    template <typename H>
+    friend H AbslHashValue(H h, const ChanceTransitionKey& key) {
+      return H::combine(std::move(h), key.parent_node_id, key.outcome_id);
+    }
   };
 
   struct InfoSetRow {
@@ -173,12 +178,10 @@ class StrategyTables {
   NodeId root_node_id = kInvalidNodeId;
   std::vector<BettingNode> betting_nodes;
   std::vector<BettingEdge> betting_edges;
-  absl::flat_hash_map<NodeKey, NodeId, NodeKeyHash>
-      node_ids;
+  absl::flat_hash_map<NodeKey, NodeId> node_ids;
   std::vector<Node> nodes;
   std::vector<NodeId> action_child_ids;
-  absl::flat_hash_map<ChanceTransitionKey, NodeId, ChanceTransitionKeyHash>
-      public_chance_child_ids;
+  absl::flat_hash_map<ChanceTransitionKey, NodeId> public_chance_child_ids;
   std::vector<ChanceChildEntry> chance_child_entries;
   std::vector<FrozenInfoSetActionOffsetRow> frozen_info_set_action_offsets;
   size_t info_set_count = 0;
