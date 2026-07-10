@@ -139,7 +139,6 @@ CoarseChanceTransitionMap BuildCoarseChanceTransitions(StreetKind street) {
     return transitions;
   }
 
-  CardAbstraction abstraction;
   absl::flat_hash_set<uint64_t> seen;
   ForEachCardCombination(board_count, 0, [&](absl::Span<const CardId> board) {
     Board parent;
@@ -147,7 +146,7 @@ CoarseChanceTransitionMap BuildCoarseChanceTransitions(StreetKind street) {
       parent.add(card);
     }
     const PublicBucketId parent_bucket =
-        abstraction.public_bucket(street, parent);
+        public_bucket(street, parent);
     ForEachCardCombination(deal_count, parent.mask,
                            [&](absl::Span<const CardId> cards) {
       Board child = parent;
@@ -155,7 +154,7 @@ CoarseChanceTransitionMap BuildCoarseChanceTransitions(StreetKind street) {
         child.add(card);
       }
       const PublicBucketId child_bucket =
-          abstraction.public_bucket(StreetAfterChance(street), child);
+          public_bucket(StreetAfterChance(street), child);
       const uint64_t seen_key = (parent_bucket << 32) | child_bucket;
       if (!seen.insert(seen_key).second) {
         return true;
@@ -236,12 +235,10 @@ bool SameBettingState(const BettingState& first, const BettingState& second) {
 GraphBuilder::GraphBuilder(
     const SolverConfig& config,
     SolverStorage& storage,
-    const CardAbstraction& card_abstraction,
     const BettingAbstraction& betting_abstraction,
     TraversalStats& stats)
     : config_(config),
       storage_(storage),
-      card_abstraction_(card_abstraction),
       betting_abstraction_(betting_abstraction),
       stats_(stats) {}
 
@@ -345,7 +342,7 @@ GraphBuilder::row_key(
     BettingNodeId betting_node_id,
     StreetKind street,
     const Board& board) const {
-  return {betting_node_id, card_abstraction_.public_bucket(street, board)};
+  return {betting_node_id, public_bucket(street, board)};
 }
 
 std::optional<uint32_t> GraphBuilder::find_row(
@@ -365,8 +362,7 @@ GraphBuilder::PublicStateRow GraphBuilder::make_row(
     const ExactGameState& state) {
   PublicStateRow row;
   row.betting_node_id = betting_node_id;
-  row.public_bucket =
-      card_abstraction_.public_bucket(state.betting.street, state.board);
+  row.public_bucket = public_bucket(state.betting.street, state.board);
 
   StrategyTables& tables = mtables();
   const auto& nodes = tables.betting_nodes;
@@ -467,8 +463,7 @@ bool GraphBuilder::for_each_required_chance_transition(
 
 GraphBuilder::PublicBucketId GraphBuilder::chance_outcome_id(
     const ExactGameState& child_state) const {
-  return card_abstraction_.public_bucket(child_state.betting.street,
-                                         child_state.board);
+  return public_bucket(child_state.betting.street, child_state.board);
 }
 
 std::optional<uint32_t> GraphBuilder::find_or_cache_action_child(

@@ -42,10 +42,9 @@ class GraphBuilder {
   using PublicStateRow = StrategyTables::PublicStateRow;
 
   GraphBuilder(const SolverConfig& config,
-                   SolverStorage& storage,
-                   const CardAbstraction& card_abstraction,
-                   const BettingAbstraction& betting_abstraction,
-                   TraversalStats& stats);
+               SolverStorage& storage,
+               const BettingAbstraction& betting_abstraction,
+               TraversalStats& stats);
 
   std::optional<uint32_t> get_or_create_row(const ExactGameState& state);
   std::optional<uint32_t> get_or_create_action_child(
@@ -116,7 +115,6 @@ class GraphBuilder {
 
   const SolverConfig& config_;
   SolverStorage& storage_;
-  const CardAbstraction& card_abstraction_;
   const BettingAbstraction& betting_abstraction_;
   TraversalStats& stats_;
 };

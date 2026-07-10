@@ -10,12 +10,9 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "src/build_flags.h"
 #include "src/combo.h"
 #include "src/poker_types.h"
-
-#ifndef POKER_COARSE_PUBLIC_BUCKETS
-#define POKER_COARSE_PUBLIC_BUCKETS 0
-#endif
 
 namespace poker {
 
@@ -68,7 +65,7 @@ class StrategyTables {
   using PrivateBucketId = uint16_t;
   using PublicBucketId = uint64_t;
   static constexpr uint32_t kPrivateBucketCount =
-      POKER_COARSE_PUBLIC_BUCKETS != 0 ? 36 : kComboCount;
+      kCoarsePrivateBuckets ? 36 : kComboCount;
   static constexpr uint32_t kInvalidActionOffset =
       std::numeric_limits<uint32_t>::max();
 

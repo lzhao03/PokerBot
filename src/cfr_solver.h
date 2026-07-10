@@ -103,6 +103,7 @@ class CFRSolver {
   struct NodeRef {
     uint32_t public_state_id = kInvalidPublicStateId;
     Board exact_board;
+    BoardFeatures board_features;
   };
 
   class MutableTraversalGraph {
@@ -235,6 +236,7 @@ class CFRSolver {
       const TrainingRangeView& range,
       StreetKind street,
       const Board& board,
+      const BoardFeatures& features,
       uint32_t node_id,
       int player,
       size_t action_count,
@@ -267,7 +269,6 @@ class CFRSolver {
   int64_t cfr_update_count_ = 0;
   TraversalStats traversal_stats_;
   TrainingRunStats last_training_run_stats_;
-  CardAbstraction card_abstraction_;
   BettingAbstraction betting_abstraction_;
   SolverStorage storage_;
   StrategyStore strategy_store_;

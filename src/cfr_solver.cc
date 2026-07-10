@@ -116,11 +116,8 @@ CFRSolver::CFRSolver(const SolverConfig& config,
       betting_abstraction_(config_),
       storage_(),
       strategy_store_(config_, storage_, &traversal_stats_),
-      graph_builder_(config_,
-                    storage_,
-                    card_abstraction_,
-                    betting_abstraction_,
-                    traversal_stats_) {
+      graph_builder_(config_, storage_, betting_abstraction_,
+                     traversal_stats_) {
   // Pre-allocate strategy table storage when limits are known upfront.
   // This gives fully deterministic peak memory: no reallocation after init.
   if (config_.max_info_sets > 0) {
@@ -202,7 +199,7 @@ CFRSolver::MutableTraversalGraph::action_child(NodeRef parent,
       *child_id >= solver_.rows().size()) {
     return std::nullopt;
   }
-  return NodeRef{*child_id, parent.exact_board};
+  return NodeRef{*child_id, parent.exact_board, parent.board_features};
 }
 
 std::optional<CFRSolver::NodeRef>
@@ -233,7 +230,11 @@ CFRSolver::MutableTraversalGraph::sample_chance_child(
       *child_id >= public_rows.size()) {
     return std::nullopt;
   }
-  return NodeRef{*child_id, exact_child_state.board};
+  return NodeRef{
+      *child_id,
+      exact_child_state.board,
+      board_features(exact_child_state.board),
+  };
 }
 
 CFRSolver::FrozenTraversalGraph::FrozenTraversalGraph(CFRSolver& solver)
@@ -274,8 +275,7 @@ uint32_t CFRSolver::FrozenTraversalGraph::required_chance_child_id(
   const auto child_id =
       solver_.tables().chance_child(
           parent_public_state_id,
-          solver_.card_abstraction_.public_bucket(child_state.betting.street,
-                                                  child_state.board));
+          public_bucket(child_state.betting.street, child_state.board));
   if (!child_id.has_value() ||
       *child_id == kInvalidPublicStateId ||
       *child_id == kCappedPublicStateId ||
@@ -291,6 +291,7 @@ CFRSolver::NodeRef CFRSolver::FrozenTraversalGraph::action_child(
   return NodeRef{
       required_action_child_id(parent.public_state_id, action_index),
       parent.exact_board,
+      parent.board_features,
   };
 }
 
@@ -316,6 +317,7 @@ CFRSolver::NodeRef CFRSolver::FrozenTraversalGraph::sample_chance_child(
   return NodeRef{
       required_chance_child_id(parent.public_state_id, exact_child_state),
       exact_child_state.board,
+      board_features(exact_child_state.board),
   };
 }
 
@@ -381,8 +383,8 @@ bool CFRSolver::prebuild_info_set_rows(
     }
 
     const Board& board = *row_boards[node_id];
-    const uint32_t bucket_count =
-        card_abstraction_.private_bucket_count(node.state.street, board);
+    const BoardFeatures features = board_features(board);
+    const uint32_t bucket_count = private_bucket_count(node.state.street);
     if (bucket_count == 0 ||
         bucket_count > StrategyTables::kPrivateBucketCount) {
       return false;
@@ -405,7 +407,7 @@ bool CFRSolver::prebuild_info_set_rows(
         continue;
       }
       const PrivateBucketId bucket =
-          card_abstraction_.private_bucket(combo_id, node.state.street, board);
+          private_bucket(combo_id, node.state.street, features);
       if (bucket >= bucket_count) {
         return false;
       }
@@ -555,7 +557,11 @@ void CFRSolver::run_growing_iterations(
   VLOG(1) << "Growing storage backend: " << iterations
           << " single-threaded iterations";
   MutableTraversalGraph graph(*this);
-  const NodeRef root_node{root_id, initial_state_.board};
+  const NodeRef root_node{
+      root_id,
+      initial_state_.board,
+      board_features(initial_state_.board),
+  };
   TraversalScratch scratch(ScratchDepthReserve(config_, max_depth));
   const int64_t warmup_start_updates = cfr_update_count_;
   const auto warmup_start = std::chrono::steady_clock::now();
@@ -684,7 +690,11 @@ void CFRSolver::run_fixed_storage_iterations(
 
           double local_utility = 0.0;
           FrozenTraversalGraph graph(worker);
-          const NodeRef root_node{root_id, root_board};
+          const NodeRef root_node{
+              root_id,
+              root_board,
+              board_features(root_board),
+          };
           for (int i = 0; i < shard; ++i) {
             const RangeDeal sampled = sampler.sample(worker.rng_);
             const Deal deal = worker.traversal_deal(sampled);
@@ -839,8 +849,7 @@ double CFRSolver::CfrTraversal<Graph>::decision(
   const bool update_player = player == run_.options.update_player;
   const size_t action_count = betting_node.action_count;
   const PrivateBucketId bucket =
-      solver_.card_abstraction_.private_bucket(
-          hand, betting_node.state.street, node.exact_board);
+      private_bucket(hand, betting_node.state.street, node.board_features);
   std::optional<ActionBlock> actions;
   if (run_.options.use_fixed_infoset_lookup) {
     actions = solver_.strategy_store_.find_frozen(node_id, bucket,
@@ -872,7 +881,7 @@ double CFRSolver::CfrTraversal<Graph>::decision(
         run_.scratch->frame(static_cast<size_t>(frame.scratch_depth));
     conditioned_ranges = solver_.condition_ranges_for_actions(
         *frame.ranges[static_cast<size_t>(player)], betting_node.state.street,
-        node.exact_board, node_id, player, action_count,
+        node.exact_board, node.board_features, node_id, player, action_count,
         scratch);
   }
 
@@ -990,6 +999,7 @@ absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
     const TrainingRangeView& range,
     StreetKind street,
     const Board& board,
+    const BoardFeatures& features,
     uint32_t node_id,
     int player,
     size_t action_count,
@@ -1018,8 +1028,7 @@ absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
       continue;
     }
 
-    const PrivateBucketId bucket =
-        card_abstraction_.private_bucket(combo_id, street, board);
+    const PrivateBucketId bucket = private_bucket(combo_id, street, features);
     strategy_store_.regret_matching_for_bucket(
         node_id, bucket, action_count, action_probabilities);
 
@@ -1043,7 +1052,11 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
     return 0.0;
   }
   const uint32_t root_id = *maybe_root_id;
-  const NodeRef root_node{root_id, initial_state_.board};
+  const NodeRef root_node{
+      root_id,
+      initial_state_.board,
+      board_features(initial_state_.board),
+  };
   const Deal deal{{player_a_hand, player_b_hand},
                   ComboMask(player_a_hand) | ComboMask(player_b_hand)};
   if (storage_.frozen) {
@@ -1112,7 +1125,11 @@ double CFRSolver::evaluate_strategy_samples(
   if (root_id >= rows().size()) {
     return 0.0;
   }
-  const NodeRef root_node{root_id, root_board};
+  const NodeRef root_node{
+      root_id,
+      root_board,
+      board_features(root_board),
+  };
   if (storage_.frozen) {
     FrozenTraversalGraph graph(*this);
     for (int i = 0; i < samples; ++i) {
@@ -1188,9 +1205,8 @@ double CFRSolver::evaluate_strategy_node_impl(
   absl::Span<double> probabilities(
       probabilities_storage.data(), betting_node.action_count);
   const PrivateBucketId bucket =
-      card_abstraction_.private_bucket(deal.hand(player),
-                                       betting_node.state.street,
-                                       node.exact_board);
+      private_bucket(deal.hand(player), betting_node.state.street,
+                     node.board_features);
   strategy_store_.average_strategy(
       node_id, bucket, betting_node.action_count,
       config_.regret_only_training, probabilities);
