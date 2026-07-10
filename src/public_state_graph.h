@@ -76,6 +76,9 @@ class PublicStateGraph {
 
  private:
   using PublicBucketId = StrategyTables::PublicBucketId;
+  using BettingNodeId = StrategyTables::BettingNodeId;
+  using BettingNode = StrategyTables::BettingNode;
+  using BettingEdge = StrategyTables::BettingEdge;
   using BettingHistoryKey = StrategyTables::BettingHistoryKey;
   using BettingHistoryRow = StrategyTables::BettingHistoryRow;
   using PublicStateKey = StrategyTables::PublicStateKey;
@@ -91,6 +94,14 @@ class PublicStateGraph {
       const BettingState& state) const;
   BettingHistoryRow make_betting_history_row(
       const BettingHistoryKey& key) const;
+  BettingNodeId append_betting_node(const BettingState& state);
+  BettingNodeId get_or_create_root_betting_node(const BettingState& state);
+  BettingNodeId get_or_create_action_betting_child(
+      BettingNodeId parent_node_id,
+      int action_index);
+  BettingNodeId get_or_create_chance_betting_child(
+      BettingNodeId parent_node_id,
+      const BettingState& child_state);
   PublicStateKey row_key(uint32_t betting_history_id,
                          StreetKind street,
                          const Board& board) const;
@@ -99,6 +110,7 @@ class PublicStateGraph {
       StreetKind street,
       const Board& board) const;
   PublicStateRow make_row(uint32_t betting_history_id,
+                          BettingNodeId betting_node_id,
                           const ExactGameState& state);
   uint32_t get_or_create_betting_history(
       const BettingState& state);
@@ -115,6 +127,7 @@ class PublicStateGraph {
                                      const PublicStateRow& row);
   std::optional<uint32_t> get_or_create_row(
       uint32_t betting_history_id,
+      BettingNodeId betting_node_id,
       const ExactGameState& state);
   std::optional<uint32_t> find_or_cache_action_child(
       uint32_t parent_public_state_id,

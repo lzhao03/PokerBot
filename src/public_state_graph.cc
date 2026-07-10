@@ -193,6 +193,44 @@ CoarseChanceTransitionMap BuildCoarseChanceTransitions(StreetKind street) {
   }
 }
 
+int FirstBettingPlayer(StreetKind street) {
+  return street == StreetKind::kPreflop ? 0 : 1;
+}
+
+StrategyTables::NodeKind BettingNodeKind(const BettingState& state) {
+  const bool betting_over = IsBettingRoundOver(state);
+  if (state.folded_player >= 0 ||
+      (betting_over && state.street == StreetKind::kRiver)) {
+    return StrategyTables::NodeKind::kTerminal;
+  }
+  if (betting_over) {
+    return StrategyTables::NodeKind::kChance;
+  }
+  return StrategyTables::NodeKind::kDecision;
+}
+
+int BettingNodePlayerToAct(const BettingState& state) {
+  if (BettingNodeKind(state) != StrategyTables::NodeKind::kDecision) {
+    return -1;
+  }
+  return IsPlayer(state.player_to_act) ? state.player_to_act
+                                       : FirstBettingPlayer(state.street);
+}
+
+bool SameBettingState(const BettingState& first, const BettingState& second) {
+  return first.stack == second.stack &&
+         first.contribution == second.contribution &&
+         first.pot == second.pot &&
+         first.street == second.street &&
+         first.player_to_act == second.player_to_act &&
+         first.folded_player == second.folded_player &&
+         first.actions_this_street == second.actions_this_street &&
+         first.last_action.kind == second.last_action.kind &&
+         first.last_action.amount == second.last_action.amount &&
+         first.last_action.player == second.last_action.player &&
+         first.all_in == second.all_in;
+}
+
 }  // namespace
 
 PublicStateGraph::PublicStateGraph(
@@ -219,6 +257,98 @@ PublicStateGraph::make_betting_history_row(
   return betting_abstraction_.make_history_row(key);
 }
 
+PublicStateGraph::BettingNodeId PublicStateGraph::append_betting_node(
+    const BettingState& state) {
+  StrategyTables& tables = mtables();
+  BettingNode node;
+  node.state = state;
+  node.kind = BettingNodeKind(state);
+  node.player_to_act = BettingNodePlayerToAct(state);
+
+  if (node.kind == StrategyTables::NodeKind::kDecision) {
+    const auto menu =
+        betting_abstraction_.actions_for_betting_node(state, node.player_to_act);
+    node.action_begin = static_cast<uint32_t>(tables.betting_edges.size());
+    node.action_count = menu.count;
+    for (uint8_t i = 0; i < menu.count; ++i) {
+      const GameAction action = menu.actions[static_cast<size_t>(i)];
+      tables.betting_edges.push_back({
+          action,
+          betting_abstraction_.action_key(action),
+          kInvalidBettingNodeId,
+      });
+    }
+  }
+
+  const BettingNodeId node_id =
+      static_cast<BettingNodeId>(tables.betting_nodes.size());
+  tables.betting_nodes.push_back(std::move(node));
+  return node_id;
+}
+
+PublicStateGraph::BettingNodeId
+PublicStateGraph::get_or_create_root_betting_node(const BettingState& state) {
+  StrategyTables& tables = mtables();
+  if (tables.root_betting_node_id == kInvalidBettingNodeId) {
+    tables.root_betting_node_id = append_betting_node(state);
+    return tables.root_betting_node_id;
+  }
+
+  const BettingNodeId node_id = tables.root_betting_node_id;
+  if (node_id >= tables.betting_nodes.size() ||
+      !SameBettingState(tables.betting_nodes[node_id].state, state)) {
+    throw std::logic_error("root betting node does not match root state");
+  }
+  return node_id;
+}
+
+PublicStateGraph::BettingNodeId
+PublicStateGraph::get_or_create_action_betting_child(
+    BettingNodeId parent_node_id,
+    int action_index) {
+  StrategyTables& tables = mtables();
+  if (parent_node_id >= tables.betting_nodes.size()) {
+    throw std::logic_error("action betting parent node is invalid");
+  }
+  BettingNode& parent = tables.betting_nodes[parent_node_id];
+  if (action_index < 0 || action_index >= parent.action_count) {
+    throw std::logic_error("action betting child index out of range");
+  }
+
+  const size_t edge_index = static_cast<size_t>(parent.action_begin) +
+                            static_cast<size_t>(action_index);
+  BettingEdge& edge = tables.betting_edges[edge_index];
+  if (edge.child != kInvalidBettingNodeId) {
+    return edge.child;
+  }
+
+  const BettingState child_state = ApplyAction(parent.state, edge.action);
+  edge.child = append_betting_node(child_state);
+  return edge.child;
+}
+
+PublicStateGraph::BettingNodeId
+PublicStateGraph::get_or_create_chance_betting_child(
+    BettingNodeId parent_node_id,
+    const BettingState& child_state) {
+  StrategyTables& tables = mtables();
+  if (parent_node_id >= tables.betting_nodes.size()) {
+    throw std::logic_error("chance betting parent node is invalid");
+  }
+  BettingNode& parent = tables.betting_nodes[parent_node_id];
+  if (parent.chance_child == kInvalidBettingNodeId) {
+    parent.chance_child = append_betting_node(child_state);
+    return parent.chance_child;
+  }
+
+  if (parent.chance_child >= tables.betting_nodes.size() ||
+      !SameBettingState(tables.betting_nodes[parent.chance_child].state,
+                        child_state)) {
+    throw std::logic_error("chance betting child state mismatch");
+  }
+  return parent.chance_child;
+}
+
 PublicStateGraph::PublicStateKey
 PublicStateGraph::row_key(
     uint32_t betting_history_id,
@@ -241,9 +371,11 @@ std::optional<uint32_t> PublicStateGraph::find_row(
 
 PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
     uint32_t betting_history_id,
+    BettingNodeId betting_node_id,
     const ExactGameState& state) {
   PublicStateRow row;
   row.betting_history_id = betting_history_id;
+  row.betting_node_id = betting_node_id;
   row.public_bucket =
       card_abstraction_.public_bucket(state.betting.street, state.board);
   row.betting = state.betting;
@@ -263,11 +395,34 @@ PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
     }
   }
 
+  const auto& nodes = tables().betting_nodes;
+  if (betting_node_id >= nodes.size()) {
+    throw std::logic_error("public row betting node is invalid");
+  }
+  const BettingNode& node = nodes[betting_node_id];
+  if (!SameBettingState(node.state, row.betting)) {
+    throw std::logic_error("public row betting node state mismatch");
+  }
+  if (node.player_to_act != row.player_to_act ||
+      node.action_count != row.action_count) {
+    throw std::logic_error("public row betting node metadata mismatch");
+  }
+  for (uint8_t i = 0; i < row.action_count; ++i) {
+    const size_t edge_index = static_cast<size_t>(node.action_begin) + i;
+    if (edge_index >= tables().betting_edges.size() ||
+        node.action_count != row.action_count ||
+        tables().betting_edges[edge_index].action_id !=
+            row.action_ids[static_cast<size_t>(i)]) {
+      throw std::logic_error("public row betting action mismatch");
+    }
+  }
+
   return row;
 }
 
 std::optional<uint32_t> PublicStateGraph::get_or_create_row(
     uint32_t betting_history_id,
+    BettingNodeId betting_node_id,
     const ExactGameState& state) {
   if (std::optional<uint32_t> existing =
           find_row(betting_history_id, state.betting.street, state.board)) {
@@ -288,7 +443,7 @@ std::optional<uint32_t> PublicStateGraph::get_or_create_row(
     return state_iter->second;
   }
   tables.public_state_rows.push_back(
-      make_row(betting_history_id, state));
+      make_row(betting_history_id, betting_node_id, state));
   cache_betting_history_actions(betting_history_id,
                                 tables.public_state_rows.back());
   return public_state_id;
@@ -302,12 +457,18 @@ std::optional<uint32_t> PublicStateGraph::get_or_create_row(
     if (betting_history == tables().betting_history_ids.end()) {
       return std::nullopt;
     }
-    return get_or_create_row(betting_history->second, state);
+    const BettingNodeId betting_node_id = tables().root_betting_node_id;
+    if (betting_node_id == kInvalidBettingNodeId) {
+      return std::nullopt;
+    }
+    return get_or_create_row(betting_history->second, betting_node_id, state);
   }
 
   const uint32_t betting_history_id =
       get_or_create_betting_history(state.betting);
-  return get_or_create_row(betting_history_id, state);
+  const BettingNodeId betting_node_id =
+      get_or_create_root_betting_node(state.betting);
+  return get_or_create_row(betting_history_id, betting_node_id, state);
 }
 
 uint32_t PublicStateGraph::get_or_create_betting_history(
@@ -600,9 +761,18 @@ PublicStateGraph::get_or_create_action_child(
   const BettingState child_betting =
       ApplyAction(read_row.betting, read_row.actions[action_slot]);
   const ExactGameState child_state{child_betting, parent_board};
+  const BettingNodeId child_betting_node_id =
+      get_or_create_action_betting_child(read_row.betting_node_id,
+                                         action_index);
+  if (!SameBettingState(
+          tables().betting_nodes[child_betting_node_id].state,
+          child_betting)) {
+    throw std::logic_error("action betting child state mismatch");
+  }
   const uint32_t child_history_id = get_or_create_action_history_child(
       parent_history_id, action_index, child_betting);
-  auto child_id = get_or_create_row(child_history_id, child_state);
+  auto child_id =
+      get_or_create_row(child_history_id, child_betting_node_id, child_state);
   if (!child_id.has_value()) {
     mtables()
         .public_state_rows[parent_public_state_id]
@@ -688,9 +858,13 @@ PublicStateGraph::get_or_create_chance_child(
 
   const PublicStateRow& parent_row = public_rows[parent_public_state_id];
   const uint32_t parent_history_id = parent_row.betting_history_id;
+  const BettingNodeId child_betting_node_id =
+      get_or_create_chance_betting_child(parent_row.betting_node_id,
+                                         exact_child_state.betting);
   const uint32_t child_history_id = get_or_create_chance_history_child(
       parent_history_id, exact_child_state.betting);
-  auto child_id = get_or_create_row(child_history_id, exact_child_state);
+  auto child_id = get_or_create_row(child_history_id, child_betting_node_id,
+                                    exact_child_state);
   if (!child_id.has_value()) {
     stats_.record_transition_miss();
     return std::nullopt;

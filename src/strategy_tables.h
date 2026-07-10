@@ -22,6 +22,8 @@ inline constexpr uint32_t kInvalidPublicStateId =
     std::numeric_limits<uint32_t>::max();
 inline constexpr uint32_t kInvalidBettingHistoryId =
     std::numeric_limits<uint32_t>::max();
+inline constexpr uint32_t kInvalidBettingNodeId =
+    std::numeric_limits<uint32_t>::max();
 inline constexpr uint32_t kCappedPublicStateId = kInvalidPublicStateId - 1;
 
 inline constexpr size_t kCacheLineBytes = 64;
@@ -106,6 +108,29 @@ class StrategyTables {
     size_t operator()(const PublicStateKey& key) const;
   };
 
+  using BettingNodeId = uint32_t;
+
+  enum class NodeKind : uint8_t {
+    kTerminal,
+    kChance,
+    kDecision,
+  };
+
+  struct BettingEdge {
+    GameAction action;
+    int action_id = 0;
+    BettingNodeId child = kInvalidBettingNodeId;
+  };
+
+  struct BettingNode {
+    BettingState state;
+    uint32_t action_begin = 0;
+    uint8_t action_count = 0;
+    BettingNodeId chance_child = kInvalidBettingNodeId;
+    NodeKind kind = NodeKind::kDecision;
+    int player_to_act = -1;
+  };
+
   struct ChanceTransitionKey {
     uint32_t parent_public_state_id = 0;
     PublicBucketId outcome_id = 0;
@@ -164,6 +189,7 @@ class StrategyTables {
 
     BettingState betting;
     uint32_t betting_history_id = kInvalidBettingHistoryId;
+    BettingNodeId betting_node_id = kInvalidBettingNodeId;
     PublicBucketId public_bucket = 0;
     bool is_terminal = false;
     bool is_chance_node = false;
@@ -202,6 +228,9 @@ class StrategyTables {
 
   absl::flat_hash_map<BettingHistoryKey, uint32_t, BettingHistoryKeyHash>
       betting_history_ids;
+  BettingNodeId root_betting_node_id = kInvalidBettingNodeId;
+  std::vector<BettingNode> betting_nodes;
+  std::vector<BettingEdge> betting_edges;
   absl::flat_hash_map<PublicStateKey, uint32_t, PublicStateKeyHash>
       public_state_ids;
   std::vector<PublicStateRow> public_state_rows;
