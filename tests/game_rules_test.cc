@@ -1,10 +1,15 @@
 #include "tests/rules_test_support.h"
 
 #include "doctest/doctest.h"
+#include "src/card_utils.h"
 #include "src/game_rules.h"
 
+#include <algorithm>
 #include <array>
+#include <bit>
+#include <random>
 #include <stdexcept>
+#include <vector>
 
 namespace poker {
 namespace {
@@ -107,6 +112,107 @@ void CheckExactState(const char* label,
   }
   CHECK_FALSE(IsBettingRoundOver(actual.betting));
   CHECK(IsPlayer(actual.betting.player_to_act));
+}
+
+void CheckGeneralInvariants(
+    const ExactPublicState& state,
+    const std::array<Chips, kPlayerCount>& initial_chips) {
+  CHECK(IsValidBettingState(state.betting));
+  for (size_t player = 0; player < kPlayerCount; ++player) {
+    CHECK(state.betting.stack[player] >= 0);
+    CHECK(state.betting.total_committed[player] >= 0);
+    CHECK(state.betting.street_committed[player] >= 0);
+    CHECK(state.betting.street_committed[player] <=
+          state.betting.total_committed[player]);
+    CHECK(state.betting.stack[player] +
+              state.betting.total_committed[player] ==
+          initial_chips[player]);
+  }
+  CHECK(Pot(state.betting) == state.betting.total_committed[0] +
+                                  state.betting.total_committed[1]);
+
+  CardMask seen = 0;
+  for (CardId card : state.board.cards()) {
+    CHECK((seen & CardBit(card)) == 0);
+    seen |= CardBit(card);
+  }
+  CHECK(seen == state.board.mask());
+  CHECK(std::popcount(state.board.mask()) == state.board.count());
+  CHECK(BoardCardsForStreet(state.betting.street) == state.board.count());
+
+  if (IsBettingRoundOver(state.betting)) {
+    CHECK(state.betting.player_to_act == -1);
+    if (state.betting.folded_player < 0) {
+      CHECK(state.betting.street_committed[0] ==
+            state.betting.street_committed[1]);
+    }
+  } else {
+    CHECK(IsPlayer(state.betting.player_to_act));
+  }
+  if (IsTerminal(state)) {
+    CHECK(state.betting.player_to_act == -1);
+  }
+}
+
+void CheckGeneratedRollout(uint32_t seed) {
+  CAPTURE(seed);
+  ExactPublicState state =
+      MakeInitialState(kRules, {20, 20}, {1, 2});
+  const std::array<Chips, kPlayerCount> initial_chips = {20, 20};
+  const std::array<double, 3> sizes = {1.0, 0.25, 0.5};
+  const std::array<double, 3> sorted_sizes = {0.25, 0.5, 1.0};
+  std::array<CardId, kDeckCardCount> deck = {};
+  for (int id = 0; id < kDeckCardCount; ++id) {
+    deck[static_cast<size_t>(id)] = static_cast<CardId>(id);
+  }
+  std::mt19937 rng(seed);
+
+  CheckGeneralInvariants(state, initial_chips);
+  for (int step = 0; step < 64 && !IsTerminal(state); ++step) {
+    if (IsPlayer(state.betting.player_to_act)) {
+      const ActionMenu menu = LegalActions(state.betting, sizes);
+      const ActionMenu canonical = LegalActions(state.betting, sorted_sizes);
+      REQUIRE(menu.count > 0);
+      REQUIRE(menu.count == canonical.count);
+      for (uint8_t i = 0; i < menu.count; ++i) {
+        CHECK(menu.actions[i] == canonical.actions[i]);
+        ExactPublicState child = state;
+        child.betting = ApplyAction(state.betting, menu.actions[i]);
+        CheckGeneralInvariants(child, initial_chips);
+        CHECK(child.board == state.board);
+      }
+      const uint8_t index = static_cast<uint8_t>(rng() % menu.count);
+      state.betting = ApplyAction(state.betting, menu.actions[index]);
+      CheckGeneralInvariants(state, initial_chips);
+      continue;
+    }
+
+    std::shuffle(deck.begin(), deck.end(), rng);
+    std::vector<CardId> cards;
+    for (CardId card : deck) {
+      if (!state.board.contains(card)) {
+        cards.push_back(card);
+      }
+      if (cards.size() ==
+          static_cast<size_t>(CardsForNextStreet(state.betting.street))) {
+        break;
+      }
+    }
+    const BettingState before = state.betting;
+    const CardMask board_before = state.board.mask();
+    state = ApplyChance(state, cards, kRules);
+    CheckGeneralInvariants(state, initial_chips);
+    CHECK(state.betting.stack == before.stack);
+    CHECK(state.betting.total_committed == before.total_committed);
+    CHECK((state.board.mask() & board_before) == board_before);
+  }
+  CHECK(IsTerminal(state));
+}
+
+TEST_CASE("generated transitions preserve exact-state invariants") {
+  for (uint32_t seed = 0; seed < 64; ++seed) {
+    CheckGeneratedRollout(seed);
+  }
 }
 
 BettingState State(std::array<Chips, kPlayerCount> stack,

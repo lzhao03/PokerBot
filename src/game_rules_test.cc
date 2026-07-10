@@ -1,17 +1,10 @@
 #include "src/betting_abstraction.h"
-#include "src/card_utils.h"
-#include "src/combo.h"
 #include "src/game_rules.h"
 
 #include "doctest/doctest.h"
 
-#include <algorithm>
 #include <array>
-#include <bit>
-#include <initializer_list>
-#include <random>
 #include <stdexcept>
-#include <vector>
 
 namespace poker {
 namespace {
@@ -30,73 +23,6 @@ ExactPublicState Root() {
 }
 
 constexpr BettingRules kRules{2};
-
-int ChipsInPlay(const ExactPublicState& state) {
-  return Pot(state.betting) + state.betting.stack[0] + state.betting.stack[1];
-}
-
-void CheckState(const ExactPublicState& state, int total) {
-  CHECK(IsValidBettingState(state.betting));
-  CHECK(ChipsInPlay(state) == total);
-  CHECK(Pot(state.betting) ==
-        state.betting.total_committed[0] + state.betting.total_committed[1]);
-  CHECK(BoardCardsForStreet(state.betting.street) == state.board.count());
-  CHECK(std::popcount(state.board.mask()) == state.board.count());
-  CHECK(IsBettingRoundOver(state.betting) ==
-        !IsPlayer(state.betting.player_to_act));
-}
-
-void Rollout(uint32_t seed) {
-  ExactPublicState state = Root();
-  const int total = ChipsInPlay(state);
-  const std::array<double, 3> sizes = {1.0, 0.25, 0.5};
-  const std::array<double, 3> sorted_sizes = {0.25, 0.5, 1.0};
-  std::array<CardId, kDeckCardCount> deck = {};
-  for (int i = 0; i < kDeckCardCount; ++i) deck[i] = static_cast<CardId>(i);
-  std::mt19937 rng(seed);
-
-  for (int step = 0; step < 64 && !IsTerminal(state); ++step) {
-    CheckState(state, total);
-    if (IsPlayer(state.betting.player_to_act)) {
-      const ActionMenu menu = LegalActions(state.betting, sizes);
-      const ActionMenu canonical = LegalActions(state.betting, sorted_sizes);
-      REQUIRE(menu.count > 0);
-      REQUIRE(menu.count == canonical.count);
-      for (uint8_t i = 0; i < menu.count; ++i) {
-        CHECK(menu.actions[i] == canonical.actions[i]);
-        ExactPublicState child = state;
-        child.betting = ApplyAction(state.betting, menu.actions[i]);
-        CheckState(child, total);
-        CHECK(child.board.mask() == state.board.mask());
-      }
-      state.betting = ApplyAction(
-          state.betting, menu.actions[rng() % static_cast<uint32_t>(menu.count)]);
-      continue;
-    }
-
-    std::shuffle(deck.begin(), deck.end(), rng);
-    std::vector<CardId> cards;
-    for (CardId card : deck) {
-      if (!state.board.contains(card)) cards.push_back(card);
-      if (cards.size() ==
-          static_cast<size_t>(CardsForNextStreet(state.betting.street)))
-        break;
-    }
-    const BettingState before = state.betting;
-    const CardMask board_before = state.board.mask();
-    state = ApplyChance(state, cards, kRules);
-    CheckState(state, total);
-    CHECK(state.betting.stack == before.stack);
-    CHECK(state.betting.total_committed == before.total_committed);
-    CHECK((state.board.mask() & board_before) == board_before);
-  }
-  CheckState(state, total);
-  CHECK(IsTerminal(state));
-}
-
-TEST_CASE("legal rollouts preserve game-state invariants") {
-  for (uint32_t seed = 0; seed < 64; ++seed) Rollout(seed);
-}
 
 TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   ExactPublicState state = Root();
