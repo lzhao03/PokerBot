@@ -38,10 +38,7 @@ class ActionBlock {
   size_t action_count() const { return action_count_; }
   uint32_t action_offset() const { return action_offset_; }
 
-  absl::Span<const int> action_ids() const;
   void regret_matching(RegretLoadMode mode, absl::Span<double> out) const;
-  void regret_matching(absl::Span<const int> legal_action_ids,
-                       absl::Span<double> out) const;
   void add_cfr_plus_regret(size_t action_index,
                            float delta,
                            RegretUpdateOptions options) const;
@@ -49,7 +46,6 @@ class ActionBlock {
                             double reach_weight,
                             RegretUpdateMode mode) const;
   void average_strategy(bool regret_only_training,
-                        absl::Span<const int> legal_action_ids,
                         double fallback_probability,
                         absl::Span<double> out) const;
 
@@ -106,9 +102,8 @@ class StrategyStore {
   std::optional<ActionBlock> find(InfoSetAddress address,
                                   size_t expected_action_count);
   std::optional<ActionBlock> get_or_create(InfoSetAddress address,
-                                           absl::Span<const int> action_ids);
+                                           size_t action_count);
   std::optional<ActionBlock> find_frozen(uint32_t public_state_id,
-                                         int player,
                                          PrivateBucketId private_bucket,
                                          size_t expected_action_count);
 
@@ -117,15 +112,13 @@ class StrategyStore {
                                   RegretLoadMode load_mode,
                                   absl::Span<double> out);
   void average_strategy(uint32_t public_state_id,
-                        int player,
                         PrivateBucketId private_bucket,
-                        absl::Span<const int> legal_action_ids,
+                        size_t action_count,
                         bool regret_only_training,
                         absl::Span<double> out);
   void regret_matching_for_bucket(uint32_t public_state_id,
-                                  int player,
                                   PrivateBucketId private_bucket,
-                                  absl::Span<const int> legal_action_ids,
+                                  size_t action_count,
                                   absl::Span<double> out);
 
   bool prebuild_frozen_info_set_action_offsets();
@@ -153,12 +146,12 @@ class StrategyStore {
       PrivateBucketId private_bucket);
   const InfoSetRow* get_or_create_info_set_row(
       InfoSetAddress address,
-      absl::Span<const int> action_ids);
-  InfoSetRow append_info_set_actions(absl::Span<const int> action_ids);
+      size_t action_count);
+  InfoSetRow append_info_set_actions(size_t action_count);
   uint32_t frozen_info_set_action_offset(
       uint32_t public_state_id,
-      int player,
       PrivateBucketId private_bucket) const;
+  int player_for_public_state(uint32_t public_state_id) const;
 
   const SolverConfig& config_;
   SolverStorage& storage_;

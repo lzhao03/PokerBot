@@ -76,22 +76,16 @@ class CFRSolver {
   using InfoSetAddress = StrategyTables::InfoSetAddress;
   using PublicStateRow = StrategyTables::PublicStateRow;
 
-  struct PrivateCards {
-    static PrivateCards FromCombo(ComboId combo_id);
-    CardMask mask() const;
+  struct Deal {
+    std::array<ComboId, kPlayerCount> hands = {};
+    CardMask blocked_mask = 0;
 
-    ComboId combo = 0;
-  };
-
-  struct TraversalDeal {
-    std::array<PrivateCards, kPlayerCount> cards;
-
-    const PrivateCards& player_cards(int player) const {
-      return cards[static_cast<size_t>(player)];
+    ComboId hand(int player) const {
+      return hands[static_cast<size_t>(player)];
     }
 
     CardMask known_private_cards() const {
-      return cards[0].mask() | cards[1].mask();
+      return blocked_mask;
     }
   };
 
@@ -157,7 +151,7 @@ class CFRSolver {
   };
 
   struct TraversalRun {
-    TraversalDeal deal;
+    Deal deal;
     TraversalOptions options;
     TraversalScratch* scratch = nullptr;
   };
@@ -168,19 +162,6 @@ class CFRSolver {
         nullptr, nullptr};
     uint16_t decision_depth = 0;
     uint16_t scratch_depth = 0;
-  };
-
-  struct DecisionFrame {
-    uint32_t public_state_id = kInvalidPublicStateId;
-    Player player = Player::kA;
-    StreetKind street = StreetKind::kPreflop;
-    uint8_t action_count = 0;
-    std::array<int, kMaxActionsPerNode> action_ids = {};
-
-    absl::Span<const int> action_ids_span() const {
-      return absl::Span<const int>(
-          action_ids.data(), static_cast<size_t>(action_count));
-    }
   };
 
   template <typename Graph>
@@ -226,7 +207,7 @@ class CFRSolver {
       const RangeSampler& sampler,
       const TrainingRange& a_range,
       const TrainingRange& b_range);
-  TraversalDeal traversal_deal(RangeDeal deal) const;
+  Deal traversal_deal(RangeDeal deal) const;
   TraversalOptions traversal_options(int iteration, int max_depth) const;
   void log_training_summary() const;
   template <typename WorkerFn, typename AccumulateFn>
@@ -235,9 +216,6 @@ class CFRSolver {
                    int first_index,
                    WorkerFn&& worker_fn,
                    AccumulateFn&& accumulate_fn);
-  std::optional<DecisionFrame> make_decision_frame(
-      uint32_t node_id,
-      const PublicStateRow& row) const;
   template <typename Graph>
   double cfr(NodeRef node,
              TraversalRun& run,
@@ -259,21 +237,21 @@ class CFRSolver {
       const Board& board,
       uint32_t node_id,
       int player,
-      absl::Span<const int> action_ids,
+      size_t action_count,
       RangeScratchFrame& scratch_frame);
   double terminal_utility(const PublicStateRow& row,
                           const Board& board,
-                          const PrivateCards& player_a_cards,
-                          const PrivateCards& player_b_cards);
+                          ComboId player_a_hand,
+                          ComboId player_b_hand);
   double evaluate_strategy_node(NodeRef node,
-                                const TraversalDeal& deal,
+                                const Deal& deal,
                                 MutableTraversalGraph& graph);
   double evaluate_strategy_node(NodeRef node,
-                                const TraversalDeal& deal,
+                                const Deal& deal,
                                 FrozenTraversalGraph& graph);
   template <typename Graph>
   double evaluate_strategy_node_impl(NodeRef node,
-                                     const TraversalDeal& deal,
+                                     const Deal& deal,
                                      Graph& graph);
   double evaluate_strategy_samples(
       int samples,

@@ -128,7 +128,6 @@ CFRSolver::CFRSolver(const SolverConfig& config,
     constexpr int kAvgActionsPerInfoSet = 4;
     const size_t info_set_cap = static_cast<size_t>(config_.max_info_sets);
     const size_t action_cap = info_set_cap * kAvgActionsPerInfoSet;
-    storage_.mutable_ref().action_ids.reserve(action_cap);
     arrays().cumulative_regrets.reserve(action_cap);
     arrays().cumulative_strategies.reserve(action_cap);
   }
@@ -146,22 +145,12 @@ CFRSolver::CFRSolver(const SolverConfig& config,
   }
 }
 
-CFRSolver::PrivateCards CFRSolver::PrivateCards::FromCombo(
-    ComboId combo_id) {
-  PrivateCards private_cards;
-  private_cards.combo = combo_id;
-  return private_cards;
-}
-
-CardMask CFRSolver::PrivateCards::mask() const {
-  return ComboMask(combo);
-}
-
-CFRSolver::TraversalDeal CFRSolver::traversal_deal(RangeDeal deal) const {
-  return TraversalDeal{{
-      PrivateCards::FromCombo(deal.player_a_combo),
-      PrivateCards::FromCombo(deal.player_b_combo),
-  }};
+CFRSolver::Deal CFRSolver::traversal_deal(RangeDeal deal) const {
+  const std::array<ComboId, kPlayerCount> hands = {
+      deal.player_a_combo,
+      deal.player_b_combo,
+  };
+  return Deal{hands, ComboMask(hands[0]) | ComboMask(hands[1])};
 }
 
 CFRSolver::TraversalOptions CFRSolver::traversal_options(
@@ -198,36 +187,6 @@ CFRSolver::RangeScratchFrame& CFRSolver::TraversalScratch::frame(
   return frames[depth];
 }
 
-std::optional<CFRSolver::DecisionFrame> CFRSolver::make_decision_frame(
-    uint32_t node_id,
-    const PublicStateRow& row) const {
-  const auto& betting_nodes = tables().betting_nodes;
-  const auto& betting_edges = tables().betting_edges;
-  if (row.betting_node_id >= betting_nodes.size()) {
-    return std::nullopt;
-  }
-  const auto& node = betting_nodes[row.betting_node_id];
-  if (row.kind != StrategyTables::NodeKind::kDecision ||
-      node.action_count == 0 || !IsPlayer(row.player_to_act)) {
-    return std::nullopt;
-  }
-
-  DecisionFrame frame;
-  frame.public_state_id = node_id;
-  frame.player = static_cast<Player>(row.player_to_act);
-  frame.street = row.betting.street;
-  frame.action_count = node.action_count;
-  const size_t begin = node.action_begin;
-  for (uint8_t i = 0; i < node.action_count; ++i) {
-    const size_t edge_index = begin + i;
-    if (edge_index >= betting_edges.size()) {
-      return std::nullopt;
-    }
-    frame.action_ids[i] = betting_edges[edge_index].action_id;
-  }
-  return frame;
-}
-
 CFRSolver::MutableTraversalGraph::MutableTraversalGraph(CFRSolver& solver)
     : solver_(solver) {}
 
@@ -253,8 +212,12 @@ CFRSolver::MutableTraversalGraph::sample_chance_child(
   if (parent.public_state_id >= public_rows.size()) {
     return std::nullopt;
   }
+  const PublicStateRow& row = public_rows[parent.public_state_id];
+  if (row.betting_node_id >= solver_.tables().betting_nodes.size()) {
+    return std::nullopt;
+  }
   ExactGameState exact_parent_state{
-      public_rows[parent.public_state_id].betting,
+      solver_.tables().betting_nodes[row.betting_node_id].state,
       parent.exact_board,
   };
   const auto cards = SampleStreetCards(exact_parent_state.betting.street,
@@ -333,8 +296,12 @@ CFRSolver::NodeRef CFRSolver::FrozenTraversalGraph::sample_chance_child(
   if (parent.public_state_id >= public_rows.size()) {
     throw std::logic_error("frozen chance parent public state is invalid");
   }
+  const PublicStateRow& row = public_rows[parent.public_state_id];
+  if (row.betting_node_id >= solver_.tables().betting_nodes.size()) {
+    throw std::logic_error("frozen chance parent betting node is invalid");
+  }
   ExactGameState exact_parent_state{
-      public_rows[parent.public_state_id].betting,
+      solver_.tables().betting_nodes[row.betting_node_id].state,
       parent.exact_board,
   };
   const auto cards = SampleStreetCards(exact_parent_state.betting.street,
@@ -361,17 +328,20 @@ bool CFRSolver::prebuild_info_set_rows(
         continue;
       }
       const PublicStateRow& row = rows()[node_id];
-      const auto decision = make_decision_frame(node_id, row);
-      if (!decision.has_value()) {
+      if (row.betting_node_id >= tables().betting_nodes.size()) {
         continue;
       }
-      const int player = PlayerIndex(decision->player);
-      const absl::Span<const int> action_ids = decision->action_ids_span();
+      const auto& node = tables().betting_nodes[row.betting_node_id];
+      if (node.kind != StrategyTables::NodeKind::kDecision ||
+          node.action_count == 0 || !IsPlayer(node.player_to_act)) {
+        continue;
+      }
       for (uint32_t bucket = 0; bucket < StrategyTables::kPrivateBucketCount;
            ++bucket) {
         const PrivateBucketId private_bucket = static_cast<PrivateBucketId>(bucket);
-        const InfoSetAddress infoset{node_id, player, private_bucket};
-        if (!strategy_store_.get_or_create(infoset, action_ids).has_value()) {
+        const InfoSetAddress infoset{node_id, private_bucket};
+        if (!strategy_store_.get_or_create(infoset, node.action_count)
+                 .has_value()) {
           return false;
         }
       }
@@ -390,12 +360,16 @@ bool CFRSolver::prebuild_info_set_rows(
       continue;
     }
     const PublicStateRow& row = rows()[node_id];
-    const auto decision = make_decision_frame(node_id, row);
-    if (!decision.has_value()) {
+    if (row.betting_node_id >= tables().betting_nodes.size()) {
+      continue;
+    }
+    const auto& node = tables().betting_nodes[row.betting_node_id];
+    if (node.kind != StrategyTables::NodeKind::kDecision ||
+        node.action_count == 0 || !IsPlayer(node.player_to_act)) {
       continue;
     }
 
-    const int player = PlayerIndex(decision->player);
+    const int player = node.player_to_act;
     const TrainingRangeView& range = player == 0 ? a_view : b_view;
     if (range.empty()) {
       continue;
@@ -403,7 +377,7 @@ bool CFRSolver::prebuild_info_set_rows(
 
     const Board& board = *row_boards[node_id];
     const uint32_t bucket_count =
-        card_abstraction_.private_bucket_count(row.betting.street, board);
+        card_abstraction_.private_bucket_count(node.state.street, board);
     if (bucket_count == 0 ||
         bucket_count > StrategyTables::kPrivateBucketCount) {
       return false;
@@ -416,7 +390,6 @@ bool CFRSolver::prebuild_info_set_rows(
       seen_generation = 1;
     }
     const uint32_t generation = seen_generation++;
-    const absl::Span<const int> action_ids = decision->action_ids_span();
     const CardMask board_mask = board.mask;
     for (size_t i = 0; i < range.size(); ++i) {
       if (range.weight(i) <= 0.0f) {
@@ -427,7 +400,7 @@ bool CFRSolver::prebuild_info_set_rows(
         continue;
       }
       const PrivateBucketId bucket =
-          card_abstraction_.private_bucket(combo_id, row.betting.street, board);
+          card_abstraction_.private_bucket(combo_id, node.state.street, board);
       if (bucket >= bucket_count) {
         return false;
       }
@@ -436,7 +409,7 @@ bool CFRSolver::prebuild_info_set_rows(
       }
       seen_buckets[bucket] = generation;
       if (!strategy_store_
-               .get_or_create({node_id, player, bucket}, action_ids)
+               .get_or_create({node_id, bucket}, node.action_count)
                .has_value()) {
         return false;
       }
@@ -584,7 +557,7 @@ void CFRSolver::run_growing_iterations(
 
   for (int i = 0; i < iterations; ++i) {
     const RangeDeal sampled = sampler.sample(rng_);
-    const TraversalDeal deal = traversal_deal(sampled);
+    const Deal deal = traversal_deal(sampled);
 
     VLOG(2) << "Iteration " << i + 1 << "/" << iterations;
     const int cfr_iteration = iterations_run_;
@@ -709,7 +682,7 @@ void CFRSolver::run_fixed_storage_iterations(
           const NodeRef root_node{root_id, root_board};
           for (int i = 0; i < shard; ++i) {
             const RangeDeal sampled = sampler.sample(worker.rng_);
-            const TraversalDeal deal = worker.traversal_deal(sampled);
+            const Deal deal = worker.traversal_deal(sampled);
 
             const int cfr_iteration = iteration_begin + i;
             TraversalFrame frame;
@@ -762,8 +735,13 @@ double CFRSolver::CfrTraversal<Graph>::value(
     return 0.0;
   }
   const PublicStateRow& row = rows[node_id];
+  if (row.betting_node_id >= solver_.tables().betting_nodes.size()) {
+    return 0.0;
+  }
+  const auto& betting_node =
+      solver_.tables().betting_nodes[row.betting_node_id];
 
-  switch (row.kind) {
+  switch (betting_node.kind) {
     case StrategyTables::NodeKind::kTerminal:
       return terminal(node, row);
     case StrategyTables::NodeKind::kChance:
@@ -786,10 +764,13 @@ template <typename Graph>
 double CFRSolver::CfrTraversal<Graph>::terminal(
     NodeRef node,
     const PublicStateRow& row) {
-  solver_.traversal_stats_.record_terminal(row.betting.folded_player < 0);
+  const auto& betting_node =
+      solver_.tables().betting_nodes[row.betting_node_id];
+  solver_.traversal_stats_.record_terminal(
+      betting_node.state.folded_player < 0);
   return solver_.terminal_utility(row, node.exact_board,
-                                  run_.deal.player_cards(0),
-                                  run_.deal.player_cards(1));
+                                  run_.deal.hand(0),
+                                  run_.deal.hand(1));
 }
 
 template <typename Graph>
@@ -823,10 +804,12 @@ template <typename Graph>
 double CFRSolver::CfrTraversal<Graph>::depth_limit_value(
     NodeRef node,
     const PublicStateRow& row) {
-  return IsBettingRoundOver(row.betting)
+  const auto& betting_node =
+      solver_.tables().betting_nodes[row.betting_node_id];
+  return IsBettingRoundOver(betting_node.state)
              ? solver_.terminal_utility(row, node.exact_board,
-                                        run_.deal.player_cards(0),
-                                        run_.deal.player_cards(1))
+                                        run_.deal.hand(0),
+                                        run_.deal.hand(1))
              : 0.0;
 }
 
@@ -836,28 +819,31 @@ double CFRSolver::CfrTraversal<Graph>::decision(
     const PublicStateRow& row,
     const TraversalFrame& frame) {
   const uint32_t node_id = node.public_state_id;
-  const auto maybe_decision = solver_.make_decision_frame(node_id, row);
-  if (!maybe_decision.has_value()) {
+  if (row.betting_node_id >= solver_.tables().betting_nodes.size()) {
     return 0.0;
   }
-  const DecisionFrame& decision = *maybe_decision;
-  const int player = PlayerIndex(decision.player);
-  const PrivateCards& cards = run_.deal.player_cards(player);
+  const auto& betting_node =
+      solver_.tables().betting_nodes[row.betting_node_id];
+  if (betting_node.kind != StrategyTables::NodeKind::kDecision ||
+      betting_node.action_count == 0 || !IsPlayer(betting_node.player_to_act)) {
+    return 0.0;
+  }
+  const int player = betting_node.player_to_act;
+  const ComboId hand = run_.deal.hand(player);
 
   const bool update_player = player == run_.options.update_player;
-  const size_t action_count = decision.action_count;
-  const absl::Span<const int> action_ids = decision.action_ids_span();
+  const size_t action_count = betting_node.action_count;
   const PrivateBucketId bucket =
       solver_.card_abstraction_.private_bucket(
-          cards.combo, decision.street, node.exact_board);
+          hand, betting_node.state.street, node.exact_board);
   std::optional<ActionBlock> actions;
   if (run_.options.use_fixed_infoset_lookup) {
-    actions = solver_.strategy_store_.find_frozen(
-        decision.public_state_id, player, bucket, action_count);
+    actions = solver_.strategy_store_.find_frozen(node_id, bucket,
+                                                  action_count);
   } else {
-    const InfoSetAddress infoset{decision.public_state_id, player, bucket};
+    const InfoSetAddress infoset{node_id, bucket};
     if (update_player) {
-      actions = solver_.strategy_store_.get_or_create(infoset, action_ids);
+      actions = solver_.strategy_store_.get_or_create(infoset, action_count);
     } else {
       actions = solver_.strategy_store_.find(infoset, action_count);
     }
@@ -880,8 +866,8 @@ double CFRSolver::CfrTraversal<Graph>::decision(
     RangeScratchFrame& scratch =
         run_.scratch->frame(static_cast<size_t>(frame.scratch_depth));
     conditioned_ranges = solver_.condition_ranges_for_actions(
-        *frame.ranges[static_cast<size_t>(player)], decision.street,
-        node.exact_board, decision.public_state_id, player, action_ids,
+        *frame.ranges[static_cast<size_t>(player)], betting_node.state.street,
+        node.exact_board, node_id, player, action_count,
         scratch);
   }
 
@@ -917,7 +903,7 @@ double CFRSolver::CfrTraversal<Graph>::decision(
   }
 
   ++solver_.cfr_update_count_;
-  solver_.traversal_stats_.record_decision(decision.street,
+  solver_.traversal_stats_.record_decision(betting_node.state.street,
                                            frame.decision_depth);
 
   if (actions.has_value() && update_player) {
@@ -1001,9 +987,8 @@ absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
     const Board& board,
     uint32_t node_id,
     int player,
-    absl::Span<const int> action_ids,
+    size_t action_count,
     RangeScratchFrame& scratch_frame) {
-  const size_t action_count = action_ids.size();
   if (action_count == 0) {
     return {};
   }
@@ -1031,7 +1016,7 @@ absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
     const PrivateBucketId bucket =
         card_abstraction_.private_bucket(combo_id, street, board);
     strategy_store_.regret_matching_for_bucket(
-        node_id, player, bucket, action_ids, action_probabilities);
+        node_id, bucket, action_count, action_probabilities);
 
     for (size_t action_index = 0; action_index < action_count; ++action_index) {
       const double probability = action_probabilities[action_index];
@@ -1054,10 +1039,8 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
   }
   const uint32_t root_id = *maybe_root_id;
   const NodeRef root_node{root_id, initial_state_.board};
-  const TraversalDeal deal{{
-      PrivateCards::FromCombo(player_a_hand),
-      PrivateCards::FromCombo(player_b_hand),
-  }};
+  const Deal deal{{player_a_hand, player_b_hand},
+                  ComboMask(player_a_hand) | ComboMask(player_b_hand)};
   if (storage_.frozen) {
     FrozenTraversalGraph graph(*this);
     return evaluate_strategy_node(root_node, deal, graph);
@@ -1128,22 +1111,16 @@ double CFRSolver::evaluate_strategy_samples(
   if (storage_.frozen) {
     FrozenTraversalGraph graph(*this);
     for (int i = 0; i < samples; ++i) {
-      const RangeDeal deal = sampler.sample(rng_);
-      const TraversalDeal traversal_deal{{
-          PrivateCards::FromCombo(deal.player_a_combo),
-          PrivateCards::FromCombo(deal.player_b_combo),
-      }};
-      total += evaluate_strategy_node(root_node, traversal_deal, graph);
+      const RangeDeal sampled = sampler.sample(rng_);
+      const Deal deal = traversal_deal(sampled);
+      total += evaluate_strategy_node(root_node, deal, graph);
     }
   } else {
     MutableTraversalGraph graph(*this);
     for (int i = 0; i < samples; ++i) {
-      const RangeDeal deal = sampler.sample(rng_);
-      const TraversalDeal traversal_deal{{
-          PrivateCards::FromCombo(deal.player_a_combo),
-          PrivateCards::FromCombo(deal.player_b_combo),
-      }};
-      total += evaluate_strategy_node(root_node, traversal_deal, graph);
+      const RangeDeal sampled = sampler.sample(rng_);
+      const Deal deal = traversal_deal(sampled);
+      total += evaluate_strategy_node(root_node, deal, graph);
     }
   }
   return total / samples;
@@ -1151,14 +1128,14 @@ double CFRSolver::evaluate_strategy_samples(
 
 double CFRSolver::evaluate_strategy_node(
     NodeRef node,
-    const TraversalDeal& deal,
+    const Deal& deal,
     MutableTraversalGraph& graph) {
   return evaluate_strategy_node_impl(node, deal, graph);
 }
 
 double CFRSolver::evaluate_strategy_node(
     NodeRef node,
-    const TraversalDeal& deal,
+    const Deal& deal,
     FrozenTraversalGraph& graph) {
   return evaluate_strategy_node_impl(node, deal, graph);
 }
@@ -1166,7 +1143,7 @@ double CFRSolver::evaluate_strategy_node(
 template <typename Graph>
 double CFRSolver::evaluate_strategy_node_impl(
     NodeRef node,
-    const TraversalDeal& deal,
+    const Deal& deal,
     Graph& graph) {
   const auto& public_rows = rows();
   if (node.public_state_id >= public_rows.size()) {
@@ -1174,11 +1151,15 @@ double CFRSolver::evaluate_strategy_node_impl(
   }
   const uint32_t node_id = node.public_state_id;
   const PublicStateRow& row = public_rows[node_id];
+  if (row.betting_node_id >= tables().betting_nodes.size()) {
+    return 0.0;
+  }
+  const auto& betting_node = tables().betting_nodes[row.betting_node_id];
 
-  switch (row.kind) {
+  switch (betting_node.kind) {
     case StrategyTables::NodeKind::kTerminal:
-      return terminal_utility(row, node.exact_board, deal.player_cards(0),
-                              deal.player_cards(1));
+      return terminal_utility(row, node.exact_board, deal.hand(0),
+                              deal.hand(1));
     case StrategyTables::NodeKind::kChance: {
       const int samples = ChanceSamples(config_);
       return sample_chance_children(
@@ -1192,27 +1173,25 @@ double CFRSolver::evaluate_strategy_node_impl(
     case StrategyTables::NodeKind::kDecision:
       break;
   }
-  const auto maybe_decision = make_decision_frame(node_id, row);
-  if (!maybe_decision.has_value()) {
+  if (betting_node.kind != StrategyTables::NodeKind::kDecision ||
+      betting_node.action_count == 0 || !IsPlayer(betting_node.player_to_act)) {
     return 0.0;
   }
-  const DecisionFrame& decision = *maybe_decision;
-  const int player = PlayerIndex(decision.player);
+  const int player = betting_node.player_to_act;
 
-  const PrivateCards& player_cards = deal.player_cards(player);
   std::array<double, kMaxActionsPerNode> probabilities_storage{};
   absl::Span<double> probabilities(
-      probabilities_storage.data(), decision.action_count);
+      probabilities_storage.data(), betting_node.action_count);
   const PrivateBucketId bucket =
-      card_abstraction_.private_bucket(player_cards.combo, decision.street,
+      card_abstraction_.private_bucket(deal.hand(player),
+                                       betting_node.state.street,
                                        node.exact_board);
   strategy_store_.average_strategy(
-      node_id, player, bucket, decision.action_ids_span(),
-      config_.regret_only_training,
-      probabilities);
+      node_id, bucket, betting_node.action_count,
+      config_.regret_only_training, probabilities);
 
   double value = 0.0;
-  const int action_count = decision.action_count;
+  const int action_count = betting_node.action_count;
   for (int action_index = 0; action_index < action_count; ++action_index) {
     const auto child = graph.action_child(node, action_index);
     if constexpr (std::is_same_v<std::remove_cvref_t<decltype(child)>,
@@ -1244,9 +1223,13 @@ bool CFRSolver::traversal_stats_enabled() {
 
 double CFRSolver::terminal_utility(const PublicStateRow& row,
                                    const Board& board,
-                                   const PrivateCards& player_a_cards,
-                                   const PrivateCards& player_b_cards) {
-  const BettingState& state = row.betting;
+                                   ComboId player_a_hand,
+                                   ComboId player_b_hand) {
+  if (row.betting_node_id >= tables().betting_nodes.size()) {
+    return 0.0;
+  }
+  const BettingState& state =
+      tables().betting_nodes[row.betting_node_id].state;
   const auto utility = UtilityBeforeShowdown(state, board.count);
   if (utility.has_value()) {
     return *utility;
@@ -1256,7 +1239,7 @@ double CFRSolver::terminal_utility(const PublicStateRow& row,
   // is faster than paying shared cache lookup/mutation overhead.
   HandEvaluator evaluator;
   const int comparison = evaluator.compare_hands(
-      player_a_cards.combo, player_b_cards.combo, board);
+      player_a_hand, player_b_hand, board);
   return ShowdownUtilityFromComparison(state, comparison);
 }
 

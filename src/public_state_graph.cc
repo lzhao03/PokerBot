@@ -262,7 +262,6 @@ GraphBuilder::BettingNodeId GraphBuilder::append_betting_node(
       const GameAction action = menu.actions[static_cast<size_t>(i)];
       tables.betting_edges.push_back({
           action,
-          betting_abstraction_.action_key(action),
           kInvalidBettingNodeId,
       });
     }
@@ -368,28 +367,14 @@ GraphBuilder::PublicStateRow GraphBuilder::make_row(
   row.betting_node_id = betting_node_id;
   row.public_bucket =
       card_abstraction_.public_bucket(state.betting.street, state.board);
-  row.betting = state.betting;
-  const bool terminal = IsTerminal(row.betting, state.board);
-  row.player_to_act = GetPlayerToAct(row.betting, state.board);
-  const bool chance_node = !terminal && row.player_to_act == -1;
-  if (terminal) {
-    row.kind = StrategyTables::NodeKind::kTerminal;
-  } else if (chance_node) {
-    row.kind = StrategyTables::NodeKind::kChance;
-  } else {
-    row.kind = StrategyTables::NodeKind::kDecision;
-  }
 
   const auto& nodes = tables().betting_nodes;
   if (betting_node_id >= nodes.size()) {
     throw std::logic_error("public row betting node is invalid");
   }
   const BettingNode& node = nodes[betting_node_id];
-  if (!SameBettingState(node.state, row.betting)) {
+  if (!SameBettingState(node.state, state.betting)) {
     throw std::logic_error("public row betting node state mismatch");
-  }
-  if (node.player_to_act != row.player_to_act) {
-    throw std::logic_error("public row betting node metadata mismatch");
   }
 
   return row;
@@ -445,14 +430,18 @@ bool GraphBuilder::for_each_required_chance_transition(
     const PublicStateRow& row,
     const Board& board,
     Callback&& callback) const {
+  if (row.betting_node_id >= tables().betting_nodes.size()) {
+    return false;
+  }
+  const BettingState& betting = tables().betting_nodes[row.betting_node_id].state;
   if constexpr (kCoarsePublicBuckets) {
-    const auto& transitions = CoarseChanceTransitions(row.betting.street);
+    const auto& transitions = CoarseChanceTransitions(betting.street);
     const auto existing = transitions.find(row.public_bucket);
     if (existing == transitions.end()) {
       return false;
     }
     for (const CoarseChanceTransitionTemplate& transition : existing->second) {
-      const ExactGameState parent{row.betting, transition.parent_board};
+      const ExactGameState parent{betting, transition.parent_board};
       const ExactGameState child_state = ApplyChance(parent, transition.cards);
       if (!callback(child_state, absl::Span<const CardId>(transition.cards))) {
         return false;
@@ -461,8 +450,8 @@ bool GraphBuilder::for_each_required_chance_transition(
     return true;
   } else {
     return ForEachNextStreetDeal(
-        row.betting.street, board, [&](absl::Span<const CardId> cards) {
-      return callback(ApplyChance({row.betting, board}, cards), cards);
+        betting.street, board, [&](absl::Span<const CardId> cards) {
+      return callback(ApplyChance({betting, board}, cards), cards);
     });
   }
 }
@@ -585,7 +574,7 @@ GraphBuilder::get_or_create_action_child(
   const size_t edge_index =
       static_cast<size_t>(parent.action_begin) + action_slot;
   const GameAction action = tables().betting_edges[edge_index].action;
-  const BettingState child_betting = ApplyAction(read_row.betting, action);
+  const BettingState child_betting = ApplyAction(parent.state, action);
   const ExactGameState child_state{child_betting, parent_board};
   const BettingNodeId child_betting_node_id =
       get_or_create_action_betting_child(read_row.betting_node_id,
@@ -720,11 +709,15 @@ bool GraphBuilder::prebuild_reachable_rows(
     // Copy before creating children; child creation can append to rows and
     // invalidate references.
     const PublicStateRow row = rows()[entry.node_id];
-    if (row.kind == StrategyTables::NodeKind::kTerminal) {
+    if (row.betting_node_id >= tables().betting_nodes.size()) {
+      return false;
+    }
+    const BettingNode node = tables().betting_nodes[row.betting_node_id];
+    if (node.kind == StrategyTables::NodeKind::kTerminal) {
       continue;
     }
 
-    if (row.kind == StrategyTables::NodeKind::kChance) {
+    if (node.kind == StrategyTables::NodeKind::kChance) {
       const bool complete = for_each_required_chance_transition(
           row, entry.board, [&](const ExactGameState& child_state,
                                 absl::Span<const CardId>) {
@@ -748,16 +741,10 @@ bool GraphBuilder::prebuild_reachable_rows(
     }
 
     if (max_depth > 0 && entry.depth >= max_depth) {
-      mtables().public_state_rows[entry.node_id].kind =
-          StrategyTables::NodeKind::kFrontier;
       continue;
     }
 
-    if (row.betting_node_id >= tables().betting_nodes.size()) {
-      return false;
-    }
-    const int action_count =
-        tables().betting_nodes[row.betting_node_id].action_count;
+    const int action_count = node.action_count;
     for (int action_index = 0; action_index < action_count; ++action_index) {
       auto child_id = get_or_create_action_child(entry.node_id, action_index,
                                                  entry.board);
@@ -872,11 +859,17 @@ bool GraphBuilder::validate_prebuilt_rows(
       return false;
     }
     const PublicStateRow& row = public_rows[entry.node_id];
-    if (row.kind == StrategyTables::NodeKind::kTerminal) {
+    if (row.betting_node_id >= tables().betting_nodes.size()) {
+      stats.action_transition_prebuild_complete = false;
+      stats.chance_transition_prebuild_complete = false;
+      return false;
+    }
+    const BettingNode& node = tables().betting_nodes[row.betting_node_id];
+    if (node.kind == StrategyTables::NodeKind::kTerminal) {
       continue;
     }
 
-    if (row.kind == StrategyTables::NodeKind::kChance) {
+    if (node.kind == StrategyTables::NodeKind::kChance) {
       const bool chance_complete = for_each_required_chance_transition(
           row, entry.board, [&](const ExactGameState& child_state,
                                 absl::Span<const CardId>) {
@@ -900,16 +893,10 @@ bool GraphBuilder::validate_prebuilt_rows(
       continue;
     }
 
-    if (row.kind == StrategyTables::NodeKind::kFrontier ||
-        (max_depth > 0 && entry.depth >= max_depth)) {
+    if (max_depth > 0 && entry.depth >= max_depth) {
       continue;
     }
 
-    if (row.betting_node_id >= tables().betting_nodes.size()) {
-      stats.action_transition_prebuild_complete = false;
-      return false;
-    }
-    const BettingNode& node = tables().betting_nodes[row.betting_node_id];
     for (int action_index = 0; action_index < node.action_count;
          ++action_index) {
       ++stats.prebuild_action_transitions;

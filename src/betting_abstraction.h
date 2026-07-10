@@ -18,8 +18,6 @@ class BettingAbstraction {
   ActionMenu actions_for_betting_node(const BettingState& state,
                                       int player) const;
 
-  int action_key(const GameAction& action) const;
-
  private:
   SolverConfig config_;
 };

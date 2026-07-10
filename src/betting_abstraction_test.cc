@@ -133,9 +133,24 @@ TEST_CASE("betting action menu follows config") {
   BettingAbstraction street_betting(street_config);
   CHECK(HasAction(LegalActions(street_betting, FlopState()), ActionKind::kBet,
                   4));
+}
 
-  CHECK_THROWS((void)betting.action_key({ActionKind::kCall, -1, -1}));
-  CHECK_THROWS((void)betting.action_key({ActionKind::kCall, 1000000, -1}));
+TEST_CASE("sized betting actions are sorted and deduplicated") {
+  SolverConfig config;
+  config.bet_sizes = {1.0, 0.5, 0.51, 0.25};
+  BettingAbstraction betting(config);
+
+  const std::vector<GameAction> actions = LegalActions(betting, FlopState());
+
+  REQUIRE(actions.size() == 5);
+  CHECK(actions[0].kind == ActionKind::kCheck);
+  CHECK(actions[1].kind == ActionKind::kBet);
+  CHECK(actions[1].amount == 1);
+  CHECK(actions[2].kind == ActionKind::kBet);
+  CHECK(actions[2].amount == 2);
+  CHECK(actions[3].kind == ActionKind::kBet);
+  CHECK(actions[3].amount == 4);
+  CHECK(actions[4].kind == ActionKind::kAllIn);
 }
 
 TEST_CASE("bet sizes use exact pot and stack values") {

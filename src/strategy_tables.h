@@ -83,7 +83,6 @@ class StrategyTables {
 
   struct BettingEdge {
     GameAction action;
-    int action_id = 0;
     BettingNodeId child = kInvalidBettingNodeId;
   };
 
@@ -130,7 +129,6 @@ class StrategyTables {
 
   struct InfoSetAddress {
     uint32_t public_state_id = 0;
-    int player = 0;
     PrivateBucketId private_bucket = 0;
   };
 
@@ -139,11 +137,8 @@ class StrategyTables {
       action_child_ids.fill(kInvalidPublicStateId);
     }
 
-    BettingState betting;
     BettingNodeId betting_node_id = kInvalidBettingNodeId;
     PublicBucketId public_bucket = 0;
-    NodeKind kind = NodeKind::kDecision;
-    int player_to_act = -1;
     std::array<uint32_t, kMaxActionsPerNode> action_child_ids = {};
     uint32_t chance_child_offset = 0;
     uint32_t chance_child_count = 0;
@@ -175,7 +170,7 @@ class StrategyTables {
   };
 
   using FrozenInfoSetActionOffsetRow =
-      std::array<std::array<uint32_t, kPrivateBucketCount>, kPlayerCount>;
+      std::array<uint32_t, kPrivateBucketCount>;
 
   BettingNodeId root_betting_node_id = kInvalidBettingNodeId;
   uint32_t root_public_state_id = kInvalidPublicStateId;
@@ -189,7 +184,6 @@ class StrategyTables {
   std::vector<ChanceChildEntry> chance_child_entries;
   std::vector<FrozenInfoSetActionOffsetRow> frozen_info_set_action_offsets;
   size_t info_set_count = 0;
-  std::vector<int> action_ids;
   std::vector<std::unique_ptr<PublicInfoSetSlab>> public_info_set_slabs;
 };
 

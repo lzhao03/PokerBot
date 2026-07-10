@@ -113,15 +113,6 @@ void SolverStorage::bind_frozen(
   frozen = true;
 }
 
-absl::Span<const int> ActionBlock::action_ids() const {
-  if (!valid()) {
-    return {};
-  }
-  const std::vector<int>& ids = store_->frozen_tables().action_ids;
-  return absl::Span<const int>(
-      ids.data() + static_cast<size_t>(action_offset_), action_count_);
-}
-
 void ActionBlock::regret_matching(RegretLoadMode mode,
                                   absl::Span<double> out) const {
   if (!valid() || out.size() != action_count_) {
@@ -143,44 +134,6 @@ void ActionBlock::regret_matching(RegretLoadMode mode,
 
   if (positive_sum <= 0.0) {
     FillUniform(out);
-    return;
-  }
-  for (double& probability : out) {
-    probability /= positive_sum;
-  }
-}
-
-void ActionBlock::regret_matching(absl::Span<const int> action_ids,
-                                  absl::Span<double> out) const {
-  if (!valid() || out.size() != action_ids.size()) {
-    throw std::logic_error("aligned regret-matching action count mismatch");
-  }
-  if (out.empty()) {
-    return;
-  }
-
-  const double fallback_probability = 1.0 / out.size();
-  const auto& stored_ids = store_->frozen_tables().action_ids;
-  const auto& regrets = store_->cumulative().cumulative_regrets;
-  double positive_sum = 0.0;
-  std::fill(out.begin(), out.end(), 0.0);
-  const size_t matched_count =
-      std::min(out.size(), static_cast<size_t>(action_count_));
-  for (size_t action_index = 0; action_index < matched_count; ++action_index) {
-    const size_t index = static_cast<size_t>(action_offset_) + action_index;
-    if (stored_ids[index] != action_ids[action_index]) {
-      continue;
-    }
-
-    store_->stats_->record_action_entries();
-    const double regret =
-        std::max(0.0, static_cast<double>(AtomicFloatLoad(&regrets[index])));
-    out[action_index] = regret;
-    positive_sum += regret;
-  }
-
-  if (positive_sum <= 0.0) {
-    std::fill(out.begin(), out.end(), fallback_probability);
     return;
   }
   for (double& probability : out) {
@@ -239,60 +192,29 @@ void ActionBlock::add_average_strategy(absl::Span<const double> probs,
 }
 
 void ActionBlock::average_strategy(bool regret_only_training,
-                                   absl::Span<const int> action_ids,
                                    double fallback_probability,
                                    absl::Span<double> out) const {
-  if (!valid() || out.size() != action_ids.size()) {
+  if (!valid() || out.size() != action_count_) {
     throw std::logic_error("average-strategy action count mismatch");
   }
 
   std::fill(out.begin(), out.end(), 0.0);
   double probability_sum = 0.0;
-  const auto& ids = store_->frozen_tables().action_ids;
   const auto& cumulative_regrets = store_->cumulative().cumulative_regrets;
   const auto& cumulative_strategies =
       store_->cumulative().cumulative_strategies;
 
-  bool aligned_ids = action_ids.size() == action_count_;
-  for (size_t i = 0; aligned_ids && i < action_ids.size(); ++i) {
-    aligned_ids = action_ids[i] == ids[action_offset_ + i];
-  }
-
-  if (aligned_ids) {
-    for (size_t i = 0; i < action_ids.size(); ++i) {
-      store_->stats_->record_action_entries();
-      const size_t index = static_cast<size_t>(action_offset_) + i;
-      out[i] =
-          regret_only_training
-              ? std::max(0.0,
-                         static_cast<double>(AtomicFloatLoad(
-                             &cumulative_regrets[index])))
-              : static_cast<double>(AtomicFloatLoad(
-                    &cumulative_strategies[index]));
-      probability_sum += out[i];
-    }
-  } else {
-    for (size_t action_id_index = 0; action_id_index < action_ids.size();
-         ++action_id_index) {
-      const int action_id = action_ids[action_id_index];
-      for (uint16_t action_index = 0; action_index < action_count_;
-           ++action_index) {
-        store_->stats_->record_action_entries();
-        const size_t index = static_cast<size_t>(action_offset_) + action_index;
-        if (ids[index] == action_id) {
-          out[action_id_index] =
-              regret_only_training
-                  ? std::max(
-                        0.0,
-                        static_cast<double>(AtomicFloatLoad(
-                            &cumulative_regrets[index])))
-                  : static_cast<double>(AtomicFloatLoad(
-                        &cumulative_strategies[index]));
-          probability_sum += out[action_id_index];
-          break;
-        }
-      }
-    }
+  for (size_t i = 0; i < out.size(); ++i) {
+    store_->stats_->record_action_entries();
+    const size_t index = static_cast<size_t>(action_offset_) + i;
+    out[i] =
+        regret_only_training
+            ? std::max(0.0,
+                       static_cast<double>(AtomicFloatLoad(
+                           &cumulative_regrets[index])))
+            : static_cast<double>(AtomicFloatLoad(
+                  &cumulative_strategies[index]));
+    probability_sum += out[i];
   }
 
   if (probability_sum <= 0.0) {
@@ -354,26 +276,23 @@ std::optional<ActionBlock> StrategyStore::find(
 
 std::optional<ActionBlock> StrategyStore::get_or_create(
     InfoSetAddress address,
-    absl::Span<const int> action_ids) {
-  return block_for_row(get_or_create_info_set_row(address, action_ids),
-                       action_ids.size());
+    size_t action_count) {
+  return block_for_row(get_or_create_info_set_row(address, action_count),
+                       action_count);
 }
 
 std::optional<ActionBlock> StrategyStore::find_frozen(
     uint32_t node_id,
-    int player,
     PrivateBucketId bucket,
     size_t expected_action_count) {
-  if (player < 0 || player >= kPlayerCount ||
-      node_id >= frozen_tables().frozen_info_set_action_offsets.size()) {
+  if (node_id >= frozen_tables().frozen_info_set_action_offsets.size()) {
     return std::nullopt;
   }
   if (expected_action_count > std::numeric_limits<uint16_t>::max()) {
     throw std::logic_error("infoset action count exceeds uint16_t");
   }
 
-  const uint32_t offset = frozen_info_set_action_offset(node_id, player,
-                                                        bucket);
+  const uint32_t offset = frozen_info_set_action_offset(node_id, bucket);
   if (offset == StrategyTables::kInvalidActionOffset) {
     return std::nullopt;
   }
@@ -399,12 +318,11 @@ void StrategyStore::regret_matching_or_uniform(
 }
 
 void StrategyStore::average_strategy(uint32_t node_id,
-                                     int player,
                                      PrivateBucketId bucket,
-                                     absl::Span<const int> legal_action_ids,
+                                     size_t action_count,
                                      bool regret_only_training,
                                      absl::Span<double> out) {
-  if (out.size() != legal_action_ids.size()) {
+  if (out.size() != action_count) {
     throw std::logic_error("average-strategy probability span size mismatch");
   }
   if (out.empty()) {
@@ -413,22 +331,19 @@ void StrategyStore::average_strategy(uint32_t node_id,
 
   const double uniform_probability = 1.0 / out.size();
   std::optional<ActionBlock> block =
-      find({node_id, player, bucket}, legal_action_ids.size());
+      find({node_id, bucket}, action_count);
   if (!block.has_value()) {
     std::fill(out.begin(), out.end(), uniform_probability);
     return;
   }
-  block->average_strategy(
-      regret_only_training,
-      legal_action_ids, uniform_probability, out);
+  block->average_strategy(regret_only_training, uniform_probability, out);
 }
 
 void StrategyStore::regret_matching_for_bucket(uint32_t node_id,
-                                               int player,
                                                PrivateBucketId bucket,
-                                               absl::Span<const int> action_ids,
+                                               size_t action_count,
                                                absl::Span<double> out) {
-  if (out.size() != action_ids.size()) {
+  if (out.size() != action_count) {
     throw std::logic_error("conditioned strategy span size mismatch");
   }
   if (out.empty()) {
@@ -436,12 +351,12 @@ void StrategyStore::regret_matching_for_bucket(uint32_t node_id,
   }
 
   std::optional<ActionBlock> block =
-      find({node_id, player, bucket}, action_ids.size());
+      find({node_id, bucket}, action_count);
   if (!block.has_value()) {
     FillUniform(out);
     return;
   }
-  block->regret_matching(action_ids, out);
+  block->regret_matching(RegretLoadMode::kAtomic, out);
 }
 
 bool StrategyStore::prebuild_frozen_info_set_action_offsets() {
@@ -452,9 +367,7 @@ bool StrategyStore::prebuild_frozen_info_set_action_offsets() {
   StrategyTables& tables = tables_for_growth();
   tables.frozen_info_set_action_offsets.resize(tables.public_state_rows.size());
   for (auto& offset_row : tables.frozen_info_set_action_offsets) {
-    for (auto& player_offsets : offset_row) {
-      player_offsets.fill(StrategyTables::kInvalidActionOffset);
-    }
+    offset_row.fill(StrategyTables::kInvalidActionOffset);
   }
 
   for (size_t node_id = 0; node_id < tables.public_state_rows.size();
@@ -469,25 +382,25 @@ bool StrategyStore::prebuild_frozen_info_set_action_offsets() {
     if (slab == nullptr) {
       continue;
     }
+    if (node.player_to_act < 0 || node.player_to_act >= kPlayerCount) {
+      continue;
+    }
 
     auto& offset_row = tables.frozen_info_set_action_offsets[node_id];
-    for (int player = 0; player < kPlayerCount; ++player) {
-      const PublicInfoSetSlabPlayer& player_slab = slab->players[player];
-      auto& player_offsets = offset_row[player];
-      for (uint32_t bucket = 0; bucket < StrategyTables::kPrivateBucketCount;
-           ++bucket) {
-        const auto private_bucket = static_cast<PrivateBucketId>(bucket);
-        const InfoSetRow* info_row = find_info_set_row(player_slab,
-                                                       private_bucket);
-        if (info_row == nullptr) {
-          continue;
-        }
-        if (info_row->action_count != node.action_count) {
-          return false;
-        }
-        player_offsets[static_cast<size_t>(bucket)] =
-            info_row->action_offset;
+    const PublicInfoSetSlabPlayer& player_slab =
+        slab->players[node.player_to_act];
+    for (uint32_t bucket = 0; bucket < StrategyTables::kPrivateBucketCount;
+         ++bucket) {
+      const auto private_bucket = static_cast<PrivateBucketId>(bucket);
+      const InfoSetRow* info_row = find_info_set_row(player_slab,
+                                                     private_bucket);
+      if (info_row == nullptr) {
+        continue;
       }
+      if (info_row->action_count != node.action_count) {
+        return false;
+      }
+      offset_row[static_cast<size_t>(bucket)] = info_row->action_offset;
     }
   }
   return true;
@@ -518,15 +431,18 @@ StrategyStore::get_or_create_public_info_set_slab(uint32_t node_id) {
 
 const StrategyStore::InfoSetRow* StrategyStore::find_info_set_row(
     InfoSetAddress address) const {
-  if (address.player < 0 || address.player >= kPlayerCount ||
-      address.private_bucket >= StrategyTables::kPrivateBucketCount) {
+  if (address.private_bucket >= StrategyTables::kPrivateBucketCount) {
+    return nullptr;
+  }
+  const int player = player_for_public_state(address.public_state_id);
+  if (player < 0 || player >= kPlayerCount) {
     return nullptr;
   }
   const PublicInfoSetSlab* slab = public_info_set_slab(address.public_state_id);
   if (slab == nullptr) {
     return nullptr;
   }
-  const PublicInfoSetSlabPlayer& player_slab = slab->players[address.player];
+  const PublicInfoSetSlabPlayer& player_slab = slab->players[player];
   return find_info_set_row(player_slab, address.private_bucket);
 }
 
@@ -570,9 +486,12 @@ int32_t& StrategyStore::get_or_create_private_row_slot(
 
 const StrategyStore::InfoSetRow* StrategyStore::get_or_create_info_set_row(
     InfoSetAddress address,
-    absl::Span<const int> action_ids) {
-  if (address.player < 0 || address.player >= kPlayerCount ||
-      address.private_bucket >= StrategyTables::kPrivateBucketCount) {
+    size_t action_count) {
+  if (address.private_bucket >= StrategyTables::kPrivateBucketCount) {
+    return nullptr;
+  }
+  const int player = player_for_public_state(address.public_state_id);
+  if (player < 0 || player >= kPlayerCount) {
     return nullptr;
   }
 
@@ -587,10 +506,10 @@ const StrategyStore::InfoSetRow* StrategyStore::get_or_create_info_set_row(
     return nullptr;
   }
 
-  InfoSetRow row = append_info_set_actions(action_ids);
+  InfoSetRow row = append_info_set_actions(action_count);
   PublicInfoSetSlab& slab =
       get_or_create_public_info_set_slab(address.public_state_id);
-  PublicInfoSetSlabPlayer& player_slab = slab.players[address.player];
+  PublicInfoSetSlabPlayer& player_slab = slab.players[player];
   int32_t& row_id =
       get_or_create_private_row_slot(player_slab, address.private_bucket);
   row_id = static_cast<int32_t>(player_slab.rows.size());
@@ -600,33 +519,31 @@ const StrategyStore::InfoSetRow* StrategyStore::get_or_create_info_set_row(
 }
 
 StrategyStore::InfoSetRow StrategyStore::append_info_set_actions(
-    absl::Span<const int> action_ids) {
-  StrategyTables& tables = tables_for_growth();
+    size_t action_count) {
   const size_t padding =
       (kCumulativeActionBlockAlignment -
-       tables.action_ids.size() % kCumulativeActionBlockAlignment) %
+       cumulative().cumulative_regrets.size() %
+           kCumulativeActionBlockAlignment) %
       kCumulativeActionBlockAlignment;
   InfoSetRow row;
-  row.action_offset = static_cast<uint32_t>(tables.action_ids.size() + padding);
-  row.action_count = static_cast<uint16_t>(action_ids.size());
+  row.action_offset = static_cast<uint32_t>(
+      cumulative().cumulative_regrets.size() + padding);
+  row.action_count = static_cast<uint16_t>(action_count);
   const size_t required_capacity =
-      tables.action_ids.size() + padding + action_ids.size();
-  if (required_capacity > tables.action_ids.capacity()) {
-    const size_t current_capacity = tables.action_ids.capacity();
+      cumulative().cumulative_regrets.size() + padding + action_count;
+  if (required_capacity > cumulative().cumulative_regrets.capacity()) {
+    const size_t current_capacity = cumulative().cumulative_regrets.capacity();
     const size_t grown_capacity = current_capacity == 0 ? 4096
                                                         : current_capacity * 2;
     const size_t new_capacity = std::max(required_capacity, grown_capacity);
-    tables.action_ids.reserve(new_capacity);
     cumulative().cumulative_regrets.reserve(new_capacity);
     cumulative().cumulative_strategies.reserve(new_capacity);
   }
   for (size_t i = 0; i < padding; ++i) {
-    tables.action_ids.push_back(0);
     cumulative().cumulative_regrets.push_back(0.0f);
     cumulative().cumulative_strategies.push_back(0.0f);
   }
-  for (int action_id : action_ids) {
-    tables.action_ids.push_back(action_id);
+  for (size_t action_index = 0; action_index < action_count; ++action_index) {
     cumulative().cumulative_regrets.push_back(0.0f);
     cumulative().cumulative_strategies.push_back(0.0f);
     stats_->record_action_entries();
@@ -636,10 +553,21 @@ StrategyStore::InfoSetRow StrategyStore::append_info_set_actions(
 
 uint32_t StrategyStore::frozen_info_set_action_offset(
     uint32_t public_state_id,
-    int player,
     PrivateBucketId private_bucket) const {
-  return frozen_tables().frozen_info_set_action_offsets[public_state_id][player]
+  return frozen_tables().frozen_info_set_action_offsets[public_state_id]
                                                        [private_bucket];
+}
+
+int StrategyStore::player_for_public_state(uint32_t public_state_id) const {
+  const auto& tables = frozen_tables();
+  if (public_state_id >= tables.public_state_rows.size()) {
+    return -1;
+  }
+  const auto& row = tables.public_state_rows[public_state_id];
+  if (row.betting_node_id >= tables.betting_nodes.size()) {
+    return -1;
+  }
+  return tables.betting_nodes[row.betting_node_id].player_to_act;
 }
 
 }  // namespace poker

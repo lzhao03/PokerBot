@@ -5,10 +5,10 @@
 #include <stdexcept>
 #include <vector>
 
+#include "absl/container/inlined_vector.h"
+
 namespace poker {
 namespace {
-
-constexpr int kActionKeyMultiplier = 1000000;
 
 using ActionMenu = BettingAbstraction::ActionMenu;
 
@@ -45,16 +45,6 @@ void AddAction(ActionMenu& menu, ActionKind kind, int amount) {
   ++menu.count;
 }
 
-void AddActionIfMissing(ActionMenu& menu, ActionKind kind, int amount) {
-  for (uint8_t i = 0; i < menu.count; ++i) {
-    const GameAction& action = menu.actions[static_cast<size_t>(i)];
-    if (action.kind == kind && action.amount == amount) {
-      return;
-    }
-  }
-  AddAction(menu, kind, amount);
-}
-
 }  // namespace
 
 BettingAbstraction::BettingAbstraction(const SolverConfig& config)
@@ -84,11 +74,27 @@ BettingAbstraction::ActionMenu BettingAbstraction::actions_for_betting_node(
   if (outstanding_call > 0) {
     sized_action = ActionKind::kRaise;
   }
+  absl::InlinedVector<GameAction, kMaxActionsPerNode> sized_actions;
   for (double bet_size : BetSizesForStreet(config_, state.street)) {
     const int amount = outstanding_call + ConcreteBetAmount(state, bet_size);
     if (amount < stack) {
-      AddActionIfMissing(menu, sized_action, amount);
+      sized_actions.push_back({sized_action, amount, -1});
     }
+  }
+  std::sort(sized_actions.begin(), sized_actions.end(),
+            [](const GameAction& left, const GameAction& right) {
+              return left.amount < right.amount;
+            });
+  const auto unique_end =
+      std::unique(sized_actions.begin(), sized_actions.end(),
+                  [](const GameAction& left, const GameAction& right) {
+                    return left.kind == right.kind &&
+                           left.amount == right.amount;
+                  });
+  sized_actions.erase(unique_end, sized_actions.end());
+
+  for (const GameAction& action : sized_actions) {
+    AddAction(menu, action.kind, action.amount);
   }
 
   if (outstanding_call == 0 || stack > outstanding_call) {
@@ -96,13 +102,6 @@ BettingAbstraction::ActionMenu BettingAbstraction::actions_for_betting_node(
   }
 
   return menu;
-}
-
-int BettingAbstraction::action_key(const GameAction& action) const {
-  if (action.amount < 0 || action.amount >= kActionKeyMultiplier) {
-    throw std::invalid_argument("Action amount is outside action-key range");
-  }
-  return static_cast<int>(action.kind) * kActionKeyMultiplier + action.amount;
 }
 
 }  // namespace poker

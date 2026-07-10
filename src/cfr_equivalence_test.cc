@@ -43,7 +43,6 @@ struct SolverSnapshot {
   int64_t cfr_updates = 0;
   TraversalStats stats;
   std::vector<uint64_t> graph;
-  std::vector<int> action_ids;
   std::vector<float> regrets;
   std::vector<float> strategies;
 };
@@ -74,13 +73,8 @@ struct CFRSolverTestAccess {
       uint64_t hash = 0;
       hash = Mix(hash, row.betting_node_id);
       hash = Mix(hash, row.public_bucket);
-      hash = Mix(hash, static_cast<uint64_t>(row.kind));
-      hash = Mix(hash, static_cast<uint64_t>(row.player_to_act + 2));
       hash = Mix(hash, row.chance_child_offset);
       hash = Mix(hash, row.chance_child_count);
-      hash = Mix(hash, row.betting.pot);
-      hash = Mix(hash, row.betting.stack[0]);
-      hash = Mix(hash, row.betting.stack[1]);
       for (uint32_t child_id : row.action_child_ids) {
         hash = Mix(hash, child_id);
       }
@@ -102,7 +96,6 @@ struct CFRSolverTestAccess {
       uint64_t hash = 0;
       hash = Mix(hash, static_cast<uint64_t>(edge.action.kind));
       hash = Mix(hash, edge.action.amount);
-      hash = Mix(hash, edge.action_id);
       hash = Mix(hash, edge.child);
       out.push_back(hash);
     }
@@ -142,10 +135,10 @@ struct CFRSolverTestAccess {
         solver.initial_state_.board,
     };
     CFRSolver::TraversalScratch scratch(32);
-    const CFRSolver::TraversalDeal deal{{
-        CFRSolver::PrivateCards::FromCombo(a_combo),
-        CFRSolver::PrivateCards::FromCombo(b_combo),
-    }};
+    const CFRSolver::Deal deal{
+        {a_combo, b_combo},
+        ComboMask(a_combo) | ComboMask(b_combo),
+    };
     CFRSolver::TraversalOptions options =
         solver.traversal_options(0, solver.config_.max_depth);
     CFRSolver::TraversalRun run{deal, options, &scratch};
@@ -167,7 +160,6 @@ struct CFRSolverTestAccess {
         solver.cfr_update_count_,
         solver.traversal_stats_,
         GraphFingerprint(solver),
-        solver.tables().action_ids,
         std::vector<float>(arrays.cumulative_regrets.begin(),
                            arrays.cumulative_regrets.end()),
         std::vector<float>(arrays.cumulative_strategies.begin(),
@@ -225,7 +217,6 @@ TEST_CASE("prepared mutable and frozen traversal produce the same storage") {
   CHECK(mutable_run.stats.action_entry_touches ==
         frozen_run.stats.action_entry_touches);
   CHECK(mutable_run.graph == frozen_run.graph);
-  CHECK(mutable_run.action_ids == frozen_run.action_ids);
   CHECK(mutable_run.regrets == frozen_run.regrets);
   CHECK(mutable_run.strategies == frozen_run.strategies);
 }
