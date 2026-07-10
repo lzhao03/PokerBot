@@ -104,7 +104,7 @@ cc_library(
 cc_test(
     name = "card_utils_test",
     srcs = ["card_utils_test.cc"],
-    deps = DOCTEST_DEPS + [
+    deps = DOCTEST_DEPS + RAPIDCHECK_DEPS + [
         ":card_utils",
     ],
 )
@@ -198,6 +198,7 @@ cc_library(
     srcs = ["game_rules.cc"],
     hdrs = ["game_rules.h"],
     deps = [
+        ":card_utils",
         ":combo",
         ":game_state",
         ":hand_evaluator",

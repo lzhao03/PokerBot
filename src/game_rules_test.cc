@@ -5,6 +5,7 @@
 #include "src/hand_evaluator.h"
 
 #include <initializer_list>
+#include <stdexcept>
 #include <vector>
 
 namespace poker {
@@ -174,6 +175,31 @@ TEST_CASE("all-in call runs out the remaining board") {
   state = ApplyChance(state, {MakeCardId(3, SuitKind::kHearts)});
   CHECK(IsTerminal(state.betting, state.board));
   CHECK(state.betting.player_to_act == -1);
+}
+
+TEST_CASE("chance transitions reject incorrect card counts") {
+  ExactGameState preflop = ApplySequence(
+      PreflopState(), {{ActionKind::kCall}, {ActionKind::kCheck}});
+  CHECK_THROWS_AS(
+      ApplyChance(preflop, {MakeCardId(14, SuitKind::kSpades)}),
+      std::invalid_argument);
+
+  ExactGameState flop =
+      ApplyChance(preflop, {MakeCardId(2, SuitKind::kHearts),
+                            MakeCardId(7, SuitKind::kDiamonds),
+                            MakeCardId(12, SuitKind::kClubs)});
+  flop = ApplySequence(
+      flop, {{ActionKind::kCheck}, {ActionKind::kCheck}});
+  CHECK_THROWS_AS(
+      ApplyChance(flop, {MakeCardId(9, SuitKind::kSpades),
+                         MakeCardId(3, SuitKind::kHearts)}),
+      std::invalid_argument);
+
+  ExactGameState turn =
+      ApplyChance(flop, {MakeCardId(9, SuitKind::kSpades)});
+  turn = ApplySequence(
+      turn, {{ActionKind::kCheck}, {ActionKind::kCheck}});
+  CHECK_THROWS_AS(ApplyChance(turn, {}), std::invalid_argument);
 }
 
 TEST_CASE("representative invalid actions are rejected") {

@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "absl/container/inlined_vector.h"
+#include "src/card_utils.h"
 #include "src/hand_evaluator.h"
 
 namespace poker {
@@ -249,6 +250,10 @@ ExactGameState ApplyChance(const ExactGameState& state,
       !IsBettingRoundOver(state.betting) ||
       state.betting.player_to_act != -1) {
     throw std::invalid_argument("State is not a chance node");
+  }
+  if (cards.size() !=
+      static_cast<size_t>(CardsForNextStreet(state.betting.street))) {
+    throw std::invalid_argument("Incorrect number of chance cards");
   }
 
   ExactGameState child = state;

@@ -1,76 +1,68 @@
 #include "src/card_utils.h"
 
 #include "doctest/doctest.h"
+#include "rapidcheck.h"
 
 #include <array>
+#include <cstdint>
 #include <random>
 #include <stdexcept>
 
 namespace poker {
 namespace {
 
-void CheckSample(CardMask blocked_cards,
-                 absl::Span<const CardId> cards,
-                 size_t expected_count) {
-  REQUIRE(cards.size() == expected_count);
-  CardMask seen = 0;
-  for (CardId card : cards) {
-    CHECK((blocked_cards & CardBit(card)) == 0);
-    CHECK((seen & CardBit(card)) == 0);
-    seen |= CardBit(card);
+CardId SelectAvailableCard(CardMask blocked, uint16_t choice) {
+  std::array<CardId, kDeckCardCount> available = {};
+  size_t count = 0;
+  for (int id = 0; id < kDeckCardCount; ++id) {
+    const CardId card = static_cast<CardId>(id);
+    if ((blocked & CardBit(card)) == 0) {
+      available[count++] = card;
+    }
   }
+  RC_ASSERT(count > 0);
+  return available[choice % count];
 }
 
 TEST_CASE("street sampling returns unique unblocked cards") {
-  const CardMask known_private_cards =
-      CardBit(MakeCardId(14, SuitKind::kSpades)) |
-      CardBit(MakeCardId(13, SuitKind::kSpades)) |
-      CardBit(MakeCardId(12, SuitKind::kHearts)) |
-      CardBit(MakeCardId(11, SuitKind::kHearts));
+  const bool passed = rc::check("valid card sampling", [] {
+    const int street_index = *rc::gen::inRange(0, 4).as("street");
+    const int private_count = *rc::gen::inRange(0, 5).as("private count");
+    const auto choices =
+        *rc::gen::arbitrary<std::array<uint16_t, 9>>().as("cards");
+    const uint32_t seed = *rc::gen::arbitrary<uint32_t>().as("seed");
+    const StreetKind street = static_cast<StreetKind>(street_index);
 
-  struct Scenario {
-    StreetKind street;
-    std::array<CardId, kMaxBoardCards> board;
-    uint8_t board_count = 0;
-    size_t expected_count = 0;
-  };
-  const std::array<Scenario, 4> scenarios{{
-      {StreetKind::kPreflop, {}, 0, 3},
-      {StreetKind::kFlop,
-       {MakeCardId(2, SuitKind::kClubs),
-        MakeCardId(3, SuitKind::kDiamonds),
-        MakeCardId(4, SuitKind::kHearts)},
-       3,
-       1},
-      {StreetKind::kTurn,
-       {MakeCardId(2, SuitKind::kClubs),
-        MakeCardId(3, SuitKind::kDiamonds),
-        MakeCardId(4, SuitKind::kHearts),
-        MakeCardId(5, SuitKind::kSpades)},
-       4,
-       1},
-      {StreetKind::kRiver,
-       {MakeCardId(2, SuitKind::kClubs),
-        MakeCardId(3, SuitKind::kDiamonds),
-        MakeCardId(4, SuitKind::kHearts),
-        MakeCardId(5, SuitKind::kSpades),
-        MakeCardId(6, SuitKind::kClubs)},
-       5,
-       0},
-  }};
-
-  std::mt19937 rng(12345);
-  for (const Scenario& scenario : scenarios) {
     Board board;
-    for (uint8_t i = 0; i < scenario.board_count; ++i) {
-      board.add(scenario.board[i]);
+    CardMask blocked = 0;
+    size_t cursor = 0;
+    const int board_count = BoardCardsForStreet(street);
+    for (int i = 0; i < board_count; ++i) {
+      const CardId card = SelectAvailableCard(blocked, choices[cursor++]);
+      board.add(card);
+      blocked |= CardBit(card);
     }
 
-    CheckSample(known_private_cards | board.mask,
-                SampleStreetCards(scenario.street, board,
-                                  known_private_cards, rng),
-                scenario.expected_count);
-  }
+    CardMask private_cards = 0;
+    for (int i = 0; i < private_count; ++i) {
+      const CardId card = SelectAvailableCard(blocked, choices[cursor++]);
+      private_cards |= CardBit(card);
+      blocked |= CardBit(card);
+    }
+
+    std::mt19937 rng(seed);
+    const auto sampled =
+        SampleStreetCards(street, board, private_cards, rng);
+    RC_ASSERT(sampled.size() ==
+              static_cast<size_t>(CardsForNextStreet(street)));
+    CardMask seen = 0;
+    for (CardId card : sampled) {
+      RC_ASSERT((blocked & CardBit(card)) == 0);
+      RC_ASSERT((seen & CardBit(card)) == 0);
+      seen |= CardBit(card);
+    }
+  });
+  CHECK(passed);
 }
 
 TEST_CASE("one-card sampling returns the only unblocked card") {
