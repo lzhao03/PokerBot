@@ -72,7 +72,7 @@ void FillUniform(absl::Span<double> out) {
 }  // namespace
 
 StrategyTables& SolverStorage::mutable_ref() {
-  if (frozen || mutable_tables == nullptr) {
+  if (is_frozen()) {
     throw std::logic_error("Strategy tables are frozen");
   }
   return *mutable_tables;
@@ -91,8 +91,7 @@ const MutableCumulativeArrays& SolverStorage::cumulative_ref() const {
 }
 
 void SolverStorage::freeze() {
-  if (mutable_tables == nullptr) {
-    frozen = true;
+  if (is_frozen()) {
     return;
   }
   mutable_tables->node_ids.clear();
@@ -101,7 +100,6 @@ void SolverStorage::freeze() {
   mutable_tables->public_chance_child_ids.rehash(0);
   frozen_tables = mutable_tables;
   mutable_tables.reset();
-  frozen = true;
 }
 
 void SolverStorage::bind_frozen(
@@ -110,7 +108,6 @@ void SolverStorage::bind_frozen(
   mutable_tables.reset();
   frozen_tables = std::move(frozen_in);
   cumulative = std::move(cumulative_in);
-  frozen = true;
 }
 
 void ActionBlock::regret_matching(RegretLoadMode mode,
@@ -360,7 +357,7 @@ void StrategyStore::regret_matching_for_bucket(NodeId node_id,
 }
 
 bool StrategyStore::prebuild_frozen_info_set_action_offsets() {
-  if (storage_.frozen) {
+  if (storage_.is_frozen()) {
     return true;
   }
 
@@ -499,7 +496,7 @@ const StrategyStore::InfoSetRow* StrategyStore::get_or_create_info_set_row(
     return row;
   }
 
-  if (storage_.frozen ||
+  if (storage_.is_frozen() ||
       (config_.max_info_sets > 0 &&
        static_cast<int>(frozen_tables().info_set_count) >=
            config_.max_info_sets)) {

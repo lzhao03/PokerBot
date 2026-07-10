@@ -320,7 +320,7 @@ bool CFRSolver::prebuild_info_set_rows(
     const TrainingRangeView& a_view,
     const TrainingRangeView& b_view,
     absl::Span<const std::optional<Board>> node_boards) {
-  if (storage_.frozen) {
+  if (storage_.is_frozen()) {
     return true;
   }
 
@@ -458,7 +458,7 @@ void CFRSolver::run(int iterations,
   const bool regret_only = config_.regret_only_training && max_depth == 0;
   const bool bounded = config_.max_public_states > 0 || max_depth > 0;
 
-  bool fixed_storage = storage_.frozen;
+  bool fixed_storage = storage_.is_frozen();
   if (!fixed_storage && (parallel || regret_only) && bounded) {
     fixed_storage = prepare_prebuilt_training(root_id, max_depth, a_view, b_view);
   }
@@ -481,7 +481,7 @@ bool CFRSolver::prepare_prebuilt_training(
     const TrainingRangeView& a_view,
     const TrainingRangeView& b_view) {
   TrainingRunStats& stats = last_training_run_stats_;
-  if (storage_.frozen) {
+  if (storage_.is_frozen()) {
     return true;
   }
 
@@ -647,7 +647,7 @@ void CFRSolver::run_fixed_storage_iterations(
     const RangeSampler& sampler,
     const TrainingRange& a_range,
     const TrainingRange& b_range) {
-  if (!storage_.frozen) {
+  if (!storage_.is_frozen()) {
     storage_.freeze();
   }
 
@@ -664,7 +664,7 @@ void CFRSolver::run_fixed_storage_iterations(
   const bool depth_zero = config_.max_depth == 0;
   const bool regret_only_config = config_.regret_only_training && depth_zero;
   const bool use_fixed_infoset_lookup =
-      storage_.frozen && regret_only_config && !kCoarsePublicBuckets;
+      storage_.is_frozen() && regret_only_config && !kCoarsePublicBuckets;
   const bool use_atomic_updates = num_threads > 1;
 
   struct WorkerResult {
@@ -1073,7 +1073,7 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
   };
   const Deal deal{{player_a_hand, player_b_hand},
                   ComboMask(player_a_hand) | ComboMask(player_b_hand)};
-  if (storage_.frozen) {
+  if (storage_.is_frozen()) {
     FrozenTraversalGraph graph(*this);
     return evaluate_strategy_node(root_node, deal, graph);
   }
@@ -1144,7 +1144,7 @@ double CFRSolver::evaluate_strategy_samples(
       root_board,
       board_features(root_board),
   };
-  if (storage_.frozen) {
+  if (storage_.is_frozen()) {
     FrozenTraversalGraph graph(*this);
     for (int i = 0; i < samples; ++i) {
       const RangeDeal sampled = sampler.sample(rng_);

@@ -66,8 +66,8 @@ struct SolverStorage {
   std::shared_ptr<const StrategyTables> frozen_tables = mutable_tables;
   std::shared_ptr<MutableCumulativeArrays> cumulative =
       std::make_shared<MutableCumulativeArrays>();
-  bool frozen = false;
 
+  bool is_frozen() const noexcept { return mutable_tables == nullptr; }
   StrategyTables& mutable_ref();
   const StrategyTables& frozen_ref() const;
   MutableCumulativeArrays& cumulative_ref();

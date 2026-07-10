@@ -349,7 +349,7 @@ std::optional<NodeId> GraphBuilder::get_or_create_node(
     return existing;
   }
 
-  if (storage_.frozen || node_limit_reached()) {
+  if (storage_.is_frozen() || node_limit_reached()) {
     return std::nullopt;
   }
 
@@ -368,7 +368,7 @@ std::optional<NodeId> GraphBuilder::get_or_create_node(
 
 std::optional<NodeId> GraphBuilder::get_or_create_node(
     const ExactGameState& state) {
-  if (storage_.frozen) {
+  if (storage_.is_frozen()) {
     const NodeId root_id = tables().root_node_id;
     if (root_id == kInvalidNodeId ||
         root_id >= tables().nodes.size()) {
@@ -471,7 +471,7 @@ std::optional<NodeId> GraphBuilder::find_or_cache_action_child(
     return std::nullopt;
   }
 
-  if (!storage_.frozen) {
+  if (!storage_.is_frozen()) {
     mtables().action_child_ids[child_slot] = child_id->second;
   }
   return child_id->second;
@@ -483,7 +483,7 @@ bool GraphBuilder::node_limit_reached() const {
 }
 
 bool GraphBuilder::can_insert_node() const {
-  return !storage_.frozen && !node_limit_reached();
+  return !storage_.is_frozen() && !node_limit_reached();
 }
 
 std::optional<NodeId>
@@ -518,7 +518,7 @@ GraphBuilder::get_or_create_action_child(
   }
 
   if (!can_insert_node()) {
-    if (!storage_.frozen) {
+    if (!storage_.is_frozen()) {
       mtables().action_child_ids[child_slot] = kCappedNodeId;
     }
     stats_.record_transition_miss();
@@ -585,7 +585,7 @@ std::optional<NodeId> GraphBuilder::find_or_cache_chance_child(
       return std::nullopt;
     }
 
-    if (!storage_.frozen) {
+    if (!storage_.is_frozen()) {
       mtables().public_chance_child_ids.emplace(
           transition_key, child_id->second);
     }
@@ -638,7 +638,7 @@ bool GraphBuilder::prebuild_reachable_nodes(
     const Board& root_board,
     int max_depth,
     std::vector<std::optional<Board>>& node_boards) {
-  if (storage_.frozen) {
+  if (storage_.is_frozen()) {
     return true;
   }
   if (root_id >= nodes().size()) {
