@@ -31,7 +31,7 @@ Chips CommitChips(BettingState& state, int player, Chips requested) {
   return committed;
 }
 
-void AdvanceStreet(ExactGameState& state, absl::Span<const CardId> cards) {
+void AdvanceStreet(ExactPublicState& state, absl::Span<const CardId> cards) {
   switch (state.betting.street) {
     case StreetKind::kPreflop:
       state.betting.street = StreetKind::kFlop;
@@ -244,7 +244,7 @@ BettingState ApplyAction(const BettingState& state,
   return ApplyActionUnchecked(state, action);
 }
 
-ExactGameState ApplyChance(const ExactGameState& state,
+ExactPublicState ApplyChance(const ExactPublicState& state,
                            absl::Span<const CardId> cards) {
   if (IsTerminal(state.betting, state.board) ||
       !IsBettingRoundOver(state.betting) ||
@@ -256,12 +256,12 @@ ExactGameState ApplyChance(const ExactGameState& state,
     throw std::invalid_argument("Incorrect number of chance cards");
   }
 
-  ExactGameState child = state;
+  ExactPublicState child = state;
   AdvanceStreet(child, cards);
   return child;
 }
 
-double GetUtility(const ExactGameState& state,
+double GetUtility(const ExactPublicState& state,
                   ComboId player_a_hand,
                   ComboId player_b_hand) {
   static const HandEvaluator evaluator;

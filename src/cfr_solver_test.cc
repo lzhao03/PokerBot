@@ -77,7 +77,7 @@ TEST_CASE("solver lifecycle respects training, limits, and root contracts") {
 
   SUBCASE("terminal and invalid roots") {
     SolverConfig config = Config();
-    ExactGameState terminal;
+    ExactPublicState terminal;
     terminal.betting.stack = {0, 0};
     terminal.betting.committed = {5, 5};
     terminal.betting.street = StreetKind::kRiver;
@@ -88,7 +88,7 @@ TEST_CASE("solver lifecycle respects training, limits, and root contracts") {
     CHECK(solver.get_iterations_run() == 1);
     CHECK(solver.get_expected_value(0) == doctest::Approx(5.0));
 
-    ExactGameState invalid;
+    ExactPublicState invalid;
     invalid.betting.stack[0] = -1;
     CHECK_THROWS_AS(CFRSolver(config, invalid), std::invalid_argument);
   }

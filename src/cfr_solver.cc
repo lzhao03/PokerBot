@@ -79,7 +79,7 @@ int WorkerCountForSamples(int samples) {
   return std::min(worker_count, samples);
 }
 
-ExactGameState DefaultInitialState(const SolverConfig& config) {
+ExactPublicState DefaultInitialState(const SolverConfig& config) {
   const int small_blind = config.small_blind > 0 ? config.small_blind : 1;
   const int big_blind = config.big_blind > 0 ? config.big_blind : 2;
   const int starting_stack = config.starting_stack_size;
@@ -91,7 +91,7 @@ ExactGameState DefaultInitialState(const SolverConfig& config) {
   betting.street = StreetKind::kPreflop;
   betting.player_to_act = 0;
   betting.committed = {small_blind, big_blind};
-  return ExactGameState{betting, Board{}};
+  return ExactPublicState{betting, Board{}};
 }
 
 }  // namespace
@@ -101,7 +101,7 @@ CFRSolver::CFRSolver(const SolverConfig& config)
 }
 
 CFRSolver::CFRSolver(const SolverConfig& config,
-                     const ExactGameState& initial_state)
+                     const ExactPublicState& initial_state)
     : config_(NormalizedSolverConfig(config)),
       initial_state_(initial_state),
       rng_(12345),
@@ -210,14 +210,14 @@ CFRSolver::MutableTraversalGraph::sample_chance_child(
   if (graph_node.betting_node_id >= solver_.tables().betting_nodes.size()) {
     return std::nullopt;
   }
-  ExactGameState exact_parent_state{
+  ExactPublicState exact_parent_state{
       solver_.tables().betting_nodes[graph_node.betting_node_id].state,
       parent.exact_board,
   };
   const auto cards = SampleStreetCards(exact_parent_state.betting.street,
                                        exact_parent_state.board,
                                        known_private_cards, solver_.rng_);
-  ExactGameState exact_child_state = ApplyChance(exact_parent_state, cards);
+  ExactPublicState exact_child_state = ApplyChance(exact_parent_state, cards);
   const auto child_id = solver_.graph_builder_.get_or_create_chance_child(
       parent.node, exact_child_state);
   if (!child_id.has_value() ||
@@ -268,7 +268,7 @@ NodeId CFRSolver::FrozenTraversalGraph::required_action_child_id(
 
 NodeId CFRSolver::FrozenTraversalGraph::required_chance_child_id(
     NodeId parent_node_id,
-    const ExactGameState& child_state) const {
+    const ExactPublicState& child_state) const {
   const auto child_id =
       solver_.tables().chance_child(
           parent_node_id,
@@ -303,14 +303,14 @@ CFRSolver::Position CFRSolver::FrozenTraversalGraph::sample_chance_child(
   if (graph_node.betting_node_id >= solver_.tables().betting_nodes.size()) {
     throw std::logic_error("frozen chance parent betting node is invalid");
   }
-  ExactGameState exact_parent_state{
+  ExactPublicState exact_parent_state{
       solver_.tables().betting_nodes[graph_node.betting_node_id].state,
       parent.exact_board,
   };
   const auto cards = SampleStreetCards(exact_parent_state.betting.street,
                                        exact_parent_state.board,
                                        known_private_cards, solver_.rng_);
-  ExactGameState exact_child_state = ApplyChance(exact_parent_state, cards);
+  ExactPublicState exact_child_state = ApplyChance(exact_parent_state, cards);
   return Position{
       required_chance_child_id(parent.node, exact_child_state),
       exact_child_state.board,

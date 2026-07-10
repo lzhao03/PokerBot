@@ -316,7 +316,7 @@ std::optional<NodeId> GraphBuilder::find_node(
 
 GraphBuilder::Node GraphBuilder::make_node(
     BettingNodeId betting_node_id,
-    const ExactGameState& state) {
+    const ExactPublicState& state) {
   Node graph_node;
   graph_node.betting_node_id = betting_node_id;
   graph_node.board_bucket = board_bucket(state.betting.street, state.board);
@@ -343,7 +343,7 @@ GraphBuilder::Node GraphBuilder::make_node(
 
 std::optional<NodeId> GraphBuilder::get_or_create_node(
     BettingNodeId betting_node_id,
-    const ExactGameState& state) {
+    const ExactPublicState& state) {
   if (std::optional<NodeId> existing =
           find_node(betting_node_id, state.betting.street, state.board)) {
     return existing;
@@ -367,7 +367,7 @@ std::optional<NodeId> GraphBuilder::get_or_create_node(
 }
 
 std::optional<NodeId> GraphBuilder::get_or_create_node(
-    const ExactGameState& state) {
+    const ExactPublicState& state) {
   if (storage_.is_frozen()) {
     const NodeId root_id = tables().root_node_id;
     if (root_id == kInvalidNodeId ||
@@ -409,7 +409,7 @@ bool GraphBuilder::for_each_required_chance_transition(
 }
 
 GraphBuilder::BoardBucketId GraphBuilder::chance_outcome_id(
-    const ExactGameState& child_state) const {
+    const ExactPublicState& child_state) const {
   return board_bucket(child_state.betting.street, child_state.board);
 }
 
@@ -529,7 +529,7 @@ GraphBuilder::get_or_create_action_child(
       static_cast<size_t>(parent.action_begin) + action_slot;
   const GameAction action = tables().betting_edges[edge_index].action;
   const BettingState child_betting = ApplyAction(parent.state, action);
-  const ExactGameState child_state{child_betting, parent_board};
+  const ExactPublicState child_state{child_betting, parent_board};
   const BettingNodeId child_betting_node_id =
       get_or_create_action_betting_child(parent_node.betting_node_id,
                                          action_index);
@@ -551,7 +551,7 @@ GraphBuilder::get_or_create_action_child(
 
 std::optional<NodeId> GraphBuilder::find_or_cache_chance_child(
     NodeId parent_node_id,
-    const ExactGameState& child_state) {
+    const ExactPublicState& child_state) {
   const auto& graph_nodes = nodes();
   if (parent_node_id >= graph_nodes.size()) {
     return std::nullopt;
@@ -598,7 +598,7 @@ std::optional<NodeId> GraphBuilder::find_or_cache_chance_child(
 std::optional<NodeId>
 GraphBuilder::get_or_create_chance_child(
     NodeId parent_node_id,
-    const ExactGameState& exact_child_state) {
+    const ExactPublicState& exact_child_state) {
   const auto& graph_nodes = nodes();
   if (parent_node_id >= graph_nodes.size()) {
     return std::nullopt;
@@ -667,7 +667,7 @@ bool GraphBuilder::prebuild_reachable_nodes(
 
     if (node.kind == StrategyTables::NodeKind::kChance) {
       const bool complete = for_each_required_chance_transition(
-          graph_node, entry.board, [&](const ExactGameState& child_state,
+          graph_node, entry.board, [&](const ExactPublicState& child_state,
                                 absl::Span<const CardId>) {
             auto child_id = get_or_create_chance_child(entry.node_id, child_state);
             if (!child_id.has_value()) {
@@ -820,7 +820,7 @@ bool GraphBuilder::validate_prebuilt_nodes(
 
     if (node.kind == StrategyTables::NodeKind::kChance) {
       const bool chance_complete = for_each_required_chance_transition(
-          graph_node, entry.board, [&](const ExactGameState& child_state,
+          graph_node, entry.board, [&](const ExactPublicState& child_state,
                                 absl::Span<const CardId>) {
         ++stats.prebuild_chance_transitions;
         const auto child = tables().chance_child(

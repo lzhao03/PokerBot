@@ -32,7 +32,7 @@ class CFRSolver {
 
   CFRSolver(const SolverConfig& config);
   CFRSolver(const SolverConfig& config,
-            const ExactGameState& initial_state);
+            const ExactPublicState& initial_state);
 
   void run(int iterations, const HandRange& player_a_range,
            const HandRange& player_b_range);
@@ -135,7 +135,7 @@ class CFRSolver {
                                     int action_index) const;
     NodeId required_chance_child_id(
         NodeId parent_node_id,
-        const ExactGameState& child_state) const;
+        const ExactPublicState& child_state) const;
 
     CFRSolver& solver_;
   };
@@ -263,7 +263,7 @@ class CFRSolver {
       const RangeSampler& sampler,
       bool allow_parallel);
   SolverConfig config_;
-  ExactGameState initial_state_;
+  ExactPublicState initial_state_;
   std::mt19937 rng_;
   double cumulative_root_utility_ = 0.0;
   int iterations_run_ = 0;

@@ -7,7 +7,7 @@ namespace poker {
 namespace {
 
 TEST_CASE("heads-up blinds define pot and call amount") {
-  const ExactGameState state = test::InitialHeadsUpState(20, 20, 1, 2);
+  const ExactPublicState state = test::InitialHeadsUpState(20, 20, 1, 2);
 
   CHECK(state.betting.stack == std::array<Chips, kPlayerCount>{19, 18});
   CHECK(state.betting.committed ==

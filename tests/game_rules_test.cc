@@ -7,7 +7,7 @@ namespace poker {
 namespace {
 
 TEST_CASE("check-check completes a betting round") {
-  ExactGameState state = test::InitialHeadsUpState(20, 20, 2, 2);
+  ExactPublicState state = test::InitialHeadsUpState(20, 20, 2, 2);
   state.betting.street = StreetKind::kFlop;
   state.betting.player_to_act = 1;
   state.board.add(MakeCardId(2, SuitKind::kHearts));
@@ -24,7 +24,7 @@ TEST_CASE("check-check completes a betting round") {
 }
 
 TEST_CASE("fold completes the hand") {
-  ExactGameState state = test::InitialHeadsUpState(20, 20, 1, 2);
+  ExactPublicState state = test::InitialHeadsUpState(20, 20, 1, 2);
   state.betting = ApplyAction(state.betting, {ActionKind::kFold});
 
   CHECK(IsBettingRoundOver(state.betting));

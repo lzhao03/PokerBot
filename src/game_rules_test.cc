@@ -23,18 +23,18 @@ ComboId H(int r0, S s0, int r1, S s1) {
   return CardsToComboId(C(r0, s0), C(r1, s1));
 }
 
-ExactGameState Root() {
-  ExactGameState state;
+ExactPublicState Root() {
+  ExactPublicState state;
   state.betting.stack = {19, 18};
   state.betting.committed = {1, 2};
   return state;
 }
 
-int ChipsInPlay(const ExactGameState& state) {
+int ChipsInPlay(const ExactPublicState& state) {
   return Pot(state.betting) + state.betting.stack[0] + state.betting.stack[1];
 }
 
-void CheckState(const ExactGameState& state, int total) {
+void CheckState(const ExactPublicState& state, int total) {
   CHECK(IsValidBettingState(state.betting));
   CHECK(ChipsInPlay(state) == total);
   CHECK(Pot(state.betting) ==
@@ -46,7 +46,7 @@ void CheckState(const ExactGameState& state, int total) {
 }
 
 void Rollout(uint32_t seed) {
-  ExactGameState state = Root();
+  ExactPublicState state = Root();
   const int total = ChipsInPlay(state);
   const std::array<double, 3> sizes = {1.0, 0.25, 0.5};
   const std::array<double, 3> sorted_sizes = {0.25, 0.5, 1.0};
@@ -64,7 +64,7 @@ void Rollout(uint32_t seed) {
       REQUIRE(menu.count == canonical.count);
       for (uint8_t i = 0; i < menu.count; ++i) {
         CHECK(menu.actions[i] == canonical.actions[i]);
-        ExactGameState child = state;
+        ExactPublicState child = state;
         child.betting = ApplyAction(state.betting, menu.actions[i]);
         CheckState(child, total);
         CHECK(child.board.mask == state.board.mask);
@@ -99,7 +99,7 @@ TEST_CASE("legal rollouts preserve game-state invariants") {
 }
 
 TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
-  ExactGameState state = Root();
+  ExactPublicState state = Root();
   CHECK_THROWS(ApplyAction(state.betting, {ActionKind::kCheck}));
   CHECK_THROWS(ApplyAction(state.betting, {ActionKind::kRaise, 1}));
   state.betting = ApplyAction(state.betting, {ActionKind::kCall});
@@ -107,7 +107,7 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   CHECK_THROWS_AS(ApplyChance(state, {C(14, S::kSpades)}),
                   std::invalid_argument);
 
-  ExactGameState short_call = Root();
+  ExactPublicState short_call = Root();
   short_call.betting.stack = {3, 12};
   short_call.betting.committed = {1, 8};
   short_call.betting = ApplyAction(short_call.betting, {ActionKind::kCall});
@@ -139,12 +139,12 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
 }
 
 TEST_CASE("terminal utility handles fold, win, and tie") {
-  ExactGameState folded = Root();
+  ExactPublicState folded = Root();
   folded.betting = ApplyAction(folded.betting, {ActionKind::kFold});
   CHECK(GetUtility(folded, H(14, S::kHearts, 13, S::kHearts),
                    H(12, S::kClubs, 11, S::kClubs)) == doctest::Approx(-1.0));
 
-  ExactGameState showdown;
+  ExactPublicState showdown;
   showdown.betting.street = StreetKind::kRiver;
   showdown.betting.player_to_act = -1;
   showdown.betting.pending_action_mask = 0;

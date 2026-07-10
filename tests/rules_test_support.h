@@ -4,11 +4,11 @@
 
 namespace poker::test {
 
-inline ExactGameState InitialHeadsUpState(Chips player0_stack,
+inline ExactPublicState InitialHeadsUpState(Chips player0_stack,
                                           Chips player1_stack,
                                           Chips small_blind,
                                           Chips big_blind) {
-  ExactGameState state;
+  ExactPublicState state;
   state.betting.stack = {
       player0_stack - small_blind,
       player1_stack - big_blind,

@@ -24,14 +24,14 @@ class GraphBuilder {
                const BettingAbstraction& betting_abstraction,
                TraversalStats& stats);
 
-  std::optional<NodeId> get_or_create_node(const ExactGameState& state);
+  std::optional<NodeId> get_or_create_node(const ExactPublicState& state);
   std::optional<NodeId> get_or_create_action_child(
       NodeId parent_node_id,
       int action_index,
       const Board& parent_board);
   std::optional<NodeId> get_or_create_chance_child(
       NodeId parent_node_id,
-      const ExactGameState& child_state);
+      const ExactPublicState& child_state);
   bool prebuild_reachable_nodes(NodeId root_id,
                                 const Board& root_board,
                                 int max_depth,
@@ -71,16 +71,16 @@ class GraphBuilder {
       StreetKind street,
       const Board& board) const;
   Node make_node(BettingNodeId betting_node_id,
-                 const ExactGameState& state);
+                 const ExactPublicState& state);
   std::optional<NodeId> get_or_create_node(
       BettingNodeId betting_node_id,
-      const ExactGameState& state);
+      const ExactPublicState& state);
   std::optional<NodeId> find_or_cache_action_child(
       NodeId parent_node_id,
       int action_index);
   std::optional<NodeId> find_or_cache_chance_child(
       NodeId parent_node_id,
-      const ExactGameState& child_state);
+      const ExactPublicState& child_state);
   bool node_limit_reached() const;
   bool can_insert_node() const;
   template <typename Callback>
@@ -88,7 +88,7 @@ class GraphBuilder {
                                            const Board& board,
                                            Callback&& callback) const;
   BoardBucketId chance_outcome_id(
-      const ExactGameState& child_state) const;
+      const ExactPublicState& child_state) const;
   void rebuild_chance_child_entries();
 
   const SolverConfig& config_;

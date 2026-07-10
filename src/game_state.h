@@ -57,7 +57,7 @@ struct Board {
   }
 };
 
-struct ExactGameState {
+struct ExactPublicState {
   BettingState betting;
   Board board;
 };
