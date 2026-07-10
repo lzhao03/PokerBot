@@ -100,27 +100,28 @@ bool ForEachCardCombination(int count,
 }
 
 template <typename Callback>
-bool ForEachNextStreetDeal(const CompactPublicState& state,
+bool ForEachNextStreetDeal(StreetKind street,
+                           const Board& board,
                            Callback callback) {
   const int remaining_board_slots =
-      std::max(0, kMaxBoardCards - static_cast<int>(state.board_count));
+      std::max(0, kMaxBoardCards - static_cast<int>(board.count));
   const int count =
-      std::min(CardsForNextStreet(state.street), remaining_board_slots);
+      std::min(CardsForNextStreet(street), remaining_board_slots);
   if (count <= 0) {
     return callback(absl::Span<const CardId>());
   }
 
   const int available_cards =
       kDeckCardCount -
-      static_cast<int>(std::popcount(state.board_mask));
+      static_cast<int>(std::popcount(board.mask));
   if (available_cards < count) {
     throw std::runtime_error("Not enough cards to enumerate next street");
   }
-  return ForEachCardCombination(count, state.board_mask, callback);
+  return ForEachCardCombination(count, board.mask, callback);
 }
 
 struct CoarseChanceTransitionTemplate {
-  CompactPublicState parent_board_state;
+  Board parent_board;
   absl::InlinedVector<CardId, 5> cards;
 };
 
@@ -139,28 +140,26 @@ CoarseChanceTransitionMap BuildCoarseChanceTransitions(StreetKind street) {
   CardAbstraction abstraction;
   absl::flat_hash_set<uint64_t> seen;
   ForEachCardCombination(board_count, 0, [&](absl::Span<const CardId> board) {
-    CompactPublicState parent;
-    parent.street = street;
+    Board parent;
     for (CardId card : board) {
-      AddBoardCard(parent, card);
+      parent.add(card);
     }
     const PublicBucketId parent_bucket =
-        abstraction.public_bucket(parent.street, BoardFromCompact(parent));
-    ForEachCardCombination(deal_count, parent.board_mask,
+        abstraction.public_bucket(street, parent);
+    ForEachCardCombination(deal_count, parent.mask,
                            [&](absl::Span<const CardId> cards) {
-      CompactPublicState child = parent;
-      child.street = StreetAfterChance(street);
+      Board child = parent;
       for (CardId card : cards) {
-        AddBoardCard(child, card);
+        child.add(card);
       }
       const PublicBucketId child_bucket =
-          abstraction.public_bucket(child.street, BoardFromCompact(child));
+          abstraction.public_bucket(StreetAfterChance(street), child);
       const uint64_t seen_key = (parent_bucket << 32) | child_bucket;
       if (!seen.insert(seen_key).second) {
         return true;
       }
       CoarseChanceTransitionTemplate transition;
-      transition.parent_board_state = parent;
+      transition.parent_board = parent;
       transition.cards.assign(cards.begin(), cards.end());
       transitions[parent_bucket].push_back(std::move(transition));
       return true;
@@ -252,9 +251,9 @@ PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
   row.betting_history_id = betting_history_id;
   row.public_bucket = card_abstraction_.public_bucket(state.street, board);
   row.betting = BettingStateFromCompact(state);
+  row.board = board;
   row.is_terminal = IsTerminal(row.betting, board);
   row.player_to_act = GetPlayerToAct(row.betting, board);
-  row.state = std::move(state);
   row.is_chance_node = !row.is_terminal && row.player_to_act == -1;
 
   if (!row.is_terminal && !row.is_chance_node && IsPlayer(row.player_to_act)) {
@@ -482,24 +481,25 @@ bool PublicStateGraph::for_each_required_chance_transition(
     const PublicStateRow& row,
     Callback&& callback) const {
   if constexpr (kCoarsePublicBuckets) {
-    const auto& transitions = CoarseChanceTransitions(row.state.street);
+    const auto& transitions = CoarseChanceTransitions(row.betting.street);
     const auto existing = transitions.find(row.public_bucket);
     if (existing == transitions.end()) {
       return false;
     }
     for (const CoarseChanceTransitionTemplate& transition : existing->second) {
-      CompactPublicState parent_state = row.state;
-      CopyBoardFrom(parent_state, transition.parent_board_state);
+      const ExactGameState parent{row.betting, transition.parent_board};
       const CompactPublicState child_state =
-          ApplyChance(parent_state, transition.cards);
+          ToCompact(ApplyChance(parent, transition.cards));
       if (!callback(child_state, absl::Span<const CardId>(transition.cards))) {
         return false;
       }
     }
     return true;
   } else {
-    return ForEachNextStreetDeal(row.state, [&](absl::Span<const CardId> cards) {
-      return callback(ApplyChance(row.state, cards), cards);
+    return ForEachNextStreetDeal(
+        row.betting.street, row.board, [&](absl::Span<const CardId> cards) {
+      return callback(ToCompact(ApplyChance({row.betting, row.board}, cards)),
+                      cards);
     });
   }
 }
@@ -609,7 +609,7 @@ PublicStateGraph::get_or_create_action_child(
   const BettingState child_betting =
       ApplyAction(read_row.betting, read_row.actions[action_slot]);
   CompactPublicState child_state =
-      ToCompact(child_betting, BoardFromCompact(read_row.state));
+      ToCompact(child_betting, read_row.board);
   const uint32_t child_history_id = get_or_create_action_history_child(
       parent_history_id, action_index, child_betting);
   auto child_id = get_or_create_row(child_history_id, std::move(child_state));

@@ -275,7 +275,7 @@ std::optional<CFRSolver::NodeRef> CFRSolver::root_node_ref(
   if (root_id >= state_rows.size()) {
     return std::nullopt;
   }
-  return NodeRef{root_id, BoardFromCompact(state_rows[root_id].state)};
+  return NodeRef{root_id, state_rows[root_id].board};
 }
 
 std::optional<CFRSolver::DecisionFrame> CFRSolver::make_decision_frame(
@@ -407,7 +407,7 @@ bool CFRSolver::prebuild_info_set_rows(
       continue;
     }
 
-    const Board board = BoardFromCompact(row.state);
+    const Board& board = row.board;
     const uint32_t bucket_count =
         card_abstraction_.private_bucket_count(row.betting.street, board);
     if (bucket_count == 0 || bucket_count > kComboCount) {
@@ -578,9 +578,8 @@ void CFRSolver::run_growing_iterations(
   LOG(INFO) << "Starting CFR iterations...";
   VLOG(1) << "Growing storage backend: " << iterations
           << " single-threaded iterations";
-  const CompactPublicState root_state = rows()[root_id].state;
   NodeGraph graph(*this, NodeGraphMode::kGrow);
-  const NodeRef root_node{root_id, BoardFromCompact(root_state)};
+  const NodeRef root_node{root_id, rows()[root_id].board};
   TraversalScratch scratch(ScratchDepthReserve(config_, max_depth));
   const int64_t warmup_start_updates = cfr_update_count_;
   const auto warmup_start = std::chrono::steady_clock::now();
@@ -712,9 +711,8 @@ void CFRSolver::run_fixed_storage_iterations(
 
           double local_utility = 0.0;
           const auto& root_row = worker.tables().public_state_rows[root_id];
-          const CompactPublicState root_state = root_row.state;
           NodeGraph graph(worker, NodeGraphMode::kRequirePresent);
-          const NodeRef root_node{root_id, BoardFromCompact(root_state)};
+          const NodeRef root_node{root_id, root_row.board};
           for (int i = 0; i < shard; ++i) {
             const RangeDeal sampled = sampler.sample(worker.rng_);
             const TraversalDeal deal = worker.traversal_deal(sampled);
@@ -1063,8 +1061,7 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
     return 0.0;
   }
   const uint32_t root_id = *maybe_root_id;
-  const CompactPublicState root_state = rows()[root_id].state;
-  const NodeRef root_node{root_id, BoardFromCompact(root_state)};
+  const NodeRef root_node{root_id, rows()[root_id].board};
   NodeGraph graph(*this, storage_.frozen ? NodeGraphMode::kSkipMissing
                                          : NodeGraphMode::kGrow);
   const TraversalDeal deal{{

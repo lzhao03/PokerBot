@@ -156,8 +156,8 @@ class StrategyTables {
       action_child_ids.fill(kInvalidPublicStateId);
     }
 
-    CompactPublicState state;
     BettingState betting;
+    Board board;
     uint32_t betting_history_id = kInvalidBettingHistoryId;
     PublicBucketId public_bucket = 0;
     bool is_terminal = false;
