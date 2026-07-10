@@ -307,7 +307,8 @@ GraphBuilder::get_or_create_action_betting_child(
   }
 
   const GameAction action = tables.betting_edges[edge_index].action;
-  const BettingState child_state = ApplyAction(parent.state, action);
+  const BettingState child_state =
+      ApplyLegalActionUnchecked(parent.state, action);
   const BettingNodeId child_node_id = append_betting_node(child_state);
   tables.betting_edges[edge_index].child = child_node_id;
   return child_node_id;
@@ -581,7 +582,8 @@ GraphBuilder::get_or_create_action_child(
   const size_t edge_index =
       static_cast<size_t>(parent.action_begin) + action_slot;
   const GameAction action = tables().betting_edges[edge_index].action;
-  const BettingState child_betting = ApplyAction(parent.state, action);
+  const BettingState child_betting =
+      ApplyLegalActionUnchecked(parent.state, action);
   const ExactGameState child_state{child_betting, parent_board};
   const BettingNodeId child_betting_node_id =
       get_or_create_action_betting_child(read_row.betting_node_id,

@@ -6,172 +6,41 @@
 #include "src/hand_evaluator.h"
 
 namespace poker {
-
 namespace {
 
-template <typename State>
-int StackForState(const State& state, int player) {
-  return state.stack[player];
+int ToCall(const BettingState& state, int player) {
+  return std::max(0, state.contribution[Opponent(player)] -
+                         state.contribution[player]);
 }
 
-template <typename State>
-void SetStackForState(State& state, int player, int stack) {
-  state.stack[player] = stack;
+int FirstPlayerForStreet(StreetKind street) {
+  return street == StreetKind::kPreflop ? 0 : 1;
 }
 
-template <typename State>
-int ContributionForState(const State& state, int player) {
-  return state.player_contribution[player];
-}
-
-int ContributionForState(const BettingState& state, int player) {
-  return state.contribution[player];
-}
-
-void AddContribution(CompactPublicState& state, int player, int amount) {
-  state.player_contribution[player] += amount;
+bool BoardComplete(const BettingState& state, const Board& board) {
+  return state.street == StreetKind::kRiver && board.count >= kMaxBoardCards;
 }
 
 void AddContribution(BettingState& state, int player, int amount) {
   state.contribution[player] += amount;
 }
 
-int BoardCardCount(const CompactPublicState& state) {
-  return state.board_count;
-}
-
-int BoardCardCount(const Board& board) {
-  return board.count;
-}
-
-int HistorySize(const CompactPublicState& state) {
-  return state.actions_this_street;
-}
-
-int HistorySize(const BettingState& state) {
-  return state.actions_this_street;
-}
-
-GameAction LastAction(const CompactPublicState& state) {
-  return state.last_action;
-}
-
-GameAction LastAction(const BettingState& state) {
-  return state.last_action;
-}
-
-template <typename State>
-int OutstandingToCall(const State& state, int player) {
-  return std::max(
-      0, ContributionForState(state, Opponent(player)) -
-             ContributionForState(state, player));
-}
-
-template <typename State>
-int FirstPlayerForStreet(const State& state) {
-  return state.street == StreetKind::kPreflop ? 0 : 1;
-}
-
-template <typename State>
-bool BoardComplete(const State& state) {
-  return state.street == StreetKind::kRiver &&
-         BoardCardCount(state) >= kMaxBoardCards;
-}
-
-bool BoardComplete(const BettingState& state, const Board& board) {
-  return state.street == StreetKind::kRiver &&
-         BoardCardCount(board) >= kMaxBoardCards;
-}
-
-template <typename State>
-bool IsBettingRoundOverForState(const State& state) {
-  if (state.folded_player >= 0) {
-    return true;
-  }
-  const bool calls_matched =
-      OutstandingToCall(state, 0) == 0 && OutstandingToCall(state, 1) == 0;
-  if (state.all_in) {
-    const int player = state.player_to_act;
-    return calls_matched || !IsPlayer(player) ||
-           StackForState(state, player) == 0 ||
-           OutstandingToCall(state, player) == 0;
-  }
-  if (HistorySize(state) == 0 || !calls_matched) {
-    return false;
+int CommitChips(BettingState& state, int player, int requested) {
+  if (requested <= 0) {
+    throw std::invalid_argument("Action amount must be positive");
   }
 
-  const GameAction last = LastAction(state);
-  if (last.kind == ActionKind::kCall) {
-    return HistorySize(state) > 1;
+  const int committed = std::min(requested, state.stack[player]);
+  AddContribution(state, player, committed);
+  state.stack[player] -= committed;
+  state.pot += committed;
+  if (state.stack[player] == 0) {
+    state.all_in = true;
   }
-  return last.kind == ActionKind::kCheck &&
-         state.player_to_act == FirstPlayerForStreet(state);
+  return committed;
 }
 
-template <typename State>
-bool IsHandOver(const State& state) {
-  return BoardComplete(state) && IsBettingRoundOverForState(state);
-}
-
-bool IsHandOver(const BettingState& state, const Board& board) {
-  return BoardComplete(state, board) && IsBettingRoundOverForState(state);
-}
-
-template <typename State>
-bool IsTerminalForState(const State& state) {
-  return state.folded_player >= 0 || IsHandOver(state);
-}
-
-bool IsTerminalForState(const BettingState& state, const Board& board) {
-  return state.folded_player >= 0 || IsHandOver(state, board);
-}
-
-template <typename State>
-int PlayerToActForState(const State& state) {
-  if (IsTerminalForState(state)) {
-    return -1;
-  }
-  if (IsBettingRoundOverForState(state)) {
-    return -1;
-  }
-  if (IsPlayer(state.player_to_act)) {
-    return state.player_to_act;
-  }
-  return FirstPlayerForStreet(state);
-}
-
-int PlayerToActForState(const BettingState& state) {
-  if (state.folded_player >= 0 || IsBettingRoundOverForState(state)) {
-    return -1;
-  }
-  if (IsPlayer(state.player_to_act)) {
-    return state.player_to_act;
-  }
-  return FirstPlayerForStreet(state);
-}
-
-int PlayerToActForState(const BettingState& state, const Board& board) {
-  if (IsTerminalForState(state, board)) {
-    return -1;
-  }
-  if (IsBettingRoundOverForState(state)) {
-    return -1;
-  }
-  if (IsPlayer(state.player_to_act)) {
-    return state.player_to_act;
-  }
-  return FirstPlayerForStreet(state);
-}
-
-void AppendStateHistory(CompactPublicState& state, const GameAction& action) {
-  state.last_action = action;
-  if (state.actions_this_street == UINT8_MAX) {
-    throw std::logic_error("Compact public state action count overflow");
-  }
-  ++state.actions_this_street;
-}
-
-void AppendStateHistory(BettingState& state, const GameAction& action) {
+void AppendAction(BettingState& state, const GameAction& action) {
   state.last_action = action;
   if (state.actions_this_street == UINT8_MAX) {
     throw std::logic_error("Betting state action count overflow");
@@ -179,25 +48,9 @@ void AppendStateHistory(BettingState& state, const GameAction& action) {
   ++state.actions_this_street;
 }
 
-void ResetStateHistory(BettingState& state) {
+void ResetActions(BettingState& state) {
   state.actions_this_street = 0;
   state.last_action = GameAction{};
-}
-
-template <typename State>
-int CommitChips(State& state, int player, int requested) {
-  if (requested <= 0) {
-    throw std::invalid_argument("Action amount must be positive");
-  }
-
-  const int committed = std::min(requested, StackForState(state, player));
-  AddContribution(state, player, committed);
-  SetStackForState(state, player, StackForState(state, player) - committed);
-  state.pot += committed;
-  if (StackForState(state, player) == 0) {
-    state.all_in = true;
-  }
-  return committed;
 }
 
 void AdvanceStreet(ExactGameState& state, absl::Span<const CardId> cards) {
@@ -218,114 +71,156 @@ void AdvanceStreet(ExactGameState& state, absl::Span<const CardId> cards) {
   for (CardId card : cards) {
     state.board.add(card);
   }
-  ResetStateHistory(state.betting);
-  state.betting.player_to_act = FirstPlayerForStreet(state.betting);
+  ResetActions(state.betting);
+  state.betting.player_to_act = FirstPlayerForStreet(state.betting.street);
 }
 
-template <typename State>
-State ApplyActionForState(const State& state, const GameAction& action) {
-  State new_state = state;
+bool HandOver(const BettingState& state, const Board& board) {
+  return BoardComplete(state, board) && IsBettingRoundOver(state);
+}
 
-  int player = new_state.player_to_act;
+int PlayerToAct(const BettingState& state) {
+  if (state.folded_player >= 0 || IsBettingRoundOver(state)) {
+    return -1;
+  }
+  if (IsPlayer(state.player_to_act)) {
+    return state.player_to_act;
+  }
+  return FirstPlayerForStreet(state.street);
+}
+
+}  // namespace
+
+bool IsBettingRoundOver(const BettingState& state) {
+  if (state.folded_player >= 0) {
+    return true;
+  }
+  const bool calls_matched = ToCall(state, 0) == 0 && ToCall(state, 1) == 0;
+  if (state.all_in) {
+    const int player = state.player_to_act;
+    return calls_matched || !IsPlayer(player) || state.stack[player] == 0 ||
+           ToCall(state, player) == 0;
+  }
+  if (state.actions_this_street == 0 || !calls_matched) {
+    return false;
+  }
+
+  if (state.last_action.kind == ActionKind::kCall) {
+    return state.actions_this_street > 1;
+  }
+  return state.last_action.kind == ActionKind::kCheck &&
+         state.player_to_act == FirstPlayerForStreet(state.street);
+}
+
+bool IsTerminal(const BettingState& state, const Board& board) {
+  return state.folded_player >= 0 || HandOver(state, board);
+}
+
+int GetPlayerToAct(const BettingState& state, const Board& board) {
+  if (IsTerminal(state, board) || IsBettingRoundOver(state)) {
+    return -1;
+  }
+  if (IsPlayer(state.player_to_act)) {
+    return state.player_to_act;
+  }
+  return FirstPlayerForStreet(state.street);
+}
+
+bool IsLegalAction(const BettingState& state, const GameAction& action) {
+  int player = state.player_to_act;
   if (!IsPlayer(player)) {
-    player = PlayerToActForState(new_state);
+    player = PlayerToAct(state);
   }
+  if (!IsPlayer(player) || state.folded_player >= 0 ||
+      state.stack[player] <= 0) {
+    return false;
+  }
+
+  const int to_call = ToCall(state, player);
+  switch (action.kind) {
+    case ActionKind::kFold:
+      return true;
+    case ActionKind::kCheck:
+      return to_call == 0;
+    case ActionKind::kCall:
+      return to_call > 0;
+    case ActionKind::kBet:
+      return to_call == 0 && action.amount > 0 &&
+             action.amount < state.stack[player];
+    case ActionKind::kRaise:
+      return to_call > 0 && action.amount > to_call &&
+             state.stack[player] > to_call &&
+             action.amount < state.stack[player];
+    case ActionKind::kAllIn:
+      return true;
+    case ActionKind::kNoAction:
+      return false;
+  }
+}
+
+BettingState ApplyLegalActionUnchecked(const BettingState& state,
+                                       const GameAction& action) {
+  BettingState child = state;
+  int player = child.player_to_act;
   if (!IsPlayer(player)) {
-    throw std::invalid_argument("No player can act in this state");
-  }
-  if (new_state.folded_player >= 0) {
-    throw std::invalid_argument("Cannot act after a player has folded");
-  }
-  if (StackForState(new_state, player) <= 0) {
-    throw std::invalid_argument("Player has no chips to act");
+    player = PlayerToAct(child);
   }
 
   const int opponent = Opponent(player);
-  const int to_call = OutstandingToCall(new_state, player);
+  const int to_call = ToCall(child, player);
   GameAction applied = action;
   applied.player = player;
 
   switch (action.kind) {
     case ActionKind::kFold:
       applied.amount = 0;
-      new_state.folded_player = player;
-      new_state.player_to_act = -1;
+      child.folded_player = player;
+      child.player_to_act = -1;
       break;
     case ActionKind::kCheck:
-      if (to_call != 0) {
-        throw std::invalid_argument("Cannot check facing a bet");
-      }
       applied.amount = 0;
-      new_state.player_to_act = opponent;
+      child.player_to_act = opponent;
       break;
-    case ActionKind::kCall: {
-      if (to_call == 0) {
-        throw std::invalid_argument("Cannot call without a bet");
-      }
-      const int committed = CommitChips(new_state, player, to_call);
-      applied.amount = committed;
-      new_state.player_to_act = opponent;
+    case ActionKind::kCall:
+      applied.amount = CommitChips(child, player, to_call);
+      child.player_to_act = opponent;
       break;
-    }
-    case ActionKind::kBet: {
-      if (to_call != 0) {
-        throw std::invalid_argument("Cannot bet facing a bet");
-      }
-      if (action.amount >= StackForState(new_state, player)) {
-        throw std::invalid_argument("Use all-in for full-stack bets");
-      }
-      const int committed = CommitChips(new_state, player, action.amount);
-      applied.amount = committed;
-      new_state.player_to_act = opponent;
+    case ActionKind::kBet:
+    case ActionKind::kRaise:
+      applied.amount = CommitChips(child, player, action.amount);
+      child.player_to_act = opponent;
       break;
-    }
-    case ActionKind::kRaise: {
-      if (to_call == 0) {
-        throw std::invalid_argument("Cannot raise without a bet");
-      }
-      if (action.amount <= to_call ||
-          StackForState(new_state, player) <= to_call) {
-        throw std::invalid_argument("Raise must exceed the call amount");
-      }
-      if (action.amount >= StackForState(new_state, player)) {
-        throw std::invalid_argument("Use all-in for full-stack raises");
-      }
-      const int committed = CommitChips(new_state, player, action.amount);
-      applied.amount = committed;
-      new_state.player_to_act = opponent;
+    case ActionKind::kAllIn:
+      applied.amount = CommitChips(child, player, child.stack[player]);
+      child.player_to_act = opponent;
       break;
-    }
-    case ActionKind::kAllIn: {
-      const int committed =
-          CommitChips(new_state, player, StackForState(new_state, player));
-      applied.amount = committed;
-      new_state.player_to_act = opponent;
-      break;
-    }
     case ActionKind::kNoAction:
-      throw std::invalid_argument("Unknown action type");
+      break;
   }
 
-  AppendStateHistory(new_state, applied);
-  return new_state;
+  AppendAction(child, applied);
+  return child;
 }
-
-}  // namespace
 
 BettingState ApplyAction(const BettingState& state,
                          const GameAction& action) {
-  return ApplyActionForState(state, action);
+  if (!IsLegalAction(state, action)) {
+    throw std::invalid_argument("illegal poker action");
+  }
+  return ApplyLegalActionUnchecked(state, action);
 }
 
 CompactPublicState ApplyAction(const CompactPublicState& state,
                                const GameAction& action) {
-  return ApplyActionForState(state, action);
+  const BettingState child =
+      ApplyAction(BettingStateFromCompact(state), action);
+  return ToCompact(child, BoardFromCompact(state));
 }
 
 ExactGameState ApplyChance(const ExactGameState& state,
                            absl::Span<const CardId> cards) {
-  if (IsTerminalForState(state.betting, state.board) ||
-      PlayerToActForState(state.betting, state.board) != -1) {
+  if (IsTerminal(state.betting, state.board) ||
+      GetPlayerToAct(state.betting, state.board) != -1) {
     throw std::invalid_argument("State is not a chance node");
   }
 
@@ -360,18 +255,6 @@ double GetUtility(const ExactGameState& state,
     return -a_contribution;
   }
   return (state.betting.pot / 2.0) - a_contribution;
-}
-
-bool IsTerminal(const BettingState& state, const Board& board) {
-  return IsTerminalForState(state, board);
-}
-
-int GetPlayerToAct(const BettingState& state, const Board& board) {
-  return PlayerToActForState(state, board);
-}
-
-bool IsBettingRoundOver(const BettingState& state) {
-  return IsBettingRoundOverForState(state);
 }
 
 }  // namespace poker
