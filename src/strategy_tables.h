@@ -12,6 +12,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "src/build_flags.h"
+#include "src/card_abstraction.h"
 #include "src/combo.h"
 #include "src/game_state.h"
 #include "src/poker_types.h"
@@ -71,7 +72,8 @@ class StrategyTables {
   using PrivateBucketId = uint16_t;
   using BoardBucketId = poker::BoardBucketId;
   static constexpr uint32_t kPrivateBucketCount =
-      kCoarsePrivateBuckets ? 36 : kComboCount;
+      kCoarsePrivateBuckets ? kCoarsePrivateStreetObservationCount
+                            : kComboCount;
   static constexpr uint32_t kInvalidActionOffset =
       std::numeric_limits<uint32_t>::max();
 

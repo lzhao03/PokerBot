@@ -157,10 +157,20 @@ TEST_CASE("sampling and card abstractions preserve identity") {
     CHECK(board_features(reversed) == features);
     CHECK(exact_board_bucket(board) == board.mask());
     CHECK(exact_board_bucket(board) == exact_board_bucket(reversed));
+    const PublicStreetObservation public_observation =
+        observe_public_street(street, board, features);
+    CHECK(public_observation.value == exact_board_bucket(board));
+    CHECK(board_bucket(street, board, features) == public_observation.value);
     CHECK(board_texture_bucket(street, features) ==
           board_texture_bucket(street, board_features(reversed)));
     CHECK(exact_private_bucket(hand) == hand);
-    CHECK(coarse_private_bucket(hand, street, features) < 36);
+    const PrivateStreetObservation private_observation =
+        observe_private_street(hand, street, features);
+    CHECK(private_observation.value == hand);
+    CHECK(private_bucket(hand, street, features) ==
+          private_observation.value);
+    CHECK(coarse_private_bucket(hand, street, features) <
+          kCoarsePrivateStreetObservationCount);
 
     std::array<S, 4> suits = {
         S::kHearts, S::kDiamonds, S::kClubs, S::kSpades};

@@ -32,6 +32,12 @@ TEST_CASE("public observation traces retain colliding street prefixes") {
       graph.access().public_observation(node_a);
   const PublicObservationId flop_observation_b =
       graph.access().public_observation(node_b);
+  const PublicStreetObservation local_flop_observation =
+      observe_public_street(StreetKind::kFlop, state_a.board);
+  CHECK(local_flop_observation.value == flop_observation_a);
+  CHECK(local_flop_observation.exact_cards.count == 0);
+  CHECK(board_bucket(StreetKind::kFlop, state_a.board) ==
+        local_flop_observation.value);
 
   node_a = test::CheckCheck(graph, node_a, state_a);
   node_b = test::CheckCheck(graph, node_b, state_b);

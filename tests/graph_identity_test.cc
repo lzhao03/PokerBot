@@ -58,11 +58,49 @@ SameMaskHistory BuildSameMaskHistories() {
 
 TEST_CASE("current graph merges equal masks with different reveal history") {
   const SameMaskHistory histories = BuildSameMaskHistories();
+  const PublicStreetObservation observation_a =
+      observe_public_street(StreetKind::kTurn, histories.runout_a);
+  const PublicStreetObservation observation_b =
+      observe_public_street(StreetKind::kTurn, histories.runout_b);
   CHECK(histories.runout_a.mask() == histories.runout_b.mask());
   CHECK(histories.runout_a != histories.runout_b);
+  CHECK(observation_a.value == observation_b.value);
+  CHECK(observation_a.exact_cards.count == 1);
+  CHECK(observation_b.exact_cards.count == 1);
+  CHECK(observation_a.exact_cards != observation_b.exact_cards);
+  CHECK(observation_a != observation_b);
   CHECK(histories.observation_a == histories.observation_b);
   CHECK(histories.betting_a == histories.betting_b);
   CHECK(histories.node_a == histories.node_b);
+}
+
+TEST_CASE("exact observations contain only the current street reveal") {
+  BoardRunout board = BoardRunout::Preflop();
+  const std::array<CardId, 3> flop = {
+      C(12, S::kSpades), C(13, S::kSpades), C(14, S::kSpades)};
+  board.deal_flop(flop);
+  const PublicStreetObservation flop_observation =
+      observe_public_street(StreetKind::kFlop, board);
+  CHECK(flop_observation.exact_cards.count == 3);
+  CHECK(flop_observation.exact_cards.cards == flop);
+
+  board.deal_turn(C(11, S::kHearts));
+  const PublicStreetObservation turn_observation =
+      observe_public_street(StreetKind::kTurn, board);
+  CHECK(turn_observation.exact_cards.count == 1);
+  CHECK(turn_observation.exact_cards.cards[0] == C(11, S::kHearts));
+
+  board.deal_river(C(10, S::kDiamonds));
+  const PublicStreetObservation river_observation =
+      observe_public_street(StreetKind::kRiver, board);
+  CHECK(river_observation.exact_cards.count == 1);
+  CHECK(river_observation.exact_cards.cards[0] == C(10, S::kDiamonds));
+
+  const ComboId hand = CardsToComboId(
+      C(14, S::kHearts), C(13, S::kHearts));
+  CHECK(observe_private_street(hand, StreetKind::kRiver, board).value == hand);
+  CHECK(private_bucket(hand, StreetKind::kRiver, board_features(board)) ==
+        hand);
 }
 
 // TODO(identity-commit-3): Enable when public observation IDs retain prefixes.

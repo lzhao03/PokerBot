@@ -14,6 +14,33 @@ namespace poker {
 
 using PrivateBucketId = uint16_t;
 
+inline constexpr uint32_t kCoarsePrivateStreetObservationCount = 36;
+inline constexpr uint32_t kCoarsePublicStreetObservationCount = 108;
+
+struct ExactChanceObservation {
+  std::array<CardId, 3> cards = {};
+  uint8_t count = 0;
+
+  friend bool operator==(const ExactChanceObservation&,
+                         const ExactChanceObservation&) = default;
+};
+
+struct PublicStreetObservation {
+  // Transitional graph key. Exact-mode histories should use exact_cards.
+  BoardBucketId value = 0;
+  ExactChanceObservation exact_cards;
+
+  friend bool operator==(const PublicStreetObservation&,
+                         const PublicStreetObservation&) = default;
+};
+
+struct PrivateStreetObservation {
+  PrivateBucketId value = 0;
+
+  friend bool operator==(const PrivateStreetObservation&,
+                         const PrivateStreetObservation&) = default;
+};
+
 struct BoardFeatures {
   std::array<uint8_t, 13> rank_counts = {};
   std::array<uint8_t, 4> suit_counts = {};
@@ -31,9 +58,6 @@ namespace card_abstraction_detail {
 inline constexpr int kSuitBuckets = 4;
 inline constexpr int kStraightBuckets = 3;
 inline constexpr int kHighBuckets = 3;
-inline constexpr int kTextureBucketsPerStreet =
-    3 * kSuitBuckets * kStraightBuckets * kHighBuckets;
-
 constexpr uint8_t StraightWindowDensity(uint16_t rank_mask) {
   uint8_t best = 0;
   for (int start = 0; start <= 8; ++start) {
@@ -189,18 +213,53 @@ inline BoardBucketId board_texture_bucket(
           card_abstraction_detail::kHighBuckets +
       high_bucket;
   return 1 + static_cast<BoardBucketId>(street) *
-                 card_abstraction_detail::kTextureBucketsPerStreet +
+                 kCoarsePublicStreetObservationCount +
          static_cast<BoardBucketId>(texture);
+}
+
+inline ExactChanceObservation exact_chance_observation(
+    StreetKind street,
+    const BoardRunout& board) {
+  constexpr std::array<uint8_t, 4> kOffsets = {0, 0, 3, 4};
+  constexpr std::array<uint8_t, 4> kCounts = {0, 3, 1, 1};
+  ExactChanceObservation observation;
+  const size_t street_index = static_cast<size_t>(street);
+  if (street_index >= kCounts.size()) {
+    return observation;
+  }
+  const size_t offset = kOffsets[street_index];
+  const size_t count = kCounts[street_index];
+  const auto cards = board.cards();
+  if (cards.size() < offset + count) {
+    return observation;
+  }
+  std::copy_n(cards.begin() + offset, count, observation.cards.begin());
+  observation.count = static_cast<uint8_t>(count);
+  return observation;
+}
+
+inline PublicStreetObservation observe_public_street(
+    StreetKind street,
+    const BoardRunout& board,
+    const BoardFeatures& features) {
+  if constexpr (kCoarsePublicBuckets) {
+    return {board_texture_bucket(street, features), {}};
+  } else {
+    return {exact_board_bucket(board),
+            exact_chance_observation(street, board)};
+  }
+}
+
+inline PublicStreetObservation observe_public_street(
+    StreetKind street,
+    const BoardRunout& board) {
+  return observe_public_street(street, board, board_features(board));
 }
 
 inline BoardBucketId board_bucket(StreetKind street,
                                     const BoardRunout& board,
                                     const BoardFeatures& features) {
-  if constexpr (kCoarsePublicBuckets) {
-    return board_texture_bucket(street, features);
-  } else {
-    return exact_board_bucket(board);
-  }
+  return observe_public_street(street, board, features).value;
 }
 
 inline BoardBucketId board_bucket(StreetKind street, const BoardRunout& board) {
@@ -238,18 +297,33 @@ inline PrivateBucketId coarse_private_bucket(
   return static_cast<PrivateBucketId>(local_bucket);
 }
 
-inline PrivateBucketId private_bucket(ComboId combo_id,
-                                      StreetKind street,
-                                      const BoardFeatures& features) {
+inline PrivateStreetObservation observe_private_street(
+    ComboId combo_id,
+    StreetKind street,
+    const BoardFeatures& features) {
   if constexpr (kCoarsePrivateBuckets) {
-    return coarse_private_bucket(combo_id, street, features);
+    return {coarse_private_bucket(combo_id, street, features)};
   } else {
-    return exact_private_bucket(combo_id);
+    return {exact_private_bucket(combo_id)};
   }
 }
 
+inline PrivateStreetObservation observe_private_street(
+    ComboId combo_id,
+    StreetKind street,
+    const BoardRunout& board) {
+  return observe_private_street(combo_id, street, board_features(board));
+}
+
+inline PrivateBucketId private_bucket(ComboId combo_id,
+                                      StreetKind street,
+                                      const BoardFeatures& features) {
+  return observe_private_street(combo_id, street, features).value;
+}
+
 inline uint32_t private_bucket_count(StreetKind) {
-  return kCoarsePrivateBuckets ? 36 : kComboCount;
+  return kCoarsePrivateBuckets ? kCoarsePrivateStreetObservationCount
+                               : kComboCount;
 }
 
 }  // namespace poker

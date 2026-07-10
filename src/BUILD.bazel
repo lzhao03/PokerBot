@@ -192,6 +192,7 @@ cc_library(
     hdrs = ["strategy_tables.h"],
     deps = [
         ":build_flags",
+        ":card_abstraction",
         ":combo",
         ":game_state",
         ":poker_types",
