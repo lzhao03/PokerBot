@@ -8,13 +8,12 @@
 #include "src/hand_evaluator.h"
 #include "src/hand_range.h"
 #include "src/strategy_tables.h"
-#include "src/thread_pool.h"
 #include "src/training_range.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <exception>
 #include <random>
-#include <future>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -603,11 +602,12 @@ void CFRSolver::run_sharded(int work_count,
     return;
   }
   const int shard_count = std::min(work_count, worker_count);
-  ThreadPoolExecutor executor(shard_count);
   std::uniform_int_distribution<unsigned int> seed_dist;
   using WorkerResult = decltype(worker_fn(0, 0, 0u));
-  std::vector<std::future<WorkerResult>> futures;
-  futures.reserve(shard_count);
+  std::vector<WorkerResult> results(shard_count);
+  std::vector<std::exception_ptr> errors(shard_count);
+  std::vector<std::thread> threads;
+  threads.reserve(shard_count);
 
   int work_remaining = work_count;
   int next_index = first_index;
@@ -618,13 +618,24 @@ void CFRSolver::run_sharded(int work_count,
     next_index += shard;
     const unsigned int seed = seed_dist(rng_);
     auto worker = worker_fn;
-    futures.push_back(executor.submit([worker, begin, shard, seed]() mutable {
-      return worker(begin, shard, seed);
-    }));
+    threads.emplace_back(
+        [&, worker_index, worker, begin, shard, seed]() mutable {
+          try {
+            results[worker_index] = worker(begin, shard, seed);
+          } catch (...) {
+            errors[worker_index] = std::current_exception();
+          }
+        });
   }
 
-  for (std::future<WorkerResult>& future : futures) {
-    accumulate_fn(future.get());
+  for (std::thread& thread : threads) {
+    thread.join();
+  }
+  for (int worker_index = 0; worker_index < shard_count; ++worker_index) {
+    if (errors[worker_index]) {
+      std::rethrow_exception(errors[worker_index]);
+    }
+    accumulate_fn(results[worker_index]);
   }
 }
 

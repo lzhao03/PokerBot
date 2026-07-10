@@ -276,21 +276,6 @@ cc_test(
 )
 
 cc_library(
-    name = "thread_pool",
-    srcs = ["thread_pool.cc"],
-    hdrs = ["thread_pool.h"],
-    visibility = ["//visibility:public"],
-)
-
-cc_test(
-    name = "thread_pool_test",
-    srcs = ["thread_pool_test.cc"],
-    deps = DOCTEST_DEPS + [
-        ":thread_pool",
-    ],
-)
-
-cc_library(
     name = "strategy_tables",
     srcs = ["strategy_tables.cc"],
     hdrs = ["strategy_tables.h"],
@@ -395,7 +380,6 @@ CFR_SOLVER_DEPS = [
     ":game_state",
     ":hand_range",
     ":strategy_tables",
-    ":thread_pool",
     ":training_range",
     "@abseil-cpp//absl/container:flat_hash_map",
     "@abseil-cpp//absl/container:flat_hash_set",
