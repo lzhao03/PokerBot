@@ -179,7 +179,6 @@ class CFRSolver {
    private:
     double terminal(Position position, const Node& node);
     double chance(Position position, const TraversalFrame& frame);
-    double depth_limit_value(Position position, const Node& node);
     double decision(Position position,
                     const Node& node,
                     const TraversalFrame& frame);
@@ -242,10 +241,7 @@ class CFRSolver {
       int player,
       size_t action_count,
       RangeScratchFrame& scratch_frame);
-  double terminal_utility(const Node& node,
-                          const BoardRunout& board,
-                          ComboId player_a_hand,
-                          ComboId player_b_hand);
+  double nonterminal_leaf_value() const noexcept;
   double evaluate_strategy_node(Position position,
                                 const Deal& deal,
                                 MutableTraversalGraph& graph);

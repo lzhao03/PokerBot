@@ -5,7 +5,6 @@
 #include "src/card_abstraction.h"
 #include "src/card_utils.h"
 #include "src/game_rules.h"
-#include "src/hand_evaluator.h"
 #include "src/hand_range.h"
 #include "src/strategy_tables.h"
 #include "src/training_range.h"
@@ -30,33 +29,6 @@ constexpr int kParallelEvaluationSampleThreshold = 32;
 SolverConfig NormalizedSolverConfig(SolverConfig config) {
   config.num_training_threads = std::max(1, config.num_training_threads);
   return config;
-}
-
-std::optional<double> UtilityBeforeShowdown(const BettingState& state,
-                                            uint8_t board_count) {
-  const double player_a_committed = state.total_committed[0];
-  if (state.folded_player == 0) {
-    return -player_a_committed;
-  }
-  if (state.folded_player == 1) {
-    return Pot(state) - player_a_committed;
-  }
-  if (board_count + 2 < 5) {
-    return 0.0;
-  }
-  return std::nullopt;
-}
-
-double ShowdownUtilityFromComparison(const BettingState& state,
-                                     int comparison) {
-  const double player_a_committed = state.total_committed[0];
-  if (comparison > 0) {
-    return Pot(state) - player_a_committed;
-  }
-  if (comparison < 0) {
-    return -player_a_committed;
-  }
-  return (Pot(state) / 2.0) - player_a_committed;
 }
 
 size_t ScratchDepthReserve(const SolverConfig& config, int max_depth) {
@@ -780,14 +752,14 @@ double CFRSolver::CfrTraversal<Graph>::value(
     case StrategyTables::NodeKind::kChance:
       return chance(position, frame);
     case StrategyTables::NodeKind::kFrontier:
-      return depth_limit_value(position, node);
+      return solver_.nonterminal_leaf_value();
     case StrategyTables::NodeKind::kDecision:
       break;
   }
 
   const int max_depth = run_.options.max_depth;
   if (max_depth > 0 && frame.decision_depth >= max_depth) {
-    return depth_limit_value(position, node);
+    return solver_.nonterminal_leaf_value();
   }
 
   return decision(position, node, frame);
@@ -801,9 +773,11 @@ double CFRSolver::CfrTraversal<Graph>::terminal(
       solver_.tables().betting_nodes[node.betting_node_id];
   solver_.traversal_stats_.record_terminal(
       betting_node.state.folded_player < 0);
-  return solver_.terminal_utility(node, position.exact_board,
-                                  run_.deal.hand(0),
-                                  run_.deal.hand(1));
+  const ExactPublicState state{
+      betting_node.state,
+      position.exact_board,
+  };
+  return TerminalUtility(state, run_.deal.hand(0), run_.deal.hand(1));
 }
 
 template <typename Graph>
@@ -831,19 +805,6 @@ double CFRSolver::CfrTraversal<Graph>::chance(
         }
         return value(child, child_frame);
       });
-}
-
-template <typename Graph>
-double CFRSolver::CfrTraversal<Graph>::depth_limit_value(
-    Position position,
-    const Node& node) {
-  const auto& betting_node =
-      solver_.tables().betting_nodes[node.betting_node_id];
-  return IsBettingRoundOver(betting_node.state)
-             ? solver_.terminal_utility(node, position.exact_board,
-                                        run_.deal.hand(0),
-                                        run_.deal.hand(1))
-             : 0.0;
 }
 
 template <typename Graph>
@@ -1199,9 +1160,13 @@ double CFRSolver::evaluate_strategy_node_impl(
   const auto& betting_node = tables().betting_nodes[node.betting_node_id];
 
   switch (betting_node.kind) {
-    case StrategyTables::NodeKind::kTerminal:
-      return terminal_utility(node, position.exact_board,
-                              deal.hand(0), deal.hand(1));
+    case StrategyTables::NodeKind::kTerminal: {
+      const ExactPublicState state{
+          betting_node.state,
+          position.exact_board,
+      };
+      return TerminalUtility(state, deal.hand(0), deal.hand(1));
+    }
     case StrategyTables::NodeKind::kChance: {
       const int samples = ChanceSamples(config_);
       return sample_chance_children(
@@ -1211,7 +1176,7 @@ double CFRSolver::evaluate_strategy_node_impl(
           });
     }
     case StrategyTables::NodeKind::kFrontier:
-      return 0.0;
+      return nonterminal_leaf_value();
     case StrategyTables::NodeKind::kDecision:
       break;
   }
@@ -1263,26 +1228,8 @@ bool CFRSolver::traversal_stats_enabled() {
   return kTraversalStatsEnabled;
 }
 
-double CFRSolver::terminal_utility(const Node& node,
-                                   const BoardRunout& board,
-                                   ComboId player_a_hand,
-                                   ComboId player_b_hand) {
-  if (node.betting_node_id >= tables().betting_nodes.size()) {
-    return 0.0;
-  }
-  const BettingState& state =
-      tables().betting_nodes[node.betting_node_id].state;
-  const auto utility = UtilityBeforeShowdown(state, board.count());
-  if (utility.has_value()) {
-    return *utility;
-  }
-
-  // Frozen sampled training sees mostly one-off showdowns; direct evaluation
-  // is faster than paying shared cache lookup/mutation overhead.
-  HandEvaluator evaluator;
-  const int comparison = evaluator.compare_hands(
-      player_a_hand, player_b_hand, board);
-  return ShowdownUtilityFromComparison(state, comparison);
+double CFRSolver::nonterminal_leaf_value() const noexcept {
+  return 0.0;
 }
 
 } // namespace poker

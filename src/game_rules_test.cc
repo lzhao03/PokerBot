@@ -19,17 +19,6 @@ namespace {
 using S = SuitKind;
 
 CardId C(int rank, S suit) { return MakeCardId(rank, suit); }
-ComboId H(int r0, S s0, int r1, S s1) {
-  return CardsToComboId(C(r0, s0), C(r1, s1));
-}
-
-BoardRunout RiverRunout(std::array<CardId, 5> cards) {
-  BoardRunout runout = BoardRunout::Preflop();
-  runout.deal_flop(absl::Span<const CardId>(cards.data(), 3));
-  runout.deal_turn(cards[3]);
-  runout.deal_river(cards[4]);
-  return runout;
-}
 
 ExactPublicState Root() {
   ExactPublicState state;
@@ -66,8 +55,7 @@ void Rollout(uint32_t seed) {
   for (int i = 0; i < kDeckCardCount; ++i) deck[i] = static_cast<CardId>(i);
   std::mt19937 rng(seed);
 
-  for (int step = 0; step < 64 && !IsTerminal(state.betting, state.board);
-       ++step) {
+  for (int step = 0; step < 64 && !IsTerminal(state); ++step) {
     CheckState(state, total);
     if (IsPlayer(state.betting.player_to_act)) {
       const ActionMenu menu = LegalActions(state.betting, sizes);
@@ -103,7 +91,7 @@ void Rollout(uint32_t seed) {
     CHECK((state.board.mask() & board_before) == board_before);
   }
   CheckState(state, total);
-  CHECK(IsTerminal(state.betting, state.board));
+  CHECK(IsTerminal(state));
 }
 
 TEST_CASE("legal rollouts preserve game-state invariants") {
@@ -155,40 +143,6 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   CHECK(bet_four);
   CHECK_FALSE(bet_two);
   CHECK(all_in);
-}
-
-TEST_CASE("terminal utility handles fold, win, and tie") {
-  ExactPublicState folded = Root();
-  folded.betting = ApplyAction(folded.betting, {ActionKind::kFold});
-  CHECK(GetUtility(folded, H(14, S::kHearts, 13, S::kHearts),
-                   H(12, S::kClubs, 11, S::kClubs)) == doctest::Approx(-1.0));
-
-  ExactPublicState showdown;
-  showdown.betting.street = StreetKind::kRiver;
-  showdown.betting.player_to_act = -1;
-  showdown.betting.pending_action_mask = 0;
-  showdown.betting.total_committed = {10, 10};
-  showdown.betting.street_committed = {10, 10};
-  showdown.betting.last_full_raise = 2;
-  showdown.board = RiverRunout({
-      C(10, S::kHearts),
-      C(11, S::kHearts),
-      C(12, S::kHearts),
-      C(2, S::kClubs),
-      C(3, S::kDiamonds),
-  });
-  CHECK(GetUtility(showdown, H(14, S::kHearts, 13, S::kHearts),
-                   H(9, S::kHearts, 8, S::kHearts)) == doctest::Approx(10.0));
-
-  showdown.board = RiverRunout({
-      C(2, S::kHearts),
-      C(3, S::kDiamonds),
-      C(4, S::kClubs),
-      C(5, S::kSpades),
-      C(6, S::kHearts),
-  });
-  CHECK(GetUtility(showdown, H(14, S::kClubs, 13, S::kDiamonds),
-                   H(12, S::kClubs, 11, S::kDiamonds)) == doctest::Approx(0.0));
 }
 
 }  // namespace

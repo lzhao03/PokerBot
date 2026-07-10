@@ -20,10 +20,10 @@ BettingState ApplyAction(const BettingState& state,
 ExactPublicState ApplyChance(const ExactPublicState& state,
                              absl::Span<const CardId> cards,
                              const BettingRules& rules);
-double GetUtility(const ExactPublicState& state,
-                  ComboId player_a_hand,
-                  ComboId player_b_hand);
-bool IsTerminal(const BettingState& state, const BoardRunout& board);
+double TerminalUtility(const ExactPublicState& state,
+                       ComboId player0_hand,
+                       ComboId player1_hand);
+bool IsTerminal(const ExactPublicState& state);
 bool IsBettingRoundOver(const BettingState& state) noexcept;
 
 }  // namespace poker

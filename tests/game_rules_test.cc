@@ -4,11 +4,24 @@
 #include "src/game_rules.h"
 
 #include <array>
+#include <stdexcept>
 
 namespace poker {
 namespace {
 
 constexpr BettingRules kRules{2};
+
+using S = SuitKind;
+
+CardId C(int rank, S suit) { return MakeCardId(rank, suit); }
+
+ComboId H(int first_rank,
+          S first_suit,
+          int second_rank,
+          S second_suit) {
+  return CardsToComboId(C(first_rank, first_suit),
+                        C(second_rank, second_suit));
+}
 
 std::array<CardId, 3> Flop() {
   return {
@@ -16,6 +29,40 @@ std::array<CardId, 3> Flop() {
       MakeCardId(7, SuitKind::kDiamonds),
       MakeCardId(12, SuitKind::kClubs),
   };
+}
+
+ExactPublicState ClosedState(StreetKind street) {
+  ExactPublicState state;
+  state.betting.stack = {10, 10};
+  state.betting.total_committed = {10, 10};
+  state.betting.street_committed = {0, 0};
+  state.betting.last_full_raise = 2;
+  state.betting.street = street;
+  state.betting.player_to_act = -1;
+  state.betting.pending_action_mask = 0;
+
+  if (street == StreetKind::kPreflop) {
+    return state;
+  }
+  state.board.deal_flop(Flop());
+  if (street == StreetKind::kFlop) {
+    return state;
+  }
+  state.board.deal_turn(C(9, S::kSpades));
+  if (street == StreetKind::kTurn) {
+    return state;
+  }
+  state.board.deal_river(C(3, S::kHearts));
+  return state;
+}
+
+ExactPublicState Showdown(std::array<CardId, kMaxBoardCards> cards) {
+  ExactPublicState state = ClosedState(StreetKind::kRiver);
+  state.board = BoardRunout::Preflop();
+  state.board.deal_flop(absl::Span<const CardId>(cards.data(), 3));
+  state.board.deal_turn(cards[3]);
+  state.board.deal_river(cards[4]);
+  return state;
 }
 
 BettingState State(std::array<Chips, kPlayerCount> stack,
@@ -62,7 +109,7 @@ TEST_CASE("check-check completes a betting round") {
 
   CHECK(IsBettingRoundOver(state.betting));
   CHECK(state.betting.player_to_act == -1);
-  CHECK_FALSE(IsTerminal(state.betting, state.board));
+  CHECK_FALSE(IsTerminal(state));
 }
 
 TEST_CASE("commitments update and reset across streets") {
@@ -254,21 +301,21 @@ TEST_CASE("preflop all-in runout skips later decisions") {
 
   state = ApplyChance(state, Flop(), kRules);
   CHECK(state.betting.player_to_act == -1);
-  CHECK_FALSE(IsTerminal(state.betting, state.board));
+  CHECK_FALSE(IsTerminal(state));
 
   const std::array<CardId, 1> turn = {
       MakeCardId(9, SuitKind::kSpades),
   };
   state = ApplyChance(state, turn, kRules);
   CHECK(state.betting.player_to_act == -1);
-  CHECK_FALSE(IsTerminal(state.betting, state.board));
+  CHECK_FALSE(IsTerminal(state));
 
   const std::array<CardId, 1> river = {
       MakeCardId(3, SuitKind::kHearts),
   };
   state = ApplyChance(state, river, kRules);
   CHECK(state.betting.player_to_act == -1);
-  CHECK(IsTerminal(state.betting, state.board));
+  CHECK(IsTerminal(state));
 }
 
 TEST_CASE("short all-in calls refund unmatched chips") {
@@ -293,9 +340,82 @@ TEST_CASE("fold completes the hand") {
   state.betting = ApplyAction(state.betting, {ActionKind::kFold});
 
   CHECK(IsBettingRoundOver(state.betting));
-  CHECK(IsTerminal(state.betting, state.board));
+  CHECK(IsTerminal(state));
+  CHECK(state.betting.total_committed[0] !=
+        state.betting.total_committed[1]);
   CHECK(state.betting.folded_player == 0);
   CHECK(state.betting.player_to_act == -1);
+}
+
+TEST_CASE("folds are terminal on every street") {
+  const std::array<StreetKind, 4> streets = {
+      StreetKind::kPreflop,
+      StreetKind::kFlop,
+      StreetKind::kTurn,
+      StreetKind::kRiver,
+  };
+  const ComboId player0 = H(14, S::kSpades, 13, S::kSpades);
+  const ComboId player1 = H(12, S::kClubs, 11, S::kClubs);
+
+  for (StreetKind street : streets) {
+    ExactPublicState state = ClosedState(street);
+    state.betting.folded_player = 0;
+    CHECK(IsTerminal(state));
+    CHECK(TerminalUtility(state, player0, player1) ==
+          doctest::Approx(-10.0));
+  }
+}
+
+TEST_CASE("terminal utility rejects nonterminal states") {
+  const ComboId player0 = H(14, S::kSpades, 13, S::kSpades);
+  const ComboId player1 = H(12, S::kClubs, 11, S::kClubs);
+
+  for (StreetKind street : {StreetKind::kPreflop, StreetKind::kFlop,
+                            StreetKind::kTurn}) {
+    const ExactPublicState state = ClosedState(street);
+    CHECK_FALSE(IsTerminal(state));
+    CHECK_THROWS_AS(TerminalUtility(state, player0, player1),
+                    std::invalid_argument);
+  }
+
+  ExactPublicState river = ClosedState(StreetKind::kRiver);
+  river.betting.player_to_act = 0;
+  river.betting.pending_action_mask = kAllPlayersMask;
+  CHECK_FALSE(IsTerminal(river));
+  CHECK_THROWS_AS(TerminalUtility(river, player0, player1),
+                  std::invalid_argument);
+}
+
+TEST_CASE("river terminal utility handles win, loss, and tie") {
+  const ComboId player0 = H(14, S::kHearts, 13, S::kHearts);
+  const ComboId player1 = H(9, S::kHearts, 8, S::kHearts);
+  const ExactPublicState win = Showdown({
+      C(10, S::kHearts),
+      C(11, S::kHearts),
+      C(12, S::kHearts),
+      C(2, S::kClubs),
+      C(3, S::kDiamonds),
+  });
+  REQUIRE(win.betting.total_committed[0] ==
+          win.betting.total_committed[1]);
+  const double win_utility = TerminalUtility(win, player0, player1);
+  const double loss_utility = TerminalUtility(win, player1, player0);
+  CHECK(win_utility == doctest::Approx(10.0));
+  CHECK(loss_utility == doctest::Approx(-10.0));
+  CHECK(win_utility + loss_utility == doctest::Approx(0.0));
+
+  const ExactPublicState tie = Showdown({
+      C(2, S::kHearts),
+      C(3, S::kDiamonds),
+      C(4, S::kClubs),
+      C(5, S::kSpades),
+      C(6, S::kHearts),
+  });
+  REQUIRE(tie.betting.total_committed[0] ==
+          tie.betting.total_committed[1]);
+  CHECK(TerminalUtility(
+            tie, H(14, S::kClubs, 13, S::kDiamonds),
+            H(12, S::kClubs, 11, S::kDiamonds)) == doctest::Approx(0.0));
 }
 
 }  // namespace

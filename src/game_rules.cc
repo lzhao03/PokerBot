@@ -16,11 +16,6 @@ int FirstPlayerForStreet(StreetKind street) {
   return street == StreetKind::kPreflop ? 0 : 1;
 }
 
-bool BoardComplete(const BettingState& state, const BoardRunout& board) {
-  return state.street == StreetKind::kRiver &&
-         board.count() == kMaxBoardCards;
-}
-
 Chips CommitChips(BettingState& state, int player, Chips requested) {
   if (requested <= 0) {
     throw std::invalid_argument("Action commitment delta must be positive");
@@ -76,10 +71,6 @@ void RefundUnmatchedCommitment(BettingState& state) {
   state.street_committed[player] -= excess;
   state.total_committed[player] -= excess;
   state.stack[player] += excess;
-}
-
-bool HandOver(const BettingState& state, const BoardRunout& board) {
-  return BoardComplete(state, board) && IsBettingRoundOver(state);
 }
 
 Chips ConcreteBetAmount(const BettingState& state, double size) {
@@ -239,8 +230,13 @@ bool IsBettingRoundOver(const BettingState& state) noexcept {
   return ToCall(state, live_player) == 0;
 }
 
-bool IsTerminal(const BettingState& state, const BoardRunout& board) {
-  return state.folded_player >= 0 || HandOver(state, board);
+bool IsTerminal(const ExactPublicState& state) {
+  if (state.betting.folded_player >= 0) {
+    return true;
+  }
+  return state.betting.street == StreetKind::kRiver &&
+         state.board.count() == kMaxBoardCards &&
+         IsBettingRoundOver(state.betting);
 }
 
 ActionMenu LegalActions(const BettingState& state,
@@ -306,7 +302,7 @@ ExactPublicState ApplyChance(const ExactPublicState& state,
   if (rules.minimum_bet <= 0) {
     throw std::invalid_argument("minimum bet must be positive");
   }
-  if (IsTerminal(state.betting, state.board) ||
+  if (IsTerminal(state) ||
       !IsBettingRoundOver(state.betting) ||
       state.betting.player_to_act != -1) {
     throw std::invalid_argument("State is not a chance node");
@@ -321,32 +317,32 @@ ExactPublicState ApplyChance(const ExactPublicState& state,
   return child;
 }
 
-double GetUtility(const ExactPublicState& state,
-                  ComboId player_a_hand,
-                  ComboId player_b_hand) {
+double TerminalUtility(const ExactPublicState& state,
+                       ComboId player0_hand,
+                       ComboId player1_hand) {
+  if (!IsTerminal(state)) {
+    throw std::invalid_argument("TerminalUtility requires a terminal state");
+  }
+
   static const HandEvaluator evaluator;
-  const double a_committed = state.betting.total_committed[0];
+  const double player0_committed = state.betting.total_committed[0];
 
   if (state.betting.folded_player >= 0) {
     if (state.betting.folded_player == 0) {
-      return -a_committed;
+      return -player0_committed;
     }
-    return Pot(state.betting) - a_committed;
-  }
-
-  if (state.board.count() + 2 < 5) {
-    return 0.0;
+    return Pot(state.betting) - player0_committed;
   }
 
   const int comparison =
-      evaluator.compare_hands(player_a_hand, player_b_hand, state.board);
+      evaluator.compare_hands(player0_hand, player1_hand, state.board);
   if (comparison > 0) {
-    return Pot(state.betting) - a_committed;
+    return Pot(state.betting) - player0_committed;
   }
   if (comparison < 0) {
-    return -a_committed;
+    return -player0_committed;
   }
-  return (Pot(state.betting) / 2.0) - a_committed;
+  return (Pot(state.betting) / 2.0) - player0_committed;
 }
 
 }  // namespace poker
