@@ -9,7 +9,22 @@ bazel_dep(
     name = "protobuf",
     version = "29.0",
 )
+bazel_dep(name = "rapidcheck", version = "2023.12.14")
 bazel_dep(name = "rules_cc", version = "0.2.16")
+
+archive_override(
+    module_name = "rapidcheck",
+    integrity = "sha256-h/9vmEwb6ie8aXzAg1UecgZpjCzM72mGmRI7DonPoho=",
+    patch_strip = 0,
+    patches = [
+        "//third_party/rapidcheck:add_build_file.patch",
+        "//third_party/rapidcheck:module_dot_bazel.patch",
+    ],
+    strip_prefix = "rapidcheck-b2d9ed2dddefc4b84318d664b4f221eb792d89c7",
+    urls = [
+        "https://github.com/emil-e/rapidcheck/archive/b2d9ed2dddefc4b84318d664b4f221eb792d89c7.tar.gz",
+    ],
+)
 
 # Hedron's Compile Commands Extractor for Bazel
 # https://github.com/hedronvision/bazel-compile-commands-extractor
