@@ -175,10 +175,6 @@ void AppendStateHistory(BettingState& state, const GameAction& action) {
   ++state.actions_this_street;
 }
 
-void ResetStateHistory(CompactPublicState& state) {
-  ResetHistory(state);
-}
-
 void ResetStateHistory(BettingState& state) {
   state.actions_this_street = 0;
   state.last_action = GameAction{};
@@ -198,29 +194,6 @@ int CommitChips(State& state, int player, int requested) {
     state.all_in = true;
   }
   return committed;
-}
-
-template <typename State>
-void AdvanceStreet(State& state, absl::Span<const CardId> cards) {
-  switch (state.street) {
-    case StreetKind::kPreflop:
-      state.street = StreetKind::kFlop;
-      break;
-    case StreetKind::kFlop:
-      state.street = StreetKind::kTurn;
-      break;
-    case StreetKind::kTurn:
-      state.street = StreetKind::kRiver;
-      break;
-    case StreetKind::kRiver:
-      break;
-  }
-
-  for (CardId card : cards) {
-    AddBoardCard(state, card);
-  }
-  ResetStateHistory(state);
-  state.player_to_act = FirstPlayerForStreet(state);
 }
 
 void AdvanceStreet(ExactGameState& state, absl::Span<const CardId> cards) {
@@ -353,17 +326,6 @@ ExactGameState ApplyChance(const ExactGameState& state,
   }
 
   ExactGameState child = state;
-  AdvanceStreet(child, cards);
-  return child;
-}
-
-CompactPublicState ApplyChance(const CompactPublicState& state,
-                               absl::Span<const CardId> cards) {
-  if (IsTerminalForState(state) || PlayerToActForState(state) != -1) {
-    throw std::invalid_argument("State is not a chance node");
-  }
-
-  CompactPublicState child = state;
   AdvanceStreet(child, cards);
   return child;
 }

@@ -12,8 +12,6 @@ CompactPublicState ApplyAction(const CompactPublicState& state,
                                const GameAction& action);
 ExactGameState ApplyChance(const ExactGameState& state,
                            absl::Span<const CardId> cards);
-CompactPublicState ApplyChance(const CompactPublicState& state,
-                               absl::Span<const CardId> cards);
 double GetUtility(const ExactGameState& state,
                   ComboId player_a_hand,
                   ComboId player_b_hand);

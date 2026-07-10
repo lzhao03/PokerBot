@@ -59,6 +59,11 @@ bool CompactBettingRoundOver(const CompactPublicState& state) {
   return IsBettingRoundOver(BettingStateFromCompact(state));
 }
 
+CompactPublicState CompactApplyChance(const CompactPublicState& state,
+                                      absl::Span<const CardId> cards) {
+  return ToCompact(ApplyChance(ExactGameStateFromCompact(state), cards));
+}
+
 ComboId Combo(int first_rank,
               SuitKind first_suit,
               int second_rank,
@@ -253,7 +258,7 @@ void CheckReachableCase(uint32_t seed, int max_steps) {
     } else {
       const CompactPublicState parent = state;
       const auto cards = SampleStreetCards(state, 0, rng);
-      state = ApplyChance(state, cards);
+      state = CompactApplyChance(state, cards);
       std::ostringstream step_text;
       step_text << "chance";
       for (CardId card : cards) {
@@ -424,13 +429,13 @@ TEST_CASE("betting-round completion cases agree") {
 
   CompactPublicState runout = ApplyAction(root, {ActionKind::kCall, 1, -1});
   runout = ApplyAction(runout, {ActionKind::kCheck});
-  runout = ApplyChance(runout, {MakeCardId(2, SuitKind::kHearts),
-                                MakeCardId(7, SuitKind::kDiamonds),
-                                MakeCardId(12, SuitKind::kClubs)});
+  runout = CompactApplyChance(runout, {MakeCardId(2, SuitKind::kHearts),
+                                       MakeCardId(7, SuitKind::kDiamonds),
+                                       MakeCardId(12, SuitKind::kClubs)});
   runout = ApplyAction(runout, {ActionKind::kAllIn});
   runout = ApplyAction(runout, {ActionKind::kCall});
-  runout = ApplyChance(runout, {MakeCardId(9, SuitKind::kSpades)});
-  runout = ApplyChance(runout, {MakeCardId(3, SuitKind::kHearts)});
+  runout = CompactApplyChance(runout, {MakeCardId(9, SuitKind::kSpades)});
+  runout = CompactApplyChance(runout, {MakeCardId(3, SuitKind::kHearts)});
   CHECK(CompactTerminal(runout));
   CHECK(CompactPlayerToAct(runout) == -1);
 }

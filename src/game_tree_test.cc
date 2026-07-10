@@ -38,6 +38,11 @@ CompactPublicState ShowdownState() {
   return state;
 }
 
+CompactPublicState CompactApplyChance(const CompactPublicState& state,
+                                      absl::Span<const CardId> cards) {
+  return ToCompact(ApplyChance(ExactGameStateFromCompact(state), cards));
+}
+
 TEST_CASE("terminal utility and chance transitions are correct") {
   CompactPublicState raised = ApplyAction(
       PreflopState(), {ActionKind::kRaise, 4, -1});
@@ -64,7 +69,7 @@ TEST_CASE("terminal utility and chance transitions are correct") {
       MakeCardId(9, SuitKind::kClubs),
       MakeCardId(10, SuitKind::kSpades),
   };
-  const CompactPublicState child = ApplyChance(closed_preflop, flop);
+  const CompactPublicState child = CompactApplyChance(closed_preflop, flop);
   CHECK(child.street == StreetKind::kFlop);
   CHECK(child.board_count == 3);
   CHECK(child.history_size == 0);
