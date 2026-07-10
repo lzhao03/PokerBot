@@ -22,6 +22,7 @@ cc_library(
     deps = [
         ":poker_cc_proto",
         ":poker_types",
+        "@abseil-cpp//absl/strings",
     ],
     visibility = ["//visibility:public"],
 )

@@ -1,8 +1,13 @@
 #pragma once
 
+#include <cstdint>
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+
+#include "absl/strings/numbers.h"
+#include "absl/strings/string_view.h"
 
 #include "src/poker.pb.h"
 #include "src/poker_types.h"
@@ -74,5 +79,148 @@ inline void AddBetSize(PokerConfig* config, Street street, double size) {
       break;
   }
 }
+
+struct CommonOptionState {
+  bool saw_global_bet_size = false;
+  bool saw_max_info_sets = false;
+  bool saw_max_public_states = false;
+};
+
+namespace cli_internal {
+
+template <typename Integer>
+Integer ParseIntegerOption(std::string_view value, std::string_view option) {
+  Integer parsed = 0;
+  const absl::string_view text(value.data(), value.size());
+  if (!absl::SimpleAtoi(text, &parsed)) {
+    throw std::invalid_argument("Invalid integer for " +
+                                std::string(option) + ": " +
+                                std::string(value));
+  }
+  return parsed;
+}
+
+}  // namespace cli_internal
+
+inline int ParseIntOption(std::string_view value, std::string_view option) {
+  return cli_internal::ParseIntegerOption<int>(value, option);
+}
+
+inline int64_t ParseInt64Option(std::string_view value,
+                                std::string_view option) {
+  return cli_internal::ParseIntegerOption<int64_t>(value, option);
+}
+
+inline double ParseDoubleOption(std::string_view value,
+                                std::string_view option) {
+  double parsed = 0.0;
+  const absl::string_view text(value.data(), value.size());
+  if (!absl::SimpleAtod(text, &parsed)) {
+    throw std::invalid_argument("Invalid number for " +
+                                std::string(option) + ": " +
+                                std::string(value));
+  }
+  return parsed;
+}
+
+inline bool ApplySolverOption(std::string_view argument,
+                              PokerConfig& config,
+                              CommonOptionState& state) {
+  if (argument == "--regret-only") {
+    config.set_regret_only_training(true);
+    return true;
+  }
+  if (argument.starts_with("--config=")) {
+    LoadPokerConfig(std::string(argument.substr(sizeof("--config=") - 1)),
+                    &config);
+    return true;
+  }
+
+  struct IntOption {
+    std::string_view prefix;
+    void (PokerConfig::*setter)(int32_t);
+  };
+  static constexpr IntOption kIntOptions[] = {
+      {"--starting-stack=", &PokerConfig::set_starting_stack_size},
+      {"--small-blind=", &PokerConfig::set_small_blind},
+      {"--big-blind=", &PokerConfig::set_big_blind},
+      {"--max-depth=", &PokerConfig::set_max_depth},
+      {"--chance-samples=", &PokerConfig::set_chance_samples},
+      {"--threads=", &PokerConfig::set_num_training_threads},
+  };
+  for (const IntOption& option : kIntOptions) {
+    if (!argument.starts_with(option.prefix)) {
+      continue;
+    }
+    const auto name = option.prefix.substr(0, option.prefix.size() - 1);
+    const int value = ParseIntOption(argument.substr(option.prefix.size()),
+                                     name);
+    (config.*option.setter)(value);
+    return true;
+  }
+
+  if (argument.starts_with("--max-info-sets=")) {
+    config.set_max_info_sets(ParseIntOption(
+        argument.substr(sizeof("--max-info-sets=") - 1),
+        "--max-info-sets"));
+    state.saw_max_info_sets = true;
+    return true;
+  }
+  if (argument.starts_with("--max-public-states=")) {
+    config.set_max_public_states(ParseIntOption(
+        argument.substr(sizeof("--max-public-states=") - 1),
+        "--max-public-states"));
+    state.saw_max_public_states = true;
+    return true;
+  }
+  if (argument.starts_with("--bet-size=")) {
+    if (!state.saw_global_bet_size) {
+      config.clear_bet_sizes();
+      state.saw_global_bet_size = true;
+    }
+    config.add_bet_sizes(ParseDoubleOption(
+        argument.substr(sizeof("--bet-size=") - 1), "--bet-size"));
+    return true;
+  }
+
+  struct StreetOption {
+    std::string_view prefix;
+    Street street;
+  };
+  static constexpr StreetOption kStreetOptions[] = {
+      {"--preflop-bet-size=", Street::PREFLOP},
+      {"--flop-bet-size=", Street::FLOP},
+      {"--turn-bet-size=", Street::TURN},
+      {"--river-bet-size=", Street::RIVER},
+  };
+  for (const StreetOption& option : kStreetOptions) {
+    if (!argument.starts_with(option.prefix)) {
+      continue;
+    }
+    const auto name = option.prefix.substr(0, option.prefix.size() - 1);
+    const double value = ParseDoubleOption(
+        argument.substr(option.prefix.size()), name);
+    AddBetSize(&config, option.street, value);
+    return true;
+  }
+  return false;
+}
+
+inline constexpr std::string_view kCommonSolverOptionUsage =
+    "  --config=PATH                  binary PokerConfig protobuf\n"
+    "  --starting-stack=N             solver config override\n"
+    "  --small-blind=N                solver config override\n"
+    "  --big-blind=N                  solver config override\n"
+    "  --max-depth=N                  solver config override\n"
+    "  --chance-samples=N             solver config override\n"
+    "  --max-info-sets=N              solver config override\n"
+    "  --max-public-states=N          solver config override\n"
+    "  --threads=N                    solver config override\n"
+    "  --regret-only                  solver config override\n"
+    "  --bet-size=X                   replace/append global bet sizes\n"
+    "  --preflop-bet-size=X           solver config override\n"
+    "  --flop-bet-size=X              solver config override\n"
+    "  --turn-bet-size=X              solver config override\n"
+    "  --river-bet-size=X             solver config override\n";
 
 }  // namespace poker

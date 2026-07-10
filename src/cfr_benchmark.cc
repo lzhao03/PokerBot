@@ -11,6 +11,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -51,34 +52,6 @@ struct BenchmarkResult {
   bool public_state_cap_hit = false;
 };
 
-bool ConsumePrefix(const std::string& arg,
-                   const std::string& prefix,
-                   std::string* value) {
-  if (arg.rfind(prefix, 0) != 0) {
-    return false;
-  }
-  *value = arg.substr(prefix.size());
-  return true;
-}
-
-int ParseInt(const std::string& value, const std::string& flag) {
-  char* end = nullptr;
-  long parsed = std::strtol(value.c_str(), &end, 10);
-  if (end == value.c_str() || *end != '\0') {
-    throw std::invalid_argument("Invalid integer for " + flag + ": " + value);
-  }
-  return static_cast<int>(parsed);
-}
-
-double ParseDouble(const std::string& value, const std::string& flag) {
-  char* end = nullptr;
-  double parsed = std::strtod(value.c_str(), &end);
-  if (end == value.c_str() || *end != '\0') {
-    throw std::invalid_argument("Invalid number for " + flag + ": " + value);
-  }
-  return parsed;
-}
-
 poker::HandRange BenchmarkRange(const Options& options) {
   poker::HandRange range;
   if (options.range == "premium") {
@@ -94,28 +67,12 @@ poker::HandRange BenchmarkRange(const Options& options) {
 void PrintUsage(const char* program) {
   std::cerr
       << "Usage: " << program << " [options]\n"
-      << "  --config=PATH                  binary PokerConfig protobuf\n"
       << "  --iterations=N                 default " << kDefaultIterations
       << "\n"
       << "  --eval-samples=N                default " << kDefaultEvalSamples
       << "\n"
       << "  --range=premium|all|RANGE       default " << kDefaultRange << "\n"
-      << "  --starting-stack=N              solver config override\n"
-      << "  --small-blind=N                 solver config override\n"
-      << "  --big-blind=N                   solver config override\n"
-      << "  --max-depth=N                   solver config override\n"
-      << "  --chance-samples=N              solver config override\n"
-      << "  --max-info-sets=N               solver config override"
-      << " (default " << kDefaultMaxInfoSets << ")\n"
-      << "  --max-public-states=N           solver config override"
-      << " (default " << kDefaultMaxPublicStates << ")\n"
-      << "  --threads=N                     solver config override\n"
-      << "  --regret-only                   solver config override\n"
-      << "  --bet-size=X                    replaces default global sizes on first use\n"
-      << "  --preflop-bet-size=X            solver config override\n"
-      << "  --flop-bet-size=X               solver config override\n"
-      << "  --turn-bet-size=X               solver config override\n"
-      << "  --river-bet-size=X              solver config override\n";
+      << poker::kCommonSolverOptionUsage;
 }
 
 void PrintBenchmarkHeader() {
@@ -361,7 +318,7 @@ void RunBenchmark(const std::string& name, BenchmarkFn&& benchmark) {
 ParsedOptions ParseOptions(int argc, char** argv) {
   ParsedOptions parsed;
   parsed.config = poker::DefaultPokerConfig();
-  bool saw_global_bet_size = false;
+  poker::CommonOptionState option_state;
   if (kProdBenchmarkDefaults) {
     parsed.config.set_max_depth(kDefaultMaxDepth);
     parsed.config.set_regret_only_training(true);
@@ -369,58 +326,21 @@ ParsedOptions ParseOptions(int argc, char** argv) {
     parsed.config.set_max_public_states(kDefaultMaxPublicStates);
   }
   for (int i = 1; i < argc; ++i) {
-    std::string arg = argv[i];
-    std::string value;
+    const std::string_view arg = argv[i];
     if (arg == "--help") {
       PrintUsage(argv[0]);
       std::exit(0);
-    } else if (arg == "--regret-only") {
-      parsed.config.set_regret_only_training(true);
-    } else if (ConsumePrefix(arg, "--config=", &value)) {
-      poker::LoadPokerConfig(value, &parsed.config);
-    } else if (ConsumePrefix(arg, "--iterations=", &value)) {
-      parsed.benchmark.iterations = ParseInt(value, "--iterations");
-    } else if (ConsumePrefix(arg, "--max-depth=", &value)) {
-      parsed.config.set_max_depth(ParseInt(value, "--max-depth"));
-    } else if (ConsumePrefix(arg, "--chance-samples=", &value)) {
-      parsed.config.set_chance_samples(ParseInt(value, "--chance-samples"));
-    } else if (ConsumePrefix(arg, "--eval-samples=", &value)) {
-      parsed.benchmark.eval_samples = ParseInt(value, "--eval-samples");
-    } else if (ConsumePrefix(arg, "--range=", &value)) {
-      parsed.benchmark.range = value;
-    } else if (ConsumePrefix(arg, "--starting-stack=", &value)) {
-      parsed.config.set_starting_stack_size(ParseInt(value, "--starting-stack"));
-    } else if (ConsumePrefix(arg, "--small-blind=", &value)) {
-      parsed.config.set_small_blind(ParseInt(value, "--small-blind"));
-    } else if (ConsumePrefix(arg, "--big-blind=", &value)) {
-      parsed.config.set_big_blind(ParseInt(value, "--big-blind"));
-    } else if (ConsumePrefix(arg, "--max-info-sets=", &value)) {
-      parsed.config.set_max_info_sets(ParseInt(value, "--max-info-sets"));
-    } else if (ConsumePrefix(arg, "--max-public-states=", &value)) {
-      parsed.config.set_max_public_states(
-          ParseInt(value, "--max-public-states"));
-    } else if (ConsumePrefix(arg, "--threads=", &value)) {
-      parsed.config.set_num_training_threads(ParseInt(value, "--threads"));
-    } else if (ConsumePrefix(arg, "--bet-size=", &value)) {
-      if (!saw_global_bet_size) {
-        parsed.config.clear_bet_sizes();
-        saw_global_bet_size = true;
-      }
-      parsed.config.add_bet_sizes(ParseDouble(value, "--bet-size"));
-    } else if (ConsumePrefix(arg, "--preflop-bet-size=", &value)) {
-      poker::AddBetSize(&parsed.config, poker::Street::PREFLOP,
-                        ParseDouble(value, "--preflop-bet-size"));
-    } else if (ConsumePrefix(arg, "--flop-bet-size=", &value)) {
-      poker::AddBetSize(&parsed.config, poker::Street::FLOP,
-                        ParseDouble(value, "--flop-bet-size"));
-    } else if (ConsumePrefix(arg, "--turn-bet-size=", &value)) {
-      poker::AddBetSize(&parsed.config, poker::Street::TURN,
-                        ParseDouble(value, "--turn-bet-size"));
-    } else if (ConsumePrefix(arg, "--river-bet-size=", &value)) {
-      poker::AddBetSize(&parsed.config, poker::Street::RIVER,
-                        ParseDouble(value, "--river-bet-size"));
-    } else {
-      throw std::invalid_argument("Unknown option: " + arg);
+    } else if (arg.starts_with("--iterations=")) {
+      parsed.benchmark.iterations = poker::ParseIntOption(
+          arg.substr(sizeof("--iterations=") - 1), "--iterations");
+    } else if (arg.starts_with("--eval-samples=")) {
+      parsed.benchmark.eval_samples = poker::ParseIntOption(
+          arg.substr(sizeof("--eval-samples=") - 1), "--eval-samples");
+    } else if (arg.starts_with("--range=")) {
+      parsed.benchmark.range =
+          std::string(arg.substr(sizeof("--range=") - 1));
+    } else if (!poker::ApplySolverOption(arg, parsed.config, option_state)) {
+      throw std::invalid_argument("Unknown option: " + std::string(arg));
     }
   }
   return parsed;
