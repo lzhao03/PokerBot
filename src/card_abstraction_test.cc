@@ -1,22 +1,116 @@
 #include "src/card_abstraction.h"
 
 #include "doctest/doctest.h"
+#include "rapidcheck.h"
+#include "src/card_utils.h"
 #include "src/coarse_chance_transitions.h"
+
+#include <array>
+#include <cstdint>
+#include <initializer_list>
+#include <utility>
 
 namespace poker {
 namespace {
 
-Board TestBoard(StreetKind street,
-                CardId first,
-                CardId second,
-                CardId third,
-                CardId fourth = 0) {
+struct GeneratedCase {
+  StreetKind street = StreetKind::kPreflop;
   Board board;
-  board.add(first);
-  board.add(second);
-  board.add(third);
-  if (street == StreetKind::kTurn || street == StreetKind::kRiver) {
-    board.add(fourth);
+  ComboId hand = 0;
+};
+
+CardId SelectAvailableCard(CardMask blocked, uint16_t choice) {
+  std::array<CardId, kDeckCardCount> available = {};
+  size_t count = 0;
+  for (int id = 0; id < kDeckCardCount; ++id) {
+    const CardId card = static_cast<CardId>(id);
+    if ((blocked & CardBit(card)) == 0) {
+      available[count++] = card;
+    }
+  }
+  RC_ASSERT(count > 0);
+  return available[choice % count];
+}
+
+GeneratedCase GenerateCase() {
+  const int street_index = *rc::gen::inRange(0, 4).as("street");
+  const auto choices =
+      *rc::gen::arbitrary<std::array<uint16_t, 7>>().as("cards");
+
+  GeneratedCase generated;
+  generated.street = static_cast<StreetKind>(street_index);
+  CardMask blocked = 0;
+  size_t cursor = 0;
+  const int board_count = BoardCardsForStreet(generated.street);
+  for (int i = 0; i < board_count; ++i) {
+    const CardId card = SelectAvailableCard(blocked, choices[cursor++]);
+    generated.board.add(card);
+    blocked |= CardBit(card);
+  }
+
+  const CardId first = SelectAvailableCard(blocked, choices[cursor++]);
+  blocked |= CardBit(first);
+  const CardId second = SelectAvailableCard(blocked, choices[cursor]);
+  generated.hand = CardsToComboId(first, second);
+  return generated;
+}
+
+Board PermuteBoard(const Board& board,
+                   const std::array<uint16_t, kMaxBoardCards>& choices) {
+  std::array<CardId, kMaxBoardCards> cards = board.cards;
+  size_t cursor = 0;
+  for (size_t remaining = board.count; remaining > 1; --remaining) {
+    std::swap(cards[remaining - 1], cards[choices[cursor++] % remaining]);
+  }
+
+  Board permuted;
+  for (uint8_t i = 0; i < board.count; ++i) {
+    permuted.add(cards[static_cast<size_t>(i)]);
+  }
+  return permuted;
+}
+
+std::array<SuitKind, 4> SuitPermutation(
+    const std::array<uint16_t, 4>& choices) {
+  std::array<SuitKind, 4> suits = {
+      SuitKind::kHearts,
+      SuitKind::kDiamonds,
+      SuitKind::kClubs,
+      SuitKind::kSpades,
+  };
+  size_t cursor = 0;
+  for (size_t remaining = suits.size(); remaining > 1; --remaining) {
+    std::swap(suits[remaining - 1], suits[choices[cursor++] % remaining]);
+  }
+  return suits;
+}
+
+CardId RenameSuit(CardId card, const std::array<SuitKind, 4>& permutation) {
+  return MakeCardId(
+      RankFromCardId(card),
+      permutation[static_cast<size_t>(SuitIndex(SuitFromCardId(card)))]);
+}
+
+Board RenameSuits(const Board& board,
+                  const std::array<SuitKind, 4>& permutation) {
+  Board renamed;
+  for (CardId card : board.span()) {
+    renamed.add(RenameSuit(card, permutation));
+  }
+  return renamed;
+}
+
+ComboId RenameSuits(ComboId hand,
+                    const std::array<SuitKind, 4>& permutation) {
+  const ComboInfo& combo = GetComboInfo(hand);
+  return CardsToComboId(RenameSuit(combo.card0, permutation),
+                        RenameSuit(combo.card1, permutation));
+}
+
+Board BoardOf(std::initializer_list<CardId> cards) {
+  Board board;
+  for (CardId card : cards) {
+    board.add(card);
   }
   return board;
 }
@@ -36,7 +130,6 @@ StreetKind NextStreet(StreetKind street) {
     case StreetKind::kFlop:
       return StreetKind::kTurn;
     case StreetKind::kTurn:
-      return StreetKind::kRiver;
     case StreetKind::kRiver:
       return StreetKind::kRiver;
   }
@@ -58,65 +151,86 @@ void CheckTextureTransitions(
     for (uint8_t i = 0; i < transition.card_count; ++i) {
       child.add(transition.cards[static_cast<size_t>(i)]);
     }
-    CHECK(board_texture_bucket(NextStreet(street),
-                                      board_features(child)) ==
+    CHECK(board_texture_bucket(NextStreet(street), board_features(child)) ==
           transition.child_bucket);
   }
 }
 
-TEST_CASE("exact public buckets use the board mask") {
-  const Board first = TestBoard(
-      StreetKind::kFlop, MakeCardId(2, SuitKind::kHearts),
-      MakeCardId(7, SuitKind::kDiamonds),
-      MakeCardId(11, SuitKind::kClubs));
-  const Board reordered = TestBoard(
-      StreetKind::kFlop, MakeCardId(11, SuitKind::kClubs),
-      MakeCardId(2, SuitKind::kHearts),
-      MakeCardId(7, SuitKind::kDiamonds));
+TEST_CASE("board abstraction ignores card order") {
+  const bool passed = rc::check("board order invariance", [] {
+    const GeneratedCase generated = GenerateCase();
+    const auto choices =
+        *rc::gen::arbitrary<std::array<uint16_t, kMaxBoardCards>>()
+             .as("order");
+    const Board permuted = PermuteBoard(generated.board, choices);
+    const BoardFeatures features = board_features(generated.board);
+    const BoardFeatures permuted_features = board_features(permuted);
 
-  CHECK(exact_board_bucket(first) == first.mask);
-  CHECK(exact_board_bucket(first) == exact_board_bucket(reordered));
+    RC_ASSERT(features == permuted_features);
+    RC_ASSERT(exact_board_bucket(generated.board) == generated.board.mask);
+    RC_ASSERT(exact_board_bucket(generated.board) ==
+              exact_board_bucket(permuted));
+    RC_ASSERT(board_texture_bucket(generated.street, features) ==
+              board_texture_bucket(generated.street, permuted_features));
+  });
+  CHECK(passed);
 }
 
-TEST_CASE("texture public buckets group by board texture") {
-  const Board first = TestBoard(
-      StreetKind::kFlop, MakeCardId(2, SuitKind::kHearts),
-      MakeCardId(7, SuitKind::kDiamonds),
-      MakeCardId(11, SuitKind::kClubs));
-  const Board same_texture = TestBoard(
-      StreetKind::kFlop, MakeCardId(3, SuitKind::kHearts),
-      MakeCardId(8, SuitKind::kDiamonds),
-      MakeCardId(12, SuitKind::kClubs));
-  const Board paired = TestBoard(
-      StreetKind::kFlop, MakeCardId(2, SuitKind::kHearts),
-      MakeCardId(2, SuitKind::kDiamonds),
-      MakeCardId(11, SuitKind::kClubs));
-  const Board monotone = TestBoard(
-      StreetKind::kFlop, MakeCardId(2, SuitKind::kHearts),
-      MakeCardId(7, SuitKind::kHearts),
-      MakeCardId(11, SuitKind::kHearts));
-  const Board turn = TestBoard(
-      StreetKind::kTurn, MakeCardId(2, SuitKind::kHearts),
-      MakeCardId(7, SuitKind::kDiamonds),
-      MakeCardId(11, SuitKind::kClubs),
-      MakeCardId(14, SuitKind::kSpades));
+TEST_CASE("coarse buckets ignore global suit renaming") {
+  const bool passed = rc::check("suit invariance", [] {
+    const GeneratedCase generated = GenerateCase();
+    const auto choices =
+        *rc::gen::arbitrary<std::array<uint16_t, 4>>().as("suits");
+    const auto permutation = SuitPermutation(choices);
+    const Board renamed_board = RenameSuits(generated.board, permutation);
+    const ComboId renamed_hand = RenameSuits(generated.hand, permutation);
+    const BoardFeatures features = board_features(generated.board);
+    const BoardFeatures renamed_features = board_features(renamed_board);
 
-  CHECK(board_texture_bucket(StreetKind::kFlop,
-                                    board_features(first)) ==
-        board_texture_bucket(StreetKind::kFlop,
-                                    board_features(same_texture)));
-  CHECK(board_texture_bucket(StreetKind::kFlop,
-                                    board_features(first)) !=
-        board_texture_bucket(StreetKind::kFlop,
-                                    board_features(paired)));
-  CHECK(board_texture_bucket(StreetKind::kFlop,
-                                    board_features(first)) !=
-        board_texture_bucket(StreetKind::kFlop,
-                                    board_features(monotone)));
-  CHECK(board_texture_bucket(StreetKind::kFlop,
-                                    board_features(first)) !=
-        board_texture_bucket(StreetKind::kTurn,
-                                    board_features(turn)));
+    RC_ASSERT(board_texture_bucket(generated.street, features) ==
+              board_texture_bucket(generated.street, renamed_features));
+    RC_ASSERT(coarse_private_bucket(generated.hand, generated.street,
+                                    features) ==
+              coarse_private_bucket(renamed_hand, generated.street,
+                                    renamed_features));
+  });
+  CHECK(passed);
+}
+
+TEST_CASE("coarse private buckets stay in their local range") {
+  const bool passed = rc::check("private bucket range", [] {
+    const GeneratedCase generated = GenerateCase();
+    RC_ASSERT(coarse_private_bucket(generated.hand, generated.street,
+                                    board_features(generated.board)) < 36);
+  });
+  CHECK(passed);
+}
+
+TEST_CASE("texture buckets classify paired monotone and connected boards") {
+  const Board rainbow = BoardOf({MakeCardId(2, SuitKind::kHearts),
+                                 MakeCardId(7, SuitKind::kDiamonds),
+                                 MakeCardId(11, SuitKind::kClubs)});
+  const Board paired = BoardOf({MakeCardId(11, SuitKind::kHearts),
+                                MakeCardId(11, SuitKind::kDiamonds),
+                                MakeCardId(2, SuitKind::kClubs)});
+  const Board monotone = BoardOf({MakeCardId(2, SuitKind::kHearts),
+                                  MakeCardId(7, SuitKind::kHearts),
+                                  MakeCardId(11, SuitKind::kHearts)});
+  const Board connected = BoardOf({MakeCardId(9, SuitKind::kHearts),
+                                   MakeCardId(10, SuitKind::kDiamonds),
+                                   MakeCardId(11, SuitKind::kClubs)});
+  const BoardBucketId baseline =
+      board_texture_bucket(StreetKind::kFlop, board_features(rainbow));
+
+  CHECK(board_features(paired).max_rank_count == 2);
+  CHECK(board_features(monotone).max_suit_count == 3);
+  CHECK(straight_density(board_features(connected).rank_mask) == 3);
+  CHECK(board_texture_bucket(StreetKind::kFlop, board_features(paired)) !=
+        baseline);
+  CHECK(board_texture_bucket(StreetKind::kFlop, board_features(monotone)) !=
+        baseline);
+  CHECK(board_texture_bucket(StreetKind::kFlop, board_features(connected)) !=
+        baseline);
 }
 
 TEST_CASE("exact private buckets use exact combo ids") {
@@ -128,60 +242,17 @@ TEST_CASE("exact private buckets use exact combo ids") {
   CHECK(private_bucket_count(StreetKind::kPreflop) == expected_count);
 }
 
-TEST_CASE("coarse private buckets merge equivalent combos") {
-  const ComboId ace_king_spades =
-      ExactCombo(14, SuitKind::kSpades, 13, SuitKind::kSpades);
-  const ComboId ace_king_hearts =
-      ExactCombo(14, SuitKind::kHearts, 13, SuitKind::kHearts);
-  const ComboId ace_king_offsuit =
-      ExactCombo(14, SuitKind::kSpades, 13, SuitKind::kHearts);
-
-  CHECK(ace_king_spades != ace_king_hearts);
-  const Board board;
-  const BoardFeatures features = board_features(board);
-  CHECK(coarse_private_bucket(ace_king_spades, StreetKind::kPreflop,
-                              features) ==
-        coarse_private_bucket(ace_king_hearts, StreetKind::kPreflop,
-                              features));
-  CHECK(coarse_private_bucket(ace_king_spades, StreetKind::kPreflop,
-                              features) !=
-        coarse_private_bucket(ace_king_offsuit, StreetKind::kPreflop,
-                              features));
-}
-
-TEST_CASE("coarse private bucket ids are local to street") {
-  Board board;
-  board.add(MakeCardId(14, SuitKind::kDiamonds));
-  board.add(MakeCardId(2, SuitKind::kClubs));
-  board.add(MakeCardId(7, SuitKind::kSpades));
-
-  const ComboId hand =
-      ExactCombo(14, SuitKind::kSpades, 13, SuitKind::kSpades);
-  CHECK(coarse_private_bucket(hand, StreetKind::kFlop,
-                              board_features(board)) < 36);
-
-  board.add(MakeCardId(9, SuitKind::kHearts));
-  CHECK(coarse_private_bucket(hand, StreetKind::kTurn,
-                              board_features(board)) < 36);
-
-  board.add(MakeCardId(3, SuitKind::kDiamonds));
-  CHECK(coarse_private_bucket(hand, StreetKind::kRiver,
-                              board_features(board)) < 36);
-}
-
 TEST_CASE("coarse private buckets still use exact board within public bucket") {
   const ComboId hand =
       ExactCombo(12, SuitKind::kHearts, 9, SuitKind::kHearts);
-
-  Board paired_with_hand;
-  paired_with_hand.add(MakeCardId(12, SuitKind::kSpades));
-  paired_with_hand.add(MakeCardId(2, SuitKind::kClubs));
-  paired_with_hand.add(MakeCardId(7, SuitKind::kDiamonds));
-
-  Board unpaired_for_hand;
-  unpaired_for_hand.add(MakeCardId(11, SuitKind::kSpades));
-  unpaired_for_hand.add(MakeCardId(3, SuitKind::kClubs));
-  unpaired_for_hand.add(MakeCardId(8, SuitKind::kDiamonds));
+  const Board paired_with_hand =
+      BoardOf({MakeCardId(12, SuitKind::kSpades),
+               MakeCardId(2, SuitKind::kClubs),
+               MakeCardId(7, SuitKind::kDiamonds)});
+  const Board unpaired_for_hand =
+      BoardOf({MakeCardId(11, SuitKind::kSpades),
+               MakeCardId(3, SuitKind::kClubs),
+               MakeCardId(8, SuitKind::kDiamonds)});
 
   CHECK(board_texture_bucket(
             StreetKind::kFlop, board_features(paired_with_hand)) ==

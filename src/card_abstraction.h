@@ -22,6 +22,8 @@ struct BoardFeatures {
   uint8_t max_rank_count = 0;
   uint8_t max_suit_count = 0;
   uint8_t max_rank = 0;
+
+  friend bool operator==(const BoardFeatures&, const BoardFeatures&) = default;
 };
 
 namespace card_abstraction_detail {
