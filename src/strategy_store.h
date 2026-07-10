@@ -9,7 +9,7 @@
 #include "src/card_abstraction.h"
 #include "src/poker_types.h"
 #include "src/strategy_tables.h"
-#include "src/traversal_stats.h"
+#include "src/solver_stats.h"
 
 namespace poker {
 

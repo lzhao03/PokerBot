@@ -294,7 +294,7 @@ cc_library(
     srcs = ["strategy_store.cc"],
     hdrs = [
         "strategy_store.h",
-        "traversal_stats.h",
+        "solver_stats.h",
     ],
     deps = [
         ":build_flags",
@@ -311,7 +311,7 @@ cc_library(
     srcs = ["strategy_store.cc"],
     hdrs = [
         "strategy_store.h",
-        "traversal_stats.h",
+        "solver_stats.h",
     ],
     copts = ["-DPOKER_ENABLE_TRAVERSAL_STATS=0"],
     deps = [
@@ -328,7 +328,7 @@ cc_library(
     srcs = ["strategy_store.cc"],
     hdrs = [
         "strategy_store.h",
-        "traversal_stats.h",
+        "solver_stats.h",
     ],
     copts = [
         "-DPOKER_COARSE_PRIVATE_BUCKETS=1",
@@ -348,7 +348,7 @@ cc_library(
     srcs = ["strategy_store.cc"],
     hdrs = [
         "strategy_store.h",
-        "traversal_stats.h",
+        "solver_stats.h",
     ],
     copts = [
         "-DPOKER_COARSE_PRIVATE_BUCKETS=1",

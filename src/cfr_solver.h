@@ -16,6 +16,7 @@
 #include "src/graph_builder.h"
 #include "src/hand_range.h"
 #include "src/poker_types.h"
+#include "src/solver_stats.h"
 #include "src/strategy_store.h"
 #include "src/strategy_tables.h"
 #include "src/training_range.h"
