@@ -198,10 +198,7 @@ bool SameBettingState(const BettingState& first, const BettingState& second) {
          first.street == second.street &&
          first.player_to_act == second.player_to_act &&
          first.folded_player == second.folded_player &&
-         first.actions_this_street == second.actions_this_street &&
-         first.last_action.kind == second.last_action.kind &&
-         first.last_action.amount == second.last_action.amount &&
-         first.last_action.player == second.last_action.player;
+         first.pending_action_mask == second.pending_action_mask;
 }
 
 }  // namespace

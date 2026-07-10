@@ -68,8 +68,8 @@ TEST_CASE("generated betting actions preserve state invariants") {
   const std::vector<BettingState> states = {
       PreflopState(),
       FlopState(),
-      ApplyAction(PreflopState(), {ActionKind::kRaise, 4, -1}),
-      ApplyAction(FlopState(), {ActionKind::kCheck, 0, -1}),
+      ApplyAction(PreflopState(), {ActionKind::kRaise, 4}),
+      ApplyAction(FlopState(), {ActionKind::kCheck, 0}),
   };
 
   for (const BettingState& state : states) {
@@ -84,9 +84,6 @@ TEST_CASE("generated betting actions preserve state invariants") {
       CHECK(next.stack[0] >= 0);
       CHECK(next.stack[1] >= 0);
       CHECK(Pot(next) >= 0);
-      CHECK(next.actions_this_street == state.actions_this_street + 1);
-      CHECK(next.last_action.kind == action.kind);
-      CHECK(next.last_action.player == state.player_to_act);
       if (next.folded_player >= 0) {
         CHECK(IsTerminal(next, Board{}));
         CHECK(next.player_to_act == -1);

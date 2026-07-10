@@ -24,8 +24,7 @@ ExactGameState ShowdownState() {
   state.betting.folded_player = -1;
   state.betting.committed = {10, 10};
   state.betting.player_to_act = 1;
-  state.betting.actions_this_street = 2;
-  state.betting.last_action = {ActionKind::kCheck, 0, 0};
+  state.betting.pending_action_mask = 0;
   state.board.add(MakeCardId(2, SuitKind::kHearts));
   state.board.add(MakeCardId(7, SuitKind::kDiamonds));
   state.board.add(MakeCardId(9, SuitKind::kClubs));
@@ -42,9 +41,9 @@ ExactGameState ApplyStateAction(ExactGameState state,
 
 TEST_CASE("terminal utility and chance transitions are correct") {
   ExactGameState raised = ApplyStateAction(
-      PreflopState(), {ActionKind::kRaise, 4, -1});
+      PreflopState(), {ActionKind::kRaise, 4});
   ExactGameState folded = ApplyStateAction(
-      raised, {ActionKind::kFold, 0, -1});
+      raised, {ActionKind::kFold, 0});
   CHECK(GetUtility(folded, 0, 1) == 2);
 
   ComboId player_a =
@@ -58,8 +57,8 @@ TEST_CASE("terminal utility and chance transitions are correct") {
   CHECK(GetUtility(showdown, player_a, player_b) == 10);
 
   ExactGameState closed_preflop = ApplyStateAction(
-      ApplyStateAction(PreflopState(), {ActionKind::kCall, 0, -1}),
-      {ActionKind::kCheck, 0, -1});
+      ApplyStateAction(PreflopState(), {ActionKind::kCall, 0}),
+      {ActionKind::kCheck, 0});
   const std::array<CardId, 3> flop = {
       MakeCardId(8, SuitKind::kHearts),
       MakeCardId(9, SuitKind::kClubs),
@@ -68,7 +67,7 @@ TEST_CASE("terminal utility and chance transitions are correct") {
   const ExactGameState child = ApplyChance(closed_preflop, flop);
   CHECK(child.betting.street == StreetKind::kFlop);
   CHECK(child.board.count == 3);
-  CHECK(child.betting.actions_this_street == 0);
+  CHECK(child.betting.pending_action_mask == kAllPlayersMask);
   CHECK(child.betting.player_to_act == 1);
 }
 

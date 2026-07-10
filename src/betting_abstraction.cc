@@ -47,7 +47,7 @@ void AddAction(ActionMenu& menu,
   if (menu.count >= kMaxActionsPerNode) {
     throw std::logic_error("Legal action table exceeded kMaxActionsPerNode");
   }
-  const GameAction action{kind, amount, -1};
+  const GameAction action{kind, amount};
   if (!IsLegalAction(state, action)) {
     throw std::logic_error("Betting abstraction generated an illegal action");
   }
@@ -87,7 +87,7 @@ BettingAbstraction::ActionMenu BettingAbstraction::actions_for_betting_node(
     const Chips bet = ConcreteBetAmount(state, bet_size);
     const Chips amount = outstanding_call + bet;
     if (amount < stack) {
-      sized_actions.push_back({sized_action, amount, -1});
+      sized_actions.push_back({sized_action, amount});
     }
   }
   std::sort(sized_actions.begin(), sized_actions.end(),

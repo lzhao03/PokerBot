@@ -20,6 +20,13 @@ constexpr int kDeckCardCount = 52;
 constexpr int kMaxBoardCards = 5;
 constexpr int kPlayerCount = 2;
 
+constexpr uint8_t PlayerBit(int player) {
+  return static_cast<uint8_t>(1u << player);
+}
+
+constexpr uint8_t kAllPlayersMask =
+    static_cast<uint8_t>((1u << kPlayerCount) - 1u);
+
 enum class Player : uint8_t {
   kA = 0,
   kB = 1,
@@ -56,7 +63,6 @@ enum class ActionKind : uint8_t {
 struct GameAction {
   ActionKind kind = ActionKind::kNoAction;
   Chips amount = 0;
-  int player = -1;
 };
 
 // Maximum number of legal actions at any decision node.
@@ -70,8 +76,7 @@ struct BettingState {
   StreetKind street = StreetKind::kPreflop;
   int8_t player_to_act = 0;
   int8_t folded_player = -1;
-  uint8_t actions_this_street = 0;
-  GameAction last_action;
+  uint8_t pending_action_mask = kAllPlayersMask;
 };
 
 struct SolverConfig {
@@ -190,6 +195,7 @@ inline void ValidateBettingState(const BettingState& state) {
   assert(state.stack[1] >= 0);
   assert(state.committed[0] >= 0);
   assert(state.committed[1] >= 0);
+  assert((state.pending_action_mask & ~kAllPlayersMask) == 0);
   assert(state.folded_player >= -1 &&
          state.folded_player < kPlayerCount);
   assert(state.player_to_act >= -1 &&

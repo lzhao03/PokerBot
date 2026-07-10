@@ -27,19 +27,6 @@ Chips CommitChips(BettingState& state, int player, Chips requested) {
   return committed;
 }
 
-void AppendAction(BettingState& state, const GameAction& action) {
-  state.last_action = action;
-  if (state.actions_this_street == UINT8_MAX) {
-    throw std::logic_error("Betting state action count overflow");
-  }
-  ++state.actions_this_street;
-}
-
-void ResetActions(BettingState& state) {
-  state.actions_this_street = 0;
-  state.last_action = GameAction{};
-}
-
 void AdvanceStreet(ExactGameState& state, absl::Span<const CardId> cards) {
   switch (state.betting.street) {
     case StreetKind::kPreflop:
@@ -58,7 +45,7 @@ void AdvanceStreet(ExactGameState& state, absl::Span<const CardId> cards) {
   for (CardId card : cards) {
     state.board.add(card);
   }
-  ResetActions(state.betting);
+  state.betting.pending_action_mask = kAllPlayersMask;
   state.betting.player_to_act = FirstPlayerForStreet(state.betting.street);
   ValidateBettingState(state.betting);
 }
@@ -79,25 +66,17 @@ int PlayerToAct(const BettingState& state) {
 
 }  // namespace
 
-bool IsBettingRoundOver(const BettingState& state) {
+bool IsBettingRoundOver(const BettingState& state) noexcept {
   if (state.folded_player >= 0) {
     return true;
   }
-  const bool calls_matched = ToCall(state, 0) == 0 && ToCall(state, 1) == 0;
   if (AnyPlayerAllIn(state)) {
     const int player = state.player_to_act;
-    return calls_matched || !IsPlayer(player) || state.stack[player] == 0 ||
+    return !IsPlayer(player) || state.stack[player] == 0 ||
            ToCall(state, player) == 0;
   }
-  if (state.actions_this_street == 0 || !calls_matched) {
-    return false;
-  }
-
-  if (state.last_action.kind == ActionKind::kCall) {
-    return state.actions_this_street > 1;
-  }
-  return state.last_action.kind == ActionKind::kCheck &&
-         state.player_to_act == FirstPlayerForStreet(state.street);
+  return state.pending_action_mask == 0 && ToCall(state, 0) == 0 &&
+         ToCall(state, 1) == 0;
 }
 
 bool IsTerminal(const BettingState& state, const Board& board) {
@@ -155,38 +134,47 @@ BettingState ApplyLegalActionUnchecked(const BettingState& state,
   }
 
   const int opponent = Opponent(player);
-  const Chips to_call = ToCall(child, player);
-  GameAction applied = action;
-  applied.player = player;
+  const Chips to_call_before = ToCall(child, player);
+  Chips committed = 0;
 
   switch (action.kind) {
     case ActionKind::kFold:
-      applied.amount = 0;
       child.folded_player = player;
       child.player_to_act = -1;
       break;
     case ActionKind::kCheck:
-      applied.amount = 0;
       child.player_to_act = opponent;
       break;
     case ActionKind::kCall:
-      applied.amount = CommitChips(child, player, to_call);
+      committed = CommitChips(child, player, to_call_before);
       child.player_to_act = opponent;
       break;
     case ActionKind::kBet:
     case ActionKind::kRaise:
-      applied.amount = CommitChips(child, player, action.amount);
+      committed = CommitChips(child, player, action.amount);
       child.player_to_act = opponent;
       break;
     case ActionKind::kAllIn:
-      applied.amount = CommitChips(child, player, child.stack[player]);
+      committed = CommitChips(child, player, child.stack[player]);
       child.player_to_act = opponent;
       break;
     case ActionKind::kNoAction:
       break;
   }
 
-  AppendAction(child, applied);
+  const bool aggressive =
+      action.kind == ActionKind::kBet ||
+      action.kind == ActionKind::kRaise ||
+      (action.kind == ActionKind::kAllIn && committed > to_call_before);
+  if (action.kind != ActionKind::kFold) {
+    if (aggressive) {
+      child.pending_action_mask = PlayerBit(opponent);
+    } else {
+      child.pending_action_mask &=
+          static_cast<uint8_t>(~PlayerBit(player));
+    }
+  }
+
   ValidateBettingState(child);
   return child;
 }

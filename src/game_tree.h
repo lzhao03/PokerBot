@@ -18,6 +18,6 @@ double GetUtility(const ExactGameState& state,
                   ComboId player_b_hand);
 bool IsTerminal(const BettingState& state, const Board& board);
 int GetPlayerToAct(const BettingState& state, const Board& board);
-bool IsBettingRoundOver(const BettingState& state);
+bool IsBettingRoundOver(const BettingState& state) noexcept;
 
 }  // namespace poker

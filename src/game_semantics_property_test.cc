@@ -84,8 +84,8 @@ std::string CardString(CardId card) {
 
 std::string ActionString(const GameAction& action) {
   std::ostringstream out;
-  out << "player=" << action.player << " kind="
-      << static_cast<int>(action.kind) << " amount=" << action.amount;
+  out << "kind=" << static_cast<int>(action.kind)
+      << " amount=" << action.amount;
   return out.str();
 }
 
@@ -225,8 +225,8 @@ void ValidateChanceTransition(const ExactGameState& parent,
   Require(child.board.count == BoardCardsForStreet(child.betting.street),
           trace,
           "chance must produce exact board count for street");
-  Require(child.betting.actions_this_street == 0, trace,
-          "chance must reset street action count");
+  Require(child.betting.pending_action_mask == kAllPlayersMask, trace,
+          "chance must reset pending actions");
 
   CardMask dealt = 0;
   for (CardId card : cards) {
@@ -434,24 +434,24 @@ TEST_CASE("reachable random states preserve poker invariants") {
 TEST_CASE("representative invalid actions are rejected") {
   const SolverConfig config = TestConfig();
   const ExactGameState root = InitialState(config);
-  CHECK_THROWS(ApplyAction(root.betting, {ActionKind::kCheck, 0, -1}));
-  CHECK_THROWS(ApplyAction(root.betting, {ActionKind::kRaise, 1, -1}));
+  CHECK_THROWS(ApplyAction(root.betting, {ActionKind::kCheck, 0}));
+  CHECK_THROWS(ApplyAction(root.betting, {ActionKind::kRaise, 1}));
   CHECK_THROWS(ApplyAction(
-      root.betting, {ActionKind::kRaise, root.betting.stack[0], -1}));
+      root.betting, {ActionKind::kRaise, root.betting.stack[0]}));
 
   const ExactGameState flop = FlopState();
-  CHECK_THROWS(ApplyAction(flop.betting, {ActionKind::kCall, 0, -1}));
+  CHECK_THROWS(ApplyAction(flop.betting, {ActionKind::kCall, 0}));
   CHECK_THROWS(ApplyAction(
-      flop.betting, {ActionKind::kBet, flop.betting.stack[1], -1}));
+      flop.betting, {ActionKind::kBet, flop.betting.stack[1]}));
 
   const ExactGameState folded =
-      ApplyStateAction(root, {ActionKind::kFold, 0, -1});
-  CHECK_THROWS(ApplyAction(folded.betting, {ActionKind::kCall, 1, -1}));
+      ApplyStateAction(root, {ActionKind::kFold, 0});
+  CHECK_THROWS(ApplyAction(folded.betting, {ActionKind::kCall, 1}));
 
   ExactGameState broke = flop;
   broke.betting.stack[1] = 0;
   broke.betting.player_to_act = 1;
-  CHECK_THROWS(ApplyAction(broke.betting, {ActionKind::kCheck, 0, -1}));
+  CHECK_THROWS(ApplyAction(broke.betting, {ActionKind::kCheck, 0}));
 }
 
 TEST_CASE("deterministic action transitions preserve chip accounting") {
@@ -578,7 +578,7 @@ TEST_CASE("betting-round completion cases agree") {
   const SolverConfig config = TestConfig();
   const ExactGameState root = InitialState(config);
   ExactGameState preflop_complete =
-      ApplyStateAction(root, {ActionKind::kCall, 1, -1});
+      ApplyStateAction(root, {ActionKind::kCall, 1});
   CHECK(!BettingRoundOver(preflop_complete));
   preflop_complete =
       ApplyStateAction(preflop_complete, {ActionKind::kCheck});
@@ -600,15 +600,15 @@ TEST_CASE("betting-round completion cases agree") {
   CheckCompletedRound(bet_fold, true);
 
   ExactGameState raise_call =
-      ApplyStateAction(root, {ActionKind::kRaise, 4, -1});
-  raise_call = ApplyStateAction(raise_call, {ActionKind::kCall, 3, -1});
+      ApplyStateAction(root, {ActionKind::kRaise, 4});
+  raise_call = ApplyStateAction(raise_call, {ActionKind::kCall, 3});
   CheckCompletedRound(raise_call, false);
 
   ExactGameState short_call = root;
   short_call.betting.stack[0] = 3;
   short_call.betting.stack[1] = 12;
   short_call.betting.committed = {1, 8};
-  short_call = ApplyStateAction(short_call, {ActionKind::kCall, 7, -1});
+  short_call = ApplyStateAction(short_call, {ActionKind::kCall, 7});
   CheckCompletedRound(short_call, false);
   CHECK(short_call.betting.stack[0] == 0);
   CHECK(short_call.betting.committed[0] <
@@ -620,7 +620,7 @@ TEST_CASE("betting-round completion cases agree") {
   CheckCompletedRound(all_in_bet, false);
 
   ExactGameState runout =
-      ApplyStateAction(root, {ActionKind::kCall, 1, -1});
+      ApplyStateAction(root, {ActionKind::kCall, 1});
   runout = ApplyStateAction(runout, {ActionKind::kCheck});
   runout = ApplyChance(runout, {MakeCardId(2, SuitKind::kHearts),
                                 MakeCardId(7, SuitKind::kDiamonds),
@@ -635,7 +635,7 @@ TEST_CASE("betting-round completion cases agree") {
 
 TEST_CASE("chance sampling excludes known cards") {
   ExactGameState state = InitialState(TestConfig());
-  state = ApplyStateAction(state, {ActionKind::kCall, 1, -1});
+  state = ApplyStateAction(state, {ActionKind::kCall, 1});
 
   const ComboId a_hand =
       Combo(14, SuitKind::kHearts, 13, SuitKind::kHearts);
