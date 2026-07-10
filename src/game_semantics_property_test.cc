@@ -192,6 +192,17 @@ void ValidateActionTransition(const CompactPublicState& parent,
           trace, "opponent contribution must not change");
 }
 
+CompactPublicState ApplyChecked(const CompactPublicState& parent,
+                                const GameAction& action,
+                                int total_chips,
+                                const ReachableTrace& trace) {
+  const int player = CompactPlayerToAct(parent);
+  Require(IsPlayer(player), trace, "action transition needs an acting player");
+  const CompactPublicState child = ApplyAction(parent, action);
+  ValidateActionTransition(parent, child, player, total_chips, trace);
+  return child;
+}
+
 void ValidateChanceTransition(const CompactPublicState& parent,
                               const CompactPublicState& child,
                               absl::Span<const CardId> cards,
@@ -223,6 +234,35 @@ std::vector<GameAction> LegalActions(const BettingAbstraction& betting,
       BettingStateFromCompact(state), state.player_to_act);
   return std::vector<GameAction>(menu.actions.begin(),
                                  menu.actions.begin() + menu.count);
+}
+
+void TraverseBettingTree(const BettingAbstraction& betting,
+                         const CompactPublicState& state,
+                         int total_chips,
+                         int depth,
+                         int max_depth,
+                         ReachableTrace trace) {
+  ValidateState(state, total_chips, trace);
+  if (depth >= max_depth || CompactTerminal(state) ||
+      CompactBettingRoundOver(state)) {
+    return;
+  }
+
+  const int player = CompactPlayerToAct(state);
+  Require(IsPlayer(player), trace, "betting tree node must have a player");
+  const std::vector<GameAction> actions = LegalActions(betting, state);
+  Require(!actions.empty(), trace, "betting tree node must have actions");
+
+  for (const GameAction& action : actions) {
+    CompactPublicState child =
+        ApplyChecked(state, action, total_chips, trace);
+    trace.steps.push_back("depth " + std::to_string(depth) + " " +
+                          ActionString(action) + "\n  before " +
+                          StateString(state) + "\n  after  " +
+                          StateString(child));
+    TraverseBettingTree(betting, child, total_chips, depth + 1, max_depth,
+                        trace);
+  }
 }
 
 void CheckReachableCase(uint32_t seed, int max_steps) {
@@ -284,6 +324,22 @@ CompactPublicState FlopState() {
   AddBoardCard(state, MakeCardId(2, SuitKind::kHearts));
   AddBoardCard(state, MakeCardId(7, SuitKind::kDiamonds));
   AddBoardCard(state, MakeCardId(12, SuitKind::kClubs));
+  return state;
+}
+
+CompactPublicState RiverState() {
+  CompactPublicState state;
+  state.stack = {20, 20};
+  state.pot = 20;
+  state.street = StreetKind::kRiver;
+  state.player_to_act = 1;
+  state.folded_player = -1;
+  state.player_contribution = {10, 10};
+  AddBoardCard(state, MakeCardId(2, SuitKind::kHearts));
+  AddBoardCard(state, MakeCardId(7, SuitKind::kDiamonds));
+  AddBoardCard(state, MakeCardId(12, SuitKind::kClubs));
+  AddBoardCard(state, MakeCardId(9, SuitKind::kSpades));
+  AddBoardCard(state, MakeCardId(3, SuitKind::kHearts));
   return state;
 }
 
@@ -386,6 +442,94 @@ TEST_CASE("representative invalid actions are rejected") {
   broke.stack[1] = 0;
   broke.player_to_act = 1;
   CHECK_THROWS(ApplyAction(broke, {ActionKind::kCheck, 0, -1}));
+}
+
+TEST_CASE("deterministic action transitions preserve chip accounting") {
+  const SolverConfig config = TestConfig();
+  ReachableTrace trace{0, 0, config, {}};
+  const CompactPublicState root = InitialState(config);
+  const int total_chips = TotalChips(root);
+  ValidateState(root, total_chips, trace);
+  CHECK(root.street == StreetKind::kPreflop);
+  CHECK(root.player_to_act == 0);
+  CHECK(root.player_contribution[0] == config.small_blind);
+  CHECK(root.player_contribution[1] == config.big_blind);
+
+  CompactPublicState call_check =
+      ApplyChecked(root, {ActionKind::kCall, 1}, total_chips, trace);
+  call_check = ApplyChecked(call_check, {ActionKind::kCheck}, total_chips,
+                            trace);
+  CheckCompletedRound(call_check, false);
+
+  CompactPublicState fold =
+      ApplyChecked(root, {ActionKind::kFold}, total_chips, trace);
+  CheckCompletedRound(fold, true);
+
+  CompactPublicState raise_call =
+      ApplyChecked(root, {ActionKind::kRaise, 4}, total_chips, trace);
+  raise_call = ApplyChecked(raise_call, {ActionKind::kCall}, total_chips,
+                            trace);
+  CheckCompletedRound(raise_call, false);
+
+  CompactPublicState check_bet_call =
+      ApplyChecked(FlopState(), {ActionKind::kCheck}, 40, trace);
+  check_bet_call =
+      ApplyChecked(check_bet_call, {ActionKind::kBet, 2}, 40, trace);
+  check_bet_call =
+      ApplyChecked(check_bet_call, {ActionKind::kCall}, 40, trace);
+  CheckCompletedRound(check_bet_call, false);
+
+  CompactPublicState bet_raise_call =
+      ApplyChecked(FlopState(), {ActionKind::kBet, 4}, 40, trace);
+  bet_raise_call =
+      ApplyChecked(bet_raise_call, {ActionKind::kRaise, 8}, 40, trace);
+  bet_raise_call =
+      ApplyChecked(bet_raise_call, {ActionKind::kCall}, 40, trace);
+  CheckCompletedRound(bet_raise_call, false);
+
+  CompactPublicState all_in =
+      ApplyChecked(FlopState(), {ActionKind::kAllIn}, 40, trace);
+  all_in = ApplyChecked(all_in, {ActionKind::kCall}, 40, trace);
+  CheckCompletedRound(all_in, false);
+
+  CompactPublicState short_call = root;
+  short_call.stack[0] = 3;
+  short_call.stack[1] = 12;
+  short_call.pot = 9;
+  short_call.player_contribution = {1, 8};
+  short_call = ApplyChecked(short_call, {ActionKind::kCall}, 24, trace);
+  CheckCompletedRound(short_call, false);
+  CHECK(short_call.stack[0] == 0);
+  CHECK(short_call.player_contribution[0] < short_call.player_contribution[1]);
+
+  CompactPublicState river_check =
+      ApplyChecked(RiverState(), {ActionKind::kCheck}, 60, trace);
+  river_check = ApplyChecked(river_check, {ActionKind::kCheck}, 60, trace);
+  CheckCompletedRound(river_check, true);
+
+  CompactPublicState river_call =
+      ApplyChecked(RiverState(), {ActionKind::kBet, 10}, 60, trace);
+  river_call = ApplyChecked(river_call, {ActionKind::kCall}, 60, trace);
+  CheckCompletedRound(river_call, true);
+
+  CompactPublicState river_fold =
+      ApplyChecked(RiverState(), {ActionKind::kBet, 10}, 60, trace);
+  river_fold = ApplyChecked(river_fold, {ActionKind::kFold}, 60, trace);
+  CheckCompletedRound(river_fold, true);
+}
+
+TEST_CASE("tiny betting tree is exhaustively valid to bounded depth") {
+  SolverConfig config = TestConfig();
+  config.starting_stack_size = 8;
+  config.small_blind = 1;
+  config.big_blind = 2;
+  config.bet_sizes = {0.5, 1.0};
+
+  const CompactPublicState root = InitialState(config);
+  const int total_chips = TotalChips(root);
+  ReachableTrace trace{0, 8, config, {}};
+  TraverseBettingTree(BettingAbstraction(config), root, total_chips, 0, 8,
+                      trace);
 }
 
 TEST_CASE("betting-round completion cases agree") {
