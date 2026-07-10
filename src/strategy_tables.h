@@ -203,7 +203,6 @@ class StrategyTables {
       public_chance_child_ids;
   std::vector<ChanceChildEntry> chance_child_entries;
   std::vector<BettingHistoryRow> betting_history_rows;
-  std::vector<std::array<PrivateBucketId, kComboCount>> private_bucket_rows;
   std::vector<FrozenInfoSetActionOffsetRow> frozen_info_set_action_offsets;
   size_t info_set_count = 0;
   std::vector<int> action_ids;

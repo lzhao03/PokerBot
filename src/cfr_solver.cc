@@ -134,7 +134,6 @@ CFRSolver::CFRSolver(const SolverConfig& config,
     storage_.mutable_ref().public_state_rows.reserve(public_state_cap);
     storage_.mutable_ref().public_chance_child_ids.reserve(public_state_cap);
     storage_.mutable_ref().chance_child_entries.reserve(public_state_cap);
-    storage_.mutable_ref().private_bucket_rows.reserve(public_state_cap);
     storage_.mutable_ref().frozen_info_set_action_offsets.reserve(
         public_state_cap);
     storage_.mutable_ref().public_info_set_slabs.reserve(public_state_cap);
@@ -558,15 +557,6 @@ bool CFRSolver::prepare_prebuilt_training(
   }
 
   StrategyStore& store = strategy_store_;
-  const bool private_buckets_complete = store.prebuild_private_bucket_rows();
-  stats.private_bucket_prebuild_complete = private_buckets_complete;
-  if (!stats.private_bucket_prebuild_complete) {
-    return false;
-  }
-  const int64_t private_bucket_rows =
-      static_cast<int64_t>(tables().private_bucket_rows.size());
-  stats.prebuild_private_bucket_rows = private_bucket_rows;
-
   const bool frozen_lookup_complete = store.prebuild_frozen_info_set_action_offsets();
   stats.frozen_info_set_lookup_prebuild_complete = frozen_lookup_complete;
   if (!stats.frozen_info_set_lookup_prebuild_complete) {

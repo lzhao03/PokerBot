@@ -55,7 +55,6 @@ TEST_CASE("coarse training reaches fixed-storage phase") {
   CHECK(stats.action_transition_prebuild_complete);
   CHECK(stats.chance_transition_prebuild_complete);
   CHECK(stats.info_set_prebuild_complete);
-  CHECK(stats.private_bucket_prebuild_complete);
   CHECK(stats.frozen_info_set_lookup_prebuild_complete);
   CHECK(stats.warmup_iterations == 0);
   CHECK(stats.frozen_iterations == 4);

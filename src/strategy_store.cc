@@ -443,35 +443,6 @@ void StrategyStore::regret_matching_for_bucket(uint32_t node_id,
   block->regret_matching(action_ids, out);
 }
 
-bool StrategyStore::prebuild_private_bucket_rows() {
-  if (storage_.frozen) {
-    return true;
-  }
-
-  StrategyTables& tables = tables_for_growth();
-  tables.private_bucket_rows.resize(tables.public_state_rows.size());
-  for (size_t node_id = 0; node_id < tables.public_state_rows.size();
-       ++node_id) {
-    const PublicStateRow& row = tables.public_state_rows[node_id];
-    const Board board = BoardFromCompact(row.state);
-    const uint32_t bucket_count = card_abstraction_.private_bucket_count(
-        row.betting.street, board);
-    if (bucket_count == 0 || bucket_count > kComboCount) {
-      return false;
-    }
-    auto& bucket_row = tables.private_bucket_rows[node_id];
-    for (int combo = 0; combo < kComboCount; ++combo) {
-      const PrivateBucketId bucket = card_abstraction_.private_bucket(
-          static_cast<ComboId>(combo), row.betting.street, board);
-      if (bucket >= bucket_count) {
-        return false;
-      }
-      bucket_row[static_cast<size_t>(combo)] = bucket;
-    }
-  }
-  return true;
-}
-
 bool StrategyStore::prebuild_frozen_info_set_action_offsets() {
   if (storage_.frozen) {
     return true;

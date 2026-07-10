@@ -19,7 +19,6 @@ struct TrainingRunStats {
   bool action_transition_prebuild_complete = false;
   bool chance_transition_prebuild_complete = false;
   bool info_set_prebuild_complete = false;
-  bool private_bucket_prebuild_complete = false;
   bool frozen_info_set_lookup_prebuild_complete = false;
   int64_t prebuild_public_states = 0;
   int64_t prebuild_betting_histories = 0;
@@ -31,7 +30,6 @@ struct TrainingRunStats {
   int64_t missing_chance_transitions = 0;
   int64_t prebuild_info_sets = 0;
   int64_t prebuild_action_entries = 0;
-  int64_t prebuild_private_bucket_rows = 0;
   int64_t prebuild_frozen_info_set_lookup_rows = 0;
   double prebuild_seconds = 0.0;
   double info_set_prebuild_seconds = 0.0;

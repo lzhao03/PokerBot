@@ -131,7 +131,6 @@ class StrategyStore {
                                   absl::Span<const int> legal_action_ids,
                                   absl::Span<double> out);
 
-  bool prebuild_private_bucket_rows();
   bool prebuild_frozen_info_set_action_offsets();
 
  private:
