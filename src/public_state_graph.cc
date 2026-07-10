@@ -25,13 +25,14 @@ class PublicStateBfs {
  public:
   struct Entry {
     uint32_t node_id = 0;
+    Board board;
     int depth = 0;
   };
 
-  PublicStateBfs(uint32_t root_id, size_t row_count) {
+  PublicStateBfs(uint32_t root_id, Board root_board, size_t row_count) {
     queue_.reserve(1024);
     queued_.resize(row_count, 0);
-    enqueue_growing(root_id, 0);
+    enqueue_growing(root_id, std::move(root_board), 0);
   }
 
   std::optional<Entry> next() {
@@ -42,29 +43,30 @@ class PublicStateBfs {
   }
 
   bool enqueue_existing(uint32_t node_id,
+                        Board board,
                         int depth,
                         size_t row_count) {
     if (node_id >= row_count || node_id >= queued_.size()) {
       return false;
     }
-    enqueue_known_index(node_id, depth);
+    enqueue_known_index(node_id, std::move(board), depth);
     return true;
   }
 
-  void enqueue_growing(uint32_t node_id, int depth) {
+  void enqueue_growing(uint32_t node_id, Board board, int depth) {
     if (node_id >= queued_.size()) {
       queued_.resize(static_cast<size_t>(node_id) + 1, 0);
     }
-    enqueue_known_index(node_id, depth);
+    enqueue_known_index(node_id, std::move(board), depth);
   }
 
  private:
-  void enqueue_known_index(uint32_t node_id, int depth) {
+  void enqueue_known_index(uint32_t node_id, Board board, int depth) {
     if (queued_[node_id]) {
       return;
     }
     queued_[node_id] = 1;
-    queue_.push_back({node_id, depth});
+    queue_.push_back({node_id, std::move(board), depth});
   }
 
   std::vector<Entry> queue_;
@@ -245,9 +247,8 @@ PublicStateGraph::PublicStateRow PublicStateGraph::make_row(
   row.public_bucket =
       card_abstraction_.public_bucket(state.betting.street, state.board);
   row.betting = state.betting;
-  row.board = state.board;
-  row.is_terminal = IsTerminal(row.betting, row.board);
-  row.player_to_act = GetPlayerToAct(row.betting, row.board);
+  row.is_terminal = IsTerminal(row.betting, state.board);
+  row.player_to_act = GetPlayerToAct(row.betting, state.board);
   row.is_chance_node = !row.is_terminal && row.player_to_act == -1;
 
   if (!row.is_terminal && !row.is_chance_node && IsPlayer(row.player_to_act)) {
@@ -469,6 +470,7 @@ std::optional<uint32_t> PublicStateGraph::find_chance_child(
 template <typename Callback>
 bool PublicStateGraph::for_each_required_chance_transition(
     const PublicStateRow& row,
+    const Board& board,
     Callback&& callback) const {
   if constexpr (kCoarsePublicBuckets) {
     const auto& transitions = CoarseChanceTransitions(row.betting.street);
@@ -486,8 +488,8 @@ bool PublicStateGraph::for_each_required_chance_transition(
     return true;
   } else {
     return ForEachNextStreetDeal(
-        row.betting.street, row.board, [&](absl::Span<const CardId> cards) {
-      return callback(ApplyChance({row.betting, row.board}, cards), cards);
+        row.betting.street, board, [&](absl::Span<const CardId> cards) {
+      return callback(ApplyChance({row.betting, board}, cards), cards);
     });
   }
 }
@@ -562,7 +564,8 @@ bool PublicStateGraph::can_insert_row() const {
 std::optional<uint32_t>
 PublicStateGraph::get_or_create_action_child(
     uint32_t parent_public_state_id,
-    int action_index) {
+    int action_index,
+    const Board& parent_board) {
   const auto& public_rows = rows();
   if (parent_public_state_id >= public_rows.size()) {
     return std::nullopt;
@@ -596,7 +599,7 @@ PublicStateGraph::get_or_create_action_child(
   const uint32_t parent_history_id = read_row.betting_history_id;
   const BettingState child_betting =
       ApplyAction(read_row.betting, read_row.actions[action_slot]);
-  const ExactGameState child_state{child_betting, read_row.board};
+  const ExactGameState child_state{child_betting, parent_board};
   const uint32_t child_history_id = get_or_create_action_history_child(
       parent_history_id, action_index, child_betting);
   auto child_id = get_or_create_row(child_history_id, child_state);
@@ -702,7 +705,9 @@ PublicStateGraph::get_or_create_chance_child(
 
 bool PublicStateGraph::prebuild_reachable_rows(
     uint32_t root_id,
-    int max_depth) {
+    const Board& root_board,
+    int max_depth,
+    std::vector<std::optional<Board>>& row_boards) {
   if (storage_.frozen) {
     return true;
   }
@@ -710,7 +715,10 @@ bool PublicStateGraph::prebuild_reachable_rows(
     return false;
   }
 
-  PublicStateBfs bfs(root_id, rows().size());
+  row_boards.clear();
+  row_boards.resize(rows().size());
+  row_boards[root_id] = root_board;
+  PublicStateBfs bfs(root_id, root_board, rows().size());
   while (std::optional<PublicStateBfs::Entry> maybe_entry = bfs.next()) {
     const PublicStateBfs::Entry entry = *maybe_entry;
     if (entry.node_id >= rows().size()) {
@@ -725,13 +733,19 @@ bool PublicStateGraph::prebuild_reachable_rows(
 
     if (row.is_chance_node) {
       const bool complete = for_each_required_chance_transition(
-          row, [&](const ExactGameState& child_state,
-                   absl::Span<const CardId>) {
+          row, entry.board, [&](const ExactGameState& child_state,
+                                absl::Span<const CardId>) {
             auto child_id = get_or_create_chance_child(entry.node_id, child_state);
             if (!child_id.has_value()) {
               return false;
             }
-            bfs.enqueue_growing(*child_id, entry.depth);
+            if (row_boards.size() <= *child_id) {
+              row_boards.resize(static_cast<size_t>(*child_id) + 1);
+            }
+            if (!row_boards[*child_id].has_value()) {
+              row_boards[*child_id] = child_state.board;
+            }
+            bfs.enqueue_growing(*child_id, child_state.board, entry.depth);
             return true;
           });
       if (!complete) {
@@ -746,11 +760,18 @@ bool PublicStateGraph::prebuild_reachable_rows(
 
     for (int action_index = 0; action_index < row.action_count;
          ++action_index) {
-      auto child_id = get_or_create_action_child(entry.node_id, action_index);
+      auto child_id = get_or_create_action_child(entry.node_id, action_index,
+                                                 entry.board);
       if (!child_id.has_value()) {
         return false;
       }
-      bfs.enqueue_growing(*child_id, entry.depth + 1);
+      if (row_boards.size() <= *child_id) {
+        row_boards.resize(static_cast<size_t>(*child_id) + 1);
+      }
+      if (!row_boards[*child_id].has_value()) {
+        row_boards[*child_id] = entry.board;
+      }
+      bfs.enqueue_growing(*child_id, entry.board, entry.depth + 1);
     }
   }
 
@@ -814,6 +835,7 @@ void PublicStateGraph::rebuild_chance_child_entries() {
 
 bool PublicStateGraph::validate_prebuilt_rows(
     uint32_t root_id,
+    const Board& root_board,
     int max_depth,
     TrainingRunStats& stats) const {
   const auto& public_rows = rows();
@@ -825,7 +847,7 @@ bool PublicStateGraph::validate_prebuilt_rows(
   stats.action_transition_prebuild_complete = true;
   stats.chance_transition_prebuild_complete = true;
 
-  PublicStateBfs bfs(root_id, public_rows.size());
+  PublicStateBfs bfs(root_id, root_board, public_rows.size());
 
   auto valid_public_child = [&](uint32_t node_id) {
     return node_id != kInvalidPublicStateId &&
@@ -839,8 +861,9 @@ bool PublicStateGraph::validate_prebuilt_rows(
            history_id < history_rows.size() &&
            public_rows[node_id].betting_history_id == history_id;
   };
-  auto enqueue_child = [&](uint32_t node_id, int depth) {
-    return bfs.enqueue_existing(node_id, depth, public_rows.size());
+  auto enqueue_child = [&](uint32_t node_id, Board board, int depth) {
+    return bfs.enqueue_existing(node_id, std::move(board), depth,
+                                public_rows.size());
   };
   auto mark_missing_betting_history = [&] {
     ++stats.missing_betting_history_transitions;
@@ -877,8 +900,8 @@ bool PublicStateGraph::validate_prebuilt_rows(
 
     if (row.is_chance_node) {
       const bool chance_complete = for_each_required_chance_transition(
-          row, [&](const ExactGameState& child_state,
-                   absl::Span<const CardId>) {
+          row, entry.board, [&](const ExactGameState& child_state,
+                                absl::Span<const CardId>) {
         ++stats.prebuild_chance_transitions;
         ++stats.prebuild_betting_history_transitions;
         const auto child = find_chance_child(entry.node_id, child_state);
@@ -891,7 +914,8 @@ bool PublicStateGraph::validate_prebuilt_rows(
                                     history_row.chance_child_id)) {
           mark_missing_betting_history();
         }
-        if (valid_child && !enqueue_child(child_id, entry.depth)) {
+        if (valid_child &&
+            !enqueue_child(child_id, child_state.board, entry.depth)) {
           mark_missing_chance();
           mark_missing_betting_history();
         }
@@ -928,7 +952,8 @@ bool PublicStateGraph::validate_prebuilt_rows(
       if (!valid_betting_child) {
         mark_missing_betting_history();
       }
-      if (valid_child && !enqueue_child(child_id, entry.depth + 1)) {
+      if (valid_child && !enqueue_child(child_id, entry.board,
+                                        entry.depth + 1)) {
         mark_missing_action();
         mark_missing_betting_history();
       }

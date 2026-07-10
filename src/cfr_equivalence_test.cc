@@ -75,7 +75,6 @@ struct CFRSolverTestAccess {
       hash = Mix(hash, row.betting.pot);
       hash = Mix(hash, row.betting.stack[0]);
       hash = Mix(hash, row.betting.stack[1]);
-      hash = Mix(hash, row.board.mask);
       for (uint8_t i = 0; i < row.action_count; ++i) {
         hash = Mix(hash, row.action_ids[static_cast<size_t>(i)]);
         hash = Mix(hash, row.action_child_ids[static_cast<size_t>(i)]);
@@ -114,11 +113,9 @@ struct CFRSolverTestAccess {
       solver.require_frozen_children_ = true;
     }
 
-    const StrategyTables::PublicStateRow& root_row =
-        solver.tables().public_state_rows[root_id];
     const CFRSolver::NodeRef root{
         root_id,
-        root_row.board,
+        solver.initial_state_.board,
     };
     CFRSolver::NodeGraph graph(
         solver,

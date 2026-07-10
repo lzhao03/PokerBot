@@ -60,13 +60,17 @@ class PublicStateGraph {
       const ExactGameState& child_state) const;
   std::optional<uint32_t> get_or_create_action_child(
       uint32_t parent_public_state_id,
-      int action_index);
+      int action_index,
+      const Board& parent_board);
   std::optional<uint32_t> get_or_create_chance_child(
       uint32_t parent_public_state_id,
       const ExactGameState& child_state);
   bool prebuild_reachable_rows(uint32_t root_id,
-                               int max_depth);
+                               const Board& root_board,
+                               int max_depth,
+                               std::vector<std::optional<Board>>& row_boards);
   bool validate_prebuilt_rows(uint32_t root_id,
+                              const Board& root_board,
                               int max_depth,
                               TrainingRunStats& stats) const;
 
@@ -122,6 +126,7 @@ class PublicStateGraph {
   bool can_insert_row() const;
   template <typename Callback>
   bool for_each_required_chance_transition(const PublicStateRow& row,
+                                           const Board& board,
                                            Callback&& callback) const;
   PublicBucketId chance_outcome_id(
       const ExactGameState& child_state) const;

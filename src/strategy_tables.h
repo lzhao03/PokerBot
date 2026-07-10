@@ -157,7 +157,6 @@ class StrategyTables {
     }
 
     BettingState betting;
-    Board board;
     uint32_t betting_history_id = kInvalidBettingHistoryId;
     PublicBucketId public_bucket = 0;
     bool is_terminal = false;

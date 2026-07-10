@@ -4,6 +4,7 @@
 #include <bit>
 #include <cstddef>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "src/build_flags.h"
@@ -17,7 +18,7 @@ using ActionMenu = BettingAbstraction::ActionMenu;
 using BettingHistoryKey = BettingAbstraction::BettingHistoryKey;
 using BettingHistoryRow = BettingAbstraction::BettingHistoryRow;
 
-struct Projection {
+struct CoarseHistoryKeyFields {
   int street = 0;
   int pot_bucket = 0;
   int effective_stack_bucket = 0;
@@ -77,7 +78,7 @@ int BucketChips(int chips) {
   return std::bit_width(static_cast<unsigned int>(chips));
 }
 
-Projection Project(const BettingState& state) {
+CoarseHistoryKeyFields CoarseHistoryFields(const BettingState& state) {
   const int gap =
       state.contribution[0] > state.contribution[1]
           ? state.contribution[0] - state.contribution[1]
@@ -93,19 +94,21 @@ Projection Project(const BettingState& state) {
   };
 }
 
-void ApplyProjection(const BettingState& state, BettingHistoryKey& key) {
+BettingHistoryKey CoarsenHistoryKey(const BettingState& state,
+                                    BettingHistoryKey key) {
   if constexpr (kCoarsePublicBuckets) {
-    const Projection projection = Project(state);
-    key.street = projection.street;
-    key.pot = projection.pot_bucket;
-    key.stack_a = projection.effective_stack_bucket;
+    const CoarseHistoryKeyFields fields = CoarseHistoryFields(state);
+    key.street = fields.street;
+    key.pot = fields.pot_bucket;
+    key.stack_a = fields.effective_stack_bucket;
     key.stack_b = 0;
-    key.all_in = projection.all_in;
-    key.folded_player = projection.folded_player;
-    key.player_to_act = projection.player_to_act;
+    key.all_in = fields.all_in;
+    key.folded_player = fields.folded_player;
+    key.player_to_act = fields.player_to_act;
     key.player_contribution_size = 1;
-    key.player_contributions = {projection.to_call_bucket, 0};
+    key.player_contributions = {fields.to_call_bucket, 0};
   }
+  return key;
 }
 
 BettingHistoryKey BaseHistoryKey(const BettingState& state) {
@@ -119,8 +122,7 @@ BettingHistoryKey BaseHistoryKey(const BettingState& state) {
   key.player_to_act = state.player_to_act;
   key.player_contribution_size = 2;
   key.player_contributions = state.contribution;
-  ApplyProjection(state, key);
-  return key;
+  return CoarsenHistoryKey(state, std::move(key));
 }
 
 void AppendHistoryValue(BettingHistoryKey& key, int value) {

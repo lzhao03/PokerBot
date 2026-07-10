@@ -279,7 +279,7 @@ std::optional<CFRSolver::NodeRef> CFRSolver::root_node_ref(
   if (root_id >= state_rows.size()) {
     return std::nullopt;
   }
-  return NodeRef{root_id, state_rows[root_id].board};
+  return NodeRef{root_id, initial_state_.board};
 }
 
 std::optional<CFRSolver::DecisionFrame> CFRSolver::make_decision_frame(
@@ -337,7 +337,7 @@ CFRSolver::NodeGraph::action_child(NodeRef parent,
   switch (mode_) {
     case NodeGraphMode::kGrow:
       child_id = solver_.public_graph_.get_or_create_action_child(
-          parent.public_state_id, action_index);
+          parent.public_state_id, action_index, parent.exact_board);
       break;
     case NodeGraphMode::kSkipMissing:
     case NodeGraphMode::kRequirePresent:
@@ -386,7 +386,8 @@ CFRSolver::NodeGraph::sample_chance_child(
 
 bool CFRSolver::prebuild_info_set_rows(
     const TrainingRangeView& a_view,
-    const TrainingRangeView& b_view) {
+    const TrainingRangeView& b_view,
+    absl::Span<const std::optional<Board>> row_boards) {
   if (storage_.frozen) {
     return true;
   }
@@ -398,6 +399,9 @@ bool CFRSolver::prebuild_info_set_rows(
        public_state_id < rows().size();
        ++public_state_id) {
     const uint32_t node_id = public_state_id;
+    if (node_id >= row_boards.size() || !row_boards[node_id].has_value()) {
+      continue;
+    }
     const PublicStateRow& row = rows()[node_id];
     const auto decision = make_decision_frame(node_id, row);
     if (!decision.has_value()) {
@@ -410,7 +414,7 @@ bool CFRSolver::prebuild_info_set_rows(
       continue;
     }
 
-    const Board& board = row.board;
+    const Board& board = *row_boards[node_id];
     const uint32_t bucket_count =
         card_abstraction_.private_bucket_count(row.betting.street, board);
     if (bucket_count == 0 || bucket_count > kComboCount) {
@@ -493,7 +497,8 @@ void CFRSolver::run(int iterations,
 
   if (fixed_storage) {
     run_fixed_storage_iterations(
-        iterations, threads, root_id, sampler, a_range, b_range);
+        iterations, threads, root_id, initial_state_.board, sampler, a_range,
+        b_range);
   } else {
     run_growing_iterations(iterations, root_id, sampler, a_view, b_view,
                            max_depth);
@@ -529,8 +534,10 @@ bool CFRSolver::prepare_prebuilt_training(
 
   VLOG(1) << "Prebuilding compact public-state rows...";
   PublicStateGraph& graph = public_graph_;
+  std::vector<std::optional<Board>> row_boards;
   const auto prebuild_start = std::chrono::steady_clock::now();
-  const bool public_rows_complete = graph.prebuild_reachable_rows(root_id, max_depth);
+  const bool public_rows_complete = graph.prebuild_reachable_rows(
+      root_id, initial_state_.board, max_depth, row_boards);
   const auto prebuild_end = std::chrono::steady_clock::now();
   const std::chrono::duration<double> prebuild_seconds =
       prebuild_end - prebuild_start;
@@ -541,14 +548,16 @@ bool CFRSolver::prepare_prebuilt_training(
     return false;
   }
 
-  if (!graph.validate_prebuilt_rows(root_id, max_depth, stats)) {
+  if (!graph.validate_prebuilt_rows(root_id, initial_state_.board, max_depth,
+                                    stats)) {
     return false;
   }
   record_action_counts();
 
   VLOG(1) << "Prebuilding infoset rows...";
   const auto info_set_prebuild_start = std::chrono::steady_clock::now();
-  const bool infosets_complete = prebuild_info_set_rows(a_view, b_view);
+  const bool infosets_complete =
+      prebuild_info_set_rows(a_view, b_view, row_boards);
   const auto info_set_prebuild_end = std::chrono::steady_clock::now();
   const std::chrono::duration<double> info_set_seconds =
       info_set_prebuild_end - info_set_prebuild_start;
@@ -582,7 +591,7 @@ void CFRSolver::run_growing_iterations(
   VLOG(1) << "Growing storage backend: " << iterations
           << " single-threaded iterations";
   NodeGraph graph(*this, NodeGraphMode::kGrow);
-  const NodeRef root_node{root_id, rows()[root_id].board};
+  const NodeRef root_node{root_id, initial_state_.board};
   TraversalScratch scratch(ScratchDepthReserve(config_, max_depth));
   const int64_t warmup_start_updates = cfr_update_count_;
   const auto warmup_start = std::chrono::steady_clock::now();
@@ -654,6 +663,7 @@ void CFRSolver::run_fixed_storage_iterations(
     int iterations,
     int num_threads,
     uint32_t root_id,
+    const Board& root_board,
     const RangeSampler& sampler,
     const TrainingRange& a_range,
     const TrainingRange& b_range) {
@@ -689,7 +699,7 @@ void CFRSolver::run_fixed_storage_iterations(
   int completed_iterations = 0;
   run_sharded(
       iterations, num_threads, iterations_run_,
-      [this, root_id, &sampler, fixed_tables, cumulative,
+      [this, root_id, root_board, &sampler, fixed_tables, cumulative,
        use_fixed_infoset_lookup, use_atomic_updates, &a_range, &b_range](
           int iteration_begin, int shard, unsigned int seed) mutable {
           // Build a lightweight worker that shares frozen tables.
@@ -713,9 +723,8 @@ void CFRSolver::run_fixed_storage_iterations(
           }
 
           double local_utility = 0.0;
-          const auto& root_row = worker.tables().public_state_rows[root_id];
           NodeGraph graph(worker, NodeGraphMode::kRequirePresent);
-          const NodeRef root_node{root_id, root_row.board};
+          const NodeRef root_node{root_id, root_board};
           for (int i = 0; i < shard; ++i) {
             const RangeDeal sampled = sampler.sample(worker.rng_);
             const TraversalDeal deal = worker.traversal_deal(sampled);
@@ -1064,7 +1073,7 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
     return 0.0;
   }
   const uint32_t root_id = *maybe_root_id;
-  const NodeRef root_node{root_id, rows()[root_id].board};
+  const NodeRef root_node{root_id, initial_state_.board};
   NodeGraph graph(*this, storage_.frozen ? NodeGraphMode::kSkipMissing
                                          : NodeGraphMode::kGrow);
   const TraversalDeal deal{{
@@ -1087,12 +1096,14 @@ double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range
   if (!maybe_root_id.has_value()) {
     return 0.0;
   }
-  return evaluate_strategy_samples(samples, *maybe_root_id, sampler, true);
+  return evaluate_strategy_samples(samples, *maybe_root_id,
+                                   initial_state_.board, sampler, true);
 }
 
 double CFRSolver::evaluate_strategy_samples(
     int samples,
     uint32_t root_id,
+    const Board& root_board,
     const RangeSampler& sampler,
     bool allow_parallel) {
   if (samples <= 0) {
@@ -1108,13 +1119,13 @@ double CFRSolver::evaluate_strategy_samples(
     double total = 0.0;
     run_sharded(
         samples, worker_count, 0,
-        [config, &sampler, root_id, frozen_tables, cumulative](
+        [config, &sampler, root_id, root_board, frozen_tables, cumulative](
             int, int shard_samples, unsigned int seed) mutable {
           CFRSolver worker(config);
           worker.storage_.bind_frozen(frozen_tables, cumulative);
           worker.rng_.seed(seed);
           const double value = worker.evaluate_strategy_samples(
-              shard_samples, root_id, sampler, false);
+              shard_samples, root_id, root_board, sampler, false);
           return std::make_pair(
               value * shard_samples,
               worker.get_traversal_stats().action_entry_touches);
@@ -1127,10 +1138,10 @@ double CFRSolver::evaluate_strategy_samples(
   }
 
   double total = 0.0;
-  std::optional<NodeRef> root_node = root_node_ref(root_id);
-  if (!root_node.has_value()) {
+  if (root_id >= rows().size()) {
     return 0.0;
   }
+  const NodeRef root_node{root_id, root_board};
   NodeGraph graph(*this, storage_.frozen ? NodeGraphMode::kSkipMissing
                                          : NodeGraphMode::kGrow);
   for (int i = 0; i < samples; ++i) {
@@ -1139,7 +1150,7 @@ double CFRSolver::evaluate_strategy_samples(
         PrivateCards::FromCombo(deal.player_a_combo),
         PrivateCards::FromCombo(deal.player_b_combo),
     }};
-    total += evaluate_strategy_node(*root_node, traversal_deal, graph);
+    total += evaluate_strategy_node(root_node, traversal_deal, graph);
   }
   return total / samples;
 }

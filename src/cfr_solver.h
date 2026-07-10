@@ -331,6 +331,7 @@ class CFRSolver {
       int iterations,
       int num_threads,
       uint32_t root_id,
+      const Board& root_board,
       const RangeSampler& sampler,
       const TrainingRange& a_range,
       const TrainingRange& b_range);
@@ -356,7 +357,8 @@ class CFRSolver {
                                 EvalChild&& eval_child);
 
   bool prebuild_info_set_rows(const TrainingRangeView& a_view,
-                              const TrainingRangeView& b_view);
+                              const TrainingRangeView& b_view,
+                              absl::Span<const std::optional<Board>> row_boards);
   absl::Span<TrainingRangeView> condition_ranges_for_actions(
       const TrainingRangeView& range,
       StreetKind street,
@@ -375,6 +377,7 @@ class CFRSolver {
   double evaluate_strategy_samples(
       int samples,
       uint32_t root_id,
+      const Board& root_board,
       const RangeSampler& sampler,
       bool allow_parallel);
   SolverConfig config_;
