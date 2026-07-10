@@ -62,7 +62,7 @@ double ShowdownUtilityFromComparison(const BettingState& state,
 
 size_t ScratchDepthReserve(const SolverConfig& config, int max_depth) {
   if (max_depth > 0) {
-    return static_cast<size_t>(max_depth) + 2;
+    return static_cast<size_t>(max_depth) + kMaxBoardCards + 4;
   }
   const int stack_size = std::max(0, config.starting_stack_size);
   return std::max<size_t>(32, static_cast<size_t>(stack_size) + 12);
@@ -196,81 +196,6 @@ CFRSolver::RangeScratchFrame& CFRSolver::TraversalScratch::frame(
     frames.emplace_back();
   }
   return frames[depth];
-}
-
-CFRSolver::TraversalContext::TraversalContext(
-    TraversalDeal deal,
-    TraversalOptions options,
-    TraversalScratch& scratch,
-    OptionalTrainingRange player_a_range,
-    OptionalTrainingRange player_b_range)
-    : deal_(deal), options_(options), scratch_(&scratch) {
-  ranges_[0] = player_a_range;
-  ranges_[1] = player_b_range;
-}
-
-CFRSolver::OptionalTrainingRange
-CFRSolver::TraversalContext::range_without_mask(int player,
-                                                CardMask blocked_mask) {
-  OptionalTrainingRange current = range(player);
-  if (!current.has_value()) {
-    return {};
-  }
-  TrainingRangeView& scratch =
-      scratch_frame().public_player_ranges[static_cast<size_t>(player)];
-  return std::cref(
-      current->get().copy_without_mask_into(blocked_mask, scratch));
-}
-
-RegretUpdateOptions CFRSolver::TraversalContext::regret_update_options()
-    const {
-  return RegretUpdateOptions{options_.regret_update_mode,
-                             options_.record_atomic_retry_stats};
-}
-
-CFRSolver::TraversalContext::ChildTraversalScope::ChildTraversalScope(
-    TraversalContext& ctx,
-    int acting_player,
-    double action_probability,
-    OptionalTrainingRange player_a_range,
-    OptionalTrainingRange player_b_range,
-    bool override_ranges)
-    : ctx_(ctx),
-      player_(acting_player),
-      previous_reach_(ctx_.reach_[static_cast<size_t>(acting_player)]),
-      previous_ranges_(ctx_.ranges_),
-      restore_reach_(true),
-      restore_depth_(true),
-      restore_ranges_(override_ranges) {
-  ctx_.reach_[static_cast<size_t>(acting_player)] *= action_probability;
-  ++ctx_.depth_;
-  if (restore_ranges_) {
-    ctx_.ranges_[0] = player_a_range;
-    ctx_.ranges_[1] = player_b_range;
-  }
-}
-
-CFRSolver::TraversalContext::ChildTraversalScope::ChildTraversalScope(
-    TraversalContext& ctx,
-    OptionalTrainingRange player_a_range,
-    OptionalTrainingRange player_b_range)
-    : ctx_(ctx),
-      previous_ranges_(ctx_.ranges_),
-      restore_ranges_(true) {
-  ctx_.ranges_[0] = player_a_range;
-  ctx_.ranges_[1] = player_b_range;
-}
-
-CFRSolver::TraversalContext::ChildTraversalScope::~ChildTraversalScope() {
-  if (restore_depth_) {
-    --ctx_.depth_;
-  }
-  if (restore_reach_) {
-    ctx_.reach_[static_cast<size_t>(player_)] = previous_reach_;
-  }
-  if (restore_ranges_) {
-    ctx_.ranges_ = previous_ranges_;
-  }
 }
 
 std::optional<CFRSolver::DecisionFrame> CFRSolver::make_decision_frame(
@@ -663,15 +588,14 @@ void CFRSolver::run_growing_iterations(
 
     VLOG(2) << "Iteration " << i + 1 << "/" << iterations;
     const int cfr_iteration = iterations_run_;
-    OptionalTrainingRange a_context;
-    OptionalTrainingRange b_context;
+    TraversalFrame frame;
     if (max_depth > 0) {
-      a_context = std::cref(a_view);
-      b_context = std::cref(b_view);
+      frame.ranges[0] = &a_view;
+      frame.ranges[1] = &b_view;
     }
     TraversalOptions options = traversal_options(cfr_iteration, max_depth);
-    TraversalContext ctx(deal, options, scratch, a_context, b_context);
-    const double dealt_value = cfr(root_node, ctx, graph);
+    TraversalRun run{deal, options, &scratch};
+    const double dealt_value = cfr(root_node, run, frame, graph);
 
     cumulative_root_utility_ += dealt_value;
     ++iterations_run_;
@@ -788,11 +712,10 @@ void CFRSolver::run_fixed_storage_iterations(
             const TraversalDeal deal = worker.traversal_deal(sampled);
 
             const int cfr_iteration = iteration_begin + i;
-            OptionalTrainingRange a_context;
-            OptionalTrainingRange b_context;
+            TraversalFrame frame;
             if (max_depth > 0) {
-              a_context = std::cref(a_view);
-              b_context = std::cref(b_view);
+              frame.ranges[0] = &a_view;
+              frame.ranges[1] = &b_view;
             }
             auto options = worker.traversal_options(cfr_iteration, max_depth);
             if (use_fixed_infoset_lookup) {
@@ -807,8 +730,8 @@ void CFRSolver::run_fixed_storage_iterations(
               options.write_average_strategy = false;
               options.record_atomic_retry_stats = use_atomic_updates;
             }
-            TraversalContext ctx(deal, options, scratch, a_context, b_context);
-            local_utility += worker.cfr(root_node, ctx, graph);
+            TraversalRun run{deal, options, &scratch};
+            local_utility += worker.cfr(root_node, run, frame, graph);
           }
           return WorkerResult{local_utility, worker.get_traversal_stats(),
                               worker.get_cfr_update_count(), shard};
@@ -830,7 +753,9 @@ void CFRSolver::run_fixed_storage_iterations(
 }
 
 template <typename Graph>
-double CFRSolver::CfrTraversal<Graph>::value(NodeRef node) {
+double CFRSolver::CfrTraversal<Graph>::value(
+    NodeRef node,
+    const TraversalFrame& frame) {
   const uint32_t node_id = node.public_state_id;
   const auto& rows = solver_.rows();
   if (node_id >= rows.size()) {
@@ -842,18 +767,19 @@ double CFRSolver::CfrTraversal<Graph>::value(NodeRef node) {
     case StrategyTables::NodeKind::kTerminal:
       return terminal(node, row);
     case StrategyTables::NodeKind::kChance:
-      return chance(node);
+      return chance(node, frame);
     case StrategyTables::NodeKind::kFrontier:
       return depth_limit_value(node, row);
     case StrategyTables::NodeKind::kDecision:
       break;
   }
 
-  if (ctx_.depth_limited()) {
+  const int max_depth = run_.options.max_depth;
+  if (max_depth > 0 && frame.decision_depth >= max_depth) {
     return depth_limit_value(node, row);
   }
 
-  return decision(node, row);
+  return decision(node, row, frame);
 }
 
 template <typename Graph>
@@ -861,28 +787,35 @@ double CFRSolver::CfrTraversal<Graph>::terminal(
     NodeRef node,
     const PublicStateRow& row) {
   solver_.traversal_stats_.record_terminal(row.betting.folded_player < 0);
-  return solver_.terminal_utility(row, node.exact_board, ctx_.cards(0),
-                                  ctx_.cards(1));
+  return solver_.terminal_utility(row, node.exact_board,
+                                  run_.deal.player_cards(0),
+                                  run_.deal.player_cards(1));
 }
 
 template <typename Graph>
-double CFRSolver::CfrTraversal<Graph>::chance(NodeRef node) {
+double CFRSolver::CfrTraversal<Graph>::chance(
+    NodeRef node,
+    const TraversalFrame& frame) {
   const int samples = ChanceSamples(solver_.config_);
   solver_.traversal_stats_.record_chance_samples(samples);
   return solver_.sample_chance_children(
-      samples, node, ctx_.known_private_cards(), graph_,
+      samples, node, run_.deal.known_private_cards(), graph_,
       [&](NodeRef child) {
-        OptionalTrainingRange a_range =
-            ctx_.range_without_mask(0, child.exact_board.mask);
-        OptionalTrainingRange b_range =
-            ctx_.range_without_mask(1, child.exact_board.mask);
-
-        if (a_range.has_value() || b_range.has_value()) {
-          TraversalContext::ChildTraversalScope child_scope(
-              ctx_, a_range, b_range);
-          return value(child);
+        TraversalFrame child_frame = frame;
+        ++child_frame.scratch_depth;
+        if (frame.ranges[0] != nullptr || frame.ranges[1] != nullptr) {
+          RangeScratchFrame& scratch =
+              run_.scratch->frame(child_frame.scratch_depth);
+          for (size_t player = 0; player < kPlayerCount; ++player) {
+            if (frame.ranges[player] == nullptr) {
+              continue;
+            }
+            child_frame.ranges[player] =
+                &frame.ranges[player]->copy_without_mask_into(
+                    child.exact_board.mask, scratch.filtered_ranges[player]);
+          }
         }
-        return value(child);
+        return value(child, child_frame);
       });
 }
 
@@ -891,15 +824,17 @@ double CFRSolver::CfrTraversal<Graph>::depth_limit_value(
     NodeRef node,
     const PublicStateRow& row) {
   return IsBettingRoundOver(row.betting)
-             ? solver_.terminal_utility(row, node.exact_board, ctx_.cards(0),
-                                        ctx_.cards(1))
+             ? solver_.terminal_utility(row, node.exact_board,
+                                        run_.deal.player_cards(0),
+                                        run_.deal.player_cards(1))
              : 0.0;
 }
 
 template <typename Graph>
 double CFRSolver::CfrTraversal<Graph>::decision(
     NodeRef node,
-    const PublicStateRow& row) {
+    const PublicStateRow& row,
+    const TraversalFrame& frame) {
   const uint32_t node_id = node.public_state_id;
   const auto maybe_decision = solver_.make_decision_frame(node_id, row);
   if (!maybe_decision.has_value()) {
@@ -907,16 +842,16 @@ double CFRSolver::CfrTraversal<Graph>::decision(
   }
   const DecisionFrame& decision = *maybe_decision;
   const int player = PlayerIndex(decision.player);
-  const PrivateCards& cards = ctx_.cards(player);
+  const PrivateCards& cards = run_.deal.player_cards(player);
 
-  const bool update_player = ctx_.is_update_player(player);
+  const bool update_player = player == run_.options.update_player;
   const size_t action_count = decision.action_count;
   const absl::Span<const int> action_ids = decision.action_ids_span();
   const PrivateBucketId bucket =
       solver_.card_abstraction_.private_bucket(
           cards.combo, decision.street, node.exact_board);
   std::optional<ActionBlock> actions;
-  if (ctx_.options().use_fixed_infoset_lookup) {
+  if (run_.options.use_fixed_infoset_lookup) {
     actions = solver_.strategy_store_.find_frozen(
         decision.public_state_id, player, bucket, action_count);
   } else {
@@ -935,71 +870,63 @@ double CFRSolver::CfrTraversal<Graph>::decision(
   absl::Span<double> action_values(action_values_storage.data(), action_count);
   std::fill(action_values.begin(), action_values.end(), 0.0);
   solver_.strategy_store_.regret_matching_or_uniform(
-      actions, action_count, ctx_.options().regret_load_mode,
+      actions, action_count, run_.options.regret_load_mode,
       action_probabilities);
 
   double node_value = 0.0;
-  std::optional<ActionRangeConditioning> range_conditioning;
-  const bool needs_a_range = player == 0 && ctx_.range(0).has_value();
-  const bool needs_b_range = player == 1 && ctx_.range(1).has_value();
-  if (needs_a_range || needs_b_range) {
-    range_conditioning.emplace(solver_, ctx_, decision.street,
-                               node.exact_board,
-                               decision.public_state_id, player, action_ids);
+  absl::Span<TrainingRangeView> conditioned_ranges;
+  const bool override_range = frame.ranges[static_cast<size_t>(player)] != nullptr;
+  if (override_range) {
+    RangeScratchFrame& scratch =
+        run_.scratch->frame(static_cast<size_t>(frame.scratch_depth));
+    conditioned_ranges = solver_.condition_ranges_for_actions(
+        *frame.ranges[static_cast<size_t>(player)], decision.street,
+        node.exact_board, decision.public_state_id, player, action_ids,
+        scratch);
   }
-  const bool has_conditioning = range_conditioning.has_value();
-  const bool has_ranges = has_conditioning && range_conditioning->enabled();
-  const bool override_ranges = has_ranges;
 
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
     const int action = static_cast<int>(action_index);
     const auto child = graph_.action_child(node, action);
+    auto visit_child = [&](NodeRef child_node) {
+      TraversalFrame child_frame = frame;
+      child_frame.reach[static_cast<size_t>(player)] *=
+          action_probabilities[action_index];
+      ++child_frame.decision_depth;
+      ++child_frame.scratch_depth;
+      if (override_range) {
+        child_frame.ranges[static_cast<size_t>(player)] =
+            &conditioned_ranges[action_index];
+      }
+      return value(child_node, child_frame);
+    };
+
     if constexpr (std::is_same_v<std::remove_cvref_t<decltype(child)>,
                                  std::optional<NodeRef>>) {
       if (!child.has_value()) {
         continue;
       }
-
-      double action_value = 0.0;
-      {
-        OptionalTrainingRange a_child_range;
-        OptionalTrainingRange b_child_range;
-        if (override_ranges) {
-          a_child_range = range_conditioning->player_a_range_for(action_index);
-          b_child_range = range_conditioning->player_b_range_for(action_index);
-        }
-        TraversalContext::ChildTraversalScope child_scope(
-            ctx_, player, action_probabilities[action_index], a_child_range,
-            b_child_range, override_ranges);
-        action_value = value(*child);
-      }
+      const double action_value = visit_child(*child);
       action_values[action_index] = action_value;
       node_value += action_probabilities[action_index] * action_value;
     } else {
-      double action_value = 0.0;
-      {
-        OptionalTrainingRange a_child_range;
-        OptionalTrainingRange b_child_range;
-        if (override_ranges) {
-          a_child_range = range_conditioning->player_a_range_for(action_index);
-          b_child_range = range_conditioning->player_b_range_for(action_index);
-        }
-        TraversalContext::ChildTraversalScope child_scope(
-            ctx_, player, action_probabilities[action_index], a_child_range,
-            b_child_range, override_ranges);
-        action_value = value(child);
-      }
+      const double action_value = visit_child(child);
       action_values[action_index] = action_value;
       node_value += action_probabilities[action_index] * action_value;
     }
   }
 
   ++solver_.cfr_update_count_;
-  solver_.traversal_stats_.record_decision(decision.street, ctx_.depth());
+  solver_.traversal_stats_.record_decision(decision.street,
+                                           frame.decision_depth);
 
   if (actions.has_value() && update_player) {
-    const double opponent_reach = ctx_.opponent_reach(player);
-    const RegretUpdateOptions regret_options = ctx_.regret_update_options();
+    const double opponent_reach =
+        frame.reach[static_cast<size_t>(1 - player)];
+    const RegretUpdateOptions regret_options{
+        run_.options.regret_update_mode,
+        run_.options.record_atomic_retry_stats,
+    };
     for (size_t action_index = 0; action_index < action_count; ++action_index) {
       const double sign = player == 0 ? 1.0 : -1.0;
       const double delta = action_values[action_index] - node_value;
@@ -1009,10 +936,12 @@ double CFRSolver::CfrTraversal<Graph>::decision(
           action_index, static_cast<float>(regret), regret_options);
     }
 
-    if (ctx_.options().write_average_strategy) {
+    if (run_.options.write_average_strategy) {
+      const double weight =
+          frame.reach[static_cast<size_t>(player)] *
+          static_cast<double>(run_.options.iteration + 1);
       actions->add_average_strategy(
-          action_probabilities, ctx_.average_strategy_weight(player),
-          ctx_.options().regret_update_mode);
+          action_probabilities, weight, run_.options.regret_update_mode);
     }
   }
 
@@ -1022,9 +951,10 @@ double CFRSolver::CfrTraversal<Graph>::decision(
 template <typename Graph>
 double CFRSolver::cfr(
     NodeRef node,
-    TraversalContext& ctx,
+    TraversalRun& run,
+    const TraversalFrame& frame,
     Graph& graph) {
-  return CfrTraversal<Graph>(*this, ctx, graph).value(node);
+  return CfrTraversal<Graph>(*this, run, graph).value(node, frame);
 }
 
 template <typename Graph, typename EvalChild>
@@ -1055,61 +985,15 @@ double CFRSolver::sample_chance_children(
 
 template double CFRSolver::cfr<CFRSolver::MutableTraversalGraph>(
     NodeRef node,
-    TraversalContext& ctx,
+    TraversalRun& run,
+    const TraversalFrame& frame,
     MutableTraversalGraph& graph);
 
 template double CFRSolver::cfr<CFRSolver::FrozenTraversalGraph>(
     NodeRef node,
-    TraversalContext& ctx,
+    TraversalRun& run,
+    const TraversalFrame& frame,
     FrozenTraversalGraph& graph);
-
-CFRSolver::ActionRangeConditioning::ActionRangeConditioning(
-    CFRSolver& solver,
-    TraversalContext& ctx,
-    StreetKind street,
-    const Board& board,
-    uint32_t node_id,
-    int player,
-    absl::Span<const int> action_ids)
-    : original_player_a_range_(ctx.range(0)),
-      original_player_b_range_(ctx.range(1)),
-      condition_player_a_(player == 0 &&
-                          original_player_a_range_.has_value()),
-      condition_player_b_(player == 1 &&
-                          original_player_b_range_.has_value()) {
-  if (!enabled()) {
-    return;
-  }
-
-  RangeScratchFrame& scratch_frame = ctx.scratch_frame();
-  if (condition_player_a_) {
-    conditioned_ranges_ = solver.condition_ranges_for_actions(
-        original_player_a_range_->get(), street, board, node_id, player, action_ids,
-        scratch_frame);
-  } else {
-    conditioned_ranges_ = solver.condition_ranges_for_actions(
-        original_player_b_range_->get(), street, board, node_id, player, action_ids,
-        scratch_frame);
-  }
-}
-
-CFRSolver::OptionalTrainingRange
-CFRSolver::ActionRangeConditioning::player_a_range_for(
-    size_t action_index) const {
-  if (condition_player_a_) {
-    return std::cref(conditioned_ranges_[action_index]);
-  }
-  return original_player_a_range_;
-}
-
-CFRSolver::OptionalTrainingRange
-CFRSolver::ActionRangeConditioning::player_b_range_for(
-    size_t action_index) const {
-  if (condition_player_b_) {
-    return std::cref(conditioned_ranges_[action_index]);
-  }
-  return original_player_b_range_;
-}
 
 absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
     const TrainingRangeView& range,
@@ -1124,10 +1008,7 @@ absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
     return {};
   }
 
-  std::vector<TrainingRangeView>& ranges = scratch_frame.conditioned_ranges;
-  if (ranges.size() < action_count) {
-    ranges.resize(action_count);
-  }
+  auto& ranges = scratch_frame.conditioned_ranges;
   for (size_t i = 0; i < action_count; ++i) {
     ranges[i].reset_to_filtered();
   }

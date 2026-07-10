@@ -3,7 +3,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <optional>
 #include <random>
 #include <type_traits>
@@ -107,9 +106,6 @@ class CFRSolver {
     bool record_atomic_retry_stats = false;
   };
 
-  using OptionalTrainingRange =
-      std::optional<std::reference_wrapper<const TrainingRangeView>>;
-
   struct NodeRef {
     uint32_t public_state_id = kInvalidPublicStateId;
     Board exact_board;
@@ -148,10 +144,9 @@ class CFRSolver {
     CFRSolver& solver_;
   };
 
-  // TODO: Hide action-conditioned range borrowing behind TraversalContext too.
   struct RangeScratchFrame {
-    std::vector<TrainingRangeView> conditioned_ranges;
-    std::array<TrainingRangeView, kPlayerCount> public_player_ranges;
+    std::array<TrainingRangeView, kPlayerCount> filtered_ranges;
+    std::array<TrainingRangeView, kMaxActionsPerNode> conditioned_ranges;
   };
 
   struct TraversalScratch {
@@ -159,6 +154,20 @@ class CFRSolver {
     RangeScratchFrame& frame(size_t depth);
 
     std::vector<RangeScratchFrame> frames;
+  };
+
+  struct TraversalRun {
+    TraversalDeal deal;
+    TraversalOptions options;
+    TraversalScratch* scratch = nullptr;
+  };
+
+  struct TraversalFrame {
+    std::array<double, kPlayerCount> reach = {1.0, 1.0};
+    std::array<const TrainingRangeView*, kPlayerCount> ranges = {
+        nullptr, nullptr};
+    uint16_t decision_depth = 0;
+    uint16_t scratch_depth = 0;
   };
 
   struct DecisionFrame {
@@ -174,140 +183,26 @@ class CFRSolver {
     }
   };
 
-  class TraversalContext {
-   public:
-    TraversalContext(TraversalDeal deal,
-                     TraversalOptions options,
-                     TraversalScratch& scratch,
-                     OptionalTrainingRange player_a_range = {},
-                     OptionalTrainingRange player_b_range = {});
-
-    const TraversalDeal& deal() const { return deal_; }
-    const TraversalOptions& options() const { return options_; }
-
-    const PrivateCards& cards(int player) const {
-      return deal_.player_cards(player);
-    }
-
-    CardMask known_private_cards() const {
-      return deal_.known_private_cards();
-    }
-
-    double reach(int player) const {
-      return reach_[static_cast<size_t>(player)];
-    }
-
-    double opponent_reach(int player) const {
-      return reach_[static_cast<size_t>(1 - player)];
-    }
-
-    bool is_update_player(int player) const {
-      return player == options_.update_player;
-    }
-
-    int iteration() const { return options_.iteration; }
-    int depth() const { return depth_; }
-    int max_depth() const { return options_.max_depth; }
-
-    bool depth_limited() const {
-      return options_.max_depth > 0 && depth_ >= options_.max_depth;
-    }
-
-    RangeScratchFrame& scratch_frame() {
-      return scratch_->frame(static_cast<size_t>(depth_));
-    }
-
-    OptionalTrainingRange range(int player) const {
-      return ranges_[static_cast<size_t>(player)];
-    }
-
-    OptionalTrainingRange range_without_mask(int player, CardMask blocked_mask);
-
-    double average_strategy_weight(int player) const {
-      return reach(player) * static_cast<double>(options_.iteration + 1);
-    }
-
-    RegretUpdateOptions regret_update_options() const;
-
-    class ChildTraversalScope {
-     public:
-      ChildTraversalScope(TraversalContext& ctx,
-                          int acting_player,
-                          double action_probability,
-                          OptionalTrainingRange player_a_range = {},
-                          OptionalTrainingRange player_b_range = {},
-                          bool override_ranges = false);
-
-      ChildTraversalScope(TraversalContext& ctx,
-                          OptionalTrainingRange player_a_range,
-                          OptionalTrainingRange player_b_range);
-
-      ChildTraversalScope(const ChildTraversalScope&) = delete;
-      ChildTraversalScope& operator=(const ChildTraversalScope&) = delete;
-      ~ChildTraversalScope();
-
-     private:
-      TraversalContext& ctx_;
-      int player_ = 0;
-      double previous_reach_ = 1.0;
-      std::array<OptionalTrainingRange, kPlayerCount> previous_ranges_;
-      bool restore_reach_ = false;
-      bool restore_depth_ = false;
-      bool restore_ranges_ = false;
-    };
-
-   private:
-    TraversalDeal deal_;
-    TraversalOptions options_;
-    TraversalScratch* scratch_ = nullptr;
-    std::array<double, kPlayerCount> reach_ = {1.0, 1.0};
-    std::array<OptionalTrainingRange, kPlayerCount> ranges_;
-    int depth_ = 0;
-  };
-
-  class ActionRangeConditioning {
-   public:
-    ActionRangeConditioning(CFRSolver& solver,
-                            TraversalContext& ctx,
-                            StreetKind street,
-                            const Board& board,
-                            uint32_t node_id,
-                            int player,
-                            absl::Span<const int> action_ids);
-
-    bool enabled() const {
-      return condition_player_a_ || condition_player_b_;
-    }
-
-    OptionalTrainingRange player_a_range_for(size_t action_index) const;
-    OptionalTrainingRange player_b_range_for(size_t action_index) const;
-
-   private:
-    OptionalTrainingRange original_player_a_range_;
-    OptionalTrainingRange original_player_b_range_;
-    absl::Span<TrainingRangeView> conditioned_ranges_;
-    bool condition_player_a_ = false;
-    bool condition_player_b_ = false;
-  };
-
   template <typename Graph>
   class CfrTraversal {
    public:
     CfrTraversal(CFRSolver& solver,
-                 TraversalContext& ctx,
+                 TraversalRun& run,
                  Graph& graph)
-        : solver_(solver), ctx_(ctx), graph_(graph) {}
+        : solver_(solver), run_(run), graph_(graph) {}
 
-    double value(NodeRef node);
+    double value(NodeRef node, const TraversalFrame& frame);
 
    private:
     double terminal(NodeRef node, const PublicStateRow& row);
-    double chance(NodeRef node);
+    double chance(NodeRef node, const TraversalFrame& frame);
     double depth_limit_value(NodeRef node, const PublicStateRow& row);
-    double decision(NodeRef node, const PublicStateRow& row);
+    double decision(NodeRef node,
+                    const PublicStateRow& row,
+                    const TraversalFrame& frame);
 
     CFRSolver& solver_;
-    TraversalContext& ctx_;
+    TraversalRun& run_;
     Graph& graph_;
   };
 
@@ -344,7 +239,10 @@ class CFRSolver {
       uint32_t node_id,
       const PublicStateRow& row) const;
   template <typename Graph>
-  double cfr(NodeRef node, TraversalContext& ctx, Graph& graph);
+  double cfr(NodeRef node,
+             TraversalRun& run,
+             const TraversalFrame& frame,
+             Graph& graph);
   template <typename Graph, typename EvalChild>
   double sample_chance_children(int samples,
                                 NodeRef node,

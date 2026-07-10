@@ -48,6 +48,13 @@ struct SolverSnapshot {
   std::vector<float> strategies;
 };
 
+struct RangeScratchProbe {
+  size_t root_size = 0;
+  size_t after_flop_size = 0;
+  size_t after_turn_size = 0;
+  size_t after_flop_size_after_turn = 0;
+};
+
 }  // namespace
 
 struct CFRSolverTestAccess {
@@ -141,16 +148,18 @@ struct CFRSolverTestAccess {
     }};
     CFRSolver::TraversalOptions options =
         solver.traversal_options(0, solver.config_.max_depth);
-    CFRSolver::TraversalContext ctx(deal, options, scratch, std::cref(a_view),
-                                    std::cref(b_view));
+    CFRSolver::TraversalRun run{deal, options, &scratch};
+    CFRSolver::TraversalFrame frame;
+    frame.ranges[0] = &a_view;
+    frame.ranges[1] = &b_view;
 
     double value = 0.0;
     if (freeze_storage) {
       CFRSolver::FrozenTraversalGraph graph(solver);
-      value = solver.cfr(root, ctx, graph);
+      value = solver.cfr(root, run, frame, graph);
     } else {
       CFRSolver::MutableTraversalGraph graph(solver);
-      value = solver.cfr(root, ctx, graph);
+      value = solver.cfr(root, run, frame, graph);
     }
     const MutableCumulativeArrays& arrays = solver.storage_.cumulative_ref();
     return SolverSnapshot{
@@ -163,6 +172,42 @@ struct CFRSolverTestAccess {
                            arrays.cumulative_regrets.end()),
         std::vector<float>(arrays.cumulative_strategies.begin(),
                            arrays.cumulative_strategies.end()),
+    };
+  }
+
+  static RangeScratchProbe ProbeNestedChanceScratch() {
+    TrainingRange source;
+    source.add(Combo(14, SuitKind::kHearts, 14, SuitKind::kSpades), 1.0f);
+    source.add(Combo(13, SuitKind::kHearts, 13, SuitKind::kSpades), 1.0f);
+    source.add(Combo(12, SuitKind::kHearts, 12, SuitKind::kSpades), 1.0f);
+
+    TrainingRangeView root(source);
+    CFRSolver::TraversalScratch scratch(3);
+
+    CFRSolver::TraversalFrame root_frame;
+    root_frame.ranges[0] = &root;
+
+    const CardMask flop_mask = CardBit(MakeCardId(14, SuitKind::kHearts));
+    CFRSolver::RangeScratchFrame& flop_scratch = scratch.frame(1);
+    const TrainingRangeView& after_flop =
+        root_frame.ranges[0]->copy_without_mask_into(
+            flop_mask, flop_scratch.filtered_ranges[0]);
+
+    CFRSolver::TraversalFrame turn_frame = root_frame;
+    turn_frame.scratch_depth = 1;
+    turn_frame.ranges[0] = &after_flop;
+
+    const CardMask turn_mask = CardBit(MakeCardId(13, SuitKind::kHearts));
+    CFRSolver::RangeScratchFrame& turn_scratch = scratch.frame(2);
+    const TrainingRangeView& after_turn =
+        turn_frame.ranges[0]->copy_without_mask_into(
+            turn_mask, turn_scratch.filtered_ranges[0]);
+
+    return RangeScratchProbe{
+        root.size(),
+        after_flop.size(),
+        after_turn.size(),
+        after_flop.size(),
     };
   }
 };
@@ -183,6 +228,16 @@ TEST_CASE("prepared mutable and frozen traversal produce the same storage") {
   CHECK(mutable_run.action_ids == frozen_run.action_ids);
   CHECK(mutable_run.regrets == frozen_run.regrets);
   CHECK(mutable_run.strategies == frozen_run.strategies);
+}
+
+TEST_CASE("nested chance range filtering does not overwrite parent range") {
+  const RangeScratchProbe probe =
+      CFRSolverTestAccess::ProbeNestedChanceScratch();
+
+  CHECK(probe.root_size == 3);
+  CHECK(probe.after_flop_size == 2);
+  CHECK(probe.after_turn_size == 1);
+  CHECK(probe.after_flop_size_after_turn == 2);
 }
 
 }  // namespace
