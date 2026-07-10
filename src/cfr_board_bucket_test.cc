@@ -3,6 +3,8 @@
 #include "src/combo.h"
 #include "doctest/doctest.h"
 
+#include <cmath>
+
 namespace poker {
 namespace {
 
@@ -50,6 +52,9 @@ TEST_CASE("coarse training reaches fixed-storage phase") {
   solver.run(4, player_a, player_b);
   const CFRSolver::TrainingRunStats stats =
       solver.get_last_training_run_stats();
+  CHECK(solver.get_iterations_run() == 4);
+  CHECK(std::isfinite(solver.get_expected_value(0)));
+  CHECK(solver.get_cfr_update_count() > 0);
   CHECK(stats.public_state_prebuild_complete);
   CHECK(stats.action_transition_prebuild_complete);
   CHECK(stats.chance_transition_prebuild_complete);

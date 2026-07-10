@@ -3,6 +3,7 @@
 #include "doctest/doctest.h"
 #include "src/combo.h"
 
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -38,8 +39,25 @@ SolverConfig EquivalenceConfig() {
   return config;
 }
 
+ExactGameState RiverState() {
+  ExactGameState state;
+  state.betting.stack = {20, 20};
+  state.betting.committed = {10, 10};
+  state.betting.street = StreetKind::kRiver;
+  state.betting.player_to_act = 1;
+  state.board.add(MakeCardId(3, SuitKind::kHearts));
+  state.board.add(MakeCardId(7, SuitKind::kDiamonds));
+  state.board.add(MakeCardId(12, SuitKind::kClubs));
+  state.board.add(MakeCardId(9, SuitKind::kSpades));
+  state.board.add(MakeCardId(4, SuitKind::kHearts));
+  return state;
+}
+
 struct SolverSnapshot {
   double value = 0.0;
+  int iterations = 0;
+  size_t info_sets = 0;
+  size_t nodes = 0;
   int64_t cfr_updates = 0;
   TraversalStats stats;
   std::vector<uint64_t> graph;
@@ -114,6 +132,25 @@ struct CFRSolverTestAccess {
     return out;
   }
 
+  static SolverSnapshot Snapshot(const CFRSolver& solver,
+                                 double value = 0.0) {
+    const MutableCumulativeArrays& arrays =
+        solver.storage_.cumulative_ref();
+    return SolverSnapshot{
+        value,
+        solver.get_iterations_run(),
+        solver.get_info_set_count(),
+        solver.get_public_state_count(),
+        solver.cfr_update_count_,
+        solver.traversal_stats_,
+        GraphFingerprint(solver),
+        std::vector<float>(arrays.cumulative_regrets.begin(),
+                           arrays.cumulative_regrets.end()),
+        std::vector<float>(arrays.cumulative_strategies.begin(),
+                           arrays.cumulative_strategies.end()),
+    };
+  }
+
   static SolverSnapshot RunPrepared(bool freeze_storage) {
     const ComboId a_combo =
         Combo(14, SuitKind::kHearts, 14, SuitKind::kSpades);
@@ -162,17 +199,7 @@ struct CFRSolverTestAccess {
       CFRSolver::MutableTraversalGraph graph(solver);
       value = solver.cfr(root, run, frame, graph);
     }
-    const MutableCumulativeArrays& arrays = solver.storage_.cumulative_ref();
-    return SolverSnapshot{
-        value,
-        solver.cfr_update_count_,
-        solver.traversal_stats_,
-        GraphFingerprint(solver),
-        std::vector<float>(arrays.cumulative_regrets.begin(),
-                           arrays.cumulative_regrets.end()),
-        std::vector<float>(arrays.cumulative_strategies.begin(),
-                           arrays.cumulative_strategies.end()),
-    };
+    return Snapshot(solver, value);
   }
 
   static RangeScratchProbe ProbeNestedChanceScratch() {
@@ -237,6 +264,32 @@ TEST_CASE("nested chance range filtering does not overwrite parent range") {
   CHECK(probe.after_flop_size == 2);
   CHECK(probe.after_turn_size == 1);
   CHECK(probe.after_flop_size_after_turn == 2);
+}
+
+TEST_CASE("strategy evaluation does not mutate training state") {
+  const ComboId a_combo =
+      Combo(14, SuitKind::kHearts, 2, SuitKind::kHearts);
+  const ComboId b_combo =
+      Combo(13, SuitKind::kClubs, 2, SuitKind::kClubs);
+  SolverConfig config = EquivalenceConfig();
+  config.max_depth = 0;
+  CFRSolver solver(config, RiverState());
+  solver.run(3, ExactRange(a_combo), ExactRange(b_combo));
+  const SolverSnapshot before = CFRSolverTestAccess::Snapshot(solver);
+
+  solver.reset_traversal_stats();
+  const double value = solver.evaluate_strategy(a_combo, b_combo);
+  const SolverSnapshot after = CFRSolverTestAccess::Snapshot(solver);
+
+  CHECK(std::isfinite(value));
+  CHECK(after.iterations == before.iterations);
+  CHECK(after.info_sets == before.info_sets);
+  CHECK(after.nodes == before.nodes);
+  CHECK(after.cfr_updates == before.cfr_updates);
+  CHECK(after.graph == before.graph);
+  CHECK(after.regrets == before.regrets);
+  CHECK(after.strategies == before.strategies);
+  CHECK(after.stats.cfr_updates == 0);
 }
 
 }  // namespace
