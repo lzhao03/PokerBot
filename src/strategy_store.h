@@ -98,7 +98,6 @@ class StrategyStore {
 
   StrategyStore(
       const SolverConfig& config,
-      const CardAbstraction& card_abstraction,
       SolverStorage& storage,
       TraversalStats* stats);
 
@@ -110,9 +109,7 @@ class StrategyStore {
                                            absl::Span<const int> action_ids);
   std::optional<ActionBlock> find_frozen(uint32_t public_state_id,
                                          int player,
-                                         ComboId combo_id,
-                                         StreetKind street,
-                                         const Board& board,
+                                         PrivateBucketId private_bucket,
                                          size_t expected_action_count);
 
   void regret_matching_or_uniform(std::optional<ActionBlock> block,
@@ -164,7 +161,6 @@ class StrategyStore {
       PrivateBucketId private_bucket) const;
 
   const SolverConfig& config_;
-  const CardAbstraction& card_abstraction_;
   SolverStorage& storage_;
   TraversalStats* stats_;
 };

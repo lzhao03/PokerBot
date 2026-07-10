@@ -115,7 +115,7 @@ CFRSolver::CFRSolver(const SolverConfig& config,
       cumulative_root_utility_(0.0),
       betting_abstraction_(config_),
       storage_(),
-      strategy_store_(config_, card_abstraction_, storage_, &traversal_stats_),
+      strategy_store_(config_, storage_, &traversal_stats_),
       public_graph_(config_,
                     storage_,
                     card_abstraction_,
@@ -846,15 +846,14 @@ double CFRSolver::CfrTraversal::decision(
   const bool update_player = ctx_.is_update_player(player);
   const size_t action_count = decision.action_count;
   const absl::Span<const int> action_ids = decision.action_ids_span();
+  const PrivateBucketId bucket =
+      solver_.card_abstraction_.private_bucket(
+          cards.combo, decision.street, node.exact_board);
   std::optional<ActionBlock> actions;
   if (ctx_.options().use_fixed_infoset_lookup) {
     actions = solver_.strategy_store_.find_frozen(
-        decision.public_state_id, player, cards.combo, decision.street,
-        node.exact_board, action_count);
+        decision.public_state_id, player, bucket, action_count);
   } else {
-    const PrivateBucketId bucket =
-        solver_.card_abstraction_.private_bucket(
-            cards.combo, decision.street, node.exact_board);
     const InfoSetAddress infoset{decision.public_state_id, player, bucket};
     if (update_player) {
       actions = solver_.strategy_store_.get_or_create(infoset, action_ids);

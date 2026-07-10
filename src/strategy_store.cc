@@ -298,11 +298,9 @@ void ActionBlock::average_strategy(bool regret_only_training,
 
 StrategyStore::StrategyStore(
     const SolverConfig& config,
-    const CardAbstraction& card_abstraction,
     SolverStorage& storage,
     TraversalStats* stats)
     : config_(config),
-      card_abstraction_(card_abstraction),
       storage_(storage),
       stats_(stats) {}
 
@@ -356,9 +354,7 @@ std::optional<ActionBlock> StrategyStore::get_or_create(
 std::optional<ActionBlock> StrategyStore::find_frozen(
     uint32_t node_id,
     int player,
-    ComboId combo_id,
-    StreetKind street,
-    const Board& board,
+    PrivateBucketId bucket,
     size_t expected_action_count) {
   if (player < 0 || player >= kPlayerCount ||
       node_id >= frozen_tables().frozen_info_set_action_offsets.size()) {
@@ -368,8 +364,6 @@ std::optional<ActionBlock> StrategyStore::find_frozen(
     throw std::logic_error("infoset action count exceeds uint16_t");
   }
 
-  const PrivateBucketId bucket = card_abstraction_.private_bucket(
-      combo_id, street, board);
   const uint32_t offset = frozen_info_set_action_offset(node_id, player,
                                                         bucket);
   if (offset == StrategyTables::kInvalidActionOffset) {

@@ -10,10 +10,9 @@ namespace {
 
 struct StoreFixture {
   SolverConfig config;
-  CardAbstraction card_abstraction;
   SolverStorage storage;
   TraversalStats stats;
-  StrategyStore store{config, card_abstraction, storage, &stats};
+  StrategyStore store{config, storage, &stats};
 };
 
 ActionBlock CreateBlock(StoreFixture& fixture, absl::Span<const int> actions) {
@@ -96,7 +95,7 @@ TEST_CASE("frozen lookup matches slow slab lookup") {
 
   REQUIRE(fixture.store.prebuild_frozen_info_set_action_offsets());
   std::optional<ActionBlock> frozen_block =
-      fixture.store.find_frozen(0, 0, 0, StreetKind::kPreflop, Board{}, 2);
+      fixture.store.find_frozen(0, 0, 0, 2);
 
   REQUIRE(frozen_block.has_value());
   CHECK(frozen_block->action_offset() == block.action_offset());
