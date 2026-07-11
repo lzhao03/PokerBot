@@ -7,20 +7,7 @@ namespace {
 
 const std::vector<double>& BetSizesForStreet(const SolverConfig& config,
                                              StreetKind street) {
-  switch (street) {
-    case StreetKind::kPreflop:
-      return config.preflop_bet_sizes.empty() ? config.bet_sizes
-                                              : config.preflop_bet_sizes;
-    case StreetKind::kFlop:
-      return config.flop_bet_sizes.empty() ? config.bet_sizes
-                                           : config.flop_bet_sizes;
-    case StreetKind::kTurn:
-      return config.turn_bet_sizes.empty() ? config.bet_sizes
-                                           : config.turn_bet_sizes;
-    case StreetKind::kRiver:
-      return config.river_bet_sizes.empty() ? config.bet_sizes
-                                            : config.river_bet_sizes;
-  }
+  return config.bet_sizes[static_cast<size_t>(street)];
 }
 
 }  // namespace

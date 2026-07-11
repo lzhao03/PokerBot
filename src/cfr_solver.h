@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <random>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -16,6 +17,31 @@
 #include "src/poker_types.h"
 
 namespace poker {
+
+struct SolverOptionState {
+  bool saw_global_bet_size = false;
+  bool saw_max_info_sets = false;
+  std::array<bool, 4> saw_street_bet_size = {};
+};
+
+int ParseIntOption(std::string_view value, std::string_view option);
+int64_t ParseInt64Option(std::string_view value, std::string_view option);
+bool ApplySolverOption(std::string_view argument,
+                       SolverConfig& config,
+                       SolverOptionState& state);
+
+inline constexpr std::string_view kSolverOptionUsage =
+    "  --starting-stack=N             solver config override\n"
+    "  --small-blind=N                solver config override\n"
+    "  --big-blind=N                  solver config override\n"
+    "  --chance-samples=N             solver config override\n"
+    "  --max-info-sets=N              solver config override\n"
+    "  --no-average-strategy          skip average-strategy storage\n"
+    "  --bet-size=X                   replace all street bet sizes\n"
+    "  --preflop-bet-size=X           replace preflop bet sizes\n"
+    "  --flop-bet-size=X              replace flop bet sizes\n"
+    "  --turn-bet-size=X              replace turn bet sizes\n"
+    "  --river-bet-size=X             replace river bet sizes\n";
 
 using HistoryId = uint32_t;
 inline constexpr HistoryId kInvalidHistoryId =
@@ -124,6 +150,12 @@ class CFRSolver {
   uint64_t get_cfr_update_count() const { return stats_.decision_visits; }
   size_t get_info_set_count() const { return state_.rows.size(); }
   size_t get_history_count() const { return history_.nodes.size(); }
+  size_t get_regret_bytes() const {
+    return state_.regret_sum.size() * sizeof(float);
+  }
+  size_t get_strategy_bytes() const {
+    return state_.strategy_sum.size() * sizeof(float);
+  }
   SolverStats get_stats() const { return stats_; }
   void reset_stats() { stats_ = {}; }
 

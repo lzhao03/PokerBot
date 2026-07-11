@@ -48,8 +48,8 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   CHECK(short_call.betting.stack[1] == 16);
 
   SolverConfig config;
-  config.bet_sizes = {0.5};
-  config.flop_bet_sizes = {1.0};
+  config.bet_sizes[static_cast<size_t>(StreetKind::kPreflop)] = {0.5};
+  config.bet_sizes[static_cast<size_t>(StreetKind::kFlop)] = {1.0};
   BettingState flop;
   flop.stack = {98, 98};
   flop.total_committed = {2, 2};

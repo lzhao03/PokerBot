@@ -37,8 +37,10 @@ TEST_CASE("range syntax expands to exact combo weights") {
 
 TEST_CASE("deal sampling rejects incompatible ranges") {
   SolverConfig config;
-  config.starting_stack_size = 8;
-  config.bet_sizes = {1.0};
+  config.starting_stack = 8;
+  for (auto& sizes : config.bet_sizes) {
+    sizes = {1.0};
+  }
 
   const ComboRange a = SingleComboRange(CardsToComboId(0, 1));
   ComboRange b;

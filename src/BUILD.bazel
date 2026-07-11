@@ -1,31 +1,7 @@
-load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
-load("@protobuf//bazel:proto_library.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 
 DOCTEST_DEPS = ["@doctest//:main"]
 RAPIDCHECK_DEPS = ["@rapidcheck//:rapidcheck"]
-
-proto_library(
-    name = "poker",
-    srcs = ["poker.proto"],
-    visibility = ["//visibility:public"],
-)
-
-cc_proto_library(
-    name = "poker_cc_proto",
-    deps = [":poker"],
-)
-
-cc_library(
-    name = "poker_config",
-    hdrs = ["poker_config.h"],
-    deps = [
-        ":poker_cc_proto",
-        ":poker_types",
-        "@abseil-cpp//absl/strings",
-    ],
-    visibility = ["//visibility:public"],
-)
 
 cc_library(
     name = "poker_types",
@@ -182,14 +158,6 @@ cc_library(
 )
 
 cc_library(
-    name = "cfr_solver_no_stats",
-    srcs = ["cfr_solver.cc"],
-    hdrs = ["cfr_solver.h"],
-    copts = ["-DPOKER_ENABLE_TRAVERSAL_STATS=0"],
-    deps = CFR_SOLVER_DEPS,
-)
-
-cc_library(
     name = "cfr_solver_coarse_buckets",
     srcs = ["cfr_solver.cc"],
     hdrs = ["cfr_solver.h"],
@@ -281,18 +249,6 @@ cc_binary(
     srcs = ["main.cc"],
     deps = [
         ":cfr_solver",
-        ":poker_config",
-        "@abseil-cpp//absl/log:globals",
-        "@abseil-cpp//absl/log:initialize",
-    ],
-)
-
-cc_binary(
-    name = "poker_solver_no_stats",
-    srcs = ["main.cc"],
-    deps = [
-        ":cfr_solver_no_stats",
-        ":poker_config",
         "@abseil-cpp//absl/log:globals",
         "@abseil-cpp//absl/log:initialize",
     ],
@@ -305,22 +261,18 @@ cc_binary(
         ":build_flags",
         ":cfr_solver",
         ":hand_range",
-        ":poker_config",
         "@abseil-cpp//absl/log:initialize",
     ],
 )
 
-# Prod benchmark targets use no-stats solver libraries so absolute training
-# throughput is not polluted by hot-loop traversal counters.
 cc_binary(
     name = "cfr_prod_benchmark",
     srcs = ["cfr_benchmark.cc"],
     copts = ["-DPOKER_BENCHMARK_PROD_DEFAULTS=1"],
     deps = [
         ":build_flags",
-        ":cfr_solver_no_stats",
+        ":cfr_solver",
         ":hand_range",
-        ":poker_config",
         "@abseil-cpp//absl/log:initialize",
     ],
 )

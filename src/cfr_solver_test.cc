@@ -35,13 +35,14 @@ ComboRange R(ComboId hand) {
 
 SolverConfig Config() {
   SolverConfig config;
-  config.starting_stack_size = 8;
+  config.starting_stack = 8;
   config.small_blind = 1;
   config.big_blind = 2;
-  config.bet_sizes = {0.5, 1.0};
+  for (auto& sizes : config.bet_sizes) {
+    sizes = {0.5, 1.0};
+  }
   config.chance_samples = 1;
   config.max_info_sets = 500000;
-  config.num_training_threads = 1;
   return config;
 }
 
@@ -145,10 +146,6 @@ TEST_CASE("postflop roots use full observation identity") {
 }
 
 TEST_CASE("unsupported execution modes and caps fail explicitly") {
-  SolverConfig parallel = Config();
-  parallel.num_training_threads = 2;
-  CHECK_THROWS_AS(CFRSolver{parallel}, std::invalid_argument);
-
   SolverConfig capped = Config();
   capped.max_info_sets = 1;
   CFRSolver solver(capped);
@@ -167,6 +164,24 @@ TEST_CASE("average strategy storage is optional") {
   CHECK_THROWS_AS(
       solver.evaluate_strategy(kA, kB, StrategySource::kAverage),
       std::logic_error);
+}
+
+TEST_CASE("solver options update the plain config") {
+  SolverConfig config;
+  SolverOptionState state;
+  CHECK(ApplySolverOption("--bet-size=0.5", config, state));
+  CHECK(ApplySolverOption("--flop-bet-size=1.0", config, state));
+  CHECK(ApplySolverOption("--no-average-strategy", config, state));
+  for (size_t street = 0; street < config.bet_sizes.size(); ++street) {
+    const double expected = street == static_cast<size_t>(StreetKind::kFlop)
+                                ? 1.0
+                                : 0.5;
+    CHECK(config.bet_sizes[street] == std::vector<double>{expected});
+  }
+  CHECK_FALSE(config.accumulate_average_strategy);
+  CHECK_FALSE(ApplySolverOption("--threads=2", config, state));
+  CHECK_THROWS_AS(ParseIntOption("invalid", "--iterations"),
+                  std::invalid_argument);
 }
 
 }  // namespace

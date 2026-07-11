@@ -63,22 +63,20 @@ struct GameAction {
 inline constexpr int kMaxActionsPerNode = 8;
 
 struct SolverConfig {
-  std::vector<double> bet_sizes;
-  int starting_stack_size = 100;
-  bool enable_logging = false;
-  int small_blind = 1;
-  int big_blind = 2;
+  std::array<std::vector<double>, 4> bet_sizes = {{
+      {0.25, 0.5, 1.0},
+      {0.25, 0.5, 1.0},
+      {0.25, 0.5, 1.0},
+      {0.25, 0.5, 1.0},
+  }};
+  Chips starting_stack = 100;
+  Chips small_blind = 1;
+  Chips big_blind = 2;
   int chance_samples = 1;
-  std::vector<double> preflop_bet_sizes;
-  std::vector<double> flop_bet_sizes;
-  std::vector<double> turn_bet_sizes;
-  std::vector<double> river_bet_sizes;
   bool accumulate_average_strategy = true;
   // Maximum number of info sets to allocate. 0 means unlimited.
   // Training throws when the limit is reached.
   int max_info_sets = 0;
-  // The reduced solver is single-threaded; values above one are rejected.
-  int num_training_threads = 0;
 };
 
 inline int SuitIndex(SuitKind suit) {

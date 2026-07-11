@@ -11,7 +11,6 @@
 #include "absl/log/initialize.h"
 #include "src/build_flags.h"
 #include "src/hand_range.h"
-#include "src/poker_config.h"
 
 namespace {
 
@@ -44,7 +43,7 @@ void PrintUsage(const char* program) {
             << kDefaultEvalSamples << "\n"
             << "  --range=premium|all|RANGE      default "
             << kDefaultRange << "\n"
-            << poker::kCommonSolverOptionUsage;
+            << poker::kSolverOptionUsage;
 }
 
 template <typename Function>
@@ -61,8 +60,8 @@ double Measure(std::string_view name, Function function) {
 
 int main(int argc, char** argv) {
   absl::InitializeLog();
-  poker::PokerConfig proto = poker::DefaultPokerConfig();
-  poker::CommonOptionState option_state;
+  poker::SolverConfig config;
+  poker::SolverOptionState option_state;
   Options options;
 
   try {
@@ -81,13 +80,12 @@ int main(int argc, char** argv) {
             "--eval-samples");
       } else if (argument.starts_with("--range=")) {
         options.range = argument.substr(sizeof("--range=") - 1);
-      } else if (!poker::ApplySolverOption(argument, proto, option_state)) {
+      } else if (!poker::ApplySolverOption(argument, config, option_state)) {
         throw std::invalid_argument("Unknown option: " +
                                     std::string(argument));
       }
     }
 
-    const poker::SolverConfig config = poker::SolverConfigFromProto(proto);
     const poker::ComboRange a_range = BenchmarkRange(options.range);
     const poker::ComboRange b_range = BenchmarkRange(options.range);
 
@@ -110,13 +108,17 @@ int main(int argc, char** argv) {
               << "chance_samples\t" << training.chance_samples << '\n'
               << "terminal_visits\t" << training.terminal_visits << '\n'
               << "infosets\t" << solver->get_info_set_count() << '\n'
-              << "history_nodes\t" << solver->get_history_count() << '\n';
+              << "history_nodes\t" << solver->get_history_count() << '\n'
+              << "regret_bytes\t" << solver->get_regret_bytes() << '\n'
+              << "strategy_bytes\t" << solver->get_strategy_bytes() << '\n';
 
     solver->reset_stats();
     Measure("evaluate_range", [&] {
       return solver->evaluate_strategy(
           options.eval_samples, a_range, b_range,
-          poker::StrategySource::kAverage);
+          config.accumulate_average_strategy
+              ? poker::StrategySource::kAverage
+              : poker::StrategySource::kCurrent);
     });
   } catch (const std::exception& error) {
     std::cerr << "Error: " << error.what() << '\n';

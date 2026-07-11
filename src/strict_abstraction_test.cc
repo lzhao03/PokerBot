@@ -23,12 +23,13 @@ ComboRange Range(int first_rank, int second_rank, SuitKind suit) {
 
 TEST_CASE("mixed abstractions support history traversal") {
   SolverConfig config;
-  config.starting_stack_size = 8;
+  config.starting_stack = 8;
   config.small_blind = 1;
   config.big_blind = 2;
-  config.bet_sizes = {1.0};
+  for (auto& sizes : config.bet_sizes) {
+    sizes = {1.0};
+  }
   config.max_info_sets = 500000;
-  config.num_training_threads = 1;
   config.accumulate_average_strategy = false;
 
   const BettingRules rules{config.big_blind};

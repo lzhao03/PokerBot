@@ -2,7 +2,6 @@
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "src/hand_range.h"
-#include "src/poker_config.h"
 
 #include <cerrno>
 #include <chrono>
@@ -38,7 +37,7 @@ void PrintUsage(const char* program) {
   std::cerr
       << "Usage: " << program << " [options]\n"
       << "  --iterations=N                 CFR iterations, default 100\n"
-      << poker::kCommonSolverOptionUsage
+      << poker::kSolverOptionUsage
       << "  --max-memory-mb=N                hard memory limit in MB (default "
       << kDefaultMemoryLimitMb << ", 0 = unlimited)\n"
       << "  --log                           show INFO logs and VLOG(1) progress\n";
@@ -75,9 +74,9 @@ void PrintRunSummary(const poker::CFRSolver& solver,
 int main(int argc, char** argv) {
   absl::InitializeLog();
 
-  poker::PokerConfig config = poker::DefaultPokerConfig();
+  poker::SolverConfig config;
   int iterations = 100;
-  poker::CommonOptionState option_state;
+  poker::SolverOptionState option_state;
   int64_t memory_limit_mb = kDefaultMemoryLimitMb;
 
   try {
@@ -105,21 +104,19 @@ int main(int argc, char** argv) {
 
     // Apply sensible memory caps when the user did not explicitly set them.
     if (!option_state.saw_max_info_sets) {
-      config.set_max_info_sets(kDefaultMaxInfoSets);
+      config.max_info_sets = kDefaultMaxInfoSets;
     }
     const poker::ComboRange a_range = poker::UniformRange();
     const poker::ComboRange b_range = poker::UniformRange();
 
-    const poker::SolverConfig native_config =
-        poker::SolverConfigFromProto(config);
     SetMemoryLimit(memory_limit_mb);
-    poker::CFRSolver solver(native_config);
+    poker::CFRSolver solver(config);
     auto start = std::chrono::steady_clock::now();
     solver.run(iterations, a_range, b_range);
     auto end = std::chrono::steady_clock::now();
 
     std::chrono::duration<double> elapsed = end - start;
-    PrintRunSummary(solver, native_config, elapsed.count());
+    PrintRunSummary(solver, config, elapsed.count());
   } catch (const std::exception& error) {
     std::cerr << "Error: " << error.what() << "\n";
     PrintUsage(argv[0]);
