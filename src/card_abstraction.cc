@@ -45,21 +45,23 @@ constexpr std::array<uint8_t, 8192> BuildStraightDensityTable() {
 
 inline const auto kStraightDensity = BuildStraightDensityTable();
 
-constexpr int PublicShift(StreetKind street) noexcept {
+constexpr int CoarsePublicBitOffset(StreetKind street) noexcept {
   assert(street != StreetKind::Preflop);
   return (static_cast<int>(street) - 1) * kPublicObservationBitsPerStreet;
 }
 
-PublicObservationId AdvanceCoarsePublic(PublicObservationId previous,
-                                        StreetKind street,
-                                        BoardBucketId bucket) noexcept {
-  assert(bucket < kCoarsePublicStreetObservationCount);
-  const int shift = PublicShift(street);
-  constexpr uint64_t kSlotMask = (1ULL << kPublicObservationBitsPerStreet) - 1;
-  const uint64_t slot_mask = kSlotMask << shift;
-  assert((previous.value() & slot_mask) == 0);
+PublicObservationId AppendCoarsePublicObservation(
+    PublicObservationId history,
+    StreetKind street,
+    BoardBucketId street_bucket) noexcept {
+  assert(street_bucket < kCoarsePublicStreetObservationCount);
+  const int bit_offset = CoarsePublicBitOffset(street);
+  constexpr uint64_t kStreetMask = (1ULL << kPublicObservationBitsPerStreet) - 1;
+  const uint64_t street_slot_mask = kStreetMask << bit_offset;
+  assert((history.value() & street_slot_mask) == 0);
   return PublicObservationId(
-      previous.value() | ((static_cast<uint64_t>(bucket) + 1) << shift));
+      history.value() |
+      ((static_cast<uint64_t>(street_bucket) + 1) << bit_offset));
 }
 
 PublicObservationId ObserveCoarsePublic(StreetKind street,
@@ -72,7 +74,7 @@ PublicObservationId ObserveCoarsePublic(StreetKind street,
   const auto cards = BoardCards(board);
   const FlopBoard flop =
       DealFlop(PreflopBoard{}, {cards[0], cards[1], cards[2]});
-  observation = AdvanceCoarsePublic(
+  observation = AppendCoarsePublicObservation(
       observation, StreetKind::Flop,
       BoardTextureBucket(StreetKind::Flop, BoardFeaturesFor(Board{flop})));
   if (street == StreetKind::Flop) {
@@ -80,7 +82,7 @@ PublicObservationId ObserveCoarsePublic(StreetKind street,
   }
 
   const TurnBoard turn = DealTurn(flop, cards[3]);
-  observation = AdvanceCoarsePublic(
+  observation = AppendCoarsePublicObservation(
       observation, StreetKind::Turn,
       BoardTextureBucket(StreetKind::Turn, BoardFeaturesFor(Board{turn})));
   if (street == StreetKind::Turn) {
@@ -88,7 +90,7 @@ PublicObservationId ObserveCoarsePublic(StreetKind street,
   }
 
   const RiverBoard river = DealRiver(turn, cards[4]);
-  return AdvanceCoarsePublic(
+  return AppendCoarsePublicObservation(
       observation, StreetKind::River,
       BoardTextureBucket(StreetKind::River, BoardFeaturesFor(Board{river})));
 }
@@ -779,7 +781,7 @@ PublicPosition PublicPosition::after_chance(
   if (abstraction.config().public_mode == PublicCardMode::ExactCanonical) {
     observation = CanonicalPublicObservation(board);
   } else {
-    observation = AdvanceCoarsePublic(
+    observation = AppendCoarsePublicObservation(
         observation_, street, BoardTextureBucket(street, features));
   }
   return PublicPosition(street, std::move(board), observation, features);
