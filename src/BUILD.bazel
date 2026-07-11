@@ -41,6 +41,15 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+cc_library(
+    name = "card_canonicalization",
+    srcs = ["card_canonicalization.cc"],
+    hdrs = ["card_canonicalization.h"],
+    copts = CORE_COPTS,
+    deps = [":poker"],
+    visibility = ["//visibility:public"],
+)
+
 SOLVER_SRCS = ["solver.cc"]
 SOLVER_HDRS = [
     "card_abstraction.h",
@@ -48,6 +57,7 @@ SOLVER_HDRS = [
 ]
 SOLVER_DEPS = [
     ":bet_abstraction",
+    ":card_canonicalization",
     ":poker",
     "@abseil-cpp//absl/container:flat_hash_map",
     "@abseil-cpp//absl/container:inlined_vector",

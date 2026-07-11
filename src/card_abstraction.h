@@ -14,6 +14,7 @@
 #ifndef POKER_COARSE_PRIVATE_BUCKETS
 #define POKER_COARSE_PRIVATE_BUCKETS 0
 #endif
+#include "src/card_canonicalization.h"
 #include "src/poker.h"
 
 namespace poker {
@@ -231,18 +232,6 @@ inline uint8_t straight_density(uint16_t rank_mask) {
   return card_abstraction_detail::kStraightDensity[rank_mask & 0x1FFF];
 }
 
-inline PublicObservationId exact_public_observation(
-    const Board& board) {
-  // Pack the canonical flop and ordered turn/river into one history ID.
-  uint64_t observation = BoardCount(board);
-  size_t shift = 3;
-  for (Card card : BoardCards(board)) {
-    observation |= static_cast<uint64_t>(card.index()) << shift;
-    shift += 6;
-  }
-  return PublicObservationId(observation);
-}
-
 inline BoardBucketId board_texture_bucket(
     StreetKind,
     const BoardFeatures& features) {
@@ -372,7 +361,7 @@ inline PublicObservationId public_observation_after_chance(
     return advance_public_observation(
         previous, new_street, observe_public_street(new_street, board));
   }
-  return exact_public_observation(board);
+  return CanonicalPublicObservation(board);
 }
 
 inline PublicObservationId public_observation_id(
@@ -407,7 +396,7 @@ inline PublicObservationId public_observation_id(
         history, StreetKind::kRiver,
         observe_public_street(StreetKind::kRiver, Board{river}));
   }
-  return exact_public_observation(board);
+  return CanonicalPublicObservation(board);
 }
 
 inline PublicPosition PublicPosition::Root(StreetKind street, Board board) {
@@ -475,13 +464,15 @@ inline PrivateStreetObservation observe_private_street(
   return observe_private_street(combo_id, street, board_features(board));
 }
 
-inline PrivateObservationId exact_private_observation(ComboId hand) {
-  return PrivateObservationId(hand.index());
+inline PrivateObservationId exact_private_observation(
+    ComboId hand,
+    const Board& board) {
+  return CanonicalizeObservation(hand, board).private_observation;
 }
 
 inline PrivateObservationId initial_private_observation(ComboId hand) {
   if constexpr (!kCoarsePrivateBuckets) {
-    return exact_private_observation(hand);
+    return exact_private_observation(hand, Board{PreflopBoard{}});
   }
   const auto preflop = observe_private_street(
       hand, StreetKind::kPreflop, Board{PreflopBoard{}});
@@ -495,8 +486,7 @@ inline PrivateObservationId advance_private_observation(
   const StreetKind new_street = child.street();
   assert(new_street != StreetKind::kPreflop);
   if constexpr (!kCoarsePrivateBuckets) {
-    assert(previous == exact_private_observation(hand));
-    return previous;
+    return exact_private_observation(hand, child.board());
   }
 
   const auto current = observe_private_street(
@@ -524,7 +514,7 @@ inline PrivateObservationId private_observation_for_runout(
     const PublicPosition& position) {
   const StreetKind street = position.street();
   if constexpr (!kCoarsePrivateBuckets) {
-    return exact_private_observation(hand);
+    return exact_private_observation(hand, position.board());
   }
 
   PrivateObservationId observation = initial_private_observation(hand);

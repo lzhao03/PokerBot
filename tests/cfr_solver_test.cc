@@ -108,7 +108,7 @@ TEST_CASE("small exact solver baseline is deterministic") {
   CHECK(solver.get_history_count() == 417);
   CHECK(solver.get_info_set_count() == 720);
   CHECK(solver.get_cfr_update_count() == 1440);
-  CHECK(solver.get_expected_value(Player::kA) == doctest::Approx(-0.980685));
+  CHECK(solver.get_expected_value(Player::kA) == doctest::Approx(-1.01572));
 }
 
 TEST_CASE("history tree stores direct rule transitions") {

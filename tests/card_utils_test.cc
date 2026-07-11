@@ -9,6 +9,7 @@
 #include <array>
 #include <initializer_list>
 #include <random>
+#include <set>
 #include <stdexcept>
 
 namespace poker {
@@ -85,6 +86,11 @@ Board Rename(const Board& board, const std::array<S, 4>& suits) {
     cards[i] = Rename(board_cards[i], suits);
   }
   return Runout(absl::Span<const Card>(cards.data(), BoardCount(board)));
+}
+
+ComboId Rename(ComboId hand, const std::array<S, 4>& suits) {
+  const ComboInfo& combo = GetComboInfo(hand);
+  return H(Rename(combo.card0, suits), Rename(combo.card1, suits));
 }
 
 TEST_CASE("combo ids are an exhaustive canonical bijection") {
@@ -182,6 +188,81 @@ TEST_CASE("sampling and card abstractions preserve identity") {
     blocked |= CardBit(kDeck[static_cast<size_t>(i)]);
   CHECK_FALSE(SampleStreetCards(StreetKind::kPreflop,
                                 Board{PreflopBoard{}}, blocked, rng).ok());
+}
+
+TEST_CASE("exact card observations are invariant under suit renaming") {
+  const Board board = B({C(14, S::kHearts), C(13, S::kHearts),
+                         C(7, S::kClubs), C(10, S::kDiamonds)});
+  const ComboId hand = H(C(12, S::kHearts), C(11, S::kSpades));
+  const CanonicalCardObservation expected =
+      CanonicalizeObservation(hand, board);
+
+  std::array<S, 4> suits = {
+      S::kHearts, S::kDiamonds, S::kClubs, S::kSpades};
+  do {
+    const Board renamed_board = Rename(board, suits);
+    CHECK(CanonicalPublicObservation(renamed_board) ==
+          expected.public_observation);
+    CHECK(CanonicalizeObservation(Rename(hand, suits), renamed_board) ==
+          expected);
+  } while (std::next_permutation(suits.begin(), suits.end()));
+
+  const ComboId other_hand = H(C(9, S::kDiamonds), C(8, S::kSpades));
+  CHECK(CanonicalizeObservation(other_hand, board).public_observation ==
+        expected.public_observation);
+}
+
+TEST_CASE("canonical observations preserve card relationships and order") {
+  const Board monotone = B({C(14, S::kHearts), C(13, S::kHearts),
+                            C(12, S::kHearts)});
+  const Board rainbow = B({C(14, S::kHearts), C(13, S::kDiamonds),
+                           C(12, S::kClubs)});
+  CHECK(CanonicalPublicObservation(monotone) !=
+        CanonicalPublicObservation(rainbow));
+
+  const Board draw_board = B({C(2, S::kHearts), C(7, S::kHearts),
+                              C(12, S::kClubs)});
+  const ComboId flush_draw = H(C(14, S::kHearts), C(13, S::kSpades));
+  const ComboId no_flush_draw =
+      H(C(14, S::kDiamonds), C(13, S::kSpades));
+  CHECK(CanonicalizeObservation(flush_draw, draw_board) !=
+        CanonicalizeObservation(no_flush_draw, draw_board));
+
+  const Board jack_then_ten =
+      B({C(14, S::kHearts), C(13, S::kDiamonds), C(12, S::kClubs),
+         C(11, S::kSpades), C(10, S::kHearts)});
+  const Board ten_then_jack =
+      B({C(14, S::kHearts), C(13, S::kDiamonds), C(12, S::kClubs),
+         C(10, S::kHearts), C(11, S::kSpades)});
+  CHECK(BoardMask(jack_then_ten) == BoardMask(ten_then_jack));
+  CHECK(CanonicalPublicObservation(jack_then_ten) !=
+        CanonicalPublicObservation(ten_then_jack));
+}
+
+TEST_CASE("canonical observation counts match holdem suit isomorphisms") {
+  std::set<uint64_t> private_observations;
+  const Board preflop = PreflopBoard{};
+  for (size_t first = 0; first < kDeck.size(); ++first) {
+    for (size_t second = first + 1; second < kDeck.size(); ++second) {
+      const ComboId hand = H(kDeck[first], kDeck[second]);
+      private_observations.insert(
+          CanonicalizeObservation(hand, preflop).private_observation.value());
+    }
+  }
+  CHECK(private_observations.size() == 169);
+
+  std::set<uint64_t> public_observations;
+  for (size_t first = 0; first < kDeck.size(); ++first) {
+    for (size_t second = first + 1; second < kDeck.size(); ++second) {
+      for (size_t third = second + 1; third < kDeck.size(); ++third) {
+        const FlopBoard flop = DealFlop(
+            PreflopBoard{}, {kDeck[first], kDeck[second], kDeck[third]});
+        public_observations.insert(
+            CanonicalPublicObservation(Board{flop}).value());
+      }
+    }
+  }
+  CHECK(public_observations.size() == 1755);
 }
 
 }  // namespace
