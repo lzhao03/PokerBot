@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdlib>
+#include <filesystem>
 #include <initializer_list>
 #include <random>
 #include <set>
@@ -39,6 +41,32 @@ Board Runout(absl::Span<const Card> cards) {
 
 Board B(std::initializer_list<Card> cards) {
   return Runout(absl::Span<const Card>(cards.begin(), cards.size()));
+}
+
+EquityBucketModel TestEquityModel() {
+  EquityBucketModel model;
+  model.rollout_seed = 7;
+  model.fit_seed = 11;
+  model.training_samples = 100;
+  model.opponent_samples = 16;
+  model.runout_samples = 8;
+  for (StreetKind street : {StreetKind::kFlop, StreetKind::kTurn}) {
+    auto& cutoffs = model.ehs2_cutoffs[static_cast<size_t>(street)];
+    auto& medians = model.ehs_medians[static_cast<size_t>(street)];
+    for (int index = 1; index < 16; ++index) {
+      cutoffs.push_back(static_cast<float>(index) / 16.0f);
+    }
+    medians.assign(16, 0.5f);
+  }
+  for (int index = 1; index < 64; ++index) {
+    model.river_equity_cutoffs.push_back(
+        static_cast<float>(index) / 64.0f);
+  }
+  const auto finalized = FinalizeEquityBucketModel(std::move(model));
+  if (!finalized.ok()) {
+    throw std::invalid_argument(std::string(finalized.status().message()));
+  }
+  return *finalized;
 }
 
 HandEvaluation Score5(const std::array<Card, 5>& cards) {
@@ -236,6 +264,29 @@ TEST_CASE("handcrafted 36 mappings remain stable") {
   const PublicPosition position =
       PublicPosition::Root(current, StreetKind::kFlop, flop);
   CHECK(ObservePrivate(current, hand, position) == PrivateObservationId(7));
+}
+
+TEST_CASE("equity models preserve cutoffs and bucket boundaries") {
+  const EquityBucketModel model = TestEquityModel();
+  CHECK(EquityBucket(StreetKind::kFlop, {0.49f, 0.0f}, model) == 0);
+  CHECK(EquityBucket(StreetKind::kFlop, {0.50f, 0.0f}, model) == 1);
+  CHECK(EquityBucket(StreetKind::kTurn, {0.49f, 1.0f}, model) == 30);
+  CHECK(EquityBucket(StreetKind::kTurn, {0.50f, 1.0f}, model) == 31);
+  CHECK(EquityBucket(StreetKind::kRiver, {0.0f, 0.0f}, model) == 0);
+  CHECK(EquityBucket(StreetKind::kRiver, {1.0f, 1.0f}, model) == 63);
+
+  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
+  REQUIRE(test_tmpdir != nullptr);
+  const std::filesystem::path path =
+      std::filesystem::path(test_tmpdir) / "equity.model";
+  REQUIRE(SaveEquityBucketModel(model, path).ok());
+  const auto loaded = LoadEquityBucketModel(path);
+  REQUIRE(loaded.ok());
+  CHECK(*loaded == model);
+
+  EquityBucketModel changed = model;
+  changed.river_equity_cutoffs[0] += 0.001f;
+  CHECK_FALSE(ValidateEquityBucketModel(changed).ok());
 }
 
 TEST_CASE("canonical observations preserve card relationships and order") {

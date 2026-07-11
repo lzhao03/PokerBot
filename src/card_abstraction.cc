@@ -2,9 +2,15 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
+#include <optional>
+#include <system_error>
+#include <vector>
 
 namespace poker {
 namespace {
@@ -176,7 +182,296 @@ PrivateObservationId AdvanceCoarsePrivate(
       previous.value() | ((static_cast<uint64_t>(bucket) + 1) << shift));
 }
 
+using Bytes = std::vector<uint8_t>;
+
+void AppendU32(Bytes& bytes, uint32_t value) {
+  for (int shift = 0; shift < 32; shift += 8) {
+    bytes.push_back(static_cast<uint8_t>(value >> shift));
+  }
+}
+
+void AppendU64(Bytes& bytes, uint64_t value) {
+  for (int shift = 0; shift < 64; shift += 8) {
+    bytes.push_back(static_cast<uint8_t>(value >> shift));
+  }
+}
+
+void AppendVector(Bytes& bytes, const std::vector<float>& values) {
+  AppendU32(bytes, static_cast<uint32_t>(values.size()));
+  for (float value : values) AppendU32(bytes, std::bit_cast<uint32_t>(value));
+}
+
+void AddVector(FingerprintBuilder& hash,
+               const std::vector<float>& values) noexcept {
+  hash.add_u32(static_cast<uint32_t>(values.size()));
+  for (float value : values) hash.add_float(value);
+}
+
+ModelFingerprint EquityModelFingerprint(
+    const EquityBucketModel& model) noexcept {
+  FingerprintBuilder hash;
+  hash.add_u32(0x4551424d);  // EQBM
+  hash.add_u32(model.format_version);
+  hash.add_u32(model.feature_version);
+  hash.add_u64(model.rollout_seed);
+  hash.add_u64(model.fit_seed);
+  hash.add_u32(model.training_samples);
+  hash.add_u32(model.opponent_samples);
+  hash.add_u32(model.runout_samples);
+  for (const auto& values : model.ehs2_cutoffs) AddVector(hash, values);
+  for (const auto& values : model.ehs_medians) AddVector(hash, values);
+  AddVector(hash, model.river_equity_cutoffs);
+  return hash.finish();
+}
+
+bool ValidCutoffs(const std::vector<float>& values) {
+  return std::is_sorted(values.begin(), values.end()) &&
+         std::all_of(values.begin(), values.end(), [](float value) {
+           return std::isfinite(value) && value >= 0.0f && value <= 1.0f;
+         });
+}
+
+bool ValidValues(const std::vector<float>& values) {
+  return std::all_of(values.begin(), values.end(), [](float value) {
+    return std::isfinite(value) && value >= 0.0f && value <= 1.0f;
+  });
+}
+
+absl::Status ValidateEquityModelShape(const EquityBucketModel& model) {
+  if (model.format_version != 1 || model.feature_version != 1) {
+    return absl::InvalidArgumentError("unsupported equity model version");
+  }
+  if (model.training_samples == 0 || model.opponent_samples == 0 ||
+      model.runout_samples == 0) {
+    return absl::InvalidArgumentError("equity model sampling is empty");
+  }
+  for (StreetKind street : {StreetKind::kPreflop, StreetKind::kRiver}) {
+    const size_t index = static_cast<size_t>(street);
+    if (!model.ehs2_cutoffs[index].empty() ||
+        !model.ehs_medians[index].empty()) {
+      return absl::InvalidArgumentError(
+          "equity model has unexpected street cutoffs");
+    }
+  }
+  for (StreetKind street : {StreetKind::kFlop, StreetKind::kTurn}) {
+    const size_t index = static_cast<size_t>(street);
+    if (model.ehs2_cutoffs[index].size() != 15 ||
+        model.ehs_medians[index].size() != 16 ||
+        !ValidCutoffs(model.ehs2_cutoffs[index]) ||
+        !ValidValues(model.ehs_medians[index])) {
+      return absl::InvalidArgumentError(
+          "equity model requires 32 flop and turn buckets");
+    }
+  }
+  if (model.river_equity_cutoffs.size() != 63 ||
+      !ValidCutoffs(model.river_equity_cutoffs)) {
+    return absl::InvalidArgumentError(
+        "equity model requires 64 river buckets");
+  }
+  return absl::OkStatus();
+}
+
+class ByteReader {
+ public:
+  explicit ByteReader(absl::Span<const uint8_t> bytes) : bytes_(bytes) {}
+
+  std::optional<uint8_t> u8() {
+    if (offset_ == bytes_.size()) return std::nullopt;
+    return bytes_[offset_++];
+  }
+
+  std::optional<uint32_t> u32() {
+    if (offset_ + 4 > bytes_.size()) return std::nullopt;
+    uint32_t value = 0;
+    for (int shift = 0; shift < 32; shift += 8) {
+      value |= static_cast<uint32_t>(bytes_[offset_++]) << shift;
+    }
+    return value;
+  }
+
+  std::optional<uint64_t> u64() {
+    if (offset_ + 8 > bytes_.size()) return std::nullopt;
+    uint64_t value = 0;
+    for (int shift = 0; shift < 64; shift += 8) {
+      value |= static_cast<uint64_t>(bytes_[offset_++]) << shift;
+    }
+    return value;
+  }
+
+  std::optional<std::vector<float>> floats(size_t maximum) {
+    const auto count = u32();
+    if (!count || *count > maximum) return std::nullopt;
+    std::vector<float> values;
+    values.reserve(*count);
+    for (uint32_t index = 0; index < *count; ++index) {
+      const auto bits = u32();
+      if (!bits) return std::nullopt;
+      values.push_back(std::bit_cast<float>(*bits));
+    }
+    return values;
+  }
+
+  bool done() const { return offset_ == bytes_.size(); }
+
+ private:
+  absl::Span<const uint8_t> bytes_;
+  size_t offset_ = 0;
+};
+
+absl::Status WriteBytes(const Bytes& bytes,
+                        const std::filesystem::path& path) {
+  std::filesystem::path temporary = path;
+  temporary += ".tmp";
+  std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+  if (!output) return absl::UnavailableError("could not open model file");
+  output.write(reinterpret_cast<const char*>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+  output.close();
+  if (!output) {
+    std::error_code ignored;
+    std::filesystem::remove(temporary, ignored);
+    return absl::DataLossError("could not write model file");
+  }
+  std::error_code error;
+  std::filesystem::rename(temporary, path, error);
+  if (error) {
+    std::filesystem::remove(temporary, error);
+    return absl::UnavailableError("could not replace model file");
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<Bytes> ReadBytes(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary | std::ios::ate);
+  if (!input) return absl::NotFoundError("could not open model file");
+  const std::streamoff end = input.tellg();
+  if (end < 0 || end > 4096) {
+    return absl::DataLossError("invalid equity model size");
+  }
+  Bytes bytes(static_cast<size_t>(end));
+  input.seekg(0);
+  input.read(reinterpret_cast<char*>(bytes.data()), end);
+  if (!input) return absl::DataLossError("could not read model file");
+  return bytes;
+}
+
 }  // namespace
+
+absl::Status ValidateEquityBucketModel(const EquityBucketModel& model) {
+  const absl::Status shape = ValidateEquityModelShape(model);
+  if (!shape.ok()) return shape;
+  if (model.fingerprint != EquityModelFingerprint(model)) {
+    return absl::DataLossError("equity model fingerprint mismatch");
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<EquityBucketModel> FinalizeEquityBucketModel(
+    EquityBucketModel model) {
+  const absl::Status shape = ValidateEquityModelShape(model);
+  if (!shape.ok()) return shape;
+  model.fingerprint = EquityModelFingerprint(model);
+  return model;
+}
+
+absl::Status SaveEquityBucketModel(
+    const EquityBucketModel& model,
+    const std::filesystem::path& path) {
+  const absl::Status valid = ValidateEquityBucketModel(model);
+  if (!valid.ok()) return valid;
+  Bytes bytes = {'P', 'E', 'Q', 'M', 'O', 'D', '1', 0};
+  AppendU32(bytes, model.format_version);
+  AppendU32(bytes, model.feature_version);
+  AppendU64(bytes, model.rollout_seed);
+  AppendU64(bytes, model.fit_seed);
+  AppendU32(bytes, model.training_samples);
+  AppendU32(bytes, model.opponent_samples);
+  AppendU32(bytes, model.runout_samples);
+  for (const auto& values : model.ehs2_cutoffs) AppendVector(bytes, values);
+  for (const auto& values : model.ehs_medians) AppendVector(bytes, values);
+  AppendVector(bytes, model.river_equity_cutoffs);
+  for (std::byte byte : model.fingerprint.bytes) {
+    bytes.push_back(std::to_integer<uint8_t>(byte));
+  }
+  return WriteBytes(bytes, path);
+}
+
+absl::StatusOr<EquityBucketModel> LoadEquityBucketModel(
+    const std::filesystem::path& path) {
+  const auto bytes = ReadBytes(path);
+  if (!bytes.ok()) return bytes.status();
+  constexpr std::array<uint8_t, 8> kMagic = {
+      'P', 'E', 'Q', 'M', 'O', 'D', '1', 0};
+  if (bytes->size() < kMagic.size() ||
+      !std::equal(kMagic.begin(), kMagic.end(), bytes->begin())) {
+    return absl::DataLossError("invalid equity model magic");
+  }
+  ByteReader reader(absl::MakeConstSpan(*bytes).subspan(kMagic.size()));
+  const auto format = reader.u32();
+  const auto feature = reader.u32();
+  const auto rollout_seed = reader.u64();
+  const auto fit_seed = reader.u64();
+  const auto training_samples = reader.u32();
+  const auto opponent_samples = reader.u32();
+  const auto runout_samples = reader.u32();
+  if (!format || !feature || !rollout_seed || !fit_seed ||
+      !training_samples || !opponent_samples || !runout_samples) {
+    return absl::DataLossError("truncated equity model header");
+  }
+
+  EquityBucketModel model;
+  model.format_version = *format;
+  model.feature_version = *feature;
+  model.rollout_seed = *rollout_seed;
+  model.fit_seed = *fit_seed;
+  model.training_samples = *training_samples;
+  model.opponent_samples = *opponent_samples;
+  model.runout_samples = *runout_samples;
+  for (auto& values : model.ehs2_cutoffs) {
+    auto loaded = reader.floats(63);
+    if (!loaded) return absl::DataLossError("truncated equity cutoffs");
+    values = std::move(*loaded);
+  }
+  for (auto& values : model.ehs_medians) {
+    auto loaded = reader.floats(64);
+    if (!loaded) return absl::DataLossError("truncated equity medians");
+    values = std::move(*loaded);
+  }
+  auto river = reader.floats(63);
+  if (!river) return absl::DataLossError("truncated river cutoffs");
+  model.river_equity_cutoffs = std::move(*river);
+  for (std::byte& byte : model.fingerprint.bytes) {
+    const auto value = reader.u8();
+    if (!value) {
+      return absl::DataLossError("truncated model fingerprint");
+    }
+    byte = static_cast<std::byte>(*value);
+  }
+  if (!reader.done()) return absl::DataLossError("trailing model data");
+  const absl::Status valid = ValidateEquityBucketModel(model);
+  if (!valid.ok()) return valid;
+  return model;
+}
+
+PrivateBucketId EquityBucket(StreetKind street,
+                             EquityFeatures features,
+                             const EquityBucketModel& model) noexcept {
+  assert(features.ehs >= 0.0f && features.ehs <= 1.0f);
+  assert(features.ehs2 >= 0.0f && features.ehs2 <= 1.0f);
+  if (street == StreetKind::kRiver) {
+    return static_cast<PrivateBucketId>(std::upper_bound(
+        model.river_equity_cutoffs.begin(),
+        model.river_equity_cutoffs.end(), features.ehs) -
+        model.river_equity_cutoffs.begin());
+  }
+  assert(street == StreetKind::kFlop || street == StreetKind::kTurn);
+  const size_t index = static_cast<size_t>(street);
+  const size_t outer = static_cast<size_t>(std::upper_bound(
+      model.ehs2_cutoffs[index].begin(), model.ehs2_cutoffs[index].end(),
+      features.ehs2) - model.ehs2_cutoffs[index].begin());
+  return static_cast<PrivateBucketId>(
+      2 * outer + (features.ehs >= model.ehs_medians[index][outer] ? 1 : 0));
+}
 
 BoardFeatures BoardFeaturesFor(const Board& board) noexcept {
   BoardFeatures features;
