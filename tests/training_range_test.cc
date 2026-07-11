@@ -54,11 +54,13 @@ TEST_CASE("deal sampling rejects incompatible ranges") {
   b.add(CardsToComboId(kDeck[0], kDeck[2]));
   b.add(CardsToComboId(kDeck[1], kDeck[3]));
   CFRSolver solver(config);
-  CHECK_THROWS_AS(solver.run(1, a, b), std::invalid_argument);
+  CHECK_FALSE(DealDistribution::Create(a, b).ok());
 
   const ComboRange compatible =
       SingleComboRange(H(12, S::kClubs, 12, S::kDiamonds));
-  solver.run(1, a, compatible);
+  const auto deals = DealDistribution::Create(a, compatible);
+  REQUIRE(deals.ok());
+  solver.run(1, *deals);
   CHECK(std::isfinite(solver.get_expected_value(Player::kA)));
 }
 

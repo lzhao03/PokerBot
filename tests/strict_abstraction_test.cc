@@ -70,8 +70,10 @@ TEST_CASE("mixed abstractions support history traversal") {
   state = DealChance(state, flop, rules);
 
   CFRSolver solver(config, state);
-  solver.run(2, Range(14, 13, Suit::kHearts),
-             Range(12, 11, Suit::kClubs));
+  const auto deals = DealDistribution::Create(
+      Range(14, 13, Suit::kHearts), Range(12, 11, Suit::kClubs));
+  REQUIRE(deals.ok());
+  solver.run(2, *deals);
 
   CHECK(solver.get_iterations_run() == 2);
   CHECK(std::isfinite(solver.get_expected_value(Player::kA)));

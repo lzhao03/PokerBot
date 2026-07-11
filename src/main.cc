@@ -172,12 +172,17 @@ int main(int argc, char** argv) {
     }
     const poker::ComboRange a_range = poker::UniformRange();
     const poker::ComboRange b_range = poker::UniformRange();
+    const auto deals = poker::DealDistribution::Create(a_range, b_range);
+    if (!deals.ok()) {
+      std::cerr << "Error: " << deals.status() << "\n";
+      return 1;
+    }
 
     SetMemoryLimit(memory_limit_mb);
     poker::CFRSolver solver(*config);
     const auto start = std::chrono::steady_clock::now();
     const poker::TrainingResult result = solver.run(
-        absl::GetFlag(FLAGS_iterations), a_range, b_range);
+        absl::GetFlag(FLAGS_iterations), *deals);
     const auto end = std::chrono::steady_clock::now();
 
     const std::chrono::duration<double> elapsed = end - start;

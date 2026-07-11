@@ -160,6 +160,28 @@ struct Deal {
   }
 };
 
+class DealDistribution {
+ public:
+  static absl::StatusOr<DealDistribution> Create(
+      const ComboRange& player_a,
+      const ComboRange& player_b);
+
+  Deal sample(std::mt19937& rng) const;
+
+ private:
+  static size_t SampleIndex(absl::Span<const float> cumulative,
+                            float total,
+                            std::mt19937& rng);
+
+  std::vector<ComboId> a_hands_;
+  std::vector<float> a_cumulative_;
+  std::vector<uint32_t> b_offsets_;
+  std::vector<uint16_t> b_counts_;
+  std::vector<ComboId> b_hands_;
+  std::vector<float> b_cumulative_;
+  float total_ = 0.0f;
+};
+
 struct CFRSolverTestAccess;
 
 class CFRSolver {
@@ -169,14 +191,13 @@ class CFRSolver {
             const ExactPublicState& initial_state);
 
   TrainingResult run(uint64_t iterations,
-                     const ComboRange& player_a_range,
-                     const ComboRange& player_b_range);
+                     const DealDistribution& deals);
 
   double evaluate_strategy(ComboId player_a_hand,
                            ComboId player_b_hand,
                            StrategySource source);
-  double evaluate_strategy(int samples, const ComboRange& player_a_range,
-                           const ComboRange& player_b_range,
+  double evaluate_strategy(int samples,
+                           const DealDistribution& deals,
                            StrategySource source);
 
   double get_expected_value(Player player) const;

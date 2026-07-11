@@ -71,6 +71,11 @@ int main(int argc, char** argv) {
     }
     const poker::ComboRange a_range = *parsed_range;
     const poker::ComboRange b_range = *parsed_range;
+    const auto deals = poker::DealDistribution::Create(a_range, b_range);
+    if (!deals.ok()) {
+      std::cerr << "Error: " << deals.status() << '\n';
+      return 1;
+    }
 
     std::cout << "case\tseconds\tresult\n";
     Measure("range_expand", [&] {
@@ -83,7 +88,7 @@ int main(int argc, char** argv) {
       return solver->get_history_count();
     });
     const double training_seconds = Measure("train_range", [&] {
-      solver->run(absl::GetFlag(FLAGS_iterations), a_range, b_range);
+      solver->run(absl::GetFlag(FLAGS_iterations), *deals);
       return solver->get_expected_value(poker::Player::kA);
     });
     const auto training = solver->get_stats();
@@ -101,7 +106,7 @@ int main(int argc, char** argv) {
     solver->reset_stats();
     Measure("evaluate_range", [&] {
       return solver->evaluate_strategy(
-          absl::GetFlag(FLAGS_eval_samples), a_range, b_range,
+          absl::GetFlag(FLAGS_eval_samples), *deals,
           config.accumulate_average_strategy
               ? poker::StrategySource::kAverage
               : poker::StrategySource::kCurrent);

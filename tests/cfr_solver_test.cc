@@ -33,6 +33,14 @@ ComboRange R(ComboId hand) {
   return SingleComboRange(hand);
 }
 
+DealDistribution Deals(const ComboRange& a, const ComboRange& b) {
+  auto deals = DealDistribution::Create(a, b);
+  if (!deals.ok()) {
+    throw std::invalid_argument(std::string(deals.status().message()));
+  }
+  return *deals;
+}
+
 BettingState Apply(const BettingState& state, GameAction action) {
   const auto* decision = std::get_if<DecisionState>(&state);
   if (decision == nullptr) {
@@ -79,7 +87,7 @@ const ComboId kB = H(13, S::kClubs, 13, S::kDiamonds);
 
 TEST_CASE("small exact solver baseline is deterministic") {
   CFRSolver solver(Config());
-  solver.run(10, UniformRange(), UniformRange());
+  solver.run(10, Deals(UniformRange(), UniformRange()));
 
   CHECK(solver.get_history_count() == 517);
   CHECK(solver.get_info_set_count() == 900);
@@ -120,7 +128,7 @@ TEST_CASE("history tree stores direct rule transitions") {
 TEST_CASE("training mutates only CFR state") {
   CFRSolver solver(Config());
   const size_t history_count = solver.get_history_count();
-  solver.run(4, R(kA), R(kB));
+  solver.run(4, Deals(R(kA), R(kB)));
   CHECK(solver.get_iterations_run() == 4);
   CHECK(solver.get_info_set_count() > 0);
   CHECK(solver.get_cfr_update_count() > 0);
@@ -140,7 +148,7 @@ TEST_CASE("training mutates only CFR state") {
 
 TEST_CASE("infoset action rows are contiguous") {
   CFRSolver solver(Config());
-  solver.run(4, R(kA), R(kB));
+  solver.run(4, Deals(R(kA), R(kB)));
   const CfrState& state = CFRSolverTestAccess::state(solver);
 
   std::vector<InfoSetRow> rows;
@@ -173,7 +181,7 @@ TEST_CASE("postflop roots use full observation identity") {
   root = DealChance(root, flop, rules);
 
   CFRSolver solver(config, root);
-  solver.run(2, R(kA), R(kB));
+  solver.run(2, Deals(R(kA), R(kB)));
   const HistoryTree& tree = CFRSolverTestAccess::history(solver);
   const Player player =
       std::get<DecisionNode>(tree.nodes[tree.root.index()]).state.actor;
@@ -190,7 +198,7 @@ TEST_CASE("infoset caps stop after completing the current iteration") {
   SolverConfig capped = Config();
   capped.max_info_sets = 1;
   CFRSolver solver(capped);
-  const TrainingResult result = solver.run(2, R(kA), R(kB));
+  const TrainingResult result = solver.run(2, Deals(R(kA), R(kB)));
   CHECK(result.iterations_completed == 1);
   CHECK(result.stop_reason == TrainingStopReason::kInfoSetLimit);
   CHECK(solver.get_iterations_run() == 1);
@@ -200,7 +208,7 @@ TEST_CASE("average strategy storage is optional") {
   SolverConfig config = Config();
   config.accumulate_average_strategy = false;
   CFRSolver solver(config);
-  solver.run(2, R(kA), R(kB));
+  solver.run(2, Deals(R(kA), R(kB)));
 
   CHECK(CFRSolverTestAccess::state(solver).strategy_sum.empty());
   CHECK(std::isfinite(
