@@ -276,16 +276,16 @@ bool KeyLess(const InfoSetKey& left, const InfoSetKey& right) {
 constexpr int kHandTypeCount = 169;
 
 enum class HandShape {
-  kPair,
-  kSuited,
-  kOffsuit,
-  kAny,
+  Pair,
+  Suited,
+  Offsuit,
+  Any,
 };
 
 struct HandType {
   int high = 0;
   int low = 0;
-  HandShape shape = HandShape::kPair;
+  HandShape shape = HandShape::Pair;
 };
 
 std::optional<int> ParseRank(char rank) {
@@ -316,15 +316,15 @@ std::optional<int> HandTypeIndex(HandType type) {
     return std::nullopt;
   }
   if (type.high == type.low) {
-    return type.shape == HandShape::kPair
+    return type.shape == HandShape::Pair
                ? std::optional<int>(type.high - 2)
                : std::nullopt;
   }
   const int offset = NonPairOffset(type.high, type.low);
-  if (type.shape == HandShape::kSuited) {
+  if (type.shape == HandShape::Suited) {
     return 13 + offset;
   }
-  return type.shape == HandShape::kOffsuit
+  return type.shape == HandShape::Offsuit
              ? std::optional<int>(91 + offset)
              : std::nullopt;
 }
@@ -334,7 +334,7 @@ std::optional<HandType> DecodeHandType(int index) {
     return std::nullopt;
   }
   if (index < 13) {
-    return HandType{index + 2, index + 2, HandShape::kPair};
+    return HandType{index + 2, index + 2, HandShape::Pair};
   }
   const bool suited = index < 91;
   int offset = suited ? index - 13 : index - 91;
@@ -344,7 +344,7 @@ std::optional<HandType> DecodeHandType(int index) {
   }
   const int low = offset - high * (high - 1) / 2;
   return HandType{high + 2, low + 2,
-                  suited ? HandShape::kSuited : HandShape::kOffsuit};
+                  suited ? HandShape::Suited : HandShape::Offsuit};
 }
 
 std::optional<HandType> ParseHandType(std::string_view text) {
@@ -357,16 +357,16 @@ std::optional<HandType> ParseHandType(std::string_view text) {
     return std::nullopt;
   }
   HandType type{std::max(*first, *second), std::min(*first, *second),
-                HandShape::kPair};
+                HandShape::Pair};
   if (type.high == type.low) {
     return text.size() == 2 ? std::optional<HandType>(type) : std::nullopt;
   }
   if (text.size() == 2) {
-    type.shape = HandShape::kAny;
+    type.shape = HandShape::Any;
   } else if (text[2] == 's') {
-    type.shape = HandShape::kSuited;
+    type.shape = HandShape::Suited;
   } else if (text[2] == 'o') {
-    type.shape = HandShape::kOffsuit;
+    type.shape = HandShape::Offsuit;
   } else {
     return std::nullopt;
   }
@@ -375,8 +375,8 @@ std::optional<HandType> ParseHandType(std::string_view text) {
 
 std::vector<ComboId> Expand(HandType type) {
   constexpr std::array<Suit, 4> suits = {
-      Suit::kHearts, Suit::kDiamonds,
-      Suit::kClubs, Suit::kSpades};
+      Suit::Hearts, Suit::Diamonds,
+      Suit::Clubs, Suit::Spades};
   std::vector<ComboId> combos;
   for (size_t first = 0; first < suits.size(); ++first) {
     for (size_t second = 0; second < suits.size(); ++second) {
@@ -384,8 +384,8 @@ std::vector<ComboId> Expand(HandType type) {
         continue;
       }
       const bool suited = first == second;
-      if (type.high != type.low && type.shape != HandShape::kAny &&
-          suited != (type.shape == HandShape::kSuited)) {
+      if (type.high != type.low && type.shape != HandShape::Any &&
+          suited != (type.shape == HandShape::Suited)) {
         continue;
       }
       combos.push_back(CardsToComboId(
@@ -1013,10 +1013,10 @@ absl::StatusOr<ComboRange> ParseRange(std::string_view text) {
         selected.push_back(*index);
       }
     };
-    if (type.shape == HandShape::kAny) {
-      type.shape = HandShape::kSuited;
+    if (type.shape == HandShape::Any) {
+      type.shape = HandShape::Suited;
       add(type);
-      type.shape = HandShape::kOffsuit;
+      type.shape = HandShape::Offsuit;
     }
     add(type);
   };
@@ -1034,7 +1034,7 @@ absl::StatusOr<ComboRange> ParseRange(std::string_view text) {
         return absl::InvalidArgumentError("invalid pair range");
       }
       for (int value = *rank; value <= 14; ++value) {
-        select(HandType{value, value, HandShape::kPair});
+        select(HandType{value, value, HandShape::Pair});
       }
       continue;
     }
@@ -1079,8 +1079,8 @@ CFRSolver::CFRSolver(SolveSpec spec,
   model_ = FingerprintModel(spec_, history_);
   const size_t rows = static_cast<size_t>(spec_.config.max_info_sets());
   size_t max_actions = 3;
-  for (StreetKind street : {StreetKind::kPreflop, StreetKind::kFlop,
-                            StreetKind::kTurn, StreetKind::kRiver}) {
+  for (StreetKind street : {StreetKind::Preflop, StreetKind::Flop,
+                            StreetKind::Turn, StreetKind::River}) {
     const auto& sizes = spec_.config.bet_abstraction().pot_fractions;
     max_actions = std::max(
         max_actions, sizes[static_cast<size_t>(street)].size() + 3);
@@ -1097,8 +1097,8 @@ absl::StatusOr<std::unique_ptr<CFRSolver>> CFRSolver::Create(
   if (!IsValidBettingData(Data(spec.root.betting))) {
     return absl::InvalidArgumentError("invalid root betting state");
   }
-  auto deals = DealDistribution::Create(spec.ranges[Index(Player::kA)],
-                                        spec.ranges[Index(Player::kB)]);
+  auto deals = DealDistribution::Create(spec.ranges[Index(Player::A)],
+                                        spec.ranges[Index(Player::B)]);
   if (!deals.ok()) {
     return deals.status();
   }
@@ -1208,14 +1208,14 @@ double CFRSolver::traverse(Position position,
     using Node = std::decay_t<decltype(node)>;
     if constexpr (std::is_same_v<Node, FoldTerminalNode>) {
       ++stats_.terminal_visits;
-      return TerminalUtility(node.state, Player::kA);
+      return TerminalUtility(node.state, Player::A);
     } else if constexpr (std::is_same_v<Node, ShowdownNode>) {
       ++stats_.terminal_visits;
       const auto* board =
           std::get_if<RiverBoard>(&position.public_state.board());
       assert(board != nullptr);
-      return TerminalUtility(node.state, *board, deal.hand(Player::kA),
-                             deal.hand(Player::kB));
+      return TerminalUtility(node.state, *board, deal.hand(Player::A),
+                             deal.hand(Player::B));
     } else if constexpr (std::is_same_v<Node, ChanceNode>) {
       const int samples = spec_.config.chance_samples();
       stats_.chance_samples += static_cast<uint64_t>(samples);
@@ -1235,7 +1235,7 @@ double CFRSolver::traverse(Position position,
       const InfoSetKey key{
           position.history, position.public_state.observation(),
           frame.private_observations[player_index]};
-      const bool training = context.mode == TraversalMode::kTrain;
+      const bool training = context.mode == TraversalMode::Train;
       const bool updates = training && context.update_player == player;
       std::optional<InfoSetRow> row;
       if (updates) {
@@ -1250,7 +1250,7 @@ double CFRSolver::traverse(Position position,
 
       absl::InlinedVector<double, 8> probabilities(action_count, 0.0);
       absl::InlinedVector<double, 8> values(action_count, 0.0);
-      if (context.mode == TraversalMode::kEvaluateAverage) {
+      if (context.mode == TraversalMode::EvaluateAverage) {
         AverageStrategy(state_, strategy_row, absl::MakeSpan(probabilities));
       } else {
         RegretMatch(state_, strategy_row, absl::MakeSpan(probabilities));
@@ -1272,7 +1272,7 @@ double CFRSolver::traverse(Position position,
         return node_value;
       }
 
-      const double sign = player == Player::kA ? 1.0 : -1.0;
+      const double sign = player == Player::A ? 1.0 : -1.0;
       const double opponent_reach = frame.reach[Index(Opponent(player))];
       for (uint8_t action = 0; action < action_count; ++action) {
         const double regret =
@@ -1302,15 +1302,15 @@ TrainingResult CFRSolver::run(uint64_t iterations) {
     TraversalFrame frame;
     frame.private_observations = private_observations_for_position(deal, root);
     const Player update_player =
-        state_.iterations % kPlayerCount == 0 ? Player::kA : Player::kB;
+        state_.iterations % kPlayerCount == 0 ? Player::A : Player::B;
     TraversalContext context{
-        deal, TraversalMode::kTrain, update_player, state_.iterations};
+        deal, TraversalMode::Train, update_player, state_.iterations};
     state_.cumulative_root_utility +=
         traverse(root, frame, context);
     ++state_.iterations;
     ++result.iterations_completed;
     if (context.info_set_limit_reached) {
-      result.stop_reason = TrainingStopReason::kInfoSetLimit;
+      result.stop_reason = TrainingStopReason::InfoSetLimit;
       break;
     }
   }
@@ -1342,11 +1342,11 @@ double CFRSolver::evaluate_current(HoleCards player_a,
                                    HoleCards player_b) {
   const Deal deal{{player_a, player_b},
                   ComboMask(player_a.combo()) | ComboMask(player_b.combo())};
-  return evaluate_deal(deal, TraversalMode::kEvaluateCurrent);
+  return evaluate_deal(deal, TraversalMode::EvaluateCurrent);
 }
 
 double CFRSolver::evaluate_current(int samples) {
-  return evaluate_deals(samples, TraversalMode::kEvaluateCurrent);
+  return evaluate_deals(samples, TraversalMode::EvaluateCurrent);
 }
 
 absl::StatusOr<double> CFRSolver::evaluate_average(
@@ -1358,7 +1358,7 @@ absl::StatusOr<double> CFRSolver::evaluate_average(
   }
   const Deal deal{{player_a, player_b},
                   ComboMask(player_a.combo()) | ComboMask(player_b.combo())};
-  return evaluate_deal(deal, TraversalMode::kEvaluateAverage);
+  return evaluate_deal(deal, TraversalMode::EvaluateAverage);
 }
 
 absl::StatusOr<double> CFRSolver::evaluate_average(int samples) {
@@ -1366,7 +1366,7 @@ absl::StatusOr<double> CFRSolver::evaluate_average(int samples) {
     return absl::FailedPreconditionError(
         "average strategy accumulation is disabled");
   }
-  return evaluate_deals(samples, TraversalMode::kEvaluateAverage);
+  return evaluate_deals(samples, TraversalMode::EvaluateAverage);
 }
 
 absl::StatusOr<Policy> ExtractAveragePolicy(
@@ -1503,7 +1503,7 @@ double CFRSolver::get_expected_value(Player player) const {
   }
   const double player_a_ev =
       state_.cumulative_root_utility / state_.iterations;
-  return player == Player::kA ? player_a_ev : -player_a_ev;
+  return player == Player::A ? player_a_ev : -player_a_ev;
 }
 
 void CFRSolver::log_training_summary() const {
@@ -1511,7 +1511,7 @@ void CFRSolver::log_training_summary() const {
   LOG(INFO) << "Iterations run: " << state_.iterations;
   LOG(INFO) << "Information sets: " << state_.rows.size();
   LOG(INFO) << "History nodes: " << history_.nodes.size();
-  LOG(INFO) << "Player A average EV: " << get_expected_value(Player::kA);
+  LOG(INFO) << "Player A average EV: " << get_expected_value(Player::A);
 }
 
 }  // namespace poker

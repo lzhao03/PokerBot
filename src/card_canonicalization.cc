@@ -13,7 +13,7 @@ using SuitPermutation = std::array<Suit, 4>;
 constexpr std::array<SuitPermutation, 24> BuildSuitPermutations() {
   std::array<SuitPermutation, 24> permutations = {};
   SuitPermutation current = {
-      Suit::kHearts, Suit::kDiamonds, Suit::kClubs, Suit::kSpades};
+      Suit::Hearts, Suit::Diamonds, Suit::Clubs, Suit::Spades};
   size_t index = 0;
   do {
     permutations[index++] = current;

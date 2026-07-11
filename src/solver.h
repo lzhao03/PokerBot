@@ -223,14 +223,14 @@ struct SolverStats {
 };
 
 enum class TrainingStopReason : uint8_t {
-  kIterationsCompleted,
-  kInfoSetLimit,
+  IterationsCompleted,
+  InfoSetLimit,
 };
 
 struct TrainingResult {
   uint64_t iterations_completed = 0;
   TrainingStopReason stop_reason =
-      TrainingStopReason::kIterationsCompleted;
+      TrainingStopReason::IterationsCompleted;
 };
 
 struct Deal {
@@ -320,14 +320,14 @@ class CFRSolver {
   };
 
   enum class TraversalMode : uint8_t {
-    kTrain,
-    kEvaluateCurrent,
-    kEvaluateAverage,
+    Train,
+    EvaluateCurrent,
+    EvaluateAverage,
   };
 
   struct TraversalContext {
     const Deal& deal;
-    TraversalMode mode = TraversalMode::kTrain;
+    TraversalMode mode = TraversalMode::Train;
     std::optional<Player> update_player;
     uint64_t iteration = 0;
     bool info_set_limit_reached = false;

@@ -18,9 +18,9 @@ TEST_CASE("heads-up blinds define pot and call amount") {
   CHECK(betting.last_full_raise == 2);
   CHECK(Pot(betting) == 3);
   CHECK(CurrentWager(betting) == 2);
-  CHECK(ToCall(betting, Player::kA) == 1);
-  CHECK(ToCall(betting, Player::kB) == 0);
-  CHECK(MaxContestableAdditional(betting, Player::kA) == 19);
+  CHECK(ToCall(betting, Player::A) == 1);
+  CHECK(ToCall(betting, Player::B) == 0);
+  CHECK(MaxContestableAdditional(betting, Player::A) == 19);
 }
 
 }  // namespace

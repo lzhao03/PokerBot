@@ -22,12 +22,12 @@ struct BestResponseConfig {
 };
 
 struct BestResponseResult {
-  Player responder = Player::kA;
+  Player responder = Player::A;
   Policy response_policy;
   double value = 0.0;
   double standard_error = 0.0;
   uint64_t training_iterations_completed = 0;
-  TrainingStopReason stop_reason = TrainingStopReason::kIterationsCompleted;
+  TrainingStopReason stop_reason = TrainingStopReason::IterationsCompleted;
   uint64_t opponent_policy_lookups = 0;
   uint64_t missing_opponent_lookups = 0;
 };

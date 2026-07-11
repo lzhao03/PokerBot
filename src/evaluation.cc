@@ -113,13 +113,13 @@ double TraverseProfile(const CFRSolver& game,
   return std::visit([&](const auto& node) -> double {
     using Node = std::decay_t<decltype(node)>;
     if constexpr (std::is_same_v<Node, FoldTerminalNode>) {
-      return TerminalUtility(node.state, Player::kA);
+      return TerminalUtility(node.state, Player::A);
     } else if constexpr (std::is_same_v<Node, ShowdownNode>) {
       const auto* board =
           std::get_if<RiverBoard>(&position.public_state.board());
       assert(board != nullptr);
-      return TerminalUtility(node.state, *board, deal.hand(Player::kA),
-                             deal.hand(Player::kB));
+      return TerminalUtility(node.state, *board, deal.hand(Player::A),
+                             deal.hand(Player::B));
     } else if constexpr (std::is_same_v<Node, ChanceNode>) {
       double value = 0.0;
       const int samples = game.solve_spec().config.chance_samples();
@@ -233,7 +233,7 @@ std::optional<InfoSetRow> FindOrCreateResponseRow(
 }
 
 struct ResponseTrainingContext {
-  Player responder = Player::kA;
+  Player responder = Player::A;
   const Policy& opponent;
   CfrState& state;
   uint64_t iteration = 0;
@@ -253,13 +253,13 @@ double TraverseResponse(const CFRSolver& game,
   return std::visit([&](const auto& node) -> double {
     using Node = std::decay_t<decltype(node)>;
     if constexpr (std::is_same_v<Node, FoldTerminalNode>) {
-      return TerminalUtility(node.state, Player::kA);
+      return TerminalUtility(node.state, Player::A);
     } else if constexpr (std::is_same_v<Node, ShowdownNode>) {
       const auto* board =
           std::get_if<RiverBoard>(&position.public_state.board());
       assert(board != nullptr);
-      return TerminalUtility(node.state, *board, deal.hand(Player::kA),
-                             deal.hand(Player::kB));
+      return TerminalUtility(node.state, *board, deal.hand(Player::A),
+                             deal.hand(Player::B));
     } else if constexpr (std::is_same_v<Node, ChanceNode>) {
       double value = 0.0;
       const int samples = game.solve_spec().config.chance_samples();
@@ -308,7 +308,7 @@ double TraverseResponse(const CFRSolver& game,
       }
       if (!responds || !row) return node_value;
 
-      const double sign = actor == Player::kA ? 1.0 : -1.0;
+      const double sign = actor == Player::A ? 1.0 : -1.0;
       const double opponent_reach = frame.reach[Index(Opponent(actor))];
       for (uint8_t action = 0; action < node.edges.count; ++action) {
         const size_t index = row->action_offset + action;
@@ -388,7 +388,7 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     ++response_state.iterations;
     ++result.training_iterations_completed;
     if (context.info_set_limit_reached) {
-      result.stop_reason = TrainingStopReason::kInfoSetLimit;
+      result.stop_reason = TrainingStopReason::InfoSetLimit;
       break;
     }
   }
@@ -398,15 +398,15 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
   if (!response.ok()) return response.status();
   result.response_policy = std::move(*response);
   const uint64_t evaluation_seed = config.seed ^ 0x9e3779b97f4a7c15ULL;
-  const Policy& player_a = responder == Player::kA
+  const Policy& player_a = responder == Player::A
                                ? result.response_policy
                                : opponent;
-  const Policy& player_b = responder == Player::kB
+  const Policy& player_b = responder == Player::B
                                ? result.response_policy
                                : opponent;
   const ProfileEstimate estimate = EstimateProfile(
       game, player_a, player_b, config.evaluation_samples, evaluation_seed);
-  result.value = responder == Player::kA
+  result.value = responder == Player::A
                      ? estimate.value.mean
                      : -estimate.value.mean;
   result.standard_error = estimate.value.standard_error;
@@ -424,13 +424,13 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
     const Policy& policy,
     const BestResponseConfig& config) {
   auto player_a = TrainApproximateBestResponse(
-      game, Player::kA, policy, config);
+      game, Player::A, policy, config);
   if (!player_a.ok()) return player_a.status();
 
   BestResponseConfig player_b_config = config;
   player_b_config.seed ^= 0xd1b54a32d192ed03ULL;
   auto player_b = TrainApproximateBestResponse(
-      game, Player::kB, policy, player_b_config);
+      game, Player::B, policy, player_b_config);
   if (!player_b.ok()) return player_b.status();
 
   ExploitabilityEstimate result;

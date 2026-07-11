@@ -36,7 +36,7 @@ const std::array<ComboInfo, kComboCount>& ComboTable() {
 }
 
 Player FirstPlayerForStreet(StreetKind street) {
-  return street == StreetKind::kPreflop ? Player::kA : Player::kB;
+  return street == StreetKind::Preflop ? Player::A : Player::B;
 }
 
 Chips CommitChips(BettingData& state, Player player, Chips requested) {
@@ -54,8 +54,8 @@ void RefundUnmatchedCommitment(BettingData& state) {
     return;
   }
   const Player player = state.street_committed[0] > state.street_committed[1]
-                            ? Player::kA
-                            : Player::kB;
+                            ? Player::A
+                            : Player::B;
   const size_t index = Index(player);
   const size_t opponent = Index(Opponent(player));
   const Chips excess =
@@ -78,7 +78,7 @@ bool IsBettingRoundOver(const BettingData& state) noexcept {
     return true;
   }
   const Player live_player =
-      state.stack[0] > 0 ? Player::kA : Player::kB;
+      state.stack[0] > 0 ? Player::A : Player::B;
   return ToCall(state, live_player) == 0;
 }
 
@@ -93,14 +93,14 @@ BettingState ApplyActionUnchecked(const DecisionState& state,
   const Chips delta = action.target_street_commitment - current;
 
   switch (action.kind) {
-    case ActionKind::kFold:
+    case ActionKind::Fold:
       return FoldTerminalState{child, player};
-    case ActionKind::kCheck:
+    case ActionKind::Check:
       break;
-    case ActionKind::kCall:
-    case ActionKind::kBet:
-    case ActionKind::kRaise:
-    case ActionKind::kAllIn:
+    case ActionKind::Call:
+    case ActionKind::Bet:
+    case ActionKind::Raise:
+    case ActionKind::AllIn:
       CommitChips(child, player, delta);
       break;
   }
@@ -123,7 +123,7 @@ BettingState ApplyActionUnchecked(const DecisionState& state,
   if (IsBettingRoundOver(child)) {
     RefundUnmatchedCommitment(child);
     assert(IsValidBettingData(child));
-    return child.street == StreetKind::kRiver
+    return child.street == StreetKind::River
                ? BettingState(ShowdownState{child})
                : BettingState(ChanceState{child});
   }
@@ -257,25 +257,25 @@ absl::StatusOr<HoleCards> MakeHoleCards(Card first, Card second) {
 
 int CardsForNextStreet(StreetKind street) {
   switch (street) {
-    case StreetKind::kPreflop:
+    case StreetKind::Preflop:
       return 3;
-    case StreetKind::kFlop:
-    case StreetKind::kTurn:
+    case StreetKind::Flop:
+    case StreetKind::Turn:
       return 1;
-    case StreetKind::kRiver:
+    case StreetKind::River:
       return 0;
   }
 }
 
 int BoardCardsForStreet(StreetKind street) {
   switch (street) {
-    case StreetKind::kPreflop:
+    case StreetKind::Preflop:
       return 0;
-    case StreetKind::kFlop:
+    case StreetKind::Flop:
       return 3;
-    case StreetKind::kTurn:
+    case StreetKind::Turn:
       return 4;
-    case StreetKind::kRiver:
+    case StreetKind::River:
       return 5;
   }
 }
@@ -341,7 +341,7 @@ ExactPublicState MakeInitialState(
   betting.total_committed = blinds;
   betting.street_committed = blinds;
   betting.last_full_raise = rules.minimum_bet;
-  return ExactPublicState{DecisionState{betting, Player::kA},
+  return ExactPublicState{DecisionState{betting, Player::A},
                           PreflopBoard{}};
 }
 
@@ -372,19 +372,19 @@ bool IsLegalAction(const DecisionState& state,
       (highest_to > 0 ? highest_to : current_to) + data.last_full_raise;
   const Chips target = action.target_street_commitment;
   switch (action.kind) {
-    case ActionKind::kFold:
+    case ActionKind::Fold:
       return to_call > 0 && target == 0;
-    case ActionKind::kCheck:
+    case ActionKind::Check:
       return to_call == 0 && target == 0;
-    case ActionKind::kCall:
+    case ActionKind::Call:
       return to_call > 0 && target == call_to;
-    case ActionKind::kBet:
+    case ActionKind::Bet:
       return highest_to == 0 && target >= min_full_raise_to &&
              target < all_in_to;
-    case ActionKind::kRaise:
+    case ActionKind::Raise:
       return highest_to > 0 && target >= min_full_raise_to &&
              target < all_in_to;
-    case ActionKind::kAllIn:
+    case ActionKind::AllIn:
       return all_in_to > call_to && target == all_in_to;
   }
 }
@@ -400,7 +400,7 @@ absl::StatusOr<BettingState> ApplyAction(const DecisionState& state,
 BettingState AdvanceBettingStreet(const ChanceState& state,
                                   const BettingRules& rules) {
   assert(rules.minimum_bet > 0);
-  assert(state.data.street != StreetKind::kRiver);
+  assert(state.data.street != StreetKind::River);
 
   BettingData child = state.data;
   child.street = static_cast<StreetKind>(
@@ -410,7 +410,7 @@ BettingState AdvanceBettingStreet(const ChanceState& state,
   child.pending_action_mask = kAllPlayersMask;
   if (IsBettingRoundOver(child)) {
     assert(IsValidBettingData(child));
-    return child.street == StreetKind::kRiver
+    return child.street == StreetKind::River
                ? BettingState(ShowdownState{child})
                : BettingState(ChanceState{child});
   }
@@ -427,7 +427,7 @@ ExactPublicState AdvanceChance(const ChanceState& state,
          static_cast<size_t>(CardsForNextStreet(state.data.street)));
   Board child_board;
   switch (state.data.street) {
-    case StreetKind::kPreflop: {
+    case StreetKind::Preflop: {
       std::array<Card, 3> flop;
       std::copy_n(cards.begin(), 3, flop.begin());
       const auto* preflop = std::get_if<PreflopBoard>(&board);
@@ -435,19 +435,19 @@ ExactPublicState AdvanceChance(const ChanceState& state,
       child_board = DealFlop(*preflop, flop);
       break;
     }
-    case StreetKind::kFlop: {
+    case StreetKind::Flop: {
       const auto* flop = std::get_if<FlopBoard>(&board);
       assert(flop != nullptr);
       child_board = DealTurn(*flop, cards[0]);
       break;
     }
-    case StreetKind::kTurn: {
+    case StreetKind::Turn: {
       const auto* turn = std::get_if<TurnBoard>(&board);
       assert(turn != nullptr);
       child_board = DealRiver(*turn, cards[0]);
       break;
     }
-    case StreetKind::kRiver:
+    case StreetKind::River:
       child_board = board;
       break;
   }
@@ -480,10 +480,10 @@ double TerminalUtility(const FoldTerminalState& state,
                        Player evaluated_player) noexcept {
   const BettingData& data = state.data;
   const double player0_committed = data.total_committed[0];
-  const double player0_utility = state.folded == Player::kA
+  const double player0_utility = state.folded == Player::A
                                      ? -player0_committed
                                      : Pot(data) - player0_committed;
-  return evaluated_player == Player::kA ? player0_utility : -player0_utility;
+  return evaluated_player == Player::A ? player0_utility : -player0_utility;
 }
 
 double TerminalUtility(const ShowdownState& state,

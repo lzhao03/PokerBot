@@ -23,15 +23,15 @@ EvaluationScore MakeScore(HandRank rank, Kickers... kickers) {
 
 EvaluationScore ScoreForDistinctRanks(int rank_mask, bool flush) {
   static constexpr std::array<Suit, 5> kNonFlushSuits = {
-      Suit::kHearts, Suit::kDiamonds, Suit::kClubs,
-      Suit::kSpades, Suit::kHearts};
+      Suit::Hearts, Suit::Diamonds, Suit::Clubs,
+      Suit::Spades, Suit::Hearts};
   std::array<Card, 5> cards = {};
   size_t index = 0;
   for (int rank_index = 0; rank_index < 13; ++rank_index) {
     if ((rank_mask & (1 << rank_index)) == 0) {
       continue;
     }
-    const Suit suit = flush ? Suit::kHearts : kNonFlushSuits[index];
+    const Suit suit = flush ? Suit::Hearts : kNonFlushSuits[index];
     cards[index] = Card(static_cast<Rank>(rank_index), suit);
     ++index;
   }
@@ -40,8 +40,8 @@ EvaluationScore ScoreForDistinctRanks(int rank_mask, bool flush) {
 
 EvaluationScore ScoreForRankMultiset(const std::array<int, 5>& rank_indices) {
   static constexpr std::array<Suit, 4> kSuits = {
-      Suit::kHearts, Suit::kDiamonds, Suit::kClubs,
-      Suit::kSpades};
+      Suit::Hearts, Suit::Diamonds, Suit::Clubs,
+      Suit::Spades};
   std::array<Card, 5> cards = {};
   std::array<int, 13> rank_counts = {};
   for (size_t i = 0; i < rank_indices.size(); ++i) {
@@ -64,10 +64,10 @@ int PrimeProductForRanks(const std::array<int, 5>& rank_indices) {
 }
 
 struct CactusLookupRecord {
-  enum class Kind { kFlush, kUnique, kProduct };
+  enum class Kind { Flush, Unique, Product };
 
   EvaluationScore score;
-  Kind kind = Kind::kUnique;
+  Kind kind = Kind::Unique;
   int key = 0;
 };
 
@@ -113,10 +113,10 @@ EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards) {
 
   if (flush && ranks[0] == 14 && ranks[1] == 13 && ranks[2] == 12 &&
       ranks[3] == 11 && ranks[4] == 10) {
-    return MakeScore(HandRank::ROYAL_FLUSH);
+    return MakeScore(HandRank::RoyalFlush);
   }
   if (flush && straight) {
-    return MakeScore(HandRank::STRAIGHT_FLUSH, straight_high_rank);
+    return MakeScore(HandRank::StraightFlush, straight_high_rank);
   }
 
   std::array<int, 15> rank_counts = {};
@@ -133,7 +133,7 @@ EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards) {
           break;
         }
       }
-      return MakeScore(HandRank::FOUR_OF_A_KIND, static_cast<int>(i),
+      return MakeScore(HandRank::FourOfAKind, static_cast<int>(i),
                        kicker);
     }
   }
@@ -149,14 +149,14 @@ EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards) {
   }
 
   if (trips != -1 && pair != -1) {
-    return MakeScore(HandRank::FULL_HOUSE, trips, pair);
+    return MakeScore(HandRank::FullHouse, trips, pair);
   }
   if (flush) {
-    return MakeScore(HandRank::FLUSH, ranks[0], ranks[1], ranks[2], ranks[3],
+    return MakeScore(HandRank::Flush, ranks[0], ranks[1], ranks[2], ranks[3],
                      ranks[4]);
   }
   if (straight) {
-    return MakeScore(HandRank::STRAIGHT, straight_high_rank);
+    return MakeScore(HandRank::Straight, straight_high_rank);
   }
   if (trips != -1) {
     std::array<int, 3> kickers = {trips, 0, 0};
@@ -167,7 +167,7 @@ EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards) {
         ++kicker_count;
       }
     }
-    return MakeScore(HandRank::THREE_OF_A_KIND, kickers[0], kickers[1],
+    return MakeScore(HandRank::ThreeOfAKind, kickers[0], kickers[1],
                      kickers[2]);
   }
 
@@ -190,7 +190,7 @@ EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards) {
         break;
       }
     }
-    return MakeScore(HandRank::TWO_PAIR, high_pair, low_pair, kicker);
+    return MakeScore(HandRank::TwoPair, high_pair, low_pair, kicker);
   }
   if (pair_count > 0) {
     std::array<int, 4> kickers = {pairs[0], 0, 0, 0};
@@ -201,11 +201,11 @@ EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards) {
         ++kicker_count;
       }
     }
-    return MakeScore(HandRank::PAIR, kickers[0], kickers[1], kickers[2],
+    return MakeScore(HandRank::Pair, kickers[0], kickers[1], kickers[2],
                      kickers[3]);
   }
 
-  return MakeScore(HandRank::HIGH_CARD, ranks[0], ranks[1], ranks[2],
+  return MakeScore(HandRank::HighCard, ranks[0], ranks[1], ranks[2],
                    ranks[3], ranks[4]);
 }
 
@@ -229,9 +229,9 @@ TableData BuildCactusTables() {
       continue;
     }
     records.push_back({ScoreForDistinctRanks(rank_mask, true),
-                       CactusLookupRecord::Kind::kFlush, rank_mask});
+                       CactusLookupRecord::Kind::Flush, rank_mask});
     records.push_back({ScoreForDistinctRanks(rank_mask, false),
-                       CactusLookupRecord::Kind::kUnique, rank_mask});
+                       CactusLookupRecord::Kind::Unique, rank_mask});
   }
 
   for (int a = 0; a < 13; ++a) {
@@ -257,7 +257,7 @@ TableData BuildCactusTables() {
               continue;
             }
             records.push_back({ScoreForRankMultiset(ranks),
-                               CactusLookupRecord::Kind::kProduct,
+                               CactusLookupRecord::Kind::Product,
                                PrimeProductForRanks(ranks)});
           }
         }
@@ -278,13 +278,13 @@ TableData BuildCactusTables() {
     const CactusLookupRecord& record = records[i];
     tables.scores[value] = record.score;
     switch (record.kind) {
-      case CactusLookupRecord::Kind::kFlush:
+      case CactusLookupRecord::Kind::Flush:
         tables.flushes[record.key] = value;
         break;
-      case CactusLookupRecord::Kind::kUnique:
+      case CactusLookupRecord::Kind::Unique:
         tables.unique5[record.key] = value;
         break;
-      case CactusLookupRecord::Kind::kProduct:
+      case CactusLookupRecord::Kind::Product:
         tables.products.push_back({record.key, value});
         break;
     }

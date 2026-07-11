@@ -14,11 +14,11 @@ Card C(int rank, Suit suit) {
 }
 
 TEST_CASE("board types preserve reveal order and card invariants") {
-  const Card ace = C(14, Suit::kSpades);
-  const Card king = C(13, Suit::kSpades);
-  const Card queen = C(12, Suit::kSpades);
-  const Card jack = C(11, Suit::kHearts);
-  const Card ten = C(10, Suit::kDiamonds);
+  const Card ace = C(14, Suit::Spades);
+  const Card king = C(13, Suit::Spades);
+  const Card queen = C(12, Suit::Spades);
+  const Card jack = C(11, Suit::Hearts);
+  const Card ten = C(10, Suit::Diamonds);
 
   const FlopBoard flop = DealFlop(PreflopBoard{}, {ace, king, queen});
   const FlopBoard permuted = DealFlop(PreflopBoard{}, {queen, ace, king});
@@ -43,12 +43,12 @@ TEST_CASE("board types preserve reveal order and card invariants") {
 
 TEST_CASE("hand evaluator recognizes a royal flush") {
   const std::array<Card, 5> cards = {
-      C(10, Suit::kHearts), C(11, Suit::kHearts),
-      C(12, Suit::kHearts), C(13, Suit::kHearts),
-      C(14, Suit::kHearts),
+      C(10, Suit::Hearts), C(11, Suit::Hearts),
+      C(12, Suit::Hearts), C(13, Suit::Hearts),
+      C(14, Suit::Hearts),
   };
 
-  CHECK(EvaluateFiveCards(cards).rank == HandRank::ROYAL_FLUSH);
+  CHECK(EvaluateFiveCards(cards).rank == HandRank::RoyalFlush);
 }
 
 }  // namespace

@@ -58,15 +58,15 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   ExactPublicState state = Root();
   const auto* root_decision = std::get_if<DecisionState>(&state.betting);
   REQUIRE(root_decision != nullptr);
-  CHECK(IsLegalAction(*root_decision, {ActionKind::kCall, 2}));
-  CHECK(IsLegalAction(*root_decision, {ActionKind::kRaise, 4}));
-  CHECK(IsLegalAction(*root_decision, {ActionKind::kAllIn, 20}));
-  CHECK_FALSE(IsLegalAction(*root_decision, {ActionKind::kRaise, 3}));
-  CHECK_THROWS(Apply(state.betting, {ActionKind::kCheck}));
-  CHECK_THROWS(Apply(state.betting, {ActionKind::kRaise, 1}));
-  state.betting = Apply(state.betting, {ActionKind::kCall, 2});
-  state.betting = Apply(state.betting, {ActionKind::kCheck});
-  CHECK_THROWS_AS(DealChance(state, {C(14, S::kSpades)}, kRules),
+  CHECK(IsLegalAction(*root_decision, {ActionKind::Call, 2}));
+  CHECK(IsLegalAction(*root_decision, {ActionKind::Raise, 4}));
+  CHECK(IsLegalAction(*root_decision, {ActionKind::AllIn, 20}));
+  CHECK_FALSE(IsLegalAction(*root_decision, {ActionKind::Raise, 3}));
+  CHECK_THROWS(Apply(state.betting, {ActionKind::Check}));
+  CHECK_THROWS(Apply(state.betting, {ActionKind::Raise, 1}));
+  state.betting = Apply(state.betting, {ActionKind::Call, 2});
+  state.betting = Apply(state.betting, {ActionKind::Check});
+  CHECK_THROWS_AS(DealChance(state, {C(14, S::Spades)}, kRules),
                   std::invalid_argument);
 
   ExactPublicState short_call = Root();
@@ -76,10 +76,10 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   const auto* short_decision =
       std::get_if<DecisionState>(&short_call.betting);
   REQUIRE(short_decision != nullptr);
-  CHECK(IsLegalAction(*short_decision, {ActionKind::kCall, 4}));
-  CHECK_FALSE(IsLegalAction(*short_decision, {ActionKind::kAllIn, 4}));
+  CHECK(IsLegalAction(*short_decision, {ActionKind::Call, 4}));
+  CHECK_FALSE(IsLegalAction(*short_decision, {ActionKind::AllIn, 4}));
   short_call.betting = Apply(short_call.betting,
-                                   {ActionKind::kCall, 4});
+                                   {ActionKind::Call, 4});
   CHECK(std::holds_alternative<ChanceState>(short_call.betting));
   CHECK(B(short_call).stack[0] == 0);
   CHECK(B(short_call).total_committed ==
@@ -89,22 +89,22 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   CHECK(B(short_call).stack[1] == 16);
 
   BetAbstractionConfig config;
-  config.pot_fractions[static_cast<size_t>(StreetKind::kPreflop)] = {0.5};
-  config.pot_fractions[static_cast<size_t>(StreetKind::kFlop)] = {1.0};
+  config.pot_fractions[static_cast<size_t>(StreetKind::Preflop)] = {0.5};
+  config.pot_fractions[static_cast<size_t>(StreetKind::Flop)] = {1.0};
   BettingData flop_data;
   flop_data.stack = {98, 98};
   flop_data.total_committed = {2, 2};
   flop_data.last_full_raise = 2;
-  flop_data.street = StreetKind::kFlop;
-  const DecisionState flop{flop_data, Player::kB};
+  flop_data.street = StreetKind::Flop;
+  const DecisionState flop{flop_data, Player::B};
   const AbstractActions actions = SelectAbstractActions(config, flop);
   bool bet_four = false;
   bool bet_two = false;
   bool all_in = false;
   for (const GameAction& action : actions) {
-    bet_four |= action == GameAction{ActionKind::kBet, 4};
-    bet_two |= action == GameAction{ActionKind::kBet, 2};
-    all_in |= action == GameAction{ActionKind::kAllIn, 98};
+    bet_four |= action == GameAction{ActionKind::Bet, 4};
+    bet_two |= action == GameAction{ActionKind::Bet, 2};
+    all_in |= action == GameAction{ActionKind::AllIn, 98};
   }
   CHECK(bet_four);
   CHECK_FALSE(bet_two);

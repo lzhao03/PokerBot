@@ -51,7 +51,7 @@ EquityBucketModel TestEquityModel() {
   model.training_samples = 100;
   model.opponent_samples = 16;
   model.runout_samples = 8;
-  for (StreetKind street : {StreetKind::kFlop, StreetKind::kTurn}) {
+  for (StreetKind street : {StreetKind::Flop, StreetKind::Turn}) {
     auto& cutoffs = model.ehs2_cutoffs[static_cast<size_t>(street)];
     auto& medians = model.ehs_medians[static_cast<size_t>(street)];
     for (int index = 1; index < 16; ++index) {
@@ -155,9 +155,9 @@ TEST_CASE("combo ids are an exhaustive canonical bijection") {
 
 TEST_CASE("hand evaluator matches an independent five-card oracle") {
   const auto wheel = EvaluateFiveCards(std::array<Card, 5>{
-      C(14, S::kHearts), C(5, S::kDiamonds), C(4, S::kClubs),
-      C(3, S::kSpades), C(2, S::kHearts)});
-  CHECK(wheel.rank == HandRank::STRAIGHT);
+      C(14, S::Hearts), C(5, S::Diamonds), C(4, S::Clubs),
+      C(3, S::Spades), C(2, S::Hearts)});
+  CHECK(wheel.rank == HandRank::Straight);
   CHECK(wheel.kickers[0] == 5);
 
   std::array<Card, kDeckCardCount> deck = {};
@@ -203,7 +203,7 @@ TEST_CASE("sampling and card abstractions preserve identity") {
           kCoarsePrivateStreetObservationCount);
 
     std::array<S, 4> suits = {
-        S::kHearts, S::kDiamonds, S::kClubs, S::kSpades};
+        S::Hearts, S::Diamonds, S::Clubs, S::Spades};
     std::shuffle(suits.begin(), suits.end(), rng);
     const Board renamed_board = Rename(board, suits);
     CHECK(BoardTextureBucket(street, features) ==
@@ -224,19 +224,19 @@ TEST_CASE("sampling and card abstractions preserve identity") {
   CardMask blocked = 0;
   for (int i = 0; i < kDeckCardCount - 2; ++i)
     blocked |= CardBit(kDeck[static_cast<size_t>(i)]);
-  CHECK_FALSE(SampleStreetCards(StreetKind::kPreflop,
+  CHECK_FALSE(SampleStreetCards(StreetKind::Preflop,
                                 Board{PreflopBoard{}}, blocked, rng).ok());
 }
 
 TEST_CASE("exact card observations are invariant under suit renaming") {
-  const Board board = B({C(14, S::kHearts), C(13, S::kHearts),
-                         C(7, S::kClubs), C(10, S::kDiamonds)});
-  const ComboId hand = H(C(12, S::kHearts), C(11, S::kSpades));
+  const Board board = B({C(14, S::Hearts), C(13, S::Hearts),
+                         C(7, S::Clubs), C(10, S::Diamonds)});
+  const ComboId hand = H(C(12, S::Hearts), C(11, S::Spades));
   const CanonicalCardObservation expected =
       CanonicalizeObservation(hand, board);
 
   std::array<S, 4> suits = {
-      S::kHearts, S::kDiamonds, S::kClubs, S::kSpades};
+      S::Hearts, S::Diamonds, S::Clubs, S::Spades};
   do {
     const Board renamed_board = Rename(board, suits);
     CHECK(CanonicalPublicObservation(renamed_board) ==
@@ -245,47 +245,47 @@ TEST_CASE("exact card observations are invariant under suit renaming") {
           expected);
   } while (std::next_permutation(suits.begin(), suits.end()));
 
-  const ComboId other_hand = H(C(9, S::kDiamonds), C(8, S::kSpades));
+  const ComboId other_hand = H(C(9, S::Diamonds), C(8, S::Spades));
   CHECK(CanonicalizeObservation(other_hand, board).public_observation ==
         expected.public_observation);
 }
 
 TEST_CASE("handcrafted 36 mappings remain stable") {
   CHECK(CoarsePrivateBucket(
-            H(C(14, S::kHearts), C(14, S::kSpades)),
-            StreetKind::kPreflop, BoardFeatures{}) == 0);
+            H(C(14, S::Hearts), C(14, S::Spades)),
+            StreetKind::Preflop, BoardFeatures{}) == 0);
   CHECK(CoarsePrivateBucket(
-            H(C(14, S::kHearts), C(13, S::kHearts)),
-            StreetKind::kPreflop, BoardFeatures{}) == 12);
+            H(C(14, S::Hearts), C(13, S::Hearts)),
+            StreetKind::Preflop, BoardFeatures{}) == 12);
   CHECK(CoarsePrivateBucket(
-            H(C(7, S::kHearts), C(2, S::kSpades)),
-            StreetKind::kPreflop, BoardFeatures{}) == 35);
+            H(C(7, S::Hearts), C(2, S::Spades)),
+            StreetKind::Preflop, BoardFeatures{}) == 35);
 
-  const Board flop = B({C(2, S::kHearts), C(7, S::kHearts),
-                        C(12, S::kHearts)});
-  const ComboId hand = H(C(14, S::kHearts), C(13, S::kSpades));
-  CHECK(CoarsePrivateBucket(hand, StreetKind::kFlop,
+  const Board flop = B({C(2, S::Hearts), C(7, S::Hearts),
+                        C(12, S::Hearts)});
+  const ComboId hand = H(C(14, S::Hearts), C(13, S::Spades));
+  CHECK(CoarsePrivateBucket(hand, StreetKind::Flop,
                             BoardFeaturesFor(flop)) == 6);
 
   const CardAbstractionConfig current{
-      PublicCardMode::kTexture,
-      PrivateAbstractionKind::kHandcrafted36,
-      RecallMode::kCurrentBucketOnly};
+      PublicCardMode::Texture,
+      PrivateAbstractionKind::Handcrafted36,
+      RecallMode::CurrentBucketOnly};
   const CardAbstraction abstraction = Abstraction(current);
   const PublicPosition position =
-      PublicPosition::Root(abstraction, StreetKind::kFlop, flop);
+      PublicPosition::Root(abstraction, StreetKind::Flop, flop);
   CHECK(ObservePrivate(abstraction, hand, position) ==
         PrivateObservationId(7));
 }
 
 TEST_CASE("equity models preserve cutoffs and bucket boundaries") {
   const EquityBucketModel model = TestEquityModel();
-  CHECK(EquityBucket(StreetKind::kFlop, {0.49f, 0.0f}, model) == 0);
-  CHECK(EquityBucket(StreetKind::kFlop, {0.50f, 0.0f}, model) == 1);
-  CHECK(EquityBucket(StreetKind::kTurn, {0.49f, 1.0f}, model) == 30);
-  CHECK(EquityBucket(StreetKind::kTurn, {0.50f, 1.0f}, model) == 31);
-  CHECK(EquityBucket(StreetKind::kRiver, {0.0f, 0.0f}, model) == 0);
-  CHECK(EquityBucket(StreetKind::kRiver, {1.0f, 1.0f}, model) == 63);
+  CHECK(EquityBucket(StreetKind::Flop, {0.49f, 0.0f}, model) == 0);
+  CHECK(EquityBucket(StreetKind::Flop, {0.50f, 0.0f}, model) == 1);
+  CHECK(EquityBucket(StreetKind::Turn, {0.49f, 1.0f}, model) == 30);
+  CHECK(EquityBucket(StreetKind::Turn, {0.50f, 1.0f}, model) == 31);
+  CHECK(EquityBucket(StreetKind::River, {0.0f, 0.0f}, model) == 0);
+  CHECK(EquityBucket(StreetKind::River, {1.0f, 1.0f}, model) == 63);
 
   const char* test_tmpdir = std::getenv("TEST_TMPDIR");
   REQUIRE(test_tmpdir != nullptr);
@@ -319,40 +319,40 @@ TEST_CASE("checked-in equity model is valid and reproducible") {
 
 TEST_CASE("equity features are deterministic under suit renaming") {
   const EquityBucketModel model = TestEquityModel();
-  const Board board = B({C(2, S::kHearts), C(7, S::kHearts),
-                         C(12, S::kClubs), C(9, S::kDiamonds)});
-  const ComboId hand = H(C(14, S::kHearts), C(13, S::kSpades));
+  const Board board = B({C(2, S::Hearts), C(7, S::Hearts),
+                         C(12, S::Clubs), C(9, S::Diamonds)});
+  const ComboId hand = H(C(14, S::Hearts), C(13, S::Spades));
   const EquityFeatures first = EvaluateEquityFeatures(hand, board, model);
   CHECK(EvaluateEquityFeatures(hand, board, model) == first);
 
   const std::array<S, 4> suits = {
-      S::kClubs, S::kSpades, S::kHearts, S::kDiamonds};
+      S::Clubs, S::Spades, S::Hearts, S::Diamonds};
   const EquityFeatures renamed = EvaluateEquityFeatures(
       Rename(hand, suits), Rename(board, suits), model);
   CHECK(renamed == first);
   const PrivateBucketId bucket =
-      EquityBucket(StreetKind::kTurn, first, model);
+      EquityBucket(StreetKind::Turn, first, model);
   CHECK(bucket < 32);
-  CHECK(EquityBucket(StreetKind::kTurn, renamed, model) == bucket);
+  CHECK(EquityBucket(StreetKind::Turn, renamed, model) == bucket);
 }
 
 TEST_CASE("equity observations are cached, bounded, and suit invariant") {
   CardAbstractionConfig config{
-      PublicCardMode::kTexture,
-      PrivateAbstractionKind::kEquityPotential,
-      RecallMode::kCurrentBucketOnly,
+      PublicCardMode::Texture,
+      PrivateAbstractionKind::EquityPotential,
+      RecallMode::CurrentBucketOnly,
       TestEquityModel()};
   CardAbstraction abstraction = Abstraction(config);
   CardAbstraction cold = Abstraction(config);
-  const ComboId hand = H(C(14, S::kHearts), C(13, S::kSpades));
+  const ComboId hand = H(C(14, S::Hearts), C(13, S::Spades));
   const FlopBoard flop = DealFlop(
       PreflopBoard{},
-      {C(2, S::kHearts), C(7, S::kHearts), C(12, S::kClubs)});
-  const TurnBoard turn = DealTurn(flop, C(9, S::kDiamonds));
-  const RiverBoard river = DealRiver(turn, C(4, S::kSpades));
+      {C(2, S::Hearts), C(7, S::Hearts), C(12, S::Clubs)});
+  const TurnBoard turn = DealTurn(flop, C(9, S::Diamonds));
+  const RiverBoard river = DealRiver(turn, C(4, S::Spades));
 
   PublicPosition position = PublicPosition::Root(
-      abstraction, StreetKind::kPreflop, Board{PreflopBoard{}});
+      abstraction, StreetKind::Preflop, Board{PreflopBoard{}});
   const uint64_t preflop = ObservePrivate(abstraction, hand, position).value();
   CHECK(preflop >= 1);
   CHECK(preflop <= 169);
@@ -365,9 +365,9 @@ TEST_CASE("equity observations are cached, bounded, and suit invariant") {
   }
   CHECK(preflop_classes.size() == 169);
   for (const auto& [street, board, maximum] : {
-           std::tuple{StreetKind::kFlop, Board{flop}, uint64_t{32}},
-           std::tuple{StreetKind::kTurn, Board{turn}, uint64_t{32}},
-           std::tuple{StreetKind::kRiver, Board{river}, uint64_t{64}},
+           std::tuple{StreetKind::Flop, Board{flop}, uint64_t{32}},
+           std::tuple{StreetKind::Turn, Board{turn}, uint64_t{32}},
+           std::tuple{StreetKind::River, Board{river}, uint64_t{64}},
        }) {
     position = position.after_chance(abstraction, street, board);
     const PrivateObservationId observed =
@@ -381,9 +381,9 @@ TEST_CASE("equity observations are cached, bounded, and suit invariant") {
   CHECK(abstraction.cache_size() == 3);
 
   const std::array<S, 4> suits = {
-      S::kClubs, S::kSpades, S::kHearts, S::kDiamonds};
+      S::Clubs, S::Spades, S::Hearts, S::Diamonds};
   const PublicPosition renamed = PublicPosition::Root(
-      cold, StreetKind::kRiver, Rename(Board{river}, suits));
+      cold, StreetKind::River, Rename(Board{river}, suits));
   CHECK(ObservePrivate(cold, Rename(hand, suits), renamed) ==
         ObservePrivate(abstraction, hand, position));
 
@@ -392,27 +392,27 @@ TEST_CASE("equity observations are cached, bounded, and suit invariant") {
 }
 
 TEST_CASE("canonical observations preserve card relationships and order") {
-  const Board monotone = B({C(14, S::kHearts), C(13, S::kHearts),
-                            C(12, S::kHearts)});
-  const Board rainbow = B({C(14, S::kHearts), C(13, S::kDiamonds),
-                           C(12, S::kClubs)});
+  const Board monotone = B({C(14, S::Hearts), C(13, S::Hearts),
+                            C(12, S::Hearts)});
+  const Board rainbow = B({C(14, S::Hearts), C(13, S::Diamonds),
+                           C(12, S::Clubs)});
   CHECK(CanonicalPublicObservation(monotone) !=
         CanonicalPublicObservation(rainbow));
 
-  const Board draw_board = B({C(2, S::kHearts), C(7, S::kHearts),
-                              C(12, S::kClubs)});
-  const ComboId flush_draw = H(C(14, S::kHearts), C(13, S::kSpades));
+  const Board draw_board = B({C(2, S::Hearts), C(7, S::Hearts),
+                              C(12, S::Clubs)});
+  const ComboId flush_draw = H(C(14, S::Hearts), C(13, S::Spades));
   const ComboId no_flush_draw =
-      H(C(14, S::kDiamonds), C(13, S::kSpades));
+      H(C(14, S::Diamonds), C(13, S::Spades));
   CHECK(CanonicalizeObservation(flush_draw, draw_board) !=
         CanonicalizeObservation(no_flush_draw, draw_board));
 
   const Board jack_then_ten =
-      B({C(14, S::kHearts), C(13, S::kDiamonds), C(12, S::kClubs),
-         C(11, S::kSpades), C(10, S::kHearts)});
+      B({C(14, S::Hearts), C(13, S::Diamonds), C(12, S::Clubs),
+         C(11, S::Spades), C(10, S::Hearts)});
   const Board ten_then_jack =
-      B({C(14, S::kHearts), C(13, S::kDiamonds), C(12, S::kClubs),
-         C(10, S::kHearts), C(11, S::kSpades)});
+      B({C(14, S::Hearts), C(13, S::Diamonds), C(12, S::Clubs),
+         C(10, S::Hearts), C(11, S::Spades)});
   CHECK(BoardMask(jack_then_ten) == BoardMask(ten_then_jack));
   CHECK(CanonicalPublicObservation(jack_then_ten) !=
         CanonicalPublicObservation(ten_then_jack));
@@ -446,35 +446,35 @@ TEST_CASE("canonical observation counts match holdem suit isomorphisms") {
 
 TEST_CASE("all abstraction modes preserve observation history") {
   const std::array<CardAbstractionConfig, 4> configs = {{
-      {PublicCardMode::kExactCanonical,
-       PrivateAbstractionKind::kExactCanonical},
-      {PublicCardMode::kExactCanonical,
-       PrivateAbstractionKind::kHandcrafted36},
-      {PublicCardMode::kTexture,
-       PrivateAbstractionKind::kExactCanonical},
-      {PublicCardMode::kTexture,
-       PrivateAbstractionKind::kHandcrafted36},
+      {PublicCardMode::ExactCanonical,
+       PrivateAbstractionKind::ExactCanonical},
+      {PublicCardMode::ExactCanonical,
+       PrivateAbstractionKind::Handcrafted36},
+      {PublicCardMode::Texture,
+       PrivateAbstractionKind::ExactCanonical},
+      {PublicCardMode::Texture,
+       PrivateAbstractionKind::Handcrafted36},
   }};
-  const ComboId hand = H(C(14, S::kHearts), C(13, S::kSpades));
+  const ComboId hand = H(C(14, S::Hearts), C(13, S::Spades));
   const FlopBoard flop = DealFlop(
       PreflopBoard{},
-      {C(2, S::kHearts), C(7, S::kHearts), C(12, S::kClubs)});
-  const TurnBoard turn = DealTurn(flop, C(9, S::kDiamonds));
-  const RiverBoard river = DealRiver(turn, C(4, S::kSpades));
+      {C(2, S::Hearts), C(7, S::Hearts), C(12, S::Clubs)});
+  const TurnBoard turn = DealTurn(flop, C(9, S::Diamonds));
+  const RiverBoard river = DealRiver(turn, C(4, S::Spades));
 
   for (const CardAbstractionConfig& config : configs) {
     CAPTURE(static_cast<int>(config.public_mode));
     CAPTURE(static_cast<int>(config.private_kind));
     const CardAbstraction abstraction = Abstraction(config);
     PublicPosition position = PublicPosition::Root(
-        abstraction, StreetKind::kPreflop, Board{PreflopBoard{}});
+        abstraction, StreetKind::Preflop, Board{PreflopBoard{}});
     PrivateObservationId private_id =
         ObservePrivate(abstraction, hand, position);
 
     for (const auto& [street, board] : {
-             std::pair{StreetKind::kFlop, Board{flop}},
-             std::pair{StreetKind::kTurn, Board{turn}},
-             std::pair{StreetKind::kRiver, Board{river}},
+             std::pair{StreetKind::Flop, Board{flop}},
+             std::pair{StreetKind::Turn, Board{turn}},
+             std::pair{StreetKind::River, Board{river}},
          }) {
       position = position.after_chance(abstraction, street, board);
       private_id = ObservePrivate(abstraction, hand, position);
@@ -484,11 +484,11 @@ TEST_CASE("all abstraction modes preserve observation history") {
     }
 
     const std::array<S, 4> renamed_suits = {
-        S::kClubs, S::kSpades, S::kHearts, S::kDiamonds};
+        S::Clubs, S::Spades, S::Hearts, S::Diamonds};
     const Board renamed_board = Rename(Board{river}, renamed_suits);
     const ComboId renamed_hand = Rename(hand, renamed_suits);
     const PublicPosition renamed = PublicPosition::Root(
-        abstraction, StreetKind::kRiver, renamed_board);
+        abstraction, StreetKind::River, renamed_board);
     CHECK(renamed.observation() == position.observation());
     CHECK(ObservePrivate(abstraction, renamed_hand, renamed) == private_id);
   }
@@ -496,21 +496,21 @@ TEST_CASE("all abstraction modes preserve observation history") {
 
 TEST_CASE("coarse public exact private keeps relative flush information") {
   const CardAbstractionConfig config{
-      PublicCardMode::kTexture,
-      PrivateAbstractionKind::kExactCanonical};
+      PublicCardMode::Texture,
+      PrivateAbstractionKind::ExactCanonical};
   const CardAbstraction abstraction = Abstraction(config);
-  const Board board = B({C(2, S::kHearts), C(7, S::kHearts),
-                         C(12, S::kClubs)});
-  const ComboId hand = H(C(14, S::kHearts), C(13, S::kSpades));
+  const Board board = B({C(2, S::Hearts), C(7, S::Hearts),
+                         C(12, S::Clubs)});
+  const ComboId hand = H(C(14, S::Hearts), C(13, S::Spades));
   const PublicPosition position =
-      PublicPosition::Root(abstraction, StreetKind::kFlop, board);
+      PublicPosition::Root(abstraction, StreetKind::Flop, board);
 
   const std::array<S, 4> suits = {
-      S::kDiamonds, S::kClubs, S::kSpades, S::kHearts};
+      S::Diamonds, S::Clubs, S::Spades, S::Hearts};
   const Board renamed_board = Rename(board, suits);
   const ComboId renamed_hand = Rename(hand, suits);
   const PublicPosition renamed =
-      PublicPosition::Root(abstraction, StreetKind::kFlop, renamed_board);
+      PublicPosition::Root(abstraction, StreetKind::Flop, renamed_board);
 
   const InfoSetKey key{HistoryId(7), position.observation(),
                        ObservePrivate(abstraction, hand, position)};

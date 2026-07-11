@@ -13,7 +13,7 @@ namespace poker::hand_evaluator_generation {
 constexpr size_t kCactusScoreCount = 7463;
 
 struct EvaluationScore {
-  HandRank rank = HandRank::HIGH_CARD;
+  HandRank rank = HandRank::HighCard;
   std::array<int, 5> kickers = {};
   size_t kicker_count = 0;
 

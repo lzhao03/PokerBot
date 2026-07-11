@@ -33,7 +33,7 @@ TEST_CASE("range syntax expands to exact combo weights") {
   const auto parsed_aces = ParseRange("AA");
   REQUIRE(parsed_aces.ok());
   const ComboRange aces = *parsed_aces;
-  const ComboId hand = H(14, S::kSpades, 14, S::kHearts);
+  const ComboId hand = H(14, S::Spades, 14, S::Hearts);
   CHECK(aces.weight(hand) == 1.0f);
 
   const ComboRange uniform = UniformComboRange();
@@ -81,11 +81,11 @@ TEST_CASE("deal sampling rejects incompatible ranges") {
   CHECK_FALSE(CFRSolver::Create({config, root, {a, b}}).ok());
 
   const ComboRange compatible =
-      SingleComboRange(H(12, S::kClubs, 12, S::kDiamonds));
+      SingleComboRange(H(12, S::Clubs, 12, S::Diamonds));
   auto solver = CFRSolver::Create({config, root, {a, compatible}});
   REQUIRE(solver.ok());
   (*solver)->run(1);
-  CHECK(std::isfinite((*solver)->get_expected_value(Player::kA)));
+  CHECK(std::isfinite((*solver)->get_expected_value(Player::A)));
 }
 
 }  // namespace

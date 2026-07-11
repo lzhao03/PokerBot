@@ -14,26 +14,26 @@ using hand_evaluator_generation::TableData;
 
 const char* HandRankName(HandRank rank) {
   switch (rank) {
-    case HandRank::HIGH_CARD:
-      return "HandRank::HIGH_CARD";
-    case HandRank::PAIR:
-      return "HandRank::PAIR";
-    case HandRank::TWO_PAIR:
-      return "HandRank::TWO_PAIR";
-    case HandRank::THREE_OF_A_KIND:
-      return "HandRank::THREE_OF_A_KIND";
-    case HandRank::STRAIGHT:
-      return "HandRank::STRAIGHT";
-    case HandRank::FLUSH:
-      return "HandRank::FLUSH";
-    case HandRank::FULL_HOUSE:
-      return "HandRank::FULL_HOUSE";
-    case HandRank::FOUR_OF_A_KIND:
-      return "HandRank::FOUR_OF_A_KIND";
-    case HandRank::STRAIGHT_FLUSH:
-      return "HandRank::STRAIGHT_FLUSH";
-    case HandRank::ROYAL_FLUSH:
-      return "HandRank::ROYAL_FLUSH";
+    case HandRank::HighCard:
+      return "HandRank::HighCard";
+    case HandRank::Pair:
+      return "HandRank::Pair";
+    case HandRank::TwoPair:
+      return "HandRank::TwoPair";
+    case HandRank::ThreeOfAKind:
+      return "HandRank::ThreeOfAKind";
+    case HandRank::Straight:
+      return "HandRank::Straight";
+    case HandRank::Flush:
+      return "HandRank::Flush";
+    case HandRank::FullHouse:
+      return "HandRank::FullHouse";
+    case HandRank::FourOfAKind:
+      return "HandRank::FourOfAKind";
+    case HandRank::StraightFlush:
+      return "HandRank::StraightFlush";
+    case HandRank::RoyalFlush:
+      return "HandRank::RoyalFlush";
   }
 }
 
@@ -91,7 +91,7 @@ void PrintHeader(const TableData& tables) {
             << "#include \"src/hand_evaluator.h\"\n\n"
             << "namespace poker::hand_evaluator_tables {\n\n"
             << "struct ScoreRecord {\n"
-            << "  HandRank rank = HandRank::HIGH_CARD;\n"
+            << "  HandRank rank = HandRank::HighCard;\n"
             << "  std::array<int, 5> kickers = {};\n"
             << "  size_t kicker_count = 0;\n"
             << "};\n\n"

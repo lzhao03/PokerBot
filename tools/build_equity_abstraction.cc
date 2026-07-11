@@ -99,7 +99,7 @@ std::vector<float> OuterMedians(
 bool PrintStats(StreetKind street,
                 const std::vector<EquityFeatures>& samples,
                 const EquityBucketModel& model) {
-  const size_t buckets = street == StreetKind::kRiver ? 64 : 32;
+  const size_t buckets = street == StreetKind::River ? 64 : 32;
   struct Moments {
     uint64_t count = 0;
     double ehs = 0.0;
@@ -157,8 +157,8 @@ int Run() {
   }
 
   std::array<std::vector<EquityFeatures>, 4> features;
-  for (StreetKind street : {StreetKind::kFlop, StreetKind::kTurn,
-                            StreetKind::kRiver}) {
+  for (StreetKind street : {StreetKind::Flop, StreetKind::Turn,
+                            StreetKind::River}) {
     features[static_cast<size_t>(street)].reserve(model.training_samples);
   }
   uint64_t state = model.fit_seed;
@@ -169,15 +169,15 @@ int Run() {
         DealFlop(PreflopBoard{}, {cards[2], cards[3], cards[4]});
     const TurnBoard turn = DealTurn(flop, cards[5]);
     const RiverBoard river = DealRiver(turn, cards[6]);
-    features[static_cast<size_t>(StreetKind::kFlop)].push_back(
+    features[static_cast<size_t>(StreetKind::Flop)].push_back(
         EvaluateEquityFeatures(hand, Board{flop}, model));
-    features[static_cast<size_t>(StreetKind::kTurn)].push_back(
+    features[static_cast<size_t>(StreetKind::Turn)].push_back(
         EvaluateEquityFeatures(hand, Board{turn}, model));
-    features[static_cast<size_t>(StreetKind::kRiver)].push_back(
+    features[static_cast<size_t>(StreetKind::River)].push_back(
         EvaluateEquityFeatures(hand, Board{river}, model));
   }
 
-  for (StreetKind street : {StreetKind::kFlop, StreetKind::kTurn}) {
+  for (StreetKind street : {StreetKind::Flop, StreetKind::Turn}) {
     const size_t index = static_cast<size_t>(street);
     std::vector<float> values;
     values.reserve(features[index].size());
@@ -191,9 +191,9 @@ int Run() {
     }
   }
   std::vector<float> river_values;
-  river_values.reserve(features[static_cast<size_t>(StreetKind::kRiver)].size());
+  river_values.reserve(features[static_cast<size_t>(StreetKind::River)].size());
   for (EquityFeatures item :
-       features[static_cast<size_t>(StreetKind::kRiver)]) {
+       features[static_cast<size_t>(StreetKind::River)]) {
     river_values.push_back(item.ehs);
   }
   model.river_equity_cutoffs =
@@ -206,8 +206,8 @@ int Run() {
   }
   std::cout << "street\tbucket\tcount\tehs_variance\tehs2_variance\n";
   bool balanced = true;
-  for (StreetKind street : {StreetKind::kFlop, StreetKind::kTurn,
-                            StreetKind::kRiver}) {
+  for (StreetKind street : {StreetKind::Flop, StreetKind::Turn,
+                            StreetKind::River}) {
     balanced &= PrintStats(
         street, features[static_cast<size_t>(street)], *finalized);
   }

@@ -22,19 +22,19 @@ inline constexpr uint32_t kCoarsePrivateStreetObservationCount = 36;
 inline constexpr uint32_t kCoarsePublicStreetObservationCount = 108;
 
 enum class PublicCardMode : uint8_t {
-  kExactCanonical,
-  kTexture,
+  ExactCanonical,
+  Texture,
 };
 
 enum class PrivateAbstractionKind : uint8_t {
-  kExactCanonical,
-  kHandcrafted36,
-  kEquityPotential,
+  ExactCanonical,
+  Handcrafted36,
+  EquityPotential,
 };
 
 enum class RecallMode : uint8_t {
-  kCurrentBucketOnly,
-  kBucketHistory,
+  CurrentBucketOnly,
+  BucketHistory,
 };
 
 struct BoardFeatures {
@@ -75,10 +75,10 @@ struct EquityBucketModel {
 };
 
 struct CardAbstractionConfig {
-  PublicCardMode public_mode = PublicCardMode::kTexture;
+  PublicCardMode public_mode = PublicCardMode::Texture;
   PrivateAbstractionKind private_kind =
-      PrivateAbstractionKind::kHandcrafted36;
-  RecallMode recall_mode = RecallMode::kBucketHistory;
+      PrivateAbstractionKind::Handcrafted36;
+  RecallMode recall_mode = RecallMode::BucketHistory;
   std::optional<EquityBucketModel> equity_model;
 };
 
@@ -125,7 +125,7 @@ class PublicPosition {
         observation_(observation),
         features_(features) {}
 
-  StreetKind street_ = StreetKind::kPreflop;
+  StreetKind street_ = StreetKind::Preflop;
   Board board_ = PreflopBoard{};
   PublicObservationId observation_;
   BoardFeatures features_;

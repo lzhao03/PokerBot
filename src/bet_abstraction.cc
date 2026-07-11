@@ -19,13 +19,13 @@ AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
   const Chips min_full_raise_to = (highest_to > 0 ? highest_to : current_to) + data.last_full_raise;
   AbstractActions actions;
   if (to_call > 0) {
-    actions.push_back({ActionKind::kFold, 0});
-    actions.push_back({ActionKind::kCall, call_to});
+    actions.push_back({ActionKind::Fold, 0});
+    actions.push_back({ActionKind::Call, call_to});
   } else {
-    actions.push_back({ActionKind::kCheck, 0});
+    actions.push_back({ActionKind::Check, 0});
   }
 
-  const ActionKind kind = highest_to > 0 ? ActionKind::kRaise : ActionKind::kBet;
+  const ActionKind kind = highest_to > 0 ? ActionKind::Raise : ActionKind::Bet;
   const auto& fractions = config.pot_fractions[std::to_underlying(data.street)];
   const Chips pot_after_call = Pot(data) + to_call;
   for (double fraction : fractions) {
@@ -45,7 +45,7 @@ AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
             });
   actions.erase(std::unique(actions.begin(), actions.end()), actions.end());
   if (all_in_to > call_to) {
-    actions.push_back({ActionKind::kAllIn, all_in_to});
+    actions.push_back({ActionKind::AllIn, all_in_to});
   }
 
   for (const GameAction& action : actions) {

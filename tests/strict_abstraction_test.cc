@@ -44,14 +44,14 @@ ComboRange Range(int first_rank, int second_rank, Suit suit) {
 
 TEST_CASE("all card abstraction combinations support history traversal") {
   const std::array<CardAbstractionConfig, 4> abstractions = {{
-      {PublicCardMode::kExactCanonical,
-       PrivateAbstractionKind::kExactCanonical},
-      {PublicCardMode::kExactCanonical,
-       PrivateAbstractionKind::kHandcrafted36},
-      {PublicCardMode::kTexture,
-       PrivateAbstractionKind::kExactCanonical},
-      {PublicCardMode::kTexture,
-       PrivateAbstractionKind::kHandcrafted36},
+      {PublicCardMode::ExactCanonical,
+       PrivateAbstractionKind::ExactCanonical},
+      {PublicCardMode::ExactCanonical,
+       PrivateAbstractionKind::Handcrafted36},
+      {PublicCardMode::Texture,
+       PrivateAbstractionKind::ExactCanonical},
+      {PublicCardMode::Texture,
+       PrivateAbstractionKind::Handcrafted36},
   }};
   for (const CardAbstractionConfig& abstraction : abstractions) {
     CAPTURE(static_cast<int>(abstraction.public_mode));
@@ -72,23 +72,23 @@ TEST_CASE("all card abstraction combinations support history traversal") {
 
     const BettingRules rules{config.big_blind()};
     ExactPublicState state = MakeInitialState(rules, {8, 8}, {1, 2});
-    state.betting = Apply(state.betting, {ActionKind::kCall, 2});
-    state.betting = Apply(state.betting, {ActionKind::kCheck, 0});
+    state.betting = Apply(state.betting, {ActionKind::Call, 2});
+    state.betting = Apply(state.betting, {ActionKind::Check, 0});
     const std::array<Card, 3> flop = {
-        C(2, Suit::kDiamonds), C(7, Suit::kSpades),
-        C(9, Suit::kDiamonds),
+        C(2, Suit::Diamonds), C(7, Suit::Spades),
+        C(9, Suit::Diamonds),
     };
     state = DealChance(state, flop, rules);
 
     auto solver = CFRSolver::Create(
         {config, state,
-         {Range(14, 13, Suit::kHearts),
-          Range(12, 11, Suit::kClubs)}});
+         {Range(14, 13, Suit::Hearts),
+          Range(12, 11, Suit::Clubs)}});
     REQUIRE(solver.ok());
     (*solver)->run(2);
 
     CHECK((*solver)->get_iterations_run() == 2);
-    CHECK(std::isfinite((*solver)->get_expected_value(Player::kA)));
+    CHECK(std::isfinite((*solver)->get_expected_value(Player::A)));
     CHECK((*solver)->get_history_count() > 0);
     CHECK((*solver)->get_info_set_count() > 0);
   }

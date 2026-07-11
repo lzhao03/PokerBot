@@ -26,8 +26,8 @@ constexpr int kPlayerCount = 2;
 constexpr int kComboCount = 1326;
 
 enum class Player : uint8_t {
-  kA = 0,
-  kB = 1,
+  A = 0,
+  B = 1,
 };
 
 constexpr size_t Index(Player player) noexcept {
@@ -35,30 +35,30 @@ constexpr size_t Index(Player player) noexcept {
 }
 
 constexpr Player Opponent(Player player) noexcept {
-  return player == Player::kA ? Player::kB : Player::kA;
+  return player == Player::A ? Player::B : Player::A;
 }
 
 enum class Suit : uint8_t {
-  kHearts = 0,
-  kDiamonds = 1,
-  kClubs = 2,
-  kSpades = 3,
+  Hearts = 0,
+  Diamonds = 1,
+  Clubs = 2,
+  Spades = 3,
 };
 
 enum class Rank : uint8_t {
-  kTwo,
-  kThree,
-  kFour,
-  kFive,
-  kSix,
-  kSeven,
-  kEight,
-  kNine,
-  kTen,
-  kJack,
-  kQueen,
-  kKing,
-  kAce,
+  Two,
+  Three,
+  Four,
+  Five,
+  Six,
+  Seven,
+  Eight,
+  Nine,
+  Ten,
+  Jack,
+  Queen,
+  King,
+  Ace,
 };
 
 class Card {
@@ -158,19 +158,19 @@ inline constexpr std::array<Card, kDeckCardCount> kDeck = [] {
 }();
 
 enum class StreetKind : uint8_t {
-  kPreflop = 0,
-  kFlop = 1,
-  kTurn = 2,
-  kRiver = 3,
+  Preflop = 0,
+  Flop = 1,
+  Turn = 2,
+  River = 3,
 };
 
 enum class ActionKind : uint8_t {
-  kBet,
-  kFold,
-  kCall,
-  kRaise,
-  kCheck,
-  kAllIn,
+  Bet,
+  Fold,
+  Call,
+  Raise,
+  Check,
+  AllIn,
 };
 
 struct GameAction {
@@ -216,7 +216,7 @@ struct BettingData {
   std::array<Chips, kPlayerCount> total_committed = {0, 0};
   std::array<Chips, kPlayerCount> street_committed = {0, 0};
   Chips last_full_raise = 0;
-  StreetKind street = StreetKind::kPreflop;
+  StreetKind street = StreetKind::Preflop;
   uint8_t pending_action_mask = kAllPlayersMask;
 
   friend bool operator==(const BettingData&, const BettingData&) = default;
@@ -224,7 +224,7 @@ struct BettingData {
 
 struct DecisionState {
   BettingData data;
-  Player actor = Player::kA;
+  Player actor = Player::A;
 
   friend bool operator==(const DecisionState&, const DecisionState&) = default;
 };
@@ -237,7 +237,7 @@ struct ChanceState {
 
 struct FoldTerminalState {
   BettingData data;
-  Player folded = Player::kA;
+  Player folded = Player::A;
 
   friend bool operator==(const FoldTerminalState&,
                          const FoldTerminalState&) = default;

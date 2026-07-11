@@ -106,13 +106,13 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
       absl::GetFlag(FLAGS_private_abstraction);
   if (private_abstraction == "exact") {
     config.card_abstraction.private_kind =
-        poker::PrivateAbstractionKind::kExactCanonical;
+        poker::PrivateAbstractionKind::ExactCanonical;
   } else if (private_abstraction == "handcrafted36") {
     config.card_abstraction.private_kind =
-        poker::PrivateAbstractionKind::kHandcrafted36;
+        poker::PrivateAbstractionKind::Handcrafted36;
   } else if (private_abstraction == "equity") {
     config.card_abstraction.private_kind =
-        poker::PrivateAbstractionKind::kEquityPotential;
+        poker::PrivateAbstractionKind::EquityPotential;
     const std::string path = absl::GetFlag(FLAGS_equity_model);
     if (path.empty()) {
       return absl::InvalidArgumentError(
@@ -129,14 +129,14 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
   if (recall == "auto") {
     config.card_abstraction.recall_mode =
         config.card_abstraction.private_kind ==
-                poker::PrivateAbstractionKind::kHandcrafted36
-            ? poker::RecallMode::kBucketHistory
-            : poker::RecallMode::kCurrentBucketOnly;
+                poker::PrivateAbstractionKind::Handcrafted36
+            ? poker::RecallMode::BucketHistory
+            : poker::RecallMode::CurrentBucketOnly;
   } else if (recall == "current") {
     config.card_abstraction.recall_mode =
-        poker::RecallMode::kCurrentBucketOnly;
+        poker::RecallMode::CurrentBucketOnly;
   } else if (recall == "history") {
-    config.card_abstraction.recall_mode = poker::RecallMode::kBucketHistory;
+    config.card_abstraction.recall_mode = poker::RecallMode::BucketHistory;
   } else {
     return absl::InvalidArgumentError("invalid private recall mode");
   }
@@ -148,13 +148,13 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
   }
   config.bet_abstraction.pot_fractions.fill(*fractions);
   for (const auto& [street, values] : {
-           std::pair{poker::StreetKind::kPreflop,
+           std::pair{poker::StreetKind::Preflop,
                      absl::GetFlag(FLAGS_preflop_pot_fractions)},
-           std::pair{poker::StreetKind::kFlop,
+           std::pair{poker::StreetKind::Flop,
                      absl::GetFlag(FLAGS_flop_pot_fractions)},
-           std::pair{poker::StreetKind::kTurn,
+           std::pair{poker::StreetKind::Turn,
                      absl::GetFlag(FLAGS_turn_pot_fractions)},
-           std::pair{poker::StreetKind::kRiver,
+           std::pair{poker::StreetKind::River,
                      absl::GetFlag(FLAGS_river_pot_fractions)},
        }) {
     const absl::Status status = OverridePotFractions(config, street, values);
@@ -181,7 +181,7 @@ void PrintRunSummary(const poker::CFRSolver& solver,
   std::cout << "max_info_sets=" << config.max_info_sets() << "\n";
   std::cout << "info_set_cap_hit=" << CapHit(info_sets, config.max_info_sets())
             << "\n";
-  std::cout << "player_a_ev=" << solver.get_expected_value(poker::Player::kA)
+  std::cout << "player_a_ev=" << solver.get_expected_value(poker::Player::A)
             << "\n";
   std::cout << "seconds=" << seconds << "\n";
   std::cout << "history_nodes=" << history_nodes << "\n";
@@ -237,7 +237,7 @@ int main(int argc, char** argv) {
   PrintRunSummary(**solver, *config, elapsed.count());
   std::cout << "stop_reason="
             << (result.stop_reason ==
-                        poker::TrainingStopReason::kIterationsCompleted
+                        poker::TrainingStopReason::IterationsCompleted
                     ? "iterations_completed"
                     : "info_set_limit")
             << "\n";

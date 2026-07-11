@@ -67,10 +67,10 @@ absl::StatusOr<poker::SolverConfig> BenchmarkConfig() {
   const std::string kind = absl::GetFlag(FLAGS_private_abstraction);
   if (kind == "handcrafted36") {
     options.card_abstraction.private_kind =
-        poker::PrivateAbstractionKind::kHandcrafted36;
+        poker::PrivateAbstractionKind::Handcrafted36;
   } else if (kind == "equity") {
     options.card_abstraction.private_kind =
-        poker::PrivateAbstractionKind::kEquityPotential;
+        poker::PrivateAbstractionKind::EquityPotential;
     const std::string path = absl::GetFlag(FLAGS_equity_model);
     if (path.empty()) {
       return absl::InvalidArgumentError(
@@ -85,14 +85,14 @@ absl::StatusOr<poker::SolverConfig> BenchmarkConfig() {
   const std::string recall = absl::GetFlag(FLAGS_private_recall);
   if (recall == "auto") {
     options.card_abstraction.recall_mode =
-        kind == "equity" ? poker::RecallMode::kCurrentBucketOnly
-                         : poker::RecallMode::kBucketHistory;
+        kind == "equity" ? poker::RecallMode::CurrentBucketOnly
+                         : poker::RecallMode::BucketHistory;
   } else if (recall == "current") {
     options.card_abstraction.recall_mode =
-        poker::RecallMode::kCurrentBucketOnly;
+        poker::RecallMode::CurrentBucketOnly;
   } else if (recall == "history") {
     options.card_abstraction.recall_mode =
-        poker::RecallMode::kBucketHistory;
+        poker::RecallMode::BucketHistory;
   } else {
     return absl::InvalidArgumentError("invalid private recall mode");
   }
@@ -163,12 +163,12 @@ int main(int argc, char** argv) {
           std::chrono::duration<double>(seconds);
       while (std::chrono::steady_clock::now() < deadline) {
         if (solver->run(1).stop_reason ==
-            poker::TrainingStopReason::kInfoSetLimit) {
+            poker::TrainingStopReason::InfoSetLimit) {
           break;
         }
       }
     }
-    return solver->get_expected_value(poker::Player::kA);
+    return solver->get_expected_value(poker::Player::A);
   });
   const auto training = solver->get_stats();
   std::cout << "iterations\t" << solver->get_iterations_run() << '\n'
