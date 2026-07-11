@@ -1,0 +1,7 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "hand_evaluator_tables",
+    hdrs = ["hand_evaluator_tables.h"],
+    visibility = ["//visibility:public"],
+)

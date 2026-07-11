@@ -6,12 +6,23 @@
 #include <cstdint>
 #include <stdexcept>
 
-#include "src/build_flags.h"
+#ifndef POKER_COARSE_PUBLIC_BUCKETS
+#define POKER_COARSE_PUBLIC_BUCKETS 0
+#endif
+
+#ifndef POKER_COARSE_PRIVATE_BUCKETS
+#define POKER_COARSE_PRIVATE_BUCKETS 0
+#endif
 #include "src/combo.h"
 #include "src/game_state.h"
-#include "src/poker_types.h"
+#include "src/poker.h"
 
 namespace poker {
+
+inline constexpr bool kCoarsePublicBuckets =
+    POKER_COARSE_PUBLIC_BUCKETS != 0;
+inline constexpr bool kCoarsePrivateBuckets =
+    POKER_COARSE_PRIVATE_BUCKETS != 0;
 
 using PrivateBucketId = uint16_t;
 

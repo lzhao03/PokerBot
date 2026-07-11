@@ -1,4 +1,4 @@
-#include "src/cfr_solver.h"
+#include "src/solver.h"
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "src/hand_range.h"

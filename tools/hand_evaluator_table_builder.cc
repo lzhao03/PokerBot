@@ -1,4 +1,4 @@
-#include "src/hand_evaluator_table_builder.h"
+#include "tools/hand_evaluator_table_builder.h"
 
 #include <algorithm>
 #include <array>

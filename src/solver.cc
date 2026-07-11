@@ -1,4 +1,4 @@
-#include "src/cfr_solver.h"
+#include "src/solver.h"
 
 #include <algorithm>
 #include <array>
@@ -13,7 +13,6 @@
 
 #include "absl/log/log.h"
 #include "absl/types/span.h"
-#include "src/build_flags.h"
 #include "src/card_utils.h"
 #include "src/combo.h"
 #include "src/game_rules.h"
@@ -62,17 +61,23 @@ HistoryNodeKind KindFor(const BettingState& state) {
                                    : HistoryNodeKind::kDecision;
 }
 
+ActionMenu ActionsForBettingNode(const SolverConfig& config,
+                                 const BettingState& state) {
+  const size_t street = static_cast<size_t>(state.street);
+  return LegalActions(state, config.bet_sizes[street]);
+}
+
 HistoryId AppendHistory(HistoryTree& tree,
                         const BettingState& state,
                         const BettingRules& rules,
-                        const BettingAbstraction& abstraction) {
+                        const SolverConfig& config) {
   const HistoryId id = static_cast<HistoryId>(tree.nodes.size());
   tree.nodes.push_back(HistoryNode{state, 0, 0, kInvalidHistoryId,
                                    KindFor(state)});
 
   const HistoryNodeKind kind = tree.nodes[id].kind;
   if (kind == HistoryNodeKind::kDecision) {
-    const ActionMenu menu = abstraction.actions_for_betting_node(state);
+    const ActionMenu menu = ActionsForBettingNode(config, state);
     const uint32_t begin = static_cast<uint32_t>(tree.edges.size());
     tree.edges.resize(tree.edges.size() + menu.count);
     tree.nodes[id].action_begin = begin;
@@ -82,13 +87,13 @@ HistoryId AppendHistory(HistoryTree& tree,
       const GameAction edge_action = menu.actions[action];
       const BettingState child_state = ApplyAction(state, edge_action);
       const HistoryId child =
-          AppendHistory(tree, child_state, rules, abstraction);
+          AppendHistory(tree, child_state, rules, config);
       tree.edges[begin + action] = {edge_action, child};
     }
   } else if (kind == HistoryNodeKind::kChance) {
     const BettingState child_state = AdvanceBettingStreet(state, rules);
     const HistoryId child =
-        AppendHistory(tree, child_state, rules, abstraction);
+        AppendHistory(tree, child_state, rules, config);
     tree.nodes[id].chance_child = child;
   }
   return id;
@@ -96,11 +101,11 @@ HistoryId AppendHistory(HistoryTree& tree,
 
 HistoryTree BuildHistoryTree(const BettingState& root,
                              const BettingRules& rules,
-                             const BettingAbstraction& abstraction) {
+                             const SolverConfig& config) {
   HistoryTree tree;
   tree.nodes.reserve(4096);
   tree.edges.reserve(4096);
-  tree.root = AppendHistory(tree, root, rules, abstraction);
+  tree.root = AppendHistory(tree, root, rules, config);
   return tree;
 }
 
@@ -342,8 +347,7 @@ CFRSolver::CFRSolver(const SolverConfig& config,
     : config_(config),
       betting_rules_{config_.big_blind > 0 ? config_.big_blind : 2},
       initial_state_(initial_state),
-      rng_(12345),
-      betting_abstraction_(config_) {
+      rng_(12345) {
   if constexpr (kCoarsePublicBuckets && kCoarsePrivateBuckets) {
     throw std::invalid_argument(
         "coarse public + coarse private abstraction does not provide "
@@ -352,8 +356,7 @@ CFRSolver::CFRSolver(const SolverConfig& config,
   if (!IsValidBettingState(initial_state_.betting)) {
     throw std::invalid_argument("initial betting state is invalid");
   }
-  history_ = BuildHistoryTree(initial_state_.betting, betting_rules_,
-                              betting_abstraction_);
+  history_ = BuildHistoryTree(initial_state_.betting, betting_rules_, config_);
   if (config_.max_info_sets > 0) {
     const size_t rows = static_cast<size_t>(config_.max_info_sets);
     state_.rows.reserve(rows);

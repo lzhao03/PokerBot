@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <optional>
 
-#include "src/poker_types.h"
+#include "src/poker.h"
 
 namespace poker {
 

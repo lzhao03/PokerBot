@@ -1,4 +1,4 @@
-#include "src/cfr_solver.h"
+#include "src/solver.h"
 
 #include <algorithm>
 #include <array>

@@ -7,7 +7,7 @@
 #include <stdexcept>
 
 #include "absl/types/span.h"
-#include "src/poker_types.h"
+#include "src/poker.h"
 
 namespace poker {
 

@@ -4,7 +4,7 @@
 
 #include "absl/container/inlined_vector.h"
 #include "src/game_state.h"
-#include "src/poker_types.h"
+#include "src/poker.h"
 
 namespace poker {
 

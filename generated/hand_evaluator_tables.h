@@ -5,8 +5,6 @@
 #include <cstdint>
 #include <utility>
 
-#include "src/hand_evaluator.h"
-
 namespace poker::hand_evaluator_tables {
 
 struct ScoreRecord {

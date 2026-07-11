@@ -1,4 +1,3 @@
-#include "src/betting_abstraction.h"
 #include "src/game_rules.h"
 
 #include "doctest/doctest.h"
@@ -57,7 +56,8 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   flop.street = StreetKind::kFlop;
   flop.player_to_act = 1;
   flop.folded_player = -1;
-  const ActionMenu menu = BettingAbstraction(config).actions_for_betting_node(flop);
+  const ActionMenu menu = LegalActions(
+      flop, config.bet_sizes[static_cast<size_t>(StreetKind::kFlop)]);
   bool bet_four = false;
   bool bet_two = false;
   bool all_in = false;

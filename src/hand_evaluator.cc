@@ -6,7 +6,7 @@
 #include <stdexcept>
 
 #include "absl/types/span.h"
-#include "src/hand_evaluator_tables.h"
+#include "generated/hand_evaluator_tables.h"
 
 namespace poker {
 namespace {

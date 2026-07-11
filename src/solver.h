@@ -10,11 +10,10 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "src/betting_abstraction.h"
 #include "src/card_abstraction.h"
 #include "src/game_state.h"
 #include "src/hand_range.h"
-#include "src/poker_types.h"
+#include "src/poker.h"
 
 namespace poker {
 
@@ -200,7 +199,6 @@ class CFRSolver {
   BettingRules betting_rules_;
   ExactPublicState initial_state_;
   std::mt19937 rng_;
-  BettingAbstraction betting_abstraction_;
   HistoryTree history_;
   CfrState state_;
   SolverStats stats_;

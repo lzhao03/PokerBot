@@ -1,4 +1,4 @@
-#include "src/cfr_solver.h"
+#include "src/solver.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -9,13 +9,19 @@
 #include <string_view>
 
 #include "absl/log/initialize.h"
-#include "src/build_flags.h"
 #include "src/hand_range.h"
 
 namespace {
 
-constexpr int kDefaultIterations = poker::kProdBenchmarkDefaults ? 1 : 100;
-constexpr int kDefaultEvalSamples = poker::kProdBenchmarkDefaults ? 1 : 100;
+#ifndef POKER_BENCHMARK_PROD_DEFAULTS
+#define POKER_BENCHMARK_PROD_DEFAULTS 0
+#endif
+
+constexpr bool kProdBenchmarkDefaults =
+    POKER_BENCHMARK_PROD_DEFAULTS != 0;
+
+constexpr int kDefaultIterations = kProdBenchmarkDefaults ? 1 : 100;
+constexpr int kDefaultEvalSamples = kProdBenchmarkDefaults ? 1 : 100;
 constexpr const char* kDefaultRange = "premium";
 
 struct Options {
@@ -95,8 +101,11 @@ int main(int argc, char** argv) {
     });
 
     std::unique_ptr<poker::CFRSolver> solver;
-    const double training_seconds = Measure("train_range", [&] {
+    Measure("build_history", [&] {
       solver = std::make_unique<poker::CFRSolver>(config);
+      return solver->get_history_count();
+    });
+    const double training_seconds = Measure("train_range", [&] {
       solver->run(options.iterations, a_range, b_range);
       return solver->get_expected_value(0);
     });

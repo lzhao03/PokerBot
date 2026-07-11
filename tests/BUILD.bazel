@@ -9,12 +9,7 @@ cc_test(
         "rules_test_support.h",
     ],
     deps = [
-        "//src:card_utils",
-        "//src:combo",
-        "//src:game_rules",
-        "//src:game_state",
-        "//src:hand_evaluator",
-        "//src:poker_types",
+        "//src:poker",
         "@doctest//:main",
     ],
 )

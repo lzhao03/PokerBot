@@ -2,7 +2,7 @@
 #include "src/card_utils.h"
 #include "src/combo.h"
 #include "src/hand_evaluator.h"
-#include "src/hand_evaluator_table_builder.h"
+#include "tools/hand_evaluator_table_builder.h"
 
 #include "doctest/doctest.h"
 

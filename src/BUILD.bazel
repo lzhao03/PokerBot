@@ -1,189 +1,79 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 
 DOCTEST_DEPS = ["@doctest//:main"]
-RAPIDCHECK_DEPS = ["@rapidcheck//:rapidcheck"]
 
 cc_library(
-    name = "poker_types",
-    hdrs = ["poker_types.h"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "game_state",
-    hdrs = ["game_state.h"],
-    deps = [
-        ":poker_types",
-        "@abseil-cpp//absl/types:span",
+    name = "poker",
+    srcs = [
+        "card_utils.cc",
+        "combo.cc",
+        "hand_evaluator.cc",
+        "poker.cc",
     ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "hand_evaluator",
-    srcs = ["hand_evaluator.cc"],
     hdrs = [
+        "card_utils.h",
+        "combo.h",
+        "game_rules.h",
+        "game_state.h",
         "hand_evaluator.h",
-        "hand_evaluator_tables.h",
+        "poker.h",
     ],
     deps = [
-        ":combo",
-        ":game_state",
-        ":poker_types",
-        "@abseil-cpp//absl/types:span",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "hand_evaluator_table_builder",
-    srcs = ["hand_evaluator_table_builder.cc"],
-    hdrs = [
-        "hand_evaluator.h",
-        "hand_evaluator_table_builder.h",
-    ],
-    deps = [
-        ":combo",
-        ":game_state",
-        ":poker_types",
-        "@abseil-cpp//absl/types:span",
-    ],
-)
-
-cc_binary(
-    name = "hand_evaluator_table_generator",
-    srcs = ["hand_evaluator_table_generator.cc"],
-    deps = [":hand_evaluator_table_builder"],
-)
-
-cc_library(
-    name = "card_utils",
-    srcs = ["card_utils.cc"],
-    hdrs = ["card_utils.h"],
-    deps = [
-        ":game_state",
-        ":poker_types",
-        "@abseil-cpp//absl/container:inlined_vector",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "combo",
-    srcs = ["combo.cc"],
-    hdrs = ["combo.h"],
-    deps = [
-        ":poker_types",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "build_flags",
-    hdrs = ["build_flags.h"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "card_abstraction",
-    hdrs = [
-        "card_abstraction.h",
-        "coarse_chance_transitions.h",
-    ],
-    deps = [
-        ":build_flags",
-        ":combo",
-        ":game_state",
-        ":poker_types",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "betting_abstraction",
-    srcs = ["betting_abstraction.cc"],
-    hdrs = ["betting_abstraction.h"],
-    deps = [
-        ":game_rules",
-        ":poker_types",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "game_rules",
-    srcs = ["game_rules.cc"],
-    hdrs = ["game_rules.h"],
-    deps = [
-        ":card_utils",
-        ":combo",
-        ":game_state",
-        ":hand_evaluator",
-        ":poker_types",
         "@abseil-cpp//absl/container:inlined_vector",
         "@abseil-cpp//absl/types:span",
+        "//generated:hand_evaluator_tables",
     ],
     visibility = ["//visibility:public"],
 )
 
-cc_library(
-    name = "hand_range",
-    srcs = ["hand_range.cc"],
-    hdrs = ["hand_range.h"],
-    deps = [
-        ":combo",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-CFR_SOLVER_DEPS = [
-    ":betting_abstraction",
-    ":build_flags",
-    ":card_abstraction",
-    ":card_utils",
-    ":game_rules",
-    ":game_state",
-    ":hand_range",
+SOLVER_SRCS = ["hand_range.cc", "solver.cc"]
+SOLVER_HDRS = [
+    "card_abstraction.h",
+    "hand_range.h",
+    "solver.h",
+]
+SOLVER_DEPS = [
+    ":poker",
     "@abseil-cpp//absl/container:flat_hash_map",
     "@abseil-cpp//absl/log:log",
     "@abseil-cpp//absl/types:span",
 ]
 
 cc_library(
-    name = "cfr_solver",
-    srcs = ["cfr_solver.cc"],
-    hdrs = ["cfr_solver.h"],
-    deps = CFR_SOLVER_DEPS,
+    name = "solver",
+    srcs = SOLVER_SRCS,
+    hdrs = SOLVER_HDRS,
+    deps = SOLVER_DEPS,
     visibility = ["//visibility:public"],
 )
 
 cc_library(
-    name = "cfr_solver_coarse_buckets",
-    srcs = ["cfr_solver.cc"],
-    hdrs = ["cfr_solver.h"],
+    name = "solver_coarse_buckets",
+    srcs = SOLVER_SRCS,
+    hdrs = SOLVER_HDRS,
     copts = [
         "-DPOKER_COARSE_PRIVATE_BUCKETS=1",
         "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
     ],
-    deps = CFR_SOLVER_DEPS,
+    deps = SOLVER_DEPS,
     visibility = ["//tests:__pkg__"],
 )
 
 cc_library(
-    name = "cfr_solver_coarse_private",
-    srcs = ["cfr_solver.cc"],
-    hdrs = ["cfr_solver.h"],
+    name = "solver_coarse_private",
+    srcs = SOLVER_SRCS,
+    hdrs = SOLVER_HDRS,
     copts = ["-DPOKER_COARSE_PRIVATE_BUCKETS=1"],
-    deps = CFR_SOLVER_DEPS,
+    deps = SOLVER_DEPS,
     visibility = ["//tests:__pkg__"],
 )
 
 cc_library(
-    name = "cfr_solver_coarse_public",
-    srcs = ["cfr_solver.cc"],
-    hdrs = ["cfr_solver.h"],
+    name = "solver_coarse_public",
+    srcs = SOLVER_SRCS,
+    hdrs = SOLVER_HDRS,
     copts = ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
-    deps = CFR_SOLVER_DEPS,
+    deps = SOLVER_DEPS,
     visibility = ["//tests:__pkg__"],
 )
 
@@ -196,15 +86,8 @@ cc_test(
         "training_range_test.cc",
     ],
     deps = DOCTEST_DEPS + [
-        ":betting_abstraction",
-        ":card_abstraction",
-        ":card_utils",
-        ":cfr_solver",
-        ":combo",
-        ":game_rules",
-        ":hand_evaluator",
-        ":hand_evaluator_table_builder",
-        ":hand_range",
+        ":solver",
+        "//tools:hand_evaluator_table_builder",
     ],
 )
 
@@ -215,64 +98,29 @@ cc_test(
         "-DPOKER_COARSE_PRIVATE_BUCKETS=1",
         "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
     ],
-    deps = DOCTEST_DEPS + [
-        ":cfr_solver_coarse_buckets",
-    ],
+    deps = DOCTEST_DEPS + [":solver_coarse_buckets"],
 )
 
 cc_test(
     name = "strict_abstraction_coarse_private_test",
     srcs = ["strict_abstraction_test.cc"],
     copts = ["-DPOKER_COARSE_PRIVATE_BUCKETS=1"],
-    deps = DOCTEST_DEPS + [
-        ":cfr_solver_coarse_private",
-        ":combo",
-        ":game_rules",
-        ":hand_range",
-    ],
+    deps = DOCTEST_DEPS + [":solver_coarse_private"],
 )
 
 cc_test(
     name = "strict_abstraction_coarse_public_test",
     srcs = ["strict_abstraction_test.cc"],
     copts = ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
-    deps = DOCTEST_DEPS + [
-        ":cfr_solver_coarse_public",
-        ":combo",
-        ":game_rules",
-        ":hand_range",
-    ],
+    deps = DOCTEST_DEPS + [":solver_coarse_public"],
 )
 
 cc_binary(
     name = "poker_solver",
     srcs = ["main.cc"],
     deps = [
-        ":cfr_solver",
+        ":solver",
         "@abseil-cpp//absl/log:globals",
-        "@abseil-cpp//absl/log:initialize",
-    ],
-)
-
-cc_binary(
-    name = "cfr_benchmark",
-    srcs = ["cfr_benchmark.cc"],
-    deps = [
-        ":build_flags",
-        ":cfr_solver",
-        ":hand_range",
-        "@abseil-cpp//absl/log:initialize",
-    ],
-)
-
-cc_binary(
-    name = "cfr_prod_benchmark",
-    srcs = ["cfr_benchmark.cc"],
-    copts = ["-DPOKER_BENCHMARK_PROD_DEFAULTS=1"],
-    deps = [
-        ":build_flags",
-        ":cfr_solver",
-        ":hand_range",
         "@abseil-cpp//absl/log:initialize",
     ],
 )
