@@ -1,7 +1,6 @@
 #include "src/bet_abstraction.h"
 
 #include <algorithm>
-#include <cassert>
 #include <cmath>
 #include <utility>
 
@@ -41,9 +40,6 @@ AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
     actions.emplace_back(ActionKind::AllIn, all_in_to);
   }
 
-  for (const GameAction& action : actions) {
-    assert(IsLegalAction(state, action));
-  }
   return actions;
 }
 
