@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -18,6 +19,280 @@
 
 namespace poker {
 namespace {
+
+class Sha256 {
+ public:
+  void add(absl::Span<const uint8_t> bytes) noexcept {
+    total_bytes_ += bytes.size();
+    for (uint8_t byte : bytes) {
+      block_[block_size_++] = byte;
+      if (block_size_ == block_.size()) {
+        transform();
+        block_size_ = 0;
+      }
+    }
+  }
+
+  ModelFingerprint finish() noexcept {
+    const uint64_t bit_count = total_bytes_ * 8;
+    const uint8_t marker = 0x80;
+    add(absl::Span<const uint8_t>(&marker, 1));
+    const uint8_t zero = 0;
+    while (block_size_ != 56) {
+      add(absl::Span<const uint8_t>(&zero, 1));
+    }
+    std::array<uint8_t, 8> length = {};
+    for (size_t index = 0; index < length.size(); ++index) {
+      length[7 - index] =
+          static_cast<uint8_t>(bit_count >> static_cast<unsigned>(index * 8));
+    }
+    add(length);
+
+    ModelFingerprint fingerprint;
+    for (size_t word = 0; word < state_.size(); ++word) {
+      for (size_t byte = 0; byte < 4; ++byte) {
+        fingerprint.bytes[word * 4 + byte] = static_cast<std::byte>(
+            state_[word] >> static_cast<unsigned>((3 - byte) * 8));
+      }
+    }
+    return fingerprint;
+  }
+
+ private:
+  static constexpr std::array<uint32_t, 64> kRoundConstants = {
+      0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+      0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+      0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+      0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+      0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+      0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+      0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+      0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+      0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+      0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+      0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+      0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+      0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+      0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+      0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+      0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+  };
+
+  void transform() noexcept {
+    std::array<uint32_t, 64> words = {};
+    for (size_t index = 0; index < 16; ++index) {
+      const size_t offset = index * 4;
+      words[index] =
+          (static_cast<uint32_t>(block_[offset]) << 24) |
+          (static_cast<uint32_t>(block_[offset + 1]) << 16) |
+          (static_cast<uint32_t>(block_[offset + 2]) << 8) |
+          static_cast<uint32_t>(block_[offset + 3]);
+    }
+    for (size_t index = 16; index < words.size(); ++index) {
+      const uint32_t s0 = std::rotr(words[index - 15], 7) ^
+                          std::rotr(words[index - 15], 18) ^
+                          (words[index - 15] >> 3);
+      const uint32_t s1 = std::rotr(words[index - 2], 17) ^
+                          std::rotr(words[index - 2], 19) ^
+                          (words[index - 2] >> 10);
+      words[index] = words[index - 16] + s0 + words[index - 7] + s1;
+    }
+
+    uint32_t a = state_[0];
+    uint32_t b = state_[1];
+    uint32_t c = state_[2];
+    uint32_t d = state_[3];
+    uint32_t e = state_[4];
+    uint32_t f = state_[5];
+    uint32_t g = state_[6];
+    uint32_t h = state_[7];
+    for (size_t index = 0; index < words.size(); ++index) {
+      const uint32_t s1 =
+          std::rotr(e, 6) ^ std::rotr(e, 11) ^ std::rotr(e, 25);
+      const uint32_t choice = (e & f) ^ (~e & g);
+      const uint32_t temp1 =
+          h + s1 + choice + kRoundConstants[index] + words[index];
+      const uint32_t s0 =
+          std::rotr(a, 2) ^ std::rotr(a, 13) ^ std::rotr(a, 22);
+      const uint32_t majority = (a & b) ^ (a & c) ^ (b & c);
+      const uint32_t temp2 = s0 + majority;
+      h = g;
+      g = f;
+      f = e;
+      e = d + temp1;
+      d = c;
+      c = b;
+      b = a;
+      a = temp1 + temp2;
+    }
+    state_[0] += a;
+    state_[1] += b;
+    state_[2] += c;
+    state_[3] += d;
+    state_[4] += e;
+    state_[5] += f;
+    state_[6] += g;
+    state_[7] += h;
+  }
+
+  std::array<uint32_t, 8> state_ = {
+      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+  };
+  std::array<uint8_t, 64> block_ = {};
+  size_t block_size_ = 0;
+  uint64_t total_bytes_ = 0;
+};
+
+class FingerprintBuilder {
+ public:
+  void add_u8(uint8_t value) noexcept {
+    hash_.add(absl::Span<const uint8_t>(&value, 1));
+  }
+
+  void add_u32(uint32_t value) noexcept {
+    std::array<uint8_t, 4> bytes = {};
+    for (size_t index = 0; index < bytes.size(); ++index) {
+      bytes[index] =
+          static_cast<uint8_t>(value >> static_cast<unsigned>(index * 8));
+    }
+    hash_.add(bytes);
+  }
+
+  void add_u64(uint64_t value) noexcept {
+    std::array<uint8_t, 8> bytes = {};
+    for (size_t index = 0; index < bytes.size(); ++index) {
+      bytes[index] =
+          static_cast<uint8_t>(value >> static_cast<unsigned>(index * 8));
+    }
+    hash_.add(bytes);
+  }
+
+  void add_i32(int32_t value) noexcept {
+    add_u32(static_cast<uint32_t>(value));
+  }
+
+  void add_float(float value) noexcept {
+    add_u32(std::bit_cast<uint32_t>(value));
+  }
+
+  void add_double(double value) noexcept {
+    add_u64(std::bit_cast<uint64_t>(value));
+  }
+
+  ModelFingerprint finish() noexcept { return hash_.finish(); }
+
+ private:
+  Sha256 hash_;
+};
+
+void AddBettingData(FingerprintBuilder& hash,
+                    const BettingData& data) noexcept {
+  for (Chips value : data.stack) hash.add_i32(value);
+  for (Chips value : data.total_committed) hash.add_i32(value);
+  for (Chips value : data.street_committed) hash.add_i32(value);
+  hash.add_i32(data.last_full_raise);
+  hash.add_u8(static_cast<uint8_t>(data.street));
+  hash.add_u8(data.pending_action_mask);
+}
+
+void AddBettingState(FingerprintBuilder& hash,
+                     const BettingState& state) noexcept {
+  std::visit([&](const auto& phase) {
+    using Phase = std::decay_t<decltype(phase)>;
+    if constexpr (std::is_same_v<Phase, DecisionState>) {
+      hash.add_u8(0);
+      AddBettingData(hash, phase.data);
+      hash.add_u8(static_cast<uint8_t>(phase.actor));
+    } else if constexpr (std::is_same_v<Phase, ChanceState>) {
+      hash.add_u8(1);
+      AddBettingData(hash, phase.data);
+    } else if constexpr (std::is_same_v<Phase, FoldTerminalState>) {
+      hash.add_u8(2);
+      AddBettingData(hash, phase.data);
+      hash.add_u8(static_cast<uint8_t>(phase.folded));
+    } else {
+      hash.add_u8(3);
+      AddBettingData(hash, phase.data);
+    }
+  }, state);
+}
+
+void AddBoard(FingerprintBuilder& hash, const Board& board) noexcept {
+  hash.add_u8(BoardCount(board));
+  for (Card card : BoardCards(board)) {
+    hash.add_u8(static_cast<uint8_t>(card.index()));
+  }
+}
+
+void AddRange(FingerprintBuilder& hash, const ComboRange& range) noexcept {
+  hash.add_u32(range.active_count);
+  for (uint16_t index = 0; index < range.active_count; ++index) {
+    hash.add_u32(static_cast<uint32_t>(range.active[index].index()));
+  }
+  for (float weight : range.weights) hash.add_float(weight);
+}
+
+ModelFingerprint FingerprintModel(const SolveSpec& spec,
+                                  const HistoryTree& history) noexcept {
+  FingerprintBuilder hash;
+  hash.add_u32(1);  // Fingerprint schema.
+  hash.add_u32(1);  // Exact poker rules.
+  hash.add_u32(1);  // Card abstraction implementation.
+  hash.add_u32(1);  // Perfect-recall observation encoding.
+
+  const SolverConfig& config = spec.config;
+  hash.add_i32(config.starting_stack());
+  hash.add_i32(config.small_blind());
+  hash.add_i32(config.big_blind());
+  hash.add_i32(config.chance_samples());
+  hash.add_i32(config.max_info_sets());
+  hash.add_u8(config.accumulate_average_strategy() ? 1 : 0);
+  hash.add_u8(static_cast<uint8_t>(config.card_abstraction().public_mode));
+  hash.add_u8(static_cast<uint8_t>(config.card_abstraction().private_mode));
+  for (const auto& fractions :
+       config.bet_abstraction().pot_fractions) {
+    hash.add_u32(static_cast<uint32_t>(fractions.size()));
+    for (double fraction : fractions) hash.add_double(fraction);
+  }
+
+  AddBettingState(hash, spec.root.betting);
+  AddBoard(hash, spec.root.board);
+  for (const ComboRange& range : spec.ranges) AddRange(hash, range);
+
+  hash.add_u32(history.root.value());
+  hash.add_u32(static_cast<uint32_t>(history.nodes.size()));
+  for (const HistoryNode& node : history.nodes) {
+    std::visit([&](const auto& value) {
+      using Node = std::decay_t<decltype(value)>;
+      if constexpr (std::is_same_v<Node, DecisionNode>) {
+        hash.add_u8(0);
+        AddBettingData(hash, value.state.data);
+        hash.add_u8(static_cast<uint8_t>(value.state.actor));
+        hash.add_u32(value.edges.begin);
+        hash.add_u8(value.edges.count);
+      } else if constexpr (std::is_same_v<Node, ChanceNode>) {
+        hash.add_u8(1);
+        AddBettingData(hash, value.state.data);
+        hash.add_u32(value.child.value());
+      } else if constexpr (std::is_same_v<Node, FoldTerminalNode>) {
+        hash.add_u8(2);
+        AddBettingData(hash, value.state.data);
+        hash.add_u8(static_cast<uint8_t>(value.state.folded));
+      } else {
+        hash.add_u8(3);
+        AddBettingData(hash, value.state.data);
+      }
+    }, node);
+  }
+  hash.add_u32(static_cast<uint32_t>(history.edges.size()));
+  for (const HistoryEdge& edge : history.edges) {
+    hash.add_u8(static_cast<uint8_t>(edge.action.kind));
+    hash.add_i32(edge.action.target_street_commitment);
+    hash.add_u32(edge.child.value());
+  }
+  return hash.finish();
+}
 
 constexpr int kHandTypeCount = 169;
 
@@ -473,6 +748,7 @@ CFRSolver::CFRSolver(SolveSpec spec, DealDistribution deals)
       rng_(12345) {
   history_ = BuildHistoryTree(
       spec_.root.betting, betting_rules_, spec_.config);
+  model_ = FingerprintModel(spec_, history_);
   const size_t rows = static_cast<size_t>(spec_.config.max_info_sets());
   size_t max_actions = 3;
   for (StreetKind street : {StreetKind::kPreflop, StreetKind::kFlop,

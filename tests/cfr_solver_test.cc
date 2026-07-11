@@ -103,6 +103,18 @@ std::unique_ptr<CFRSolver> MakeSolver(
   return std::move(*solver);
 }
 
+std::string Hex(ModelFingerprint fingerprint) {
+  constexpr char kDigits[] = "0123456789abcdef";
+  std::string text;
+  text.reserve(fingerprint.bytes.size() * 2);
+  for (std::byte byte : fingerprint.bytes) {
+    const uint8_t value = std::to_integer<uint8_t>(byte);
+    text.push_back(kDigits[value >> 4]);
+    text.push_back(kDigits[value & 0x0F]);
+  }
+  return text;
+}
+
 TEST_CASE("solver configuration rejects invalid boundary values") {
   SolverConfigOptions options;
   options.max_info_sets = 0;
@@ -130,6 +142,17 @@ TEST_CASE("small exact solver baseline is deterministic") {
   CHECK(solver->get_cfr_update_count() == 1440);
   CHECK(solver->get_expected_value(Player::kA) ==
         doctest::Approx(-1.01572));
+}
+
+TEST_CASE("model fingerprints are stable and cover solve ranges") {
+  auto first = MakeSolver(Config(), R(kA), R(kB));
+  auto second = MakeSolver(Config(), R(kA), R(kB));
+  auto changed = MakeSolver(Config(), R(kB), R(kA));
+  CHECK(first->model_fingerprint() == second->model_fingerprint());
+  CHECK(first->model_fingerprint() != changed->model_fingerprint());
+  CHECK(Hex(first->model_fingerprint()) ==
+        "dbe9ae604cee3b303179e731f35dfbae"
+        "478988c4fa4633fa5ba3b92c256af99c");
 }
 
 TEST_CASE("history tree stores direct rule transitions") {

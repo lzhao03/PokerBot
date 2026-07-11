@@ -74,6 +74,13 @@ struct ComboRange {
   float weight(ComboId combo) const { return weights[combo.index()]; }
 };
 
+struct ModelFingerprint {
+  std::array<std::byte, 32> bytes = {};
+
+  friend bool operator==(const ModelFingerprint&,
+                         const ModelFingerprint&) = default;
+};
+
 struct SolveSpec {
   SolverConfig config;
   ExactPublicState root;
@@ -243,6 +250,9 @@ class CFRSolver {
   size_t get_strategy_bytes() const {
     return state_.strategy_sum.size() * sizeof(float);
   }
+  const ModelFingerprint& model_fingerprint() const noexcept {
+    return model_;
+  }
   SolverStats get_stats() const { return stats_; }
   void reset_stats() { stats_ = {}; }
 
@@ -294,6 +304,7 @@ class CFRSolver {
   DealDistribution deals_;
   std::mt19937 rng_;
   HistoryTree history_;
+  ModelFingerprint model_;
   CfrState state_;
   SolverStats stats_;
 };
