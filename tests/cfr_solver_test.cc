@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "doctest/doctest.h"
@@ -29,6 +30,14 @@ ComboId H(int r0, S s0, int r1, S s1) {
 
 ComboRange R(ComboId hand) {
   return SingleComboRange(hand);
+}
+
+BettingState Apply(const BettingState& state, GameAction action) {
+  const auto child = TryApplyAction(state, action);
+  if (!child.ok()) {
+    throw std::invalid_argument(std::string(child.status().message()));
+  }
+  return *child;
 }
 
 SolverConfig Config() {
@@ -70,7 +79,7 @@ TEST_CASE("history tree stores direct rule transitions") {
         const HistoryEdge& edge = tree.edges[node.action_begin + action];
         REQUIRE(edge.child < tree.nodes.size());
         CHECK(tree.nodes[edge.child].state ==
-              ApplyAction(node.state, edge.action));
+              Apply(node.state, edge.action));
       }
     } else if (node.kind == HistoryNodeKind::kChance) {
       REQUIRE(node.chance_child < tree.nodes.size());
@@ -133,8 +142,8 @@ TEST_CASE("postflop roots use full observation identity") {
   SolverConfig config = Config();
   const BettingRules rules{config.big_blind};
   ExactPublicState root = MakeInitialState(rules, {8, 8}, {1, 2});
-  root.betting = ApplyAction(root.betting, {ActionKind::kCall, 2});
-  root.betting = ApplyAction(root.betting, {ActionKind::kCheck, 0});
+  root.betting = Apply(root.betting, {ActionKind::kCall, 2});
+  root.betting = Apply(root.betting, {ActionKind::kCheck, 0});
   const std::array<Card, 3> flop = {
       MakeCardId(2, S::kHearts), MakeCardId(7, S::kDiamonds),
       MakeCardId(12, S::kClubs)};

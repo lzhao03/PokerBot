@@ -8,6 +8,7 @@
 #include <stdexcept>
 
 #include "absl/container/inlined_vector.h"
+#include "absl/status/status.h"
 #include "src/hand_evaluator.h"
 
 namespace poker {
@@ -149,17 +150,6 @@ bool IsLegalAction(const BettingState& state, const GameAction& action) {
   }
 }
 
-void AddAction(SolverActions& actions,
-               const BettingState& state,
-               ActionKind kind,
-               Chips target_street_commitment) {
-  const GameAction action{kind, target_street_commitment};
-  if (!IsLegalAction(state, action)) {
-    throw std::logic_error("Generated an illegal poker action");
-  }
-  actions.push_back(action);
-}
-
 BettingState ApplyActionUnchecked(const BettingState& state,
                                   const GameAction& action) {
   BettingState child = state;
@@ -213,6 +203,13 @@ BettingState ApplyActionUnchecked(const BettingState& state,
 
   assert(IsValidBettingState(child));
   return child;
+}
+
+void AddTransition(SolverTransitions& transitions,
+                   const BettingState& state,
+                   GameAction action) {
+  assert(IsLegalAction(state, action));
+  transitions.push_back({action, ApplyActionUnchecked(state, action)});
 }
 
 }  // namespace
@@ -369,27 +366,28 @@ bool IsTerminal(const ExactPublicState& state) {
          IsBettingRoundOver(state.betting);
 }
 
-SolverActions GetSolverActions(const SolverConfig& config,
-                               const BettingState& state) {
+SolverTransitions GenerateTransitions(const SolverConfig& config,
+                                      const BettingState& state) {
   const int player = state.player_to_act;
   if (!IsPlayer(player) || state.folded_player >= 0 ||
       state.stack[player] <= 0) {
-    throw std::logic_error("GetSolverActions requires a decision state");
+    throw std::logic_error("GenerateTransitions requires a decision state");
   }
 
-  SolverActions actions;
+  SolverTransitions transitions;
   const ActionLimits limits = LimitsFor(state, player);
   const Chips outstanding_call = limits.highest - limits.current;
   if (outstanding_call > 0) {
-    AddAction(actions, state, ActionKind::kFold, 0);
-    AddAction(actions, state, ActionKind::kCall, limits.call_target);
+    AddTransition(transitions, state, {ActionKind::kFold, 0});
+    AddTransition(transitions, state,
+                  {ActionKind::kCall, limits.call_target});
   } else {
-    AddAction(actions, state, ActionKind::kCheck, 0);
+    AddTransition(transitions, state, {ActionKind::kCheck, 0});
   }
 
   const ActionKind sized_kind =
       limits.wager_open ? ActionKind::kRaise : ActionKind::kBet;
-  SolverActions sized_actions;
+  absl::InlinedVector<GameAction, 8> sized_actions;
   const auto& bet_sizes =
       config.bet_sizes[static_cast<size_t>(state.street)];
   for (double bet_size : bet_sizes) {
@@ -410,20 +408,20 @@ SolverActions GetSolverActions(const SolverConfig& config,
   sized_actions.erase(unique_end, sized_actions.end());
 
   for (const GameAction& action : sized_actions) {
-    AddAction(actions, state, action.kind,
-              action.target_street_commitment);
+    AddTransition(transitions, state, action);
   }
 
   if (limits.maximum_target > limits.call_target) {
-    AddAction(actions, state, ActionKind::kAllIn, limits.maximum_target);
+    AddTransition(transitions, state,
+                  {ActionKind::kAllIn, limits.maximum_target});
   }
-  return actions;
+  return transitions;
 }
 
-BettingState ApplyAction(const BettingState& state,
-                         const GameAction& action) {
+absl::StatusOr<BettingState> TryApplyAction(const BettingState& state,
+                                            const GameAction& action) {
   if (!IsLegalAction(state, action)) {
-    throw std::invalid_argument("illegal poker action");
+    return absl::InvalidArgumentError("illegal poker action");
   }
   return ApplyActionUnchecked(state, action);
 }

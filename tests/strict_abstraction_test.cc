@@ -4,6 +4,8 @@
 
 #include <array>
 #include <cmath>
+#include <stdexcept>
+#include <string>
 
 namespace poker {
 namespace {
@@ -11,6 +13,14 @@ namespace {
 #if POKER_COARSE_PUBLIC_BUCKETS == POKER_COARSE_PRIVATE_BUCKETS
 #error "strict_abstraction_test requires one coarse abstraction"
 #endif
+
+BettingState Apply(const BettingState& state, GameAction action) {
+  const auto child = TryApplyAction(state, action);
+  if (!child.ok()) {
+    throw std::invalid_argument(std::string(child.status().message()));
+  }
+  return *child;
+}
 
 ComboRange Range(int first_rank, int second_rank, SuitKind suit) {
   const ComboId combo = CardsToComboId(
@@ -31,9 +41,9 @@ TEST_CASE("mixed abstractions support history traversal") {
 
   const BettingRules rules{config.big_blind};
   ExactPublicState state = MakeInitialState(rules, {8, 8}, {1, 2});
-  state.betting = ApplyAction(
+  state.betting = Apply(
       state.betting, {ActionKind::kCall, 2});
-  state.betting = ApplyAction(
+  state.betting = Apply(
       state.betting, {ActionKind::kCheck, 0});
   const std::array<Card, 3> flop = {
       MakeCardId(2, SuitKind::kDiamonds),

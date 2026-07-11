@@ -189,21 +189,20 @@ HistoryId AppendHistory(HistoryTree& tree,
 
   const HistoryNodeKind kind = tree.nodes[id].kind;
   if (kind == HistoryNodeKind::kDecision) {
-    const SolverActions actions = GetSolverActions(config, state);
-    if (actions.size() > std::numeric_limits<uint8_t>::max()) {
+    const SolverTransitions transitions = GenerateTransitions(config, state);
+    if (transitions.size() > std::numeric_limits<uint8_t>::max()) {
       throw std::invalid_argument("too many configured solver actions");
     }
     const uint32_t begin = static_cast<uint32_t>(tree.edges.size());
-    tree.edges.resize(tree.edges.size() + actions.size());
+    tree.edges.resize(tree.edges.size() + transitions.size());
     tree.nodes[id].action_begin = begin;
-    tree.nodes[id].action_count = static_cast<uint8_t>(actions.size());
+    tree.nodes[id].action_count = static_cast<uint8_t>(transitions.size());
 
-    for (size_t action = 0; action < actions.size(); ++action) {
-      const GameAction edge_action = actions[action];
-      const BettingState child_state = ApplyAction(state, edge_action);
+    for (size_t action = 0; action < transitions.size(); ++action) {
+      const SolverTransition& transition = transitions[action];
       const HistoryId child =
-          AppendHistory(tree, child_state, rules, config);
-      tree.edges[begin + action] = {edge_action, child};
+          AppendHistory(tree, transition.child, rules, config);
+      tree.edges[begin + action] = {transition.action, child};
     }
   } else if (kind == HistoryNodeKind::kChance) {
     const BettingState child_state = AdvanceBettingStreet(state, rules);

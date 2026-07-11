@@ -12,6 +12,8 @@ cc_library(
     ],
     deps = [
         "@abseil-cpp//absl/container:inlined_vector",
+        "@abseil-cpp//absl/status:status",
+        "@abseil-cpp//absl/status:statusor",
         "@abseil-cpp//absl/types:span",
         "//generated:hand_evaluator_tables",
     ],

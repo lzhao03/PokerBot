@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
+#include "absl/status/statusor.h"
 #include "absl/types/span.h"
 
 namespace poker {
@@ -346,7 +347,12 @@ inline bool IsValidBettingState(const BettingState& state) noexcept {
           state.street_committed[0] == state.street_committed[1]);
 }
 
-using SolverActions = absl::InlinedVector<GameAction, 8>;
+struct SolverTransition {
+  GameAction action;
+  BettingState child;
+};
+
+using SolverTransitions = absl::InlinedVector<SolverTransition, 8>;
 
 const ComboInfo& GetComboInfo(ComboId combo_id);
 CardMask ComboMask(ComboId combo_id);
@@ -365,10 +371,10 @@ ExactPublicState MakeInitialState(
     const BettingRules& rules,
     std::array<Chips, kPlayerCount> stacks,
     std::array<Chips, kPlayerCount> blinds);
-SolverActions GetSolverActions(const SolverConfig& config,
-                               const BettingState& state);
-BettingState ApplyAction(const BettingState& state,
-                         const GameAction& action);
+SolverTransitions GenerateTransitions(const SolverConfig& config,
+                                      const BettingState& state);
+absl::StatusOr<BettingState> TryApplyAction(const BettingState& state,
+                                            const GameAction& action);
 BettingState AdvanceBettingStreet(const BettingState& state,
                                   const BettingRules& rules);
 ExactPublicState ApplyChance(const ExactPublicState& state,
