@@ -23,8 +23,8 @@ int BuildCactusCard(Card card) {
       2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41};
   static constexpr std::array<int, 4> kSuitBits = {
       0x8000, 0x4000, 0x2000, 0x1000};
-  const int rank_index = RankFromCardId(card) - 2;
-  const int suit_index = SuitIndex(SuitFromCardId(card));
+  const int rank_index = PokerRank(card) - 2;
+  const int suit_index = SuitIndex(CardSuit(card));
   return kRankPrimes[static_cast<size_t>(rank_index)] | (rank_index << 8) |
          kSuitBits[static_cast<size_t>(suit_index)] |
          (1 << (16 + rank_index));

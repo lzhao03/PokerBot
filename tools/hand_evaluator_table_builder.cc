@@ -84,14 +84,14 @@ EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards) {
   std::array<int, 5> ranks;
   size_t rank_count = 0;
   for (Card card : cards) {
-    ranks[rank_count] = RankFromCardId(card);
+    ranks[rank_count] = PokerRank(card);
     ++rank_count;
   }
   std::sort(ranks.begin(), ranks.end(), std::greater<int>());
 
   bool flush = true;
   for (Card card : cards) {
-    if (SuitFromCardId(card) != SuitFromCardId(cards[0])) {
+    if (CardSuit(card) != CardSuit(cards[0])) {
       flush = false;
       break;
     }

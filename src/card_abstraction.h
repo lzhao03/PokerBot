@@ -167,8 +167,8 @@ inline int HoleStrengthBucket(int high, int low, bool pair, bool suited) {
 
 inline int MadeBucket(const ComboInfo& combo, const BoardFeatures& features) {
   std::array<uint8_t, 13> rank_counts = features.rank_counts;
-  ++rank_counts[static_cast<size_t>(RankFromCardId(combo.card0) - 2)];
-  ++rank_counts[static_cast<size_t>(RankFromCardId(combo.card1) - 2)];
+  ++rank_counts[static_cast<size_t>(PokerRank(combo.card0) - 2)];
+  ++rank_counts[static_cast<size_t>(PokerRank(combo.card1) - 2)];
 
   int pairs = 0;
   int max_count = 0;
@@ -191,8 +191,8 @@ inline int DrawBucket(const ComboInfo& combo, const BoardFeatures& features) {
   std::array<uint8_t, 4> suit_counts = features.suit_counts;
   uint16_t rank_mask = features.rank_mask;
   auto add_card = [&](Card card) {
-    ++suit_counts[static_cast<size_t>(SuitIndex(SuitFromCardId(card)))];
-    rank_mask |= static_cast<uint16_t>(1u << (RankFromCardId(card) - 2));
+    ++suit_counts[static_cast<size_t>(SuitIndex(CardSuit(card)))];
+    rank_mask |= static_cast<uint16_t>(1u << (PokerRank(card) - 2));
   };
   add_card(combo.card0);
   add_card(combo.card1);
@@ -211,10 +211,10 @@ inline BoardFeatures board_features(const Board& board) {
   BoardFeatures features;
   features.card_count = BoardCount(board);
   for (Card card : BoardCards(board)) {
-    const int rank = RankFromCardId(card);
+    const int rank = PokerRank(card);
     const size_t rank_index = static_cast<size_t>(rank - 2);
     const size_t suit_index =
-        static_cast<size_t>(SuitIndex(SuitFromCardId(card)));
+        static_cast<size_t>(SuitIndex(CardSuit(card)));
     ++features.rank_counts[rank_index];
     ++features.suit_counts[suit_index];
     features.max_rank_count =
@@ -432,13 +432,13 @@ inline PrivateBucketId CoarsePrivateBucket(
     StreetKind street,
     const BoardFeatures& features) {
   const ComboInfo& combo = GetComboInfo(combo_id);
-  const int rank0 = RankFromCardId(combo.card0);
-  const int rank1 = RankFromCardId(combo.card1);
+  const int rank0 = PokerRank(combo.card0);
+  const int rank1 = PokerRank(combo.card1);
   const int high = rank0 > rank1 ? rank0 : rank1;
   const int low = rank0 > rank1 ? rank1 : rank0;
   const bool pair = rank0 == rank1;
-  const bool suited = SuitFromCardId(combo.card0) ==
-                      SuitFromCardId(combo.card1);
+  const bool suited = CardSuit(combo.card0) ==
+                      CardSuit(combo.card1);
 
   if (street == StreetKind::kPreflop || features.card_count == 0) {
     const int shape = pair ? 0 : (suited ? 1 : 2);

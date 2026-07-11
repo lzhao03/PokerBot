@@ -74,8 +74,8 @@ int ReferenceCompare(ComboId a, ComboId b, const Board& board) {
 }
 
 Card Rename(Card card, const std::array<S, 4>& suits) {
-  return C(RankFromCardId(card),
-           suits[static_cast<size_t>(SuitIndex(SuitFromCardId(card)))]);
+  return C(PokerRank(card),
+           suits[static_cast<size_t>(SuitIndex(CardSuit(card)))]);
 }
 
 Board Rename(const Board& board, const std::array<S, 4>& suits) {

@@ -224,11 +224,11 @@ inline int SuitIndex(Suit suit) {
   return static_cast<int>(suit);
 }
 
-inline int RankFromCardId(Card card) {
+inline int PokerRank(Card card) {
   return 2 + static_cast<int>(card.rank());
 }
 
-inline Suit SuitFromCardId(Card card) {
+inline Suit CardSuit(Card card) {
   return card.suit();
 }
 
@@ -237,7 +237,7 @@ inline CardMask CardBit(Card card) {
 }
 
 inline int EncodedCard(Card card) {
-  return RankFromCardId(card) * 8 + 1 + SuitIndex(SuitFromCardId(card));
+  return PokerRank(card) * 8 + 1 + SuitIndex(CardSuit(card));
 }
 
 struct BettingRules {
