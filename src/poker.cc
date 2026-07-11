@@ -218,10 +218,7 @@ BettingState ApplyActionUnchecked(const BettingState& state,
 }  // namespace
 
 const ComboInfo& GetComboInfo(ComboId combo_id) {
-  if (combo_id >= kComboCount) {
-    throw std::invalid_argument("Invalid combo id");
-  }
-  return ComboTable()[combo_id];
+  return ComboTable()[combo_id.index()];
 }
 
 CardMask ComboMask(ComboId combo_id) {
@@ -236,12 +233,12 @@ std::optional<ComboId> MaybeCardsToComboId(Card first, Card second) {
     std::swap(first, second);
   }
 
-  ComboId combo = 0;
+  uint16_t combo = 0;
   for (size_t card = 0; card < first.index(); ++card) {
-    combo += static_cast<ComboId>(kDeckCardCount - card - 1);
+    combo += static_cast<uint16_t>(kDeckCardCount - card - 1);
   }
-  combo += static_cast<ComboId>(second.index() - first.index() - 1);
-  return combo;
+  combo += static_cast<uint16_t>(second.index() - first.index() - 1);
+  return ComboId(combo);
 }
 
 ComboId CardsToComboId(Card first, Card second) {

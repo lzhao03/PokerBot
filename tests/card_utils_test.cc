@@ -86,14 +86,14 @@ BoardRunout Rename(const BoardRunout& board, const std::array<S, 4>& suits) {
 }
 
 TEST_CASE("combo ids are an exhaustive canonical bijection") {
-  ComboId expected = 0;
+  size_t expected = 0;
   for (int a = 0; a < kDeckCardCount; ++a) {
     for (int b = a + 1; b < kDeckCardCount; ++b, ++expected) {
       const Card ca = kDeck[static_cast<size_t>(a)];
       const Card cb = kDeck[static_cast<size_t>(b)];
-      CHECK(H(ca, cb) == expected);
-      CHECK(H(cb, ca) == expected);
-      const ComboInfo& info = GetComboInfo(expected);
+      CHECK(H(ca, cb).index() == expected);
+      CHECK(H(cb, ca).index() == expected);
+      const ComboInfo& info = GetComboInfo(H(ca, cb));
       CHECK(info.card0 == ca);
       CHECK(info.card1 == cb);
       CHECK(info.mask == (CardBit(ca) | CardBit(cb)));
@@ -150,7 +150,7 @@ TEST_CASE("sampling and card abstractions preserve identity") {
           board_texture_bucket(street, board_features(reversed)));
     const PrivateStreetObservation private_observation =
         observe_private_street(hand, street, features);
-    CHECK(private_observation.value == hand);
+    CHECK(private_observation.value == hand.index());
 
     std::array<S, 4> suits = {
         S::kHearts, S::kDiamonds, S::kClubs, S::kSpades};

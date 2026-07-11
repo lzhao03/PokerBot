@@ -20,7 +20,6 @@ using BoardBucketId = uint64_t;
 using PublicObservationId = uint64_t;
 using PrivateObservationId = uint64_t;
 using Chips = int32_t;
-using ComboId = uint16_t;
 
 constexpr int kDeckCardCount = 52;
 constexpr int kMaxBoardCards = 5;
@@ -81,10 +80,38 @@ class Card {
   uint8_t value_ = 0;
 };
 
+class ComboId {
+ public:
+  constexpr ComboId() = default;
+  constexpr size_t index() const noexcept { return value_; }
+
+  friend constexpr auto operator<=>(const ComboId&,
+                                    const ComboId&) = default;
+
+ private:
+  explicit constexpr ComboId(uint16_t value) noexcept : value_(value) {}
+
+  friend std::optional<ComboId> MaybeCardsToComboId(Card first,
+                                                     Card second);
+
+  uint16_t value_ = 0;
+};
+
 struct ComboInfo {
   Card card0;
   Card card1;
   CardMask mask = 0;
+};
+
+class HoleCards {
+ public:
+  constexpr HoleCards() = default;
+  explicit constexpr HoleCards(ComboId combo) noexcept : combo_(combo) {}
+
+  constexpr ComboId combo() const noexcept { return combo_; }
+
+ private:
+  ComboId combo_;
 };
 
 inline constexpr std::array<Card, kDeckCardCount> kDeck = [] {

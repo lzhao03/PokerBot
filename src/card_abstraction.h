@@ -421,7 +421,7 @@ inline PrivateStreetObservation observe_private_street(
     return {card_abstraction_detail::CoarsePrivateBucket(
         combo_id, street, features)};
   } else {
-    return {combo_id};
+    return {static_cast<PrivateBucketId>(combo_id.index())};
   }
 }
 
@@ -433,7 +433,7 @@ inline PrivateStreetObservation observe_private_street(
 }
 
 inline PrivateObservationId exact_private_observation(ComboId hand) {
-  return PrivateObservationId{hand};
+  return PrivateObservationId{hand.index()};
 }
 
 inline PrivateObservationId initial_private_observation(ComboId hand) {

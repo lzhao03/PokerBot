@@ -276,7 +276,7 @@ class DealSampler {
         b_total, rng);
     const ComboId a = a_hands_[a_index];
     const ComboId b = b_hands_[offset + relative];
-    return {{a, b}, ComboMask(a) | ComboMask(b)};
+    return {{HoleCards(a), HoleCards(b)}, ComboMask(a) | ComboMask(b)};
   }
 
  private:
@@ -495,8 +495,9 @@ CFRSolver::private_observations_for_position(
     const Position& position) const {
   std::array<PrivateObservationId, kPlayerCount> observations;
   for (int player = 0; player < kPlayerCount; ++player) {
+    const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
     observations[player] = private_observation_for_runout(
-        deal.hand(player), position.board, position.public_observation);
+        hand, position.board, position.public_observation);
   }
   return observations;
 }
@@ -507,12 +508,13 @@ void CFRSolver::advance_private_observations(
     const Position& child) const {
   const StreetKind street = history_.nodes[child.history].state.street;
   for (int player = 0; player < kPlayerCount; ++player) {
+    const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
     frame.private_observations[player] = advance_private_observation(
-        frame.private_observations[player], deal.hand(player), street,
+        frame.private_observations[player], hand, street,
         child.board, child.public_observation);
     assert(frame.private_observations[player] ==
            private_observation_for_runout(
-               deal.hand(player), child.board, child.public_observation));
+               hand, child.board, child.public_observation));
   }
 }
 
@@ -560,8 +562,9 @@ double CFRSolver::traverse(Position position,
   const HistoryNode& node = history_.nodes[position.history];
   if (node.kind == HistoryNodeKind::kTerminal) {
     ++stats_.terminal_visits;
-    return TerminalUtility({node.state, position.board}, deal.hand(0),
-                           deal.hand(1));
+    return TerminalUtility({node.state, position.board},
+                           deal.hand(Player::kA).combo(),
+                           deal.hand(Player::kB).combo());
   }
   if (node.kind == HistoryNodeKind::kChance) {
     const int samples = std::max(1, config_.chance_samples);
@@ -582,8 +585,9 @@ double CFRSolver::traverse(Position position,
   }
   const InfoSetKey key{position.history, position.public_observation,
                        frame.private_observations[player]};
+  const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
   assert(key.private_observation == private_observation_for_runout(
-      deal.hand(player), position.board, position.public_observation));
+      hand, position.board, position.public_observation));
   const bool training = context.mode == TraversalMode::kTrain;
   const bool updates = training && player == context.update_player;
   InfoSetRow row;
@@ -670,7 +674,7 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
     throw std::logic_error("average strategy accumulation is disabled");
   }
   const Position root = root_position();
-  const Deal deal{{player_a_hand, player_b_hand},
+  const Deal deal{{HoleCards(player_a_hand), HoleCards(player_b_hand)},
                   ComboMask(player_a_hand) | ComboMask(player_b_hand)};
   TraversalFrame frame;
   frame.private_observations = private_observations_for_position(deal, root);

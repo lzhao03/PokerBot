@@ -21,16 +21,16 @@ struct ComboRange {
   uint16_t active_count = 0;
 
   void add(ComboId combo, float weight = 1.0f) {
-    if (combo < kComboCount && weight > 0.0f) {
-      if (weights[combo] == 0.0f) {
+    if (weight > 0.0f) {
+      if (weights[combo.index()] == 0.0f) {
         active[active_count++] = combo;
       }
-      weights[combo] += weight;
+      weights[combo.index()] += weight;
     }
   }
 
   size_t count() const { return active_count; }
-  float weight(ComboId combo) const { return weights[combo]; }
+  float weight(ComboId combo) const { return weights[combo.index()]; }
 };
 
 ComboRange ParseRange(std::string_view text);
@@ -113,11 +113,11 @@ enum class StrategySource : uint8_t {
 };
 
 struct Deal {
-  std::array<ComboId, kPlayerCount> hands = {};
+  std::array<HoleCards, kPlayerCount> hands = {};
   CardMask blocked_mask = 0;
 
-  ComboId hand(int player) const {
-    return hands[static_cast<size_t>(player)];
+  const HoleCards& hand(Player player) const {
+    return hands[static_cast<size_t>(PlayerIndex(player))];
   }
 };
 
