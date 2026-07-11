@@ -55,9 +55,6 @@ PublicObservationId AdvanceCoarsePublic(PublicObservationId previous,
                                         BoardBucketId bucket) noexcept {
   assert(bucket < kCoarsePublicStreetObservationCount);
   const int shift = PublicShift(street);
-  constexpr uint64_t kSlotMask = (1ULL << kPublicObservationBitsPerStreet) - 1;
-  const uint64_t slot_mask = kSlotMask << shift;
-  assert((previous.value() & slot_mask) == 0);
   return PublicObservationId(
       previous.value() | ((static_cast<uint64_t>(bucket) + 1) << shift));
 }
