@@ -170,7 +170,7 @@ class CardAbstraction {
 BoardFeatures BoardFeaturesFor(const Board& board) noexcept;
 BoardBucketId BoardTextureBucket(StreetKind street,
                                  const BoardFeatures& features) noexcept;
-PrivateBucketId CoarsePrivateBucket(ComboId hand,
+PrivateBucketId Handcrafted36Bucket(ComboId hand,
                                     StreetKind street,
                                     const BoardFeatures& features) noexcept;
 

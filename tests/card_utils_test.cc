@@ -199,7 +199,7 @@ TEST_CASE("sampling and card abstractions preserve identity") {
     CHECK(BoardFeaturesFor(reversed) == features);
     CHECK(BoardTextureBucket(street, features) ==
           BoardTextureBucket(street, BoardFeaturesFor(reversed)));
-    CHECK(CoarsePrivateBucket(hand, street, features) <
+    CHECK(Handcrafted36Bucket(hand, street, features) <
           kCoarsePrivateStreetObservationCount);
 
     std::array<S, 4> suits = {
@@ -251,20 +251,20 @@ TEST_CASE("exact card observations are invariant under suit renaming") {
 }
 
 TEST_CASE("handcrafted 36 mappings remain stable") {
-  CHECK(CoarsePrivateBucket(
+  CHECK(Handcrafted36Bucket(
             H(C(14, S::Hearts), C(14, S::Spades)),
             StreetKind::Preflop, BoardFeatures{}) == 0);
-  CHECK(CoarsePrivateBucket(
+  CHECK(Handcrafted36Bucket(
             H(C(14, S::Hearts), C(13, S::Hearts)),
             StreetKind::Preflop, BoardFeatures{}) == 12);
-  CHECK(CoarsePrivateBucket(
+  CHECK(Handcrafted36Bucket(
             H(C(7, S::Hearts), C(2, S::Spades)),
             StreetKind::Preflop, BoardFeatures{}) == 35);
 
   const Board flop = B({C(2, S::Hearts), C(7, S::Hearts),
                         C(12, S::Hearts)});
   const ComboId hand = H(C(14, S::Hearts), C(13, S::Spades));
-  CHECK(CoarsePrivateBucket(hand, StreetKind::Flop,
+  CHECK(Handcrafted36Bucket(hand, StreetKind::Flop,
                             BoardFeaturesFor(flop)) == 6);
 
   const CardAbstractionConfig current{

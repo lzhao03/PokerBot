@@ -45,71 +45,6 @@ constexpr std::array<uint8_t, 8192> BuildStraightDensityTable() {
 
 inline const auto kStraightDensity = BuildStraightDensityTable();
 
-int HighRankGroup(int rank) noexcept {
-  if (rank >= 14) {
-    return 0;
-  }
-  if (rank >= 12) {
-    return 1;
-  }
-  return rank >= 9 ? 2 : 3;
-}
-
-int LowRankGroup(int rank) noexcept {
-  if (rank >= 10) {
-    return 0;
-  }
-  return rank >= 7 ? 1 : 2;
-}
-
-int HoleStrengthBucket(int high, int low, bool pair, bool suited) noexcept {
-  if (pair || high == 14 || (high >= 13 && low >= 10)) {
-    return 0;
-  }
-  const int gap = high - low;
-  return (high >= 11 && low >= 8) || (suited && gap <= 2) ? 1 : 2;
-}
-
-int MadeBucket(const ComboInfo& combo,
-               const BoardFeatures& features) noexcept {
-  std::array<uint8_t, 13> rank_counts = features.rank_counts;
-  ++rank_counts[static_cast<size_t>(PokerRank(combo.card0) - 2)];
-  ++rank_counts[static_cast<size_t>(PokerRank(combo.card1) - 2)];
-
-  int pairs = 0;
-  int max_count = 0;
-  for (uint8_t count : rank_counts) {
-    pairs += count >= 2 ? 1 : 0;
-    max_count = std::max(max_count, static_cast<int>(count));
-  }
-  if (max_count >= 3) {
-    return 3;
-  }
-  if (pairs >= 2) {
-    return 2;
-  }
-  return pairs == 1 ? 1 : 0;
-}
-
-int DrawBucket(const ComboInfo& combo,
-               const BoardFeatures& features) noexcept {
-  std::array<uint8_t, 4> suit_counts = features.suit_counts;
-  uint16_t rank_mask = features.rank_mask;
-  auto add_card = [&](Card card) {
-    ++suit_counts[static_cast<size_t>(card.suit())];
-    rank_mask |= static_cast<uint16_t>(1u << (PokerRank(card) - 2));
-  };
-  add_card(combo.card0);
-  add_card(combo.card1);
-
-  for (uint8_t count : suit_counts) {
-    if (count >= 4) {
-      return 2;
-    }
-  }
-  return kStraightDensity[rank_mask] >= 4 ? 1 : 0;
-}
-
 constexpr int PublicShift(StreetKind street) noexcept {
   assert(street != StreetKind::Preflop);
   return (static_cast<int>(street) - 1) * kPublicObservationBitsPerStreet;
@@ -620,7 +555,7 @@ BoardBucketId BoardTextureBucket(StreetKind,
       high);
 }
 
-PrivateBucketId CoarsePrivateBucket(
+PrivateBucketId Handcrafted36Bucket(
     ComboId hand,
     StreetKind street,
     const BoardFeatures& features) noexcept {
@@ -633,12 +568,43 @@ PrivateBucketId CoarsePrivateBucket(
   const bool suited = combo.card0.suit() == combo.card1.suit();
   if (street == StreetKind::Preflop || features.card_count == 0) {
     const int shape = pair ? 0 : (suited ? 1 : 2);
+    const int high_group =
+        high >= 14 ? 0 : (high >= 12 ? 1 : (high >= 9 ? 2 : 3));
+    const int low_group = low >= 10 ? 0 : (low >= 7 ? 1 : 2);
     return static_cast<PrivateBucketId>(
-        shape * 12 + HighRankGroup(high) * 3 + LowRankGroup(low));
+        shape * 12 + high_group * 3 + low_group);
   }
+
+  std::array<uint8_t, 13> rank_counts = features.rank_counts;
+  std::array<uint8_t, 4> suit_counts = features.suit_counts;
+  uint16_t rank_mask = features.rank_mask;
+  for (Card card : {combo.card0, combo.card1}) {
+    ++rank_counts[static_cast<size_t>(PokerRank(card) - 2)];
+    ++suit_counts[static_cast<size_t>(card.suit())];
+    rank_mask |= static_cast<uint16_t>(1u << (PokerRank(card) - 2));
+  }
+
+  int pairs = 0;
+  int max_count = 0;
+  for (uint8_t count : rank_counts) {
+    pairs += count >= 2 ? 1 : 0;
+    max_count = std::max(max_count, static_cast<int>(count));
+  }
+  const int made =
+      max_count >= 3 ? 3 : (pairs >= 2 ? 2 : (pairs == 1 ? 1 : 0));
+
+  const bool flush_draw = std::ranges::any_of(
+      suit_counts, [](uint8_t count) { return count >= 4; });
+  const int draw =
+      flush_draw ? 2 : (kStraightDensity[rank_mask] >= 4 ? 1 : 0);
+
+  const int gap = high - low;
+  const int hole_strength =
+      pair || high == 14 || (high >= 13 && low >= 10)
+          ? 0
+          : ((high >= 11 && low >= 8) || (suited && gap <= 2) ? 1 : 2);
   return static_cast<PrivateBucketId>(
-      MadeBucket(combo, features) * 9 + DrawBucket(combo, features) * 3 +
-      HoleStrengthBucket(high, low, pair, suited));
+      made * 9 + draw * 3 + hole_strength);
 }
 
 namespace {
@@ -658,13 +624,13 @@ PrivateObservationId HandcraftedObservation(
     const CardAbstractionConfig& config,
     ComboId hand,
     const PublicPosition& position) noexcept {
-  const PrivateBucketId current = CoarsePrivateBucket(
+  const PrivateBucketId current = Handcrafted36Bucket(
       hand, position.street(), position.features());
   if (config.recall_mode == RecallMode::CurrentBucketOnly) {
     return PrivateObservationId(static_cast<uint64_t>(current) + 1);
   }
 
-  uint64_t observation = static_cast<uint64_t>(CoarsePrivateBucket(
+  uint64_t observation = static_cast<uint64_t>(Handcrafted36Bucket(
       hand, StreetKind::Preflop, BoardFeatures{})) + 1;
   if (position.street() == StreetKind::Preflop) {
     return PrivateObservationId(observation);
@@ -673,7 +639,7 @@ PrivateObservationId HandcraftedObservation(
   const FlopBoard flop =
       DealFlop(PreflopBoard{}, {cards[0], cards[1], cards[2]});
   observation |=
-      (static_cast<uint64_t>(CoarsePrivateBucket(
+      (static_cast<uint64_t>(Handcrafted36Bucket(
            hand, StreetKind::Flop, BoardFeaturesFor(Board{flop}))) + 1)
       << 6;
   if (position.street() == StreetKind::Flop) {
@@ -681,7 +647,7 @@ PrivateObservationId HandcraftedObservation(
   }
   const TurnBoard turn = DealTurn(flop, cards[3]);
   observation |=
-      (static_cast<uint64_t>(CoarsePrivateBucket(
+      (static_cast<uint64_t>(Handcrafted36Bucket(
            hand, StreetKind::Turn, BoardFeaturesFor(Board{turn}))) + 1)
       << 12;
   if (position.street() == StreetKind::Turn) {
@@ -689,7 +655,7 @@ PrivateObservationId HandcraftedObservation(
   }
   const RiverBoard river = DealRiver(turn, cards[4]);
   observation |=
-      (static_cast<uint64_t>(CoarsePrivateBucket(
+      (static_cast<uint64_t>(Handcrafted36Bucket(
            hand, StreetKind::River, BoardFeaturesFor(Board{river}))) + 1)
       << 18;
   return PrivateObservationId(observation);
