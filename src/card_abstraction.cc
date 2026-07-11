@@ -162,21 +162,20 @@ PublicObservationId ObserveCoarsePublic(StreetKind street,
       BoardTextureBucket(StreetKind::kRiver, BoardFeaturesFor(Board{river})));
 }
 
-using Bytes = std::vector<uint8_t>;
-
-void AppendU32(Bytes& bytes, uint32_t value) {
+void AppendU32(std::vector<uint8_t>& bytes, uint32_t value) {
   for (int shift = 0; shift < 32; shift += 8) {
     bytes.push_back(static_cast<uint8_t>(value >> shift));
   }
 }
 
-void AppendU64(Bytes& bytes, uint64_t value) {
+void AppendU64(std::vector<uint8_t>& bytes, uint64_t value) {
   for (int shift = 0; shift < 64; shift += 8) {
     bytes.push_back(static_cast<uint8_t>(value >> shift));
   }
 }
 
-void AppendVector(Bytes& bytes, const std::vector<float>& values) {
+void AppendVector(std::vector<uint8_t>& bytes,
+                  const std::vector<float>& values) {
   AppendU32(bytes, static_cast<uint32_t>(values.size()));
   for (float value : values) AppendU32(bytes, std::bit_cast<uint32_t>(value));
 }
@@ -304,7 +303,7 @@ class ByteReader {
   size_t offset_ = 0;
 };
 
-absl::Status WriteBytes(const Bytes& bytes,
+absl::Status WriteBytes(const std::vector<uint8_t>& bytes,
                         const std::filesystem::path& path) {
   std::filesystem::path temporary = path;
   temporary += ".tmp";
@@ -327,14 +326,15 @@ absl::Status WriteBytes(const Bytes& bytes,
   return absl::OkStatus();
 }
 
-absl::StatusOr<Bytes> ReadBytes(const std::filesystem::path& path) {
+absl::StatusOr<std::vector<uint8_t>> ReadBytes(
+    const std::filesystem::path& path) {
   std::ifstream input(path, std::ios::binary | std::ios::ate);
   if (!input) return absl::NotFoundError("could not open model file");
   const std::streamoff end = input.tellg();
   if (end < 0 || end > 4096) {
     return absl::DataLossError("invalid equity model size");
   }
-  Bytes bytes(static_cast<size_t>(end));
+  std::vector<uint8_t> bytes(static_cast<size_t>(end));
   input.seekg(0);
   input.read(reinterpret_cast<char*>(bytes.data()), end);
   if (!input) return absl::DataLossError("could not read model file");
@@ -447,7 +447,7 @@ absl::Status SaveEquityBucketModel(
     const std::filesystem::path& path) {
   const absl::Status valid = ValidateEquityBucketModel(model);
   if (!valid.ok()) return valid;
-  Bytes bytes = {'P', 'E', 'Q', 'M', 'O', 'D', '1', 0};
+  std::vector<uint8_t> bytes = {'P', 'E', 'Q', 'M', 'O', 'D', '1', 0};
   AppendU32(bytes, model.format_version);
   AppendU32(bytes, model.feature_version);
   AppendU64(bytes, model.rollout_seed);

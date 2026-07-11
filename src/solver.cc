@@ -141,27 +141,26 @@ ModelFingerprint FingerprintModel(const SolveSpec& spec,
   return hash.finish();
 }
 
-using Bytes = std::vector<uint8_t>;
-
-void AppendU8(Bytes& bytes, uint8_t value) {
+void AppendU8(std::vector<uint8_t>& bytes, uint8_t value) {
   bytes.push_back(value);
 }
 
-void AppendU32(Bytes& bytes, uint32_t value) {
+void AppendU32(std::vector<uint8_t>& bytes, uint32_t value) {
   for (size_t index = 0; index < 4; ++index) {
     bytes.push_back(
         static_cast<uint8_t>(value >> static_cast<unsigned>(index * 8)));
   }
 }
 
-void AppendU64(Bytes& bytes, uint64_t value) {
+void AppendU64(std::vector<uint8_t>& bytes, uint64_t value) {
   for (size_t index = 0; index < 8; ++index) {
     bytes.push_back(
         static_cast<uint8_t>(value >> static_cast<unsigned>(index * 8)));
   }
 }
 
-void AppendFingerprint(Bytes& bytes, ModelFingerprint fingerprint) {
+void AppendFingerprint(std::vector<uint8_t>& bytes,
+                       ModelFingerprint fingerprint) {
   for (std::byte byte : fingerprint.bytes) {
     bytes.push_back(std::to_integer<uint8_t>(byte));
   }
@@ -244,7 +243,8 @@ absl::Status WriteBytes(const std::filesystem::path& path,
   return absl::OkStatus();
 }
 
-absl::StatusOr<Bytes> ReadBytes(const std::filesystem::path& path) {
+absl::StatusOr<std::vector<uint8_t>> ReadBytes(
+    const std::filesystem::path& path) {
   std::ifstream input(path, std::ios::binary | std::ios::ate);
   if (!input) {
     return absl::NotFoundError("could not open input file");
@@ -254,7 +254,7 @@ absl::StatusOr<Bytes> ReadBytes(const std::filesystem::path& path) {
                      std::numeric_limits<size_t>::max()) {
     return absl::DataLossError("invalid input file size");
   }
-  Bytes bytes(static_cast<size_t>(end));
+  std::vector<uint8_t> bytes(static_cast<size_t>(end));
   input.seekg(0);
   input.read(reinterpret_cast<char*>(bytes.data()), end);
   if (!input) {
@@ -694,7 +694,7 @@ absl::Status SavePolicy(const Policy& policy,
     return KeyLess(left.first, right.first);
   });
 
-  Bytes bytes;
+  std::vector<uint8_t> bytes;
   bytes.insert(bytes.end(), kPolicyMagic.begin(), kPolicyMagic.end());
   AppendU32(bytes, 1);
   AppendFingerprint(bytes, policy.model);
@@ -857,7 +857,7 @@ absl::Status SaveCheckpoint(const SolverCheckpoint& checkpoint,
     return KeyLess(left.first, right.first);
   });
 
-  Bytes bytes;
+  std::vector<uint8_t> bytes;
   bytes.insert(bytes.end(), kCheckpointMagic.begin(),
                kCheckpointMagic.end());
   AppendU32(bytes, checkpoint.format_version);
