@@ -1,10 +1,17 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <optional>
+#include <random>
 #include <stdexcept>
 #include <vector>
 
+#include "absl/container/inlined_vector.h"
+
 namespace poker {
+
+class BoardRunout;
 
 using CardId = uint8_t;
 using CardMask = uint64_t;
@@ -12,10 +19,18 @@ using BoardBucketId = uint64_t;
 using PublicObservationId = uint64_t;
 using PrivateObservationId = uint64_t;
 using Chips = int32_t;
+using ComboId = uint16_t;
 
 constexpr int kDeckCardCount = 52;
 constexpr int kMaxBoardCards = 5;
 constexpr int kPlayerCount = 2;
+constexpr int kComboCount = 1326;
+
+struct ComboInfo {
+  CardId card0 = 0;
+  CardId card1 = 0;
+  CardMask mask = 0;
+};
 
 enum class Player : uint8_t {
   kA = 0,
@@ -114,5 +129,18 @@ inline bool IsPlayer(int player) {
 inline int Opponent(int player) {
   return 1 - player;
 }
+
+const ComboInfo& GetComboInfo(ComboId combo_id);
+CardMask ComboMask(ComboId combo_id);
+std::optional<ComboId> MaybeCardsToComboId(CardId first, CardId second);
+ComboId CardsToComboId(CardId first, CardId second);
+
+int CardsForNextStreet(StreetKind street);
+int BoardCardsForStreet(StreetKind street);
+absl::InlinedVector<CardId, 5> SampleStreetCards(
+    StreetKind street,
+    const BoardRunout& board,
+    CardMask known_private_cards,
+    std::mt19937& rng);
 
 }  // namespace poker

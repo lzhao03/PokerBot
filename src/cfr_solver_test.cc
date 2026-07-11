@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "doctest/doctest.h"
-#include "src/combo.h"
 #include "src/game_rules.h"
 
 namespace poker {

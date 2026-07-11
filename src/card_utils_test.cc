@@ -1,7 +1,6 @@
 #include "src/card_abstraction.h"
-#include "src/card_utils.h"
-#include "src/combo.h"
 #include "src/hand_evaluator.h"
+#include "src/poker.h"
 #include "tools/hand_evaluator_table_builder.h"
 
 #include "doctest/doctest.h"

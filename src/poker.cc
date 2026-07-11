@@ -1,16 +1,38 @@
 #include "src/game_rules.h"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstddef>
+#include <random>
 #include <stdexcept>
 
 #include "absl/container/inlined_vector.h"
-#include "src/card_utils.h"
 #include "src/hand_evaluator.h"
 
 namespace poker {
 namespace {
+
+std::array<ComboInfo, kComboCount> BuildComboTable() {
+  std::array<ComboInfo, kComboCount> combos;
+  int combo = 0;
+  for (int first = 0; first < kDeckCardCount; ++first) {
+    for (int second = first + 1; second < kDeckCardCount; ++second) {
+      combos[combo++] = {
+          static_cast<CardId>(first),
+          static_cast<CardId>(second),
+          CardBit(static_cast<CardId>(first)) |
+              CardBit(static_cast<CardId>(second)),
+      };
+    }
+  }
+  return combos;
+}
+
+const std::array<ComboInfo, kComboCount>& ComboTable() {
+  static const std::array<ComboInfo, kComboCount> table = BuildComboTable();
+  return table;
+}
 
 int FirstPlayerForStreet(StreetKind street) {
   return street == StreetKind::kPreflop ? 0 : 1;
@@ -195,6 +217,111 @@ BettingState ApplyActionUnchecked(const BettingState& state,
 }
 
 }  // namespace
+
+const ComboInfo& GetComboInfo(ComboId combo_id) {
+  if (combo_id >= kComboCount) {
+    throw std::invalid_argument("Invalid combo id");
+  }
+  return ComboTable()[combo_id];
+}
+
+CardMask ComboMask(ComboId combo_id) {
+  return GetComboInfo(combo_id).mask;
+}
+
+std::optional<ComboId> MaybeCardsToComboId(CardId first, CardId second) {
+  if (first >= kDeckCardCount || second >= kDeckCardCount || first == second) {
+    return std::nullopt;
+  }
+  if (second < first) {
+    std::swap(first, second);
+  }
+
+  ComboId combo = 0;
+  for (int card = 0; card < first; ++card) {
+    combo += static_cast<ComboId>(kDeckCardCount - card - 1);
+  }
+  combo += static_cast<ComboId>(second - first - 1);
+  return combo;
+}
+
+ComboId CardsToComboId(CardId first, CardId second) {
+  const std::optional<ComboId> combo = MaybeCardsToComboId(first, second);
+  if (!combo.has_value()) {
+    throw std::invalid_argument("Invalid exact two-card combo");
+  }
+  return *combo;
+}
+
+int CardsForNextStreet(StreetKind street) {
+  switch (street) {
+    case StreetKind::kPreflop:
+      return 3;
+    case StreetKind::kFlop:
+    case StreetKind::kTurn:
+      return 1;
+    case StreetKind::kRiver:
+      return 0;
+  }
+}
+
+int BoardCardsForStreet(StreetKind street) {
+  switch (street) {
+    case StreetKind::kPreflop:
+      return 0;
+    case StreetKind::kFlop:
+      return 3;
+    case StreetKind::kTurn:
+      return 4;
+    case StreetKind::kRiver:
+      return 5;
+  }
+}
+
+absl::InlinedVector<CardId, 5> SampleStreetCards(
+    StreetKind street,
+    const BoardRunout& board,
+    CardMask known_private_cards,
+    std::mt19937& rng) {
+  const int open_slots = std::max(0, kMaxBoardCards - board.count());
+  const int count = std::min(CardsForNextStreet(street), open_slots);
+  if (count <= 0) {
+    return {};
+  }
+
+  const CardMask blocked = known_private_cards | board.mask();
+  if (count == 1) {
+    std::uniform_int_distribution<int> card_dist(0, kDeckCardCount - 1);
+    for (int attempt = 0; attempt < kDeckCardCount; ++attempt) {
+      const CardId candidate = static_cast<CardId>(card_dist(rng));
+      if ((blocked & CardBit(candidate)) == 0) {
+        return {candidate};
+      }
+    }
+  }
+
+  std::array<CardId, kDeckCardCount> candidates = {};
+  int candidate_count = 0;
+  for (int card_id = 0; card_id < kDeckCardCount; ++card_id) {
+    const CardId candidate = static_cast<CardId>(card_id);
+    if ((blocked & CardBit(candidate)) == 0) {
+      candidates[candidate_count++] = candidate;
+    }
+  }
+  if (candidate_count < count) {
+    throw std::runtime_error("Not enough cards to sample next street");
+  }
+
+  absl::InlinedVector<CardId, 5> sampled;
+  sampled.reserve(count);
+  for (int i = 0; i < count; ++i) {
+    std::uniform_int_distribution<int> card_dist(i, candidate_count - 1);
+    const int chosen = card_dist(rng);
+    std::swap(candidates[i], candidates[chosen]);
+    sampled.push_back(candidates[i]);
+  }
+  return sampled;
+}
 
 ExactPublicState MakeInitialState(
     const BettingRules& rules,

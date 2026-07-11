@@ -5,14 +5,10 @@ DOCTEST_DEPS = ["@doctest//:main"]
 cc_library(
     name = "poker",
     srcs = [
-        "card_utils.cc",
-        "combo.cc",
         "hand_evaluator.cc",
         "poker.cc",
     ],
     hdrs = [
-        "card_utils.h",
-        "combo.h",
         "game_rules.h",
         "game_state.h",
         "hand_evaluator.h",
@@ -26,10 +22,9 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
-SOLVER_SRCS = ["hand_range.cc", "solver.cc"]
+SOLVER_SRCS = ["solver.cc"]
 SOLVER_HDRS = [
     "card_abstraction.h",
-    "hand_range.h",
     "solver.h",
 ]
 SOLVER_DEPS = [
