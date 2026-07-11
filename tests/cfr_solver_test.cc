@@ -1,4 +1,5 @@
 #include "src/solver.h"
+#include "src/evaluation.h"
 
 #include <algorithm>
 #include <array>
@@ -344,21 +345,28 @@ TEST_CASE("average policies are normalized and persist exactly") {
   CHECK(loaded->rows == policy.rows);
   CHECK(loaded->probabilities == policy.probabilities);
 
-  const auto evaluated =
-      solver->evaluate_policy(policy, HoleCards(kA), HoleCards(kB));
+  const SerializedRngState rng_before = solver->checkpoint().rng;
+  const auto evaluated = EstimateExpectedValue(*solver, policy, policy, 4, 17);
+  const auto repeated = EstimateExpectedValue(*solver, policy, policy, 4, 17);
   REQUIRE(evaluated.ok());
-  CHECK(std::isfinite(evaluated->value));
+  REQUIRE(repeated.ok());
+  CHECK(std::isfinite(evaluated->mean));
+  CHECK(evaluated->policy_lookups > 0);
+  CHECK(evaluated->mean == repeated->mean);
+  CHECK(evaluated->standard_error == repeated->standard_error);
+  CHECK(evaluated->policy_lookups == repeated->policy_lookups);
+  CHECK(evaluated->missing_policy_lookups ==
+        repeated->missing_policy_lookups);
+  CHECK(solver->checkpoint().rng == rng_before);
 
   Policy empty;
   empty.model = policy.model;
-  const auto fallback =
-      solver->evaluate_policy(empty, HoleCards(kA), HoleCards(kB));
+  const auto fallback = EstimateExpectedValue(*solver, empty, empty, 2, 17);
   REQUIRE(fallback.ok());
-  CHECK(fallback->missing_lookups > 0);
+  CHECK(fallback->missing_policy_lookups > 0);
 
   auto different = MakeSolver(Config(), R(kB), R(kA));
-  CHECK_FALSE(different->evaluate_policy(
-      policy, HoleCards(kA), HoleCards(kB)).ok());
+  CHECK_FALSE(EstimateExpectedValue(*different, policy, policy, 1, 17).ok());
 }
 
 TEST_CASE("zero average mass extracts as uniform policy") {

@@ -194,10 +194,10 @@ struct Policy {
   bool strategy(InfoSetKey key, absl::Span<float> output) const;
 };
 
-struct PolicyEvaluationResult {
-  double value = 0.0;
-  uint64_t missing_lookups = 0;
-};
+absl::StatusOr<Policy> ExtractAveragePolicy(
+    const CfrState& state,
+    const HistoryTree& history,
+    ModelFingerprint model);
 
 absl::Status SavePolicy(const Policy& policy,
                         const std::filesystem::path& path);
@@ -285,13 +285,6 @@ class CFRSolver {
                                           HoleCards player_b);
   absl::StatusOr<double> evaluate_average(int samples);
   absl::StatusOr<Policy> extract_average_policy() const;
-  absl::StatusOr<PolicyEvaluationResult> evaluate_policy(
-      const Policy& policy,
-      HoleCards player_a,
-      HoleCards player_b);
-  absl::StatusOr<PolicyEvaluationResult> evaluate_policy(
-      const Policy& policy,
-      int samples);
   SolverCheckpoint checkpoint() const;
   absl::Status restore(SolverCheckpoint checkpoint);
 
@@ -308,6 +301,11 @@ class CFRSolver {
   }
   const ModelFingerprint& model_fingerprint() const noexcept {
     return model_;
+  }
+  const SolveSpec& solve_spec() const noexcept { return spec_; }
+  const HistoryTree& history_tree() const noexcept { return history_; }
+  const DealDistribution& deal_distribution() const noexcept {
+    return deals_;
   }
   SolverStats get_stats() const { return stats_; }
   void reset_stats() { stats_ = {}; }
@@ -326,7 +324,6 @@ class CFRSolver {
     kTrain,
     kEvaluateCurrent,
     kEvaluateAverage,
-    kEvaluatePolicy,
   };
 
   struct TraversalContext {
@@ -335,8 +332,6 @@ class CFRSolver {
     std::optional<Player> update_player;
     uint64_t iteration = 0;
     bool info_set_limit_reached = false;
-    const Policy* policy = nullptr;
-    uint64_t missing_policy_lookups = 0;
   };
 
   Position root_position() const;

@@ -1401,14 +1401,7 @@ double CFRSolver::traverse(Position position,
 
       absl::InlinedVector<double, 8> probabilities(action_count, 0.0);
       absl::InlinedVector<double, 8> values(action_count, 0.0);
-      if (context.mode == TraversalMode::kEvaluatePolicy) {
-        assert(context.policy != nullptr);
-        absl::InlinedVector<float, 8> stored(action_count, 0.0f);
-        if (!context.policy->strategy(key, absl::MakeSpan(stored))) {
-          ++context.missing_policy_lookups;
-        }
-        std::copy(stored.begin(), stored.end(), probabilities.begin());
-      } else if (context.mode == TraversalMode::kEvaluateAverage) {
+      if (context.mode == TraversalMode::kEvaluateAverage) {
         AverageStrategy(state_, strategy_row, absl::MakeSpan(probabilities));
       } else {
         RegretMatch(state_, strategy_row, absl::MakeSpan(probabilities));
@@ -1527,39 +1520,38 @@ absl::StatusOr<double> CFRSolver::evaluate_average(int samples) {
   return evaluate_deals(samples, TraversalMode::kEvaluateAverage);
 }
 
-absl::StatusOr<Policy> CFRSolver::extract_average_policy() const {
-  if (!spec_.config.accumulate_average_strategy()) {
-    return absl::FailedPreconditionError(
-        "average strategy accumulation is disabled");
-  }
+absl::StatusOr<Policy> ExtractAveragePolicy(
+    const CfrState& state,
+    const HistoryTree& history,
+    ModelFingerprint model) {
   Policy policy;
-  policy.model = model_;
-  policy.rows.reserve(state_.rows.size());
-  policy.probabilities.resize(state_.strategy_sum.size());
-  for (const auto& [key, row] : state_.rows) {
-    if (key.history.index() >= history_.nodes.size()) {
+  policy.model = model;
+  policy.rows.reserve(state.rows.size());
+  policy.probabilities.resize(state.strategy_sum.size());
+  for (const auto& [key, row] : state.rows) {
+    if (key.history.index() >= history.nodes.size()) {
       return absl::DataLossError("infoset references an invalid history");
     }
     const auto* node =
-        std::get_if<DecisionNode>(&history_.nodes[key.history.index()]);
+        std::get_if<DecisionNode>(&history.nodes[key.history.index()]);
     if (node == nullptr) {
       return absl::DataLossError("infoset history is not a decision");
     }
     const uint8_t count = node->edges.count;
-    if (row.action_offset + count > state_.strategy_sum.size()) {
+    if (row.action_offset + count > state.strategy_sum.size()) {
       return absl::DataLossError("infoset strategy span is invalid");
     }
     policy.rows.emplace(key, PolicyRow{row.action_offset, count});
     double sum = 0.0;
     for (size_t action = 0; action < count; ++action) {
-      const float value = state_.strategy_sum[row.action_offset + action];
+      const float value = state.strategy_sum[row.action_offset + action];
       if (!std::isfinite(value)) {
         return absl::DataLossError("nonfinite average strategy value");
       }
       sum += std::max(0.0f, value);
     }
     for (size_t action = 0; action < count; ++action) {
-      const float value = state_.strategy_sum[row.action_offset + action];
+      const float value = state.strategy_sum[row.action_offset + action];
       policy.probabilities[row.action_offset + action] =
           sum > 0.0 ? static_cast<float>(std::max(0.0f, value) / sum)
                     : 1.0f / count;
@@ -1570,44 +1562,12 @@ absl::StatusOr<Policy> CFRSolver::extract_average_policy() const {
   return policy;
 }
 
-absl::StatusOr<PolicyEvaluationResult> CFRSolver::evaluate_policy(
-    const Policy& policy,
-    HoleCards player_a,
-    HoleCards player_b) {
-  if (policy.model != model_) {
-    return absl::FailedPreconditionError("policy model does not match solver");
+absl::StatusOr<Policy> CFRSolver::extract_average_policy() const {
+  if (!spec_.config.accumulate_average_strategy()) {
+    return absl::FailedPreconditionError(
+        "average strategy accumulation is disabled");
   }
-  const Deal deal{{player_a, player_b},
-                  ComboMask(player_a.combo()) | ComboMask(player_b.combo())};
-  const Position root = root_position();
-  TraversalFrame frame;
-  frame.private_observations = private_observations_for_position(deal, root);
-  TraversalContext context{deal, TraversalMode::kEvaluatePolicy};
-  context.policy = &policy;
-  const double value = traverse(root, frame, context);
-  return PolicyEvaluationResult{value, context.missing_policy_lookups};
-}
-
-absl::StatusOr<PolicyEvaluationResult> CFRSolver::evaluate_policy(
-    const Policy& policy,
-    int samples) {
-  if (policy.model != model_) {
-    return absl::FailedPreconditionError("policy model does not match solver");
-  }
-  PolicyEvaluationResult result;
-  if (samples <= 0) return result;
-  for (int sample = 0; sample < samples; ++sample) {
-    const Deal deal = deals_.sample(rng_);
-    const Position root = root_position();
-    TraversalFrame frame;
-    frame.private_observations = private_observations_for_position(deal, root);
-    TraversalContext context{deal, TraversalMode::kEvaluatePolicy};
-    context.policy = &policy;
-    result.value += traverse(root, frame, context);
-    result.missing_lookups += context.missing_policy_lookups;
-  }
-  result.value /= samples;
-  return result;
+  return ExtractAveragePolicy(state_, history_, model_);
 }
 
 SolverCheckpoint CFRSolver::checkpoint() const {
