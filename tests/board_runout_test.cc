@@ -1,11 +1,10 @@
-#include "doctest/doctest.h"
-#include "src/poker.h"
 #include "src/hand_evaluator.h"
+#include "src/poker.h"
 
-#include <algorithm>
 #include <array>
 #include <bit>
-#include <stdexcept>
+
+#include "doctest/doctest.h"
 
 namespace poker {
 namespace {
@@ -14,67 +13,38 @@ Card C(int rank, SuitKind suit) {
   return MakeCardId(rank, suit);
 }
 
-BoardRunout Flop(std::array<Card, 3> cards) {
-  BoardRunout runout = BoardRunout::Preflop();
-  runout.deal_flop(cards);
-  return runout;
-}
-
-TEST_CASE("flop order canonicalizes while later streets remain observable") {
+TEST_CASE("board types preserve reveal order and card invariants") {
   const Card ace = C(14, SuitKind::kSpades);
   const Card king = C(13, SuitKind::kSpades);
   const Card queen = C(12, SuitKind::kSpades);
   const Card jack = C(11, SuitKind::kHearts);
   const Card ten = C(10, SuitKind::kDiamonds);
 
-  BoardRunout first = Flop({ace, king, queen});
-  BoardRunout permuted = Flop({queen, ace, king});
-  CHECK(first == permuted);
+  const FlopBoard flop = DealFlop(PreflopBoard{}, {ace, king, queen});
+  const FlopBoard permuted = DealFlop(PreflopBoard{}, {queen, ace, king});
+  CHECK(flop == permuted);
 
-  first.deal_turn(jack);
-  BoardRunout different_turn = Flop({ace, king, jack});
-  different_turn.deal_turn(queen);
-  CHECK(first.mask() == different_turn.mask());
-  CHECK_FALSE(first == different_turn);
+  const TurnBoard first_turn = DealTurn(flop, jack);
+  const TurnBoard different_turn = DealTurn(
+      DealFlop(PreflopBoard{}, {ace, king, jack}), queen);
+  CHECK(first_turn.mask() == different_turn.mask());
+  CHECK_FALSE(first_turn == different_turn);
 
-  first.deal_river(ten);
-  BoardRunout different_river = Flop({ace, king, queen});
-  different_river.deal_turn(ten);
-  different_river.deal_river(jack);
-  CHECK(first.mask() == different_river.mask());
-  CHECK_FALSE(first == different_river);
-}
+  const RiverBoard river = DealRiver(first_turn, ten);
+  const RiverBoard different_river = DealRiver(DealTurn(flop, ten), jack);
+  CHECK(river.mask() == different_river.mask());
+  CHECK_FALSE(river == different_river);
+  CHECK(std::popcount(river.mask()) == kMaxBoardCards);
 
-TEST_CASE("runout dealing enforces street and card invariants") {
-  const Card first = C(2, SuitKind::kHearts);
-  const Card second = C(7, SuitKind::kDiamonds);
-  const Card third = C(12, SuitKind::kClubs);
-  BoardRunout runout = Flop({third, first, second});
-
-  CHECK(runout.count() == 3);
-  CHECK(std::popcount(runout.mask()) == runout.count());
-  CHECK(std::is_sorted(runout.cards().begin(), runout.cards().end()));
-  CHECK(runout.contains(first));
-  CHECK_THROWS_AS(runout.deal_turn(first), std::invalid_argument);
-
-  BoardRunout preflop = BoardRunout::Preflop();
-  const std::array<Card, 2> short_flop = {first, second};
-  CHECK_THROWS_AS(preflop.deal_flop(short_flop), std::invalid_argument);
-  CHECK_THROWS_AS(preflop.deal_turn(first), std::logic_error);
-  BoardRunout no_turn = Flop({first, second, third});
-  CHECK_THROWS_AS(no_turn.deal_river(C(9, SuitKind::kSpades)),
-                  std::logic_error);
-  const std::array<Card, 3> duplicate_flop = {first, second, first};
-  CHECK_THROWS_AS(preflop.deal_flop(duplicate_flop),
-                  std::invalid_argument);
+  CHECK_FALSE(MakeFlop({ace, king, ace}).ok());
+  CHECK_FALSE(MakeTurn(flop, ace).ok());
+  CHECK_FALSE(MakeRiver(first_turn, jack).ok());
 }
 
 TEST_CASE("hand evaluator recognizes a royal flush") {
   const std::array<Card, 5> cards = {
-      C(10, SuitKind::kHearts),
-      C(11, SuitKind::kHearts),
-      C(12, SuitKind::kHearts),
-      C(13, SuitKind::kHearts),
+      C(10, SuitKind::kHearts), C(11, SuitKind::kHearts),
+      C(12, SuitKind::kHearts), C(13, SuitKind::kHearts),
       C(14, SuitKind::kHearts),
   };
 

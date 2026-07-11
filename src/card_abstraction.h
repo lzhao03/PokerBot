@@ -173,10 +173,10 @@ inline int DrawBucket(const ComboInfo& combo, const BoardFeatures& features) {
 
 }  // namespace card_abstraction_detail
 
-inline BoardFeatures board_features(const BoardRunout& board) {
+inline BoardFeatures board_features(const Board& board) {
   BoardFeatures features;
-  features.card_count = board.count();
-  for (Card card : board.cards()) {
+  features.card_count = BoardCount(board);
+  for (Card card : BoardCards(board)) {
     const int rank = RankFromCardId(card);
     const size_t rank_index = static_cast<size_t>(rank - 2);
     const size_t suit_index =
@@ -198,11 +198,11 @@ inline uint8_t straight_density(uint16_t rank_mask) {
 }
 
 inline PublicObservationId exact_public_observation(
-    const BoardRunout& board) {
+    const Board& board) {
   // Pack the canonical flop and ordered turn/river into one history ID.
-  uint64_t observation = board.count();
+  uint64_t observation = BoardCount(board);
   size_t shift = 3;
-  for (Card card : board.cards()) {
+  for (Card card : BoardCards(board)) {
     observation |= static_cast<uint64_t>(card.index()) << shift;
     shift += 6;
   }
@@ -301,7 +301,7 @@ inline PublicObservationId advance_public_observation(
 
 inline ExactChanceObservation exact_chance_observation(
     StreetKind street,
-    const BoardRunout& board) {
+    const Board& board) {
   constexpr std::array<uint8_t, 4> kOffsets = {0, 0, 3, 4};
   constexpr std::array<uint8_t, 4> kCounts = {0, 3, 1, 1};
   ExactChanceObservation observation;
@@ -311,7 +311,7 @@ inline ExactChanceObservation exact_chance_observation(
   }
   const size_t offset = kOffsets[street_index];
   const size_t count = kCounts[street_index];
-  const auto cards = board.cards();
+  const auto cards = BoardCards(board);
   if (cards.size() < offset + count) {
     return observation;
   }
@@ -322,7 +322,7 @@ inline ExactChanceObservation exact_chance_observation(
 
 inline PublicStreetObservation observe_public_street(
     StreetKind street,
-    const BoardRunout& board,
+    const Board& board,
     const BoardFeatures& features) {
   if constexpr (kCoarsePublicBuckets) {
     return {board_texture_bucket(street, features), {}};
@@ -333,14 +333,14 @@ inline PublicStreetObservation observe_public_street(
 
 inline PublicStreetObservation observe_public_street(
     StreetKind street,
-    const BoardRunout& board) {
+    const Board& board) {
   return observe_public_street(street, board, board_features(board));
 }
 
 inline PublicObservationId public_observation_after_chance(
     PublicObservationId previous,
     StreetKind new_street,
-    const BoardRunout& board) {
+    const Board& board) {
   if constexpr (kCoarsePublicBuckets) {
     return advance_public_observation(
         previous, new_street, observe_public_street(new_street, board));
@@ -350,16 +350,16 @@ inline PublicObservationId public_observation_after_chance(
 
 inline PublicObservationId public_observation_id(
     StreetKind street,
-    const BoardRunout& board) {
+    const Board& board) {
   if constexpr (kCoarsePublicBuckets) {
     PublicObservationId history = initial_public_observation();
     if (street == StreetKind::kPreflop) {
       return history;
     }
 
-    const auto cards = board.cards();
-    BoardRunout prefix = BoardRunout::Preflop();
-    prefix.deal_flop(cards.first(3));
+    const auto cards = BoardCards(board);
+    const std::array<Card, 3> flop = {cards[0], cards[1], cards[2]};
+    Board prefix = DealFlop(PreflopBoard{}, flop);
     history = advance_public_observation(
         history, StreetKind::kFlop,
         observe_public_street(StreetKind::kFlop, prefix));
@@ -367,7 +367,7 @@ inline PublicObservationId public_observation_id(
       return history;
     }
 
-    prefix.deal_turn(cards[3]);
+    prefix = DealTurn(std::get<FlopBoard>(prefix), cards[3]);
     history = advance_public_observation(
         history, StreetKind::kTurn,
         observe_public_street(StreetKind::kTurn, prefix));
@@ -375,7 +375,7 @@ inline PublicObservationId public_observation_id(
       return history;
     }
 
-    prefix.deal_river(cards[4]);
+    prefix = DealRiver(std::get<TurnBoard>(prefix), cards[4]);
     return advance_public_observation(
         history, StreetKind::kRiver,
         observe_public_street(StreetKind::kRiver, prefix));
@@ -429,7 +429,7 @@ inline PrivateStreetObservation observe_private_street(
 inline PrivateStreetObservation observe_private_street(
     ComboId combo_id,
     StreetKind street,
-    const BoardRunout& board) {
+    const Board& board) {
   return observe_private_street(combo_id, street, board_features(board));
 }
 
@@ -442,7 +442,7 @@ inline PrivateObservationId initial_private_observation(ComboId hand) {
     return exact_private_observation(hand);
   }
   const auto preflop = observe_private_street(
-      hand, StreetKind::kPreflop, BoardRunout::Preflop());
+      hand, StreetKind::kPreflop, Board{PreflopBoard{}});
   return PrivateObservationId(preflop.value + 1);
 }
 
@@ -450,7 +450,7 @@ inline PrivateObservationId advance_private_observation(
     PrivateObservationId previous,
     ComboId hand,
     StreetKind new_street,
-    const BoardRunout& exact_board,
+    const Board& exact_board,
     PublicObservationId public_observation) {
   if (new_street == StreetKind::kPreflop) {
     throw std::invalid_argument("preflop private observation is initial");
@@ -488,10 +488,10 @@ inline PrivateObservationId advance_private_observation(
 
 inline PrivateObservationId private_observation_for_runout(
     ComboId hand,
-    const BoardRunout& runout,
+    const Board& runout,
     PublicObservationId public_observation) {
   StreetKind street = StreetKind::kPreflop;
-  switch (runout.count()) {
+  switch (BoardCount(runout)) {
     case 0:
       break;
     case 3:
@@ -517,23 +517,23 @@ inline PrivateObservationId private_observation_for_runout(
   if (street == StreetKind::kPreflop) {
     return observation;
   }
-  const auto cards = runout.cards();
-  BoardRunout prefix = BoardRunout::Preflop();
-  prefix.deal_flop(cards.first(3));
+  const auto cards = BoardCards(runout);
+  const std::array<Card, 3> flop = {cards[0], cards[1], cards[2]};
+  Board prefix = DealFlop(PreflopBoard{}, flop);
   observation = advance_private_observation(
       observation, hand, StreetKind::kFlop, prefix,
       public_observation_id(StreetKind::kFlop, prefix));
   if (street == StreetKind::kFlop) {
     return observation;
   }
-  prefix.deal_turn(cards[3]);
+  prefix = DealTurn(std::get<FlopBoard>(prefix), cards[3]);
   observation = advance_private_observation(
       observation, hand, StreetKind::kTurn, prefix,
       public_observation_id(StreetKind::kTurn, prefix));
   if (street == StreetKind::kTurn) {
     return observation;
   }
-  prefix.deal_river(cards[4]);
+  prefix = DealRiver(std::get<TurnBoard>(prefix), cards[4]);
   return advance_private_observation(
       observation, hand, StreetKind::kRiver, prefix, public_observation);
 }

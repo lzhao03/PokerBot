@@ -148,9 +148,9 @@ int CompareCactusValues(uint16_t first, uint16_t second) {
   return 0;
 }
 
-uint16_t HandValue(ComboId hand, const BoardRunout& board) {
+uint16_t HandValue(ComboId hand, const Board& board) {
   const SevenCardHand cards =
-      SevenCardHand::FromHoleAndBoard(hand, board.cards());
+      SevenCardHand::FromHoleAndBoard(hand, BoardCards(board));
   return EvalBestCactus(cards.cards());
 }
 
@@ -167,7 +167,7 @@ HandEvaluation EvaluateFiveCards(const std::array<Card, 5>& cards) {
 
 int CompareHands(ComboId first,
                  ComboId second,
-                 const BoardRunout& board) {
+                 const Board& board) {
   return CompareCactusValues(HandValue(first, board),
                              HandValue(second, board));
 }

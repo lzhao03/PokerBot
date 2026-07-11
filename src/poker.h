@@ -289,80 +289,85 @@ inline const BettingData& Data(const BettingState& state) noexcept {
   }, state);
 }
 
-class BoardRunout {
+struct PreflopBoard {
+  friend bool operator==(const PreflopBoard&, const PreflopBoard&) = default;
+};
+
+class FlopBoard {
  public:
-  static BoardRunout Preflop() { return BoardRunout(); }
-
-  void deal_flop(absl::Span<const Card> cards) {
-    if (count_ != 0) {
-      throw std::logic_error("flop requires a preflop runout");
-    }
-    if (cards.size() != 3) {
-      throw std::invalid_argument("flop requires exactly three cards");
-    }
-
-    CardMask dealt_mask = 0;
-    for (Card card : cards) {
-      const CardMask bit = CardBit(card);
-      if ((dealt_mask & bit) != 0) {
-        throw std::invalid_argument("duplicate board card");
-      }
-      dealt_mask |= bit;
-    }
-
-    std::copy(cards.begin(), cards.end(), cards_.begin());
-    std::sort(cards_.begin(), cards_.begin() + 3);
-    mask_ = dealt_mask;
-    count_ = 3;
-  }
-
-  void deal_turn(Card card) {
-    if (count_ != 3) {
-      throw std::logic_error("turn requires a dealt flop");
-    }
-    deal_card(card, 3);
-  }
-
-  void deal_river(Card card) {
-    if (count_ != 4) {
-      throw std::logic_error("river requires a dealt turn");
-    }
-    deal_card(card, 4);
-  }
-
-  absl::Span<const Card> cards() const {
-    return absl::Span<const Card>(cards_.data(), count_);
-  }
-
+  absl::Span<const Card> cards() const { return cards_; }
   CardMask mask() const { return mask_; }
-  uint8_t count() const { return count_; }
 
-  bool contains(Card card) const {
-    return (mask_ & CardBit(card)) != 0;
-  }
-
-  bool operator==(const BoardRunout&) const = default;
+  friend bool operator==(const FlopBoard&, const FlopBoard&) = default;
 
  private:
-  BoardRunout() = default;
+  FlopBoard(std::array<Card, 3> cards, CardMask mask)
+      : cards_(cards), mask_(mask) {}
 
-  void deal_card(Card card, size_t index) {
-    if (contains(card)) {
-      throw std::invalid_argument("duplicate board card");
-    }
-    cards_[index] = card;
-    mask_ |= CardBit(card);
-    ++count_;
-  }
+  friend FlopBoard DealFlop(const PreflopBoard&,
+                            std::array<Card, 3> cards) noexcept;
+  friend absl::StatusOr<FlopBoard> MakeFlop(std::array<Card, 3> cards);
 
-  std::array<Card, kMaxBoardCards> cards_ = {};
+  std::array<Card, 3> cards_ = {};
   CardMask mask_ = 0;
-  uint8_t count_ = 0;
 };
+
+class TurnBoard {
+ public:
+  absl::Span<const Card> cards() const {
+    return absl::Span<const Card>(cards_.data(), 4);
+  }
+  CardMask mask() const { return mask_; }
+
+  friend bool operator==(const TurnBoard&, const TurnBoard&) = default;
+
+ private:
+  TurnBoard(std::array<Card, 5> cards, CardMask mask)
+      : cards_(cards), mask_(mask) {}
+
+  friend TurnBoard DealTurn(const FlopBoard&, Card card) noexcept;
+  friend absl::StatusOr<TurnBoard> MakeTurn(const FlopBoard&, Card card);
+
+  std::array<Card, 5> cards_ = {};
+  CardMask mask_ = 0;
+};
+
+class RiverBoard {
+ public:
+  absl::Span<const Card> cards() const { return cards_; }
+  CardMask mask() const { return mask_; }
+
+  friend bool operator==(const RiverBoard&, const RiverBoard&) = default;
+
+ private:
+  RiverBoard(std::array<Card, 5> cards, CardMask mask)
+      : cards_(cards), mask_(mask) {}
+
+  friend RiverBoard DealRiver(const TurnBoard&, Card card) noexcept;
+  friend absl::StatusOr<RiverBoard> MakeRiver(const TurnBoard&, Card card);
+
+  std::array<Card, 5> cards_ = {};
+  CardMask mask_ = 0;
+};
+
+using Board = std::variant<PreflopBoard, FlopBoard, TurnBoard, RiverBoard>;
+
+FlopBoard DealFlop(const PreflopBoard& board,
+                   std::array<Card, 3> cards) noexcept;
+TurnBoard DealTurn(const FlopBoard& board, Card card) noexcept;
+RiverBoard DealRiver(const TurnBoard& board, Card card) noexcept;
+absl::StatusOr<FlopBoard> MakeFlop(std::array<Card, 3> cards);
+absl::StatusOr<TurnBoard> MakeTurn(const FlopBoard& board, Card card);
+absl::StatusOr<RiverBoard> MakeRiver(const TurnBoard& board, Card card);
+
+absl::Span<const Card> BoardCards(const Board& board) noexcept;
+CardMask BoardMask(const Board& board) noexcept;
+uint8_t BoardCount(const Board& board) noexcept;
+bool BoardContains(const Board& board, Card card) noexcept;
 
 struct ExactPublicState {
   BettingState betting;
-  BoardRunout board = BoardRunout::Preflop();
+  Board board = PreflopBoard{};
 };
 
 inline Chips Pot(const BettingData& state) noexcept {
@@ -415,7 +420,7 @@ int CardsForNextStreet(StreetKind street);
 int BoardCardsForStreet(StreetKind street);
 absl::InlinedVector<Card, 5> SampleStreetCards(
     StreetKind street,
-    const BoardRunout& board,
+    const Board& board,
     CardMask known_private_cards,
     std::mt19937& rng);
 

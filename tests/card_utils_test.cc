@@ -19,22 +19,23 @@ using S = SuitKind;
 Card C(int rank, S suit) { return MakeCardId(rank, suit); }
 ComboId H(Card a, Card b) { return CardsToComboId(a, b); }
 
-BoardRunout Runout(absl::Span<const Card> cards) {
-  BoardRunout runout = BoardRunout::Preflop();
+Board Runout(absl::Span<const Card> cards) {
   if (cards.empty()) {
-    return runout;
+    return PreflopBoard{};
   }
-  runout.deal_flop(absl::Span<const Card>(cards.data(), 3));
-  if (cards.size() >= 4) {
-    runout.deal_turn(cards[3]);
+  const std::array<Card, 3> flop_cards = {cards[0], cards[1], cards[2]};
+  const FlopBoard flop = DealFlop(PreflopBoard{}, flop_cards);
+  if (cards.size() == 3) {
+    return flop;
   }
+  const TurnBoard turn = DealTurn(flop, cards[3]);
   if (cards.size() == 5) {
-    runout.deal_river(cards[4]);
+    return DealRiver(turn, cards[4]);
   }
-  return runout;
+  return turn;
 }
 
-BoardRunout B(std::initializer_list<Card> cards) {
+Board B(std::initializer_list<Card> cards) {
   return Runout(absl::Span<const Card>(cards.begin(), cards.size()));
 }
 
@@ -47,13 +48,13 @@ HandEvaluation Score5(const std::array<Card, 5>& cards) {
   return out;
 }
 
-HandEvaluation ReferenceBest(ComboId hand, const BoardRunout& board) {
+HandEvaluation ReferenceBest(ComboId hand, const Board& board) {
   std::array<Card, 7> cards = {};
   const ComboInfo& combo = GetComboInfo(hand);
   cards[0] = combo.card0;
   cards[1] = combo.card1;
   size_t count = 2;
-  for (Card card : board.cards()) cards[count++] = card;
+  for (Card card : BoardCards(board)) cards[count++] = card;
 
   HandEvaluation best;
   for (size_t a = 0; a + 4 < count; ++a)
@@ -66,7 +67,7 @@ HandEvaluation ReferenceBest(ComboId hand, const BoardRunout& board) {
   return best;
 }
 
-int ReferenceCompare(ComboId a, ComboId b, const BoardRunout& board) {
+int ReferenceCompare(ComboId a, ComboId b, const Board& board) {
   const HandEvaluation ea = ReferenceBest(a, board);
   const HandEvaluation eb = ReferenceBest(b, board);
   return ea > eb ? 1 : ea < eb ? -1 : 0;
@@ -77,12 +78,13 @@ Card Rename(Card card, const std::array<S, 4>& suits) {
            suits[static_cast<size_t>(SuitIndex(SuitFromCardId(card)))]);
 }
 
-BoardRunout Rename(const BoardRunout& board, const std::array<S, 4>& suits) {
+Board Rename(const Board& board, const std::array<S, 4>& suits) {
   std::array<Card, kMaxBoardCards> cards = {};
-  for (size_t i = 0; i < board.cards().size(); ++i) {
-    cards[i] = Rename(board.cards()[i], suits);
+  const auto board_cards = BoardCards(board);
+  for (size_t i = 0; i < board_cards.size(); ++i) {
+    cards[i] = Rename(board_cards[i], suits);
   }
-  return Runout(absl::Span<const Card>(cards.data(), board.count()));
+  return Runout(absl::Span<const Card>(cards.data(), BoardCount(board)));
 }
 
 TEST_CASE("combo ids are an exhaustive canonical bijection") {
@@ -117,7 +119,7 @@ TEST_CASE("hand evaluator matches an independent five-card oracle") {
     std::shuffle(deck.begin(), deck.end(), rng);
     const ComboId a = H(deck[0], deck[1]);
     const ComboId b = H(deck[2], deck[3]);
-    const BoardRunout board = B({deck[4], deck[5], deck[6], deck[7], deck[8]});
+    const Board board = B({deck[4], deck[5], deck[6], deck[7], deck[8]});
     CAPTURE(trial);
     CHECK(CompareHands(a, b, board) ==
           ReferenceCompare(a, b, board));
@@ -133,17 +135,18 @@ TEST_CASE("sampling and card abstractions preserve identity") {
     std::shuffle(deck.begin(), deck.end(), rng);
     const StreetKind street = static_cast<StreetKind>(trial % 3);
     const int board_count = BoardCardsForStreet(street);
-    const BoardRunout board = Runout(
+    const Board board = Runout(
         absl::Span<const Card>(deck.data(), board_count));
     const ComboId hand = H(deck[board_count], deck[board_count + 1]);
 
     std::array<Card, kMaxBoardCards> permuted = {};
-    std::copy(board.cards().begin(), board.cards().end(), permuted.begin());
-    if (board.count() >= 3) {
+    const auto cards = BoardCards(board);
+    std::copy(cards.begin(), cards.end(), permuted.begin());
+    if (BoardCount(board) >= 3) {
       std::swap(permuted[0], permuted[2]);
     }
-    const BoardRunout reversed = Runout(
-        absl::Span<const Card>(permuted.data(), board.count()));
+    const Board reversed = Runout(
+        absl::Span<const Card>(permuted.data(), BoardCount(board)));
     const BoardFeatures features = board_features(board);
     CHECK(board_features(reversed) == features);
     CHECK(board_texture_bucket(street, features) ==
@@ -155,13 +158,13 @@ TEST_CASE("sampling and card abstractions preserve identity") {
     std::array<S, 4> suits = {
         S::kHearts, S::kDiamonds, S::kClubs, S::kSpades};
     std::shuffle(suits.begin(), suits.end(), rng);
-    const BoardRunout renamed_board = Rename(board, suits);
+    const Board renamed_board = Rename(board, suits);
     CHECK(board_texture_bucket(street, features) ==
           board_texture_bucket(street, board_features(renamed_board)));
 
     const auto sampled = SampleStreetCards(street, board, ComboMask(hand), rng);
     CHECK(sampled.size() == static_cast<size_t>(CardsForNextStreet(street)));
-    CardMask blocked = board.mask() | ComboMask(hand);
+    CardMask blocked = BoardMask(board) | ComboMask(hand);
     for (Card card : sampled) {
       CHECK((blocked & CardBit(card)) == 0);
       blocked |= CardBit(card);
@@ -172,7 +175,7 @@ TEST_CASE("sampling and card abstractions preserve identity") {
   for (int i = 0; i < kDeckCardCount - 2; ++i)
     blocked |= CardBit(kDeck[static_cast<size_t>(i)]);
   CHECK_THROWS_AS(SampleStreetCards(StreetKind::kPreflop,
-                                    BoardRunout::Preflop(), blocked, rng),
+                                    Board{PreflopBoard{}}, blocked, rng),
                   std::runtime_error);
 }
 

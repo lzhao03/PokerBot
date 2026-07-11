@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <random>
 #include <stdexcept>
+#include <type_traits>
 
 #include "absl/container/inlined_vector.h"
 #include "absl/status/status.h"
@@ -46,24 +47,6 @@ Chips CommitChips(BettingData& state, Player player, Chips requested) {
   state.total_committed[index] += committed;
   state.street_committed[index] += committed;
   return committed;
-}
-
-void DealNextStreet(BoardRunout& board,
-                    StreetKind street,
-                    absl::Span<const Card> cards) {
-  switch (street) {
-    case StreetKind::kPreflop:
-      board.deal_flop(cards);
-      break;
-    case StreetKind::kFlop:
-      board.deal_turn(cards[0]);
-      break;
-    case StreetKind::kTurn:
-      board.deal_river(cards[0]);
-      break;
-    case StreetKind::kRiver:
-      break;
-  }
 }
 
 void RefundUnmatchedCommitment(BettingData& state) {
@@ -228,6 +211,89 @@ void AddTransition(SolverTransitions& transitions,
 
 }  // namespace
 
+FlopBoard DealFlop(const PreflopBoard&,
+                   std::array<Card, 3> cards) noexcept {
+  CardMask mask = 0;
+  for (Card card : cards) {
+    assert((mask & CardBit(card)) == 0);
+    mask |= CardBit(card);
+  }
+  std::sort(cards.begin(), cards.end());
+  return FlopBoard(cards, mask);
+}
+
+TurnBoard DealTurn(const FlopBoard& board, Card card) noexcept {
+  assert((board.mask() & CardBit(card)) == 0);
+  std::array<Card, 5> cards = {};
+  std::copy(board.cards().begin(), board.cards().end(), cards.begin());
+  cards[3] = card;
+  return TurnBoard(cards, board.mask() | CardBit(card));
+}
+
+RiverBoard DealRiver(const TurnBoard& board, Card card) noexcept {
+  assert((board.mask() & CardBit(card)) == 0);
+  std::array<Card, 5> cards = {};
+  std::copy(board.cards().begin(), board.cards().end(), cards.begin());
+  cards[4] = card;
+  return RiverBoard(cards, board.mask() | CardBit(card));
+}
+
+absl::StatusOr<FlopBoard> MakeFlop(std::array<Card, 3> cards) {
+  CardMask mask = 0;
+  for (Card card : cards) {
+    if ((mask & CardBit(card)) != 0) {
+      return absl::InvalidArgumentError("duplicate flop card");
+    }
+    mask |= CardBit(card);
+  }
+  std::sort(cards.begin(), cards.end());
+  return FlopBoard(cards, mask);
+}
+
+absl::StatusOr<TurnBoard> MakeTurn(const FlopBoard& board, Card card) {
+  if ((board.mask() & CardBit(card)) != 0) {
+    return absl::InvalidArgumentError("duplicate turn card");
+  }
+  return DealTurn(board, card);
+}
+
+absl::StatusOr<RiverBoard> MakeRiver(const TurnBoard& board, Card card) {
+  if ((board.mask() & CardBit(card)) != 0) {
+    return absl::InvalidArgumentError("duplicate river card");
+  }
+  return DealRiver(board, card);
+}
+
+absl::Span<const Card> BoardCards(const Board& board) noexcept {
+  return std::visit([](const auto& street) -> absl::Span<const Card> {
+    using Street = std::decay_t<decltype(street)>;
+    if constexpr (std::is_same_v<Street, PreflopBoard>) {
+      return {};
+    } else {
+      return street.cards();
+    }
+  }, board);
+}
+
+CardMask BoardMask(const Board& board) noexcept {
+  return std::visit([](const auto& street) -> CardMask {
+    using Street = std::decay_t<decltype(street)>;
+    if constexpr (std::is_same_v<Street, PreflopBoard>) {
+      return 0;
+    } else {
+      return street.mask();
+    }
+  }, board);
+}
+
+uint8_t BoardCount(const Board& board) noexcept {
+  return static_cast<uint8_t>(BoardCards(board).size());
+}
+
+bool BoardContains(const Board& board, Card card) noexcept {
+  return (BoardMask(board) & CardBit(card)) != 0;
+}
+
 const ComboInfo& GetComboInfo(ComboId combo_id) {
   return ComboTable()[combo_id.index()];
 }
@@ -287,16 +353,16 @@ int BoardCardsForStreet(StreetKind street) {
 
 absl::InlinedVector<Card, 5> SampleStreetCards(
     StreetKind street,
-    const BoardRunout& board,
+    const Board& board,
     CardMask known_private_cards,
     std::mt19937& rng) {
-  const int open_slots = std::max(0, kMaxBoardCards - board.count());
+  const int open_slots = std::max(0, kMaxBoardCards - BoardCount(board));
   const int count = std::min(CardsForNextStreet(street), open_slots);
   if (count <= 0) {
     return {};
   }
 
-  const CardMask blocked = known_private_cards | board.mask();
+  const CardMask blocked = known_private_cards | BoardMask(board);
   if (count == 1) {
     std::uniform_int_distribution<int> card_dist(0, kDeckCardCount - 1);
     for (int attempt = 0; attempt < kDeckCardCount; ++attempt) {
@@ -350,7 +416,7 @@ ExactPublicState MakeInitialState(
   betting.street_committed = blinds;
   betting.last_full_raise = rules.minimum_bet;
   return ExactPublicState{DecisionState{betting, Player::kA},
-                          BoardRunout::Preflop()};
+                          PreflopBoard{}};
 }
 
 bool IsTerminal(const ExactPublicState& state) {
@@ -358,7 +424,7 @@ bool IsTerminal(const ExactPublicState& state) {
     return true;
   }
   return std::holds_alternative<ShowdownState>(state.betting) &&
-         state.board.count() == kMaxBoardCards;
+         BoardCount(state.board) == kMaxBoardCards;
 }
 
 SolverTransitions GenerateTransitions(const SolverConfig& config,
@@ -460,9 +526,25 @@ ExactPublicState ApplyChance(const ExactPublicState& state,
     throw std::invalid_argument("Incorrect number of chance cards");
   }
 
-  ExactPublicState child{AdvanceBettingStreet(*chance, rules),
-                         state.board};
-  DealNextStreet(child.board, chance->data.street, cards);
+  Board child_board;
+  switch (chance->data.street) {
+    case StreetKind::kPreflop: {
+      std::array<Card, 3> flop;
+      std::copy_n(cards.begin(), 3, flop.begin());
+      child_board = DealFlop(std::get<PreflopBoard>(state.board), flop);
+      break;
+    }
+    case StreetKind::kFlop:
+      child_board = DealTurn(std::get<FlopBoard>(state.board), cards[0]);
+      break;
+    case StreetKind::kTurn:
+      child_board = DealRiver(std::get<TurnBoard>(state.board), cards[0]);
+      break;
+    case StreetKind::kRiver:
+      child_board = state.board;
+      break;
+  }
+  ExactPublicState child{AdvanceBettingStreet(*chance, rules), child_board};
   return child;
 }
 

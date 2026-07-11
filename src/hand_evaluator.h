@@ -61,6 +61,6 @@ struct HandEvaluation {
 HandEvaluation EvaluateFiveCards(const std::array<Card, 5>& cards);
 int CompareHands(ComboId first,
                  ComboId second,
-                 const BoardRunout& board);
+                 const Board& board);
 
 }  // namespace poker
