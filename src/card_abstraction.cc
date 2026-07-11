@@ -408,12 +408,16 @@ float EstimateShowdownEquity(
     const CanonicalCardObservation& observation,
     uint64_t runout) noexcept {
   const CardMask blocked = ComboMask(hand) | board.mask();
+  const uint16_t hero_value = HandValue(hand, board);
   double value = 0.0;
   for (uint32_t sample = 0; sample < samples; ++sample) {
     const auto cards = SampleUnblocked(
         blocked, 2, SampleSeed(model, observation, runout, sample));
     const ComboId opponent = CardsToComboId(cards[0], cards[1]);
-    const int comparison = CompareHands(hand, opponent, board);
+    const uint16_t opponent_value = HandValue(opponent, board);
+    const int comparison = hero_value < opponent_value
+                               ? 1
+                               : (hero_value > opponent_value ? -1 : 0);
     value += comparison > 0 ? 1.0 : (comparison == 0 ? 0.5 : 0.0);
   }
   return static_cast<float>(value / samples);

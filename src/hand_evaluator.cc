@@ -123,7 +123,7 @@ int CompareCactusValues(uint16_t first, uint16_t second) {
   return 0;
 }
 
-uint16_t HandValue(ComboId hand, const RiverBoard& board) noexcept {
+uint16_t HandValueImpl(ComboId hand, const RiverBoard& board) noexcept {
   std::array<Card, 7> cards;
   const ComboInfo& combo = GetComboInfo(hand);
   cards[0] = combo.card0;
@@ -144,11 +144,15 @@ HandEvaluation EvaluateFiveCards(const std::array<Card, 5>& cards) {
   return ToHandEvaluation(ScoreForCards(cards));
 }
 
+uint16_t HandValue(ComboId hand, const RiverBoard& board) noexcept {
+  return HandValueImpl(hand, board);
+}
+
 int CompareHands(ComboId first,
                  ComboId second,
                  const RiverBoard& board) {
-  return CompareCactusValues(HandValue(first, board),
-                             HandValue(second, board));
+  return CompareCactusValues(HandValueImpl(first, board),
+                             HandValueImpl(second, board));
 }
 
 }  // namespace poker

@@ -59,6 +59,7 @@ struct HandEvaluation {
 };
 
 HandEvaluation EvaluateFiveCards(const std::array<Card, 5>& cards);
+uint16_t HandValue(ComboId hand, const RiverBoard& board) noexcept;
 int CompareHands(ComboId first,
                  ComboId second,
                  const RiverBoard& board);

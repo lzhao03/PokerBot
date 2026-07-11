@@ -39,6 +39,9 @@ ABSL_FLAG(std::string, equity_model, "", "equity model path");
 ABSL_FLAG(uint64_t, evaluation_seed, 1, "policy evaluation seed");
 ABSL_FLAG(uint64_t, best_response_iterations, 0,
           "approximate best-response iterations; 0 disables it");
+ABSL_FLAG(int, starting_stack, 100, "starting stack in chips");
+ABSL_FLAG(int, max_info_sets, 500000, "maximum infosets");
+ABSL_FLAG(int, chance_samples, 1, "chance samples per chance node");
 
 namespace {
 
@@ -58,6 +61,9 @@ double Rate(double count, double seconds) {
 
 absl::StatusOr<poker::SolverConfig> BenchmarkConfig() {
   poker::SolverConfigOptions options;
+  options.starting_stack = absl::GetFlag(FLAGS_starting_stack);
+  options.max_info_sets = absl::GetFlag(FLAGS_max_info_sets);
+  options.chance_samples = absl::GetFlag(FLAGS_chance_samples);
   const std::string kind = absl::GetFlag(FLAGS_private_abstraction);
   if (kind == "handcrafted36") {
     options.card_abstraction.private_kind =
