@@ -199,15 +199,18 @@ HistoryId AppendHistory(HistoryTree& tree,
     tree.nodes.push_back(ChanceNode{*chance});
     const BettingState child_state = AdvanceBettingStreet(*chance, rules);
     const HistoryId child = AppendHistory(tree, child_state, rules, config);
-    std::get<ChanceNode>(tree.nodes[id.index()]).child = child;
+    auto* node = std::get_if<ChanceNode>(&tree.nodes[id.index()]);
+    assert(node != nullptr);
+    node->child = child;
     return id;
   }
 
   if (const auto* fold = std::get_if<FoldTerminalState>(&state)) {
     tree.nodes.push_back(FoldTerminalNode{*fold});
   } else {
-    tree.nodes.push_back(
-        ShowdownNode{std::get<ShowdownState>(state)});
+    const auto* showdown = std::get_if<ShowdownState>(&state);
+    assert(showdown != nullptr);
+    tree.nodes.push_back(ShowdownNode{*showdown});
   }
   return id;
 }
@@ -379,8 +382,8 @@ absl::StatusOr<ComboRange> ParseRange(std::string_view text) {
   auto select = [&](HandType type) {
     auto add = [&](HandType candidate) {
       const auto index = HandTypeIndex(candidate);
-      if (index && !seen[*index]) {
-        seen[*index] = true;
+      if (index && !seen[static_cast<size_t>(*index)]) {
+        seen[static_cast<size_t>(*index)] = true;
         selected.push_back(*index);
       }
     };
@@ -447,7 +450,7 @@ absl::Status ValidateSolverConfig(const SolverConfig& config) {
 ComboRange UniformRange() {
   std::vector<int> selected(kHandTypeCount);
   for (int index = 0; index < kHandTypeCount; ++index) {
-    selected[index] = index;
+    selected[static_cast<size_t>(index)] = index;
   }
   return ExpandSelected(selected);
 }
@@ -467,9 +470,7 @@ CFRSolver::CFRSolver(const SolverConfig& config,
       betting_rules_{config_.big_blind > 0 ? config_.big_blind : 2},
       initial_state_(initial_state),
       rng_(12345) {
-  if (!IsValidBettingData(Data(initial_state_.betting))) {
-    throw std::invalid_argument("initial betting state is invalid");
-  }
+  assert(IsValidBettingData(Data(initial_state_.betting)));
   history_ = BuildHistoryTree(initial_state_.betting, betting_rules_, config_);
   if (config_.max_info_sets > 0) {
     const size_t rows = static_cast<size_t>(config_.max_info_sets);
@@ -488,29 +489,22 @@ Position CFRSolver::root_position() const {
 }
 
 Position CFRSolver::action_child(Position position, int action_index) const {
-  if (position.history.index() >= history_.nodes.size()) {
-    throw std::logic_error("action parent history is invalid");
-  }
+  assert(position.history.index() < history_.nodes.size());
   const auto* node =
       std::get_if<DecisionNode>(&history_.nodes[position.history.index()]);
-  if (node == nullptr || action_index < 0 ||
-      action_index >= node->edges.count) {
-    throw std::logic_error("action index is out of range");
-  }
-  position.history = history_.edges[node->edges.begin + action_index].child;
+  assert(node != nullptr && action_index >= 0 &&
+         action_index < node->edges.count);
+  position.history = history_.edges[
+      node->edges.begin + static_cast<uint32_t>(action_index)].child;
   return position;
 }
 
 Position CFRSolver::sample_chance_child(Position position,
                                         const Deal& deal) {
-  if (position.history.index() >= history_.nodes.size()) {
-    throw std::logic_error("chance parent history is invalid");
-  }
+  assert(position.history.index() < history_.nodes.size());
   const auto* node =
       std::get_if<ChanceNode>(&history_.nodes[position.history.index()]);
-  if (node == nullptr || node->child == kInvalidHistoryId) {
-    throw std::logic_error("expected a chance history");
-  }
+  assert(node != nullptr && node->child != kInvalidHistoryId);
 
   const BettingData& data = node->state.data;
   const auto sampled = SampleStreetCards(data.street,
@@ -530,7 +524,7 @@ CFRSolver::private_observations_for_position(
     const Deal& deal,
     const Position& position) const {
   std::array<PrivateObservationId, kPlayerCount> observations;
-  for (int player = 0; player < kPlayerCount; ++player) {
+  for (size_t player = 0; player < kPlayerCount; ++player) {
     const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
     observations[player] =
         private_observation_for_runout(hand, position.public_state);
@@ -542,7 +536,7 @@ void CFRSolver::advance_private_observations(
     TraversalFrame& frame,
     const Deal& deal,
     const Position& child) const {
-  for (int player = 0; player < kPlayerCount; ++player) {
+  for (size_t player = 0; player < kPlayerCount; ++player) {
     const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
     frame.private_observations[player] = advance_private_observation(
         frame.private_observations[player], hand, child.public_state);
@@ -557,9 +551,7 @@ const InfoSetRow* CFRSolver::find_row(InfoSetKey key,
   if (row == state_.rows.end()) {
     return nullptr;
   }
-  if (row->second.action_count != action_count) {
-    throw std::logic_error("infoset action count mismatch");
-  }
+  assert(row->second.action_count == action_count);
   return &row->second;
 }
 
@@ -586,9 +578,7 @@ double CFRSolver::traverse(Position position,
                            TraversalFrame frame,
                            TraversalContext& context) {
   const Deal& deal = context.deal;
-  if (position.history.index() >= history_.nodes.size()) {
-    throw std::logic_error("traversal history is invalid");
-  }
+  assert(position.history.index() < history_.nodes.size());
   return std::visit([&](const auto& node) -> double {
     using Node = std::decay_t<decltype(node)>;
     if constexpr (std::is_same_v<Node, FoldTerminalNode>) {
@@ -596,13 +586,14 @@ double CFRSolver::traverse(Position position,
       return TerminalUtility(node.state, Player::kA);
     } else if constexpr (std::is_same_v<Node, ShowdownNode>) {
       ++stats_.terminal_visits;
-      return TerminalUtility(
-          node.state,
-          std::get<RiverBoard>(position.public_state.board()),
-          deal.hand(Player::kA), deal.hand(Player::kB));
+      const auto* board =
+          std::get_if<RiverBoard>(&position.public_state.board());
+      assert(board != nullptr);
+      return TerminalUtility(node.state, *board, deal.hand(Player::kA),
+                             deal.hand(Player::kB));
     } else if constexpr (std::is_same_v<Node, ChanceNode>) {
       const int samples = std::max(1, config_.chance_samples);
-      stats_.chance_samples += samples;
+      stats_.chance_samples += static_cast<uint64_t>(samples);
       double value = 0.0;
       for (int sample = 0; sample < samples; ++sample) {
         const Position child = sample_chance_child(position, deal);

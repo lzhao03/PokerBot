@@ -25,15 +25,17 @@ int BuildCactusCard(Card card) {
       0x8000, 0x4000, 0x2000, 0x1000};
   const int rank_index = RankFromCardId(card) - 2;
   const int suit_index = SuitIndex(SuitFromCardId(card));
-  return kRankPrimes[rank_index] | (rank_index << 8) |
-         kSuitBits[suit_index] | (1 << (16 + rank_index));
+  return kRankPrimes[static_cast<size_t>(rank_index)] | (rank_index << 8) |
+         kSuitBits[static_cast<size_t>(suit_index)] |
+         (1 << (16 + rank_index));
 }
 
 const std::array<int, kDeckCardCount>& CactusCardTable() {
   static const std::array<int, kDeckCardCount> table = [] {
     std::array<int, kDeckCardCount> out = {};
     for (int id = 0; id < kDeckCardCount; ++id) {
-      out[static_cast<size_t>(id)] = BuildCactusCard(kDeck[id]);
+      out[static_cast<size_t>(id)] =
+          BuildCactusCard(kDeck[static_cast<size_t>(id)]);
     }
     return out;
   }();
@@ -69,10 +71,12 @@ uint16_t EvalFiveCactus(const std::array<int, 5>& cards) {
   const int rank_mask =
       (cards[0] | cards[1] | cards[2] | cards[3] | cards[4]) >> 16;
   if ((cards[0] & cards[1] & cards[2] & cards[3] & cards[4] & 0xF000) != 0) {
-    return hand_evaluator_tables::kCactusFlushes[rank_mask];
+    return hand_evaluator_tables::kCactusFlushes[
+        static_cast<size_t>(rank_mask)];
   }
   if (std::popcount(static_cast<unsigned int>(rank_mask)) == 5) {
-    return hand_evaluator_tables::kCactusUnique5[rank_mask];
+    return hand_evaluator_tables::kCactusUnique5[
+        static_cast<size_t>(rank_mask)];
   }
   const int product = (cards[0] & 0xFF) * (cards[1] & 0xFF) *
                       (cards[2] & 0xFF) * (cards[3] & 0xFF) *

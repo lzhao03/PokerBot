@@ -17,7 +17,7 @@ namespace {
 
 std::array<ComboInfo, kComboCount> BuildComboTable() {
   std::array<ComboInfo, kComboCount> combos;
-  int combo = 0;
+  size_t combo = 0;
   for (size_t first = 0; first < kDeck.size(); ++first) {
     for (size_t second = first + 1; second < kDeck.size(); ++second) {
       combos[combo++] = {
@@ -379,7 +379,7 @@ absl::StatusOr<absl::InlinedVector<Card, 5>> SampleStreetCards(
   int candidate_count = 0;
   for (Card candidate : kDeck) {
     if ((blocked & CardBit(candidate)) == 0) {
-      candidates[candidate_count++] = candidate;
+      candidates[static_cast<size_t>(candidate_count++)] = candidate;
     }
   }
   if (candidate_count < count) {
@@ -387,12 +387,13 @@ absl::StatusOr<absl::InlinedVector<Card, 5>> SampleStreetCards(
   }
 
   absl::InlinedVector<Card, 5> sampled;
-  sampled.reserve(count);
+  sampled.reserve(static_cast<size_t>(count));
   for (int i = 0; i < count; ++i) {
     std::uniform_int_distribution<int> card_dist(i, candidate_count - 1);
     const int chosen = card_dist(rng);
-    std::swap(candidates[i], candidates[chosen]);
-    sampled.push_back(candidates[i]);
+    std::swap(candidates[static_cast<size_t>(i)],
+              candidates[static_cast<size_t>(chosen)]);
+    sampled.push_back(candidates[static_cast<size_t>(i)]);
   }
   return sampled;
 }

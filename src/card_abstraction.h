@@ -385,27 +385,27 @@ inline PublicObservationId public_observation_id(
     }
 
     const auto cards = BoardCards(board);
-    const std::array<Card, 3> flop = {cards[0], cards[1], cards[2]};
-    Board prefix = DealFlop(PreflopBoard{}, flop);
+    const std::array<Card, 3> flop_cards = {cards[0], cards[1], cards[2]};
+    const FlopBoard flop = DealFlop(PreflopBoard{}, flop_cards);
     history = advance_public_observation(
         history, StreetKind::kFlop,
-        observe_public_street(StreetKind::kFlop, prefix));
+        observe_public_street(StreetKind::kFlop, Board{flop}));
     if (street == StreetKind::kFlop) {
       return history;
     }
 
-    prefix = DealTurn(std::get<FlopBoard>(prefix), cards[3]);
+    const TurnBoard turn = DealTurn(flop, cards[3]);
     history = advance_public_observation(
         history, StreetKind::kTurn,
-        observe_public_street(StreetKind::kTurn, prefix));
+        observe_public_street(StreetKind::kTurn, Board{turn}));
     if (street == StreetKind::kTurn) {
       return history;
     }
 
-    prefix = DealRiver(std::get<TurnBoard>(prefix), cards[4]);
+    const RiverBoard river = DealRiver(turn, cards[4]);
     return advance_public_observation(
         history, StreetKind::kRiver,
-        observe_public_street(StreetKind::kRiver, prefix));
+        observe_public_street(StreetKind::kRiver, Board{river}));
   }
   return exact_public_observation(board);
 }
@@ -514,7 +514,9 @@ inline PrivateObservationId advance_private_observation(
       (previous_value >> (shift - kPrivateObservationBitsPerStreet)) &
       kSlotMask;
   assert((previous_value & slot_mask) == 0 && later == 0 && prior != 0);
-  return PrivateObservationId(previous_value | ((current.value + 1) << shift));
+  const uint64_t encoded =
+      (uint64_t{current.value} + 1) << static_cast<unsigned>(shift);
+  return PrivateObservationId(previous_value | encoded);
 }
 
 inline PrivateObservationId private_observation_for_runout(
@@ -530,22 +532,25 @@ inline PrivateObservationId private_observation_for_runout(
     return observation;
   }
   const auto cards = BoardCards(position.board());
-  const std::array<Card, 3> flop = {cards[0], cards[1], cards[2]};
-  Board prefix = DealFlop(PreflopBoard{}, flop);
+  const std::array<Card, 3> flop_cards = {cards[0], cards[1], cards[2]};
+  const FlopBoard flop = DealFlop(PreflopBoard{}, flop_cards);
   observation = advance_private_observation(
-      observation, hand, PublicPosition::Root(StreetKind::kFlop, prefix));
+      observation, hand,
+      PublicPosition::Root(StreetKind::kFlop, Board{flop}));
   if (street == StreetKind::kFlop) {
     return observation;
   }
-  prefix = DealTurn(std::get<FlopBoard>(prefix), cards[3]);
+  const TurnBoard turn = DealTurn(flop, cards[3]);
   observation = advance_private_observation(
-      observation, hand, PublicPosition::Root(StreetKind::kTurn, prefix));
+      observation, hand,
+      PublicPosition::Root(StreetKind::kTurn, Board{turn}));
   if (street == StreetKind::kTurn) {
     return observation;
   }
-  prefix = DealRiver(std::get<TurnBoard>(prefix), cards[4]);
+  const RiverBoard river = DealRiver(turn, cards[4]);
   return advance_private_observation(
-      observation, hand, PublicPosition::Root(StreetKind::kRiver, prefix));
+      observation, hand,
+      PublicPosition::Root(StreetKind::kRiver, Board{river}));
 }
 
 }  // namespace poker

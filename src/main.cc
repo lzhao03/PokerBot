@@ -14,7 +14,6 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
-#include <stdexcept>
 #include <string>
 #include <sys/resource.h>
 #include <vector>
@@ -160,43 +159,38 @@ int main(int argc, char** argv) {
     absl::SetGlobalVLogLevel(1);
   }
 
-  try {
-    const int64_t memory_limit_mb = absl::GetFlag(FLAGS_max_memory_mb);
-    if (memory_limit_mb < 0) {
-      throw std::invalid_argument("--max_memory_mb must be non-negative");
-    }
-    const auto config = ConfigFromFlags();
-    if (!config.ok()) {
-      std::cerr << "Error: " << config.status() << "\n";
-      return 1;
-    }
-    const poker::ComboRange a_range = poker::UniformRange();
-    const poker::ComboRange b_range = poker::UniformRange();
-    const auto deals = poker::DealDistribution::Create(a_range, b_range);
-    if (!deals.ok()) {
-      std::cerr << "Error: " << deals.status() << "\n";
-      return 1;
-    }
-
-    SetMemoryLimit(memory_limit_mb);
-    poker::CFRSolver solver(*config);
-    const auto start = std::chrono::steady_clock::now();
-    const poker::TrainingResult result = solver.run(
-        absl::GetFlag(FLAGS_iterations), *deals);
-    const auto end = std::chrono::steady_clock::now();
-
-    const std::chrono::duration<double> elapsed = end - start;
-    PrintRunSummary(solver, *config, elapsed.count());
-    std::cout << "stop_reason="
-              << (result.stop_reason ==
-                          poker::TrainingStopReason::kIterationsCompleted
-                      ? "iterations_completed"
-                      : "info_set_limit")
-              << "\n";
-  } catch (const std::exception& error) {
-    std::cerr << "Error: " << error.what() << "\n";
+  const int64_t memory_limit_mb = absl::GetFlag(FLAGS_max_memory_mb);
+  if (memory_limit_mb < 0) {
+    std::cerr << "Error: --max_memory_mb must be non-negative\n";
+    return 1;
+  }
+  const auto config = ConfigFromFlags();
+  if (!config.ok()) {
+    std::cerr << "Error: " << config.status() << "\n";
+    return 1;
+  }
+  const poker::ComboRange a_range = poker::UniformRange();
+  const poker::ComboRange b_range = poker::UniformRange();
+  const auto deals = poker::DealDistribution::Create(a_range, b_range);
+  if (!deals.ok()) {
+    std::cerr << "Error: " << deals.status() << "\n";
     return 1;
   }
 
+  SetMemoryLimit(memory_limit_mb);
+  poker::CFRSolver solver(*config);
+  const auto start = std::chrono::steady_clock::now();
+  const poker::TrainingResult result =
+      solver.run(absl::GetFlag(FLAGS_iterations), *deals);
+  const auto end = std::chrono::steady_clock::now();
+
+  const std::chrono::duration<double> elapsed = end - start;
+  PrintRunSummary(solver, *config, elapsed.count());
+  std::cout << "stop_reason="
+            << (result.stop_reason ==
+                        poker::TrainingStopReason::kIterationsCompleted
+                    ? "iterations_completed"
+                    : "info_set_limit")
+            << "\n";
   return 0;
 }
