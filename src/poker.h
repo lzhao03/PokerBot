@@ -39,7 +39,7 @@ constexpr Player Opponent(Player player) noexcept {
   return player == Player::kA ? Player::kB : Player::kA;
 }
 
-enum class SuitKind : uint8_t {
+enum class Suit : uint8_t {
   kHearts = 0,
   kDiamonds = 1,
   kClubs = 2,
@@ -65,7 +65,7 @@ enum class Rank : uint8_t {
 class Card {
  public:
   constexpr Card() = default;
-  constexpr Card(Rank rank, SuitKind suit) noexcept
+  constexpr Card(Rank rank, Suit suit) noexcept
       : value_(static_cast<uint8_t>(
             static_cast<uint8_t>(suit) * 13 +
             static_cast<uint8_t>(rank))) {}
@@ -74,8 +74,8 @@ class Card {
   constexpr Rank rank() const noexcept {
     return static_cast<Rank>(value_ % 13);
   }
-  constexpr SuitKind suit() const noexcept {
-    return static_cast<SuitKind>(value_ / 13);
+  constexpr Suit suit() const noexcept {
+    return static_cast<Suit>(value_ / 13);
   }
 
   friend constexpr auto operator<=>(const Card&, const Card&) = default;
@@ -152,7 +152,7 @@ inline constexpr std::array<Card, kDeckCardCount> kDeck = [] {
   for (uint8_t suit = 0; suit < 4; ++suit) {
     for (uint8_t rank = 0; rank < 13; ++rank) {
       cards[index++] = Card(static_cast<Rank>(rank),
-                            static_cast<SuitKind>(suit));
+                            static_cast<Suit>(suit));
     }
   }
   return cards;
@@ -196,7 +196,7 @@ struct SolverConfig {
   int max_info_sets = 500000;
 };
 
-inline int SuitIndex(SuitKind suit) {
+inline int SuitIndex(Suit suit) {
   return static_cast<int>(suit);
 }
 
@@ -204,21 +204,8 @@ inline int RankFromCardId(Card card) {
   return 2 + static_cast<int>(card.rank());
 }
 
-inline SuitKind SuitFromCardId(Card card) {
+inline Suit SuitFromCardId(Card card) {
   return card.suit();
-}
-
-inline Card MakeCardId(int rank, SuitKind suit) {
-  if (rank == 1) {
-    rank = 14;
-  }
-  const int rank_index = rank - 2;
-  const int suit_index = SuitIndex(suit);
-  if (rank_index < 0 || rank_index >= 13 || suit_index < 0 ||
-      suit_index >= 4) {
-    throw std::invalid_argument("Invalid card");
-  }
-  return Card(static_cast<Rank>(rank_index), suit);
 }
 
 inline CardMask CardBit(Card card) {
@@ -413,7 +400,8 @@ using SolverTransitions = absl::InlinedVector<SolverTransition, 8>;
 const ComboInfo& GetComboInfo(ComboId combo_id);
 CardMask ComboMask(ComboId combo_id);
 std::optional<ComboId> MaybeCardsToComboId(Card first, Card second);
-ComboId CardsToComboId(Card first, Card second);
+ComboId CardsToComboId(Card first, Card second) noexcept;
+absl::StatusOr<HoleCards> MakeHoleCards(Card first, Card second);
 
 int CardsForNextStreet(StreetKind street);
 int BoardCardsForStreet(StreetKind street);

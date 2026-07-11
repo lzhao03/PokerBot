@@ -9,9 +9,9 @@
 namespace poker {
 namespace {
 
-using S = SuitKind;
+using S = Suit;
 
-Card C(int rank, S suit) { return MakeCardId(rank, suit); }
+Card C(int rank, S suit) { return Card(static_cast<Rank>(rank - 2), suit); }
 
 BettingData& B(BettingState& state) {
   return std::visit([](auto& phase) -> BettingData& { return phase.data; },

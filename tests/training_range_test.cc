@@ -8,10 +8,11 @@
 namespace poker {
 namespace {
 
-using S = SuitKind;
+using S = Suit;
 
 ComboId H(int r0, S s0, int r1, S s1) {
-  return CardsToComboId(MakeCardId(r0, s0), MakeCardId(r1, s1));
+  return CardsToComboId(Card(static_cast<Rank>(r0 - 2), s0),
+                        Card(static_cast<Rank>(r1 - 2), s1));
 }
 
 TEST_CASE("range syntax expands to exact combo weights") {

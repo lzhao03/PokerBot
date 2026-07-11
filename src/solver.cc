@@ -120,9 +120,9 @@ std::optional<HandType> ParseHandType(std::string_view text) {
 }
 
 std::vector<ComboId> Expand(HandType type) {
-  constexpr std::array<SuitKind, 4> suits = {
-      SuitKind::kHearts, SuitKind::kDiamonds,
-      SuitKind::kClubs, SuitKind::kSpades};
+  constexpr std::array<Suit, 4> suits = {
+      Suit::kHearts, Suit::kDiamonds,
+      Suit::kClubs, Suit::kSpades};
   std::vector<ComboId> combos;
   for (size_t first = 0; first < suits.size(); ++first) {
     for (size_t second = 0; second < suits.size(); ++second) {
@@ -135,8 +135,8 @@ std::vector<ComboId> Expand(HandType type) {
         continue;
       }
       combos.push_back(CardsToComboId(
-          MakeCardId(type.high, suits[first]),
-          MakeCardId(type.low, suits[second])));
+          Card(static_cast<Rank>(type.high - 2), suits[first]),
+          Card(static_cast<Rank>(type.low - 2), suits[second])));
     }
   }
   return combos;

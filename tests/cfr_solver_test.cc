@@ -22,10 +22,11 @@ struct CFRSolverTestAccess {
 
 namespace {
 
-using S = SuitKind;
+using S = Suit;
 
 ComboId H(int r0, S s0, int r1, S s1) {
-  return CardsToComboId(MakeCardId(r0, s0), MakeCardId(r1, s1));
+  return CardsToComboId(Card(static_cast<Rank>(r0 - 2), s0),
+                        Card(static_cast<Rank>(r1 - 2), s1));
 }
 
 ComboRange R(ComboId hand) {
@@ -157,8 +158,8 @@ TEST_CASE("postflop roots use full observation identity") {
   root.betting = Apply(root.betting, {ActionKind::kCall, 2});
   root.betting = Apply(root.betting, {ActionKind::kCheck, 0});
   const std::array<Card, 3> flop = {
-      MakeCardId(2, S::kHearts), MakeCardId(7, S::kDiamonds),
-      MakeCardId(12, S::kClubs)};
+      Card(Rank::kTwo, S::kHearts), Card(Rank::kSeven, S::kDiamonds),
+      Card(Rank::kQueen, S::kClubs)};
   root = ApplyChance(root, flop, rules);
 
   CFRSolver solver(config, root);

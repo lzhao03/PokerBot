@@ -314,12 +314,18 @@ std::optional<ComboId> MaybeCardsToComboId(Card first, Card second) {
   return ComboId(combo);
 }
 
-ComboId CardsToComboId(Card first, Card second) {
+ComboId CardsToComboId(Card first, Card second) noexcept {
+  const std::optional<ComboId> combo = MaybeCardsToComboId(first, second);
+  assert(combo.has_value());
+  return *combo;
+}
+
+absl::StatusOr<HoleCards> MakeHoleCards(Card first, Card second) {
   const std::optional<ComboId> combo = MaybeCardsToComboId(first, second);
   if (!combo.has_value()) {
-    throw std::invalid_argument("Invalid exact two-card combo");
+    return absl::InvalidArgumentError("hole cards must be distinct");
   }
-  return *combo;
+  return HoleCards(*combo);
 }
 
 int CardsForNextStreet(StreetKind street) {

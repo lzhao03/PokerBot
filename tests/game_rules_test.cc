@@ -16,9 +16,9 @@ namespace {
 
 constexpr BettingRules kRules{2};
 
-using S = SuitKind;
+using S = Suit;
 
-Card C(int rank, S suit) { return MakeCardId(rank, suit); }
+Card C(int rank, S suit) { return Card(static_cast<Rank>(rank - 2), suit); }
 
 BettingData& B(BettingState& state) {
   return std::visit([](auto& phase) -> BettingData& { return phase.data; },
@@ -53,9 +53,8 @@ BettingState Apply(const BettingState& state, GameAction action) {
 
 std::array<Card, 3> Flop() {
   return {
-      MakeCardId(2, SuitKind::kHearts),
-      MakeCardId(7, SuitKind::kDiamonds),
-      MakeCardId(12, SuitKind::kClubs),
+      C(2, Suit::kHearts), C(7, Suit::kDiamonds),
+      C(12, Suit::kClubs),
   };
 }
 
@@ -504,14 +503,14 @@ TEST_CASE("preflop all-in runout skips later decisions") {
   CHECK_FALSE(IsTerminal(state));
 
   const std::array<Card, 1> turn = {
-      MakeCardId(9, SuitKind::kSpades),
+      C(9, Suit::kSpades),
   };
   state = ApplyChance(state, turn, kRules);
   CHECK(std::holds_alternative<ChanceState>(state.betting));
   CHECK_FALSE(IsTerminal(state));
 
   const std::array<Card, 1> river = {
-      MakeCardId(3, SuitKind::kHearts),
+      C(3, Suit::kHearts),
   };
   state = ApplyChance(state, river, kRules);
   CHECK(std::holds_alternative<ShowdownState>(state.betting));

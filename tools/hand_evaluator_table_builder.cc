@@ -22,32 +22,32 @@ EvaluationScore MakeScore(HandRank rank, Kickers... kickers) {
 }
 
 EvaluationScore ScoreForDistinctRanks(int rank_mask, bool flush) {
-  static constexpr std::array<SuitKind, 5> kNonFlushSuits = {
-      SuitKind::kHearts, SuitKind::kDiamonds, SuitKind::kClubs,
-      SuitKind::kSpades, SuitKind::kHearts};
+  static constexpr std::array<Suit, 5> kNonFlushSuits = {
+      Suit::kHearts, Suit::kDiamonds, Suit::kClubs,
+      Suit::kSpades, Suit::kHearts};
   std::array<Card, 5> cards = {};
   size_t index = 0;
   for (int rank_index = 0; rank_index < 13; ++rank_index) {
     if ((rank_mask & (1 << rank_index)) == 0) {
       continue;
     }
-    const SuitKind suit = flush ? SuitKind::kHearts : kNonFlushSuits[index];
-    cards[index] = MakeCardId(rank_index + 2, suit);
+    const Suit suit = flush ? Suit::kHearts : kNonFlushSuits[index];
+    cards[index] = Card(static_cast<Rank>(rank_index), suit);
     ++index;
   }
   return EvaluateFiveCardScore(cards);
 }
 
 EvaluationScore ScoreForRankMultiset(const std::array<int, 5>& rank_indices) {
-  static constexpr std::array<SuitKind, 4> kSuits = {
-      SuitKind::kHearts, SuitKind::kDiamonds, SuitKind::kClubs,
-      SuitKind::kSpades};
+  static constexpr std::array<Suit, 4> kSuits = {
+      Suit::kHearts, Suit::kDiamonds, Suit::kClubs,
+      Suit::kSpades};
   std::array<Card, 5> cards = {};
   std::array<int, 13> rank_counts = {};
   for (size_t i = 0; i < rank_indices.size(); ++i) {
     const int rank_index = rank_indices[i];
     const int suit_index = rank_counts[rank_index];
-    cards[i] = MakeCardId(rank_index + 2, kSuits[suit_index]);
+    cards[i] = Card(static_cast<Rank>(rank_index), kSuits[suit_index]);
     ++rank_counts[rank_index];
   }
   return EvaluateFiveCardScore(cards);

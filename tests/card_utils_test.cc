@@ -14,9 +14,9 @@
 namespace poker {
 namespace {
 
-using S = SuitKind;
+using S = Suit;
 
-Card C(int rank, S suit) { return MakeCardId(rank, suit); }
+Card C(int rank, S suit) { return Card(static_cast<Rank>(rank - 2), suit); }
 ComboId H(Card a, Card b) { return CardsToComboId(a, b); }
 
 Board Runout(absl::Span<const Card> cards) {
@@ -102,7 +102,10 @@ TEST_CASE("combo ids are an exhaustive canonical bijection") {
     }
   }
   CHECK(expected == kComboCount);
-  CHECK_FALSE(MaybeCardsToComboId(kDeck[0], kDeck[0]).has_value());
+  CHECK_FALSE(MakeHoleCards(kDeck[0], kDeck[0]).ok());
+  const auto hole_cards = MakeHoleCards(kDeck[0], kDeck[1]);
+  REQUIRE(hole_cards.ok());
+  CHECK(hole_cards->combo() == H(kDeck[0], kDeck[1]));
 }
 
 TEST_CASE("hand evaluator matches an independent five-card oracle") {
