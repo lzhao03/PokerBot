@@ -33,14 +33,6 @@ ComboRange R(ComboId hand) {
   return SingleComboRange(hand);
 }
 
-DealDistribution Deals(const ComboRange& a, const ComboRange& b) {
-  auto deals = DealDistribution::Create(a, b);
-  if (!deals.ok()) {
-    throw std::invalid_argument(std::string(deals.status().message()));
-  }
-  return *deals;
-}
-
 BettingState Apply(const BettingState& state, GameAction action) {
   const auto* decision = std::get_if<DecisionState>(&state);
   if (decision == nullptr) {
@@ -92,6 +84,25 @@ SolverConfig Config(bool accumulate_average = true,
   return *config;
 }
 
+ExactPublicState Root(const SolverConfig& config) {
+  const Chips stack = config.starting_stack();
+  return MakeInitialState(BettingRules{config.big_blind()}, {stack, stack},
+                          {config.small_blind(), config.big_blind()});
+}
+
+std::unique_ptr<CFRSolver> MakeSolver(
+    const SolverConfig& config,
+    const ComboRange& a,
+    const ComboRange& b,
+    std::optional<ExactPublicState> root = std::nullopt) {
+  auto solver = CFRSolver::Create(
+      {config, root.value_or(Root(config)), {a, b}});
+  if (!solver.ok()) {
+    throw std::invalid_argument(std::string(solver.status().message()));
+  }
+  return std::move(*solver);
+}
+
 TEST_CASE("solver configuration rejects invalid boundary values") {
   SolverConfigOptions options;
   options.max_info_sets = 0;
@@ -110,18 +121,20 @@ const ComboId kA = H(14, S::kHearts, 14, S::kSpades);
 const ComboId kB = H(13, S::kClubs, 13, S::kDiamonds);
 
 TEST_CASE("small exact solver baseline is deterministic") {
-  CFRSolver solver(Config());
-  solver.run(10, Deals(UniformComboRange(), UniformComboRange()));
+  auto solver = MakeSolver(
+      Config(), UniformComboRange(), UniformComboRange());
+  solver->run(10);
 
-  CHECK(solver.get_history_count() == 417);
-  CHECK(solver.get_info_set_count() == 720);
-  CHECK(solver.get_cfr_update_count() == 1440);
-  CHECK(solver.get_expected_value(Player::kA) == doctest::Approx(-1.01572));
+  CHECK(solver->get_history_count() == 417);
+  CHECK(solver->get_info_set_count() == 720);
+  CHECK(solver->get_cfr_update_count() == 1440);
+  CHECK(solver->get_expected_value(Player::kA) ==
+        doctest::Approx(-1.01572));
 }
 
 TEST_CASE("history tree stores direct rule transitions") {
-  CFRSolver solver(Config());
-  const HistoryTree& tree = CFRSolverTestAccess::history(solver);
+  auto solver = MakeSolver(Config(), R(kA), R(kB));
+  const HistoryTree& tree = CFRSolverTestAccess::history(*solver);
   REQUIRE(tree.root.index() < tree.nodes.size());
 
   for (size_t id = 0; id < tree.nodes.size(); ++id) {
@@ -150,45 +163,46 @@ TEST_CASE("history tree stores direct rule transitions") {
 }
 
 TEST_CASE("training mutates only CFR state") {
-  CFRSolver solver(Config());
-  const size_t history_count = solver.get_history_count();
-  solver.run(4, Deals(R(kA), R(kB)));
-  CHECK(solver.get_iterations_run() == 4);
-  CHECK(solver.get_info_set_count() > 0);
-  CHECK(solver.get_cfr_update_count() > 0);
-  CHECK(std::isfinite(solver.get_expected_value(Player::kA)));
-  CHECK(solver.get_history_count() == history_count);
+  auto solver = MakeSolver(Config(), R(kA), R(kB));
+  const size_t history_count = solver->get_history_count();
+  solver->run(4);
+  CHECK(solver->get_iterations_run() == 4);
+  CHECK(solver->get_info_set_count() > 0);
+  CHECK(solver->get_cfr_update_count() > 0);
+  CHECK(std::isfinite(solver->get_expected_value(Player::kA)));
+  CHECK(solver->get_history_count() == history_count);
 
-  const CfrState before = CFRSolverTestAccess::state(solver);
-  const int64_t updates = solver.get_cfr_update_count();
+  const CfrState before = CFRSolverTestAccess::state(*solver);
+  const int64_t updates = solver->get_cfr_update_count();
   const auto value =
-      solver.evaluate_average(HoleCards(kA), HoleCards(kB));
+      solver->evaluate_average(HoleCards(kA), HoleCards(kB));
   REQUIRE(value.ok());
   CHECK(std::isfinite(*value));
-  CHECK(solver.get_history_count() == history_count);
-  CHECK(solver.get_cfr_update_count() == updates);
-  CHECK(CFRSolverTestAccess::state(solver).rows == before.rows);
-  CHECK(CFRSolverTestAccess::state(solver).regret_sum == before.regret_sum);
-  CHECK(CFRSolverTestAccess::state(solver).strategy_sum == before.strategy_sum);
+  CHECK(solver->get_history_count() == history_count);
+  CHECK(solver->get_cfr_update_count() == updates);
+  CHECK(CFRSolverTestAccess::state(*solver).rows == before.rows);
+  CHECK(CFRSolverTestAccess::state(*solver).regret_sum == before.regret_sum);
+  CHECK(CFRSolverTestAccess::state(*solver).strategy_sum ==
+        before.strategy_sum);
 }
 
 TEST_CASE("training uses preallocated action arrays") {
-  CFRSolver solver(Config());
-  const CfrState& before = CFRSolverTestAccess::state(solver);
+  auto solver = MakeSolver(Config(), R(kA), R(kB));
+  const CfrState& before = CFRSolverTestAccess::state(*solver);
   const size_t regret_capacity = before.regret_sum.capacity();
   const size_t strategy_capacity = before.strategy_sum.capacity();
 
-  solver.run(4, Deals(R(kA), R(kB)));
+  solver->run(4);
 
-  const CfrState& after = CFRSolverTestAccess::state(solver);
+  const CfrState& after = CFRSolverTestAccess::state(*solver);
   CHECK(after.regret_sum.capacity() == regret_capacity);
   CHECK(after.strategy_sum.capacity() == strategy_capacity);
 }
 
 TEST_CASE("infoset action rows are contiguous") {
-  CFRSolver solver(Config());
-  solver.run(4, Deals(R(kA), R(kB)));
-  const CfrState& state = CFRSolverTestAccess::state(solver);
+  auto solver = MakeSolver(Config(), R(kA), R(kB));
+  solver->run(4);
+  const CfrState& state = CFRSolverTestAccess::state(*solver);
 
   struct RowSize {
     InfoSetRow row;
@@ -197,7 +211,7 @@ TEST_CASE("infoset action rows are contiguous") {
   std::vector<RowSize> rows;
   rows.reserve(state.rows.size());
   for (const auto& entry : state.rows) {
-    const HistoryNode& node = CFRSolverTestAccess::history(solver)
+    const HistoryNode& node = CFRSolverTestAccess::history(*solver)
                                   .nodes[entry.first.history.index()];
     rows.push_back({entry.second,
                     std::get<DecisionNode>(node).edges.count});
@@ -226,9 +240,9 @@ TEST_CASE("postflop roots use full observation identity") {
       Card(Rank::kQueen, S::kClubs)};
   root = DealChance(root, flop, rules);
 
-  CFRSolver solver(config, root);
-  solver.run(2, Deals(R(kA), R(kB)));
-  const HistoryTree& tree = CFRSolverTestAccess::history(solver);
+  auto solver = MakeSolver(config, R(kA), R(kB), root);
+  solver->run(2);
+  const HistoryTree& tree = CFRSolverTestAccess::history(*solver);
   const Player player =
       std::get<DecisionNode>(tree.nodes[tree.root.index()]).state.actor;
   const ComboId hand = player == Player::kA ? kA : kB;
@@ -236,28 +250,28 @@ TEST_CASE("postflop roots use full observation identity") {
       config.card_abstraction(), Data(root.betting).street, root.board);
   const PrivateObservationId private_id = ObservePrivate(
       config.card_abstraction(), hand, public_state);
-  CHECK(CFRSolverTestAccess::state(solver).rows.contains(
+  CHECK(CFRSolverTestAccess::state(*solver).rows.contains(
       {tree.root, public_state.observation(), private_id}));
 }
 
 TEST_CASE("infoset caps stop after completing the current iteration") {
-  CFRSolver solver(Config(true, 1));
-  const TrainingResult result = solver.run(2, Deals(R(kA), R(kB)));
+  auto solver = MakeSolver(Config(true, 1), R(kA), R(kB));
+  const TrainingResult result = solver->run(2);
   CHECK(result.iterations_completed == 1);
   CHECK(result.stop_reason == TrainingStopReason::kInfoSetLimit);
-  CHECK(solver.get_iterations_run() == 1);
+  CHECK(solver->get_iterations_run() == 1);
 }
 
 TEST_CASE("average strategy storage is optional") {
   const SolverConfig config = Config(false);
-  CFRSolver solver(config);
-  solver.run(2, Deals(R(kA), R(kB)));
+  auto solver = MakeSolver(config, R(kA), R(kB));
+  solver->run(2);
 
-  CHECK(CFRSolverTestAccess::state(solver).strategy_sum.empty());
+  CHECK(CFRSolverTestAccess::state(*solver).strategy_sum.empty());
   CHECK(std::isfinite(
-      solver.evaluate_current(HoleCards(kA), HoleCards(kB))));
+      solver->evaluate_current(HoleCards(kA), HoleCards(kB))));
   CHECK_FALSE(
-      solver.evaluate_average(HoleCards(kA), HoleCards(kB)).ok());
+      solver->evaluate_average(HoleCards(kA), HoleCards(kB)).ok());
 }
 
 }  // namespace

@@ -69,22 +69,32 @@ int main(int argc, char** argv) {
   }
   const poker::ComboRange a_range = *parsed_range;
   const poker::ComboRange b_range = *parsed_range;
-  const auto deals = poker::DealDistribution::Create(a_range, b_range);
-  if (!deals.ok()) {
-    std::cerr << "Error: " << deals.status() << '\n';
-    return 1;
-  }
+  const poker::Chips stack = config.starting_stack();
+  const poker::ExactPublicState root = poker::MakeInitialState(
+      poker::BettingRules{config.big_blind()}, {stack, stack},
+      {config.small_blind(), config.big_blind()});
 
   std::cout << "case\tseconds\tresult\n";
   Measure("range_expand", [&] { return a_range.count(); });
 
   std::unique_ptr<poker::CFRSolver> solver;
+  std::string build_error;
   Measure("build_history", [&] {
-    solver = std::make_unique<poker::CFRSolver>(config);
+    auto result = poker::CFRSolver::Create(
+        {config, root, {a_range, b_range}});
+    if (!result.ok()) {
+      build_error = result.status().ToString();
+      return size_t{0};
+    }
+    solver = std::move(*result);
     return solver->get_history_count();
   });
+  if (!build_error.empty()) {
+    std::cerr << "Error: " << build_error << '\n';
+    return 1;
+  }
   const double training_seconds = Measure("train_range", [&] {
-    solver->run(absl::GetFlag(FLAGS_iterations), *deals);
+    solver->run(absl::GetFlag(FLAGS_iterations));
     return solver->get_expected_value(poker::Player::kA);
   });
   const auto training = solver->get_stats();
@@ -103,10 +113,10 @@ int main(int argc, char** argv) {
   Measure("evaluate_range", [&] {
     if (!config.accumulate_average_strategy()) {
       return solver->evaluate_current(
-          absl::GetFlag(FLAGS_eval_samples), *deals);
+          absl::GetFlag(FLAGS_eval_samples));
     }
     const auto value = solver->evaluate_average(
-        absl::GetFlag(FLAGS_eval_samples), *deals);
+        absl::GetFlag(FLAGS_eval_samples));
     return value.ok() ? *value : 0.0;
   });
   return 0;

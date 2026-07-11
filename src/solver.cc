@@ -162,14 +162,6 @@ ComboRange ExpandSelectedCombos(const std::vector<int>& selected) {
   return range;
 }
 
-ExactPublicState DefaultInitialState(const SolverConfig& config) {
-  const Chips small_blind = config.small_blind();
-  const Chips big_blind = config.big_blind();
-  const Chips stack = config.starting_stack();
-  return MakeInitialState(BettingRules{big_blind}, {stack, stack},
-                          {small_blind, big_blind});
-}
-
 HistoryId AppendHistory(HistoryTree& tree,
                         const BettingState& state,
                         const BettingRules& rules,
@@ -474,37 +466,47 @@ ComboRange SingleComboRange(ComboId combo, float weight) {
   return range;
 }
 
-CFRSolver::CFRSolver(const SolverConfig& config)
-    : CFRSolver(config, DefaultInitialState(config)) {}
-
-CFRSolver::CFRSolver(const SolverConfig& config,
-                     const ExactPublicState& initial_state)
-    : config_(config),
-      betting_rules_{config_.big_blind()},
-      initial_state_(initial_state),
+CFRSolver::CFRSolver(SolveSpec spec, DealDistribution deals)
+    : spec_(std::move(spec)),
+      betting_rules_{spec_.config.big_blind()},
+      deals_(std::move(deals)),
       rng_(12345) {
-  assert(IsValidBettingData(Data(initial_state_.betting)));
-  history_ = BuildHistoryTree(initial_state_.betting, betting_rules_, config_);
-  const size_t rows = static_cast<size_t>(config_.max_info_sets());
+  history_ = BuildHistoryTree(
+      spec_.root.betting, betting_rules_, spec_.config);
+  const size_t rows = static_cast<size_t>(spec_.config.max_info_sets());
   size_t max_actions = 3;
   for (StreetKind street : {StreetKind::kPreflop, StreetKind::kFlop,
                             StreetKind::kTurn, StreetKind::kRiver}) {
-    const auto& sizes = config_.bet_abstraction().pot_fractions;
+    const auto& sizes = spec_.config.bet_abstraction().pot_fractions;
     max_actions = std::max(
         max_actions, sizes[static_cast<size_t>(street)].size() + 3);
   }
   state_.rows.reserve(rows);
   state_.regret_sum.reserve(rows * max_actions);
-  if (config_.accumulate_average_strategy()) {
+  if (spec_.config.accumulate_average_strategy()) {
     state_.strategy_sum.reserve(rows * max_actions);
   }
 }
 
+absl::StatusOr<std::unique_ptr<CFRSolver>> CFRSolver::Create(
+    SolveSpec spec) {
+  if (!IsValidBettingData(Data(spec.root.betting))) {
+    return absl::InvalidArgumentError("invalid root betting state");
+  }
+  auto deals = DealDistribution::Create(spec.ranges[Index(Player::kA)],
+                                        spec.ranges[Index(Player::kB)]);
+  if (!deals.ok()) {
+    return deals.status();
+  }
+  return std::unique_ptr<CFRSolver>(
+      new CFRSolver(std::move(spec), std::move(*deals)));
+}
+
 Position CFRSolver::root_position() const {
   return {history_.root,
-          PublicPosition::Root(config_.card_abstraction(),
-                               Data(initial_state_.betting).street,
-                               initial_state_.board)};
+          PublicPosition::Root(spec_.config.card_abstraction(),
+                               Data(spec_.root.betting).street,
+                               spec_.root.board)};
 }
 
 Position CFRSolver::action_child(Position position,
@@ -534,7 +536,8 @@ Position CFRSolver::sample_chance_child(Position position,
       node->state, position.public_state.board(), *sampled, betting_rules_);
   position.history = node->child;
   position.public_state = position.public_state.after_chance(
-      config_.card_abstraction(), Data(child.betting).street, child.board);
+      spec_.config.card_abstraction(), Data(child.betting).street,
+      child.board);
   return position;
 }
 
@@ -546,7 +549,7 @@ CFRSolver::private_observations_for_position(
   for (size_t player = 0; player < kPlayerCount; ++player) {
     const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
     observations[player] = ObservePrivate(
-        config_.card_abstraction(), hand, position.public_state);
+        spec_.config.card_abstraction(), hand, position.public_state);
   }
   return observations;
 }
@@ -558,8 +561,8 @@ void CFRSolver::advance_private_observations(
   for (size_t player = 0; player < kPlayerCount; ++player) {
     const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
     frame.private_observations[player] = AdvancePrivateObservation(
-        config_.card_abstraction(), frame.private_observations[player], hand,
-        child.public_state);
+        spec_.config.card_abstraction(), frame.private_observations[player],
+        hand, child.public_state);
   }
 }
 
@@ -577,13 +580,14 @@ std::optional<InfoSetRow> CFRSolver::find_or_create_row(
   if (const auto row = find_row(key)) {
     return row;
   }
-  if (state_.rows.size() >= static_cast<size_t>(config_.max_info_sets())) {
+  if (state_.rows.size() >=
+      static_cast<size_t>(spec_.config.max_info_sets())) {
     return std::nullopt;
   }
 
   const size_t offset = state_.regret_sum.size();
   state_.regret_sum.resize(offset + action_count, 0.0f);
-  if (config_.accumulate_average_strategy()) {
+  if (spec_.config.accumulate_average_strategy()) {
     state_.strategy_sum.resize(offset + action_count, 0.0f);
   }
   const InfoSetRow row{offset};
@@ -608,7 +612,7 @@ double CFRSolver::traverse(Position position,
       return TerminalUtility(node.state, *board, deal.hand(Player::kA),
                              deal.hand(Player::kB));
     } else if constexpr (std::is_same_v<Node, ChanceNode>) {
-      const int samples = config_.chance_samples();
+      const int samples = spec_.config.chance_samples();
       stats_.chance_samples += static_cast<uint64_t>(samples);
       double value = 0.0;
       for (int sample = 0; sample < samples; ++sample) {
@@ -670,7 +674,7 @@ double CFRSolver::traverse(Position position,
             opponent_reach * sign * (values[action] - node_value);
         AddCfrPlusRegret(state_, *row, action, static_cast<float>(regret));
       }
-      if (config_.accumulate_average_strategy()) {
+      if (spec_.config.accumulate_average_strategy()) {
         const double weight = frame.reach[player_index] *
                               static_cast<double>(context.iteration + 1);
         AddStrategySum(state_, *row, absl::MakeConstSpan(probabilities),
@@ -681,8 +685,7 @@ double CFRSolver::traverse(Position position,
   }, history_.nodes[position.history.index()]);
 }
 
-TrainingResult CFRSolver::run(uint64_t iterations,
-                              const DealDistribution& deals) {
+TrainingResult CFRSolver::run(uint64_t iterations) {
   TrainingResult result;
   if (iterations <= 0) {
     return result;
@@ -690,7 +693,7 @@ TrainingResult CFRSolver::run(uint64_t iterations,
 
   const Position root = root_position();
   for (uint64_t i = 0; i < iterations; ++i) {
-    const Deal deal = deals.sample(rng_);
+    const Deal deal = deals_.sample(rng_);
     TraversalFrame frame;
     frame.private_observations = private_observations_for_position(deal, root);
     const Player update_player =
@@ -719,15 +722,13 @@ double CFRSolver::evaluate_deal(const Deal& deal, TraversalMode mode) {
   return traverse(root, frame, context);
 }
 
-double CFRSolver::evaluate_deals(int samples,
-                                 const DealDistribution& deals,
-                                 TraversalMode mode) {
+double CFRSolver::evaluate_deals(int samples, TraversalMode mode) {
   if (samples <= 0) {
     return 0.0;
   }
   double value = 0.0;
   for (int sample = 0; sample < samples; ++sample) {
-    value += evaluate_deal(deals.sample(rng_), mode);
+    value += evaluate_deal(deals_.sample(rng_), mode);
   }
   return value / samples;
 }
@@ -739,15 +740,14 @@ double CFRSolver::evaluate_current(HoleCards player_a,
   return evaluate_deal(deal, TraversalMode::kEvaluateCurrent);
 }
 
-double CFRSolver::evaluate_current(int samples,
-                                   const DealDistribution& deals) {
-  return evaluate_deals(samples, deals, TraversalMode::kEvaluateCurrent);
+double CFRSolver::evaluate_current(int samples) {
+  return evaluate_deals(samples, TraversalMode::kEvaluateCurrent);
 }
 
 absl::StatusOr<double> CFRSolver::evaluate_average(
     HoleCards player_a,
     HoleCards player_b) {
-  if (!config_.accumulate_average_strategy()) {
+  if (!spec_.config.accumulate_average_strategy()) {
     return absl::FailedPreconditionError(
         "average strategy accumulation is disabled");
   }
@@ -756,14 +756,12 @@ absl::StatusOr<double> CFRSolver::evaluate_average(
   return evaluate_deal(deal, TraversalMode::kEvaluateAverage);
 }
 
-absl::StatusOr<double> CFRSolver::evaluate_average(
-    int samples,
-    const DealDistribution& deals) {
-  if (!config_.accumulate_average_strategy()) {
+absl::StatusOr<double> CFRSolver::evaluate_average(int samples) {
+  if (!spec_.config.accumulate_average_strategy()) {
     return absl::FailedPreconditionError(
         "average strategy accumulation is disabled");
   }
-  return evaluate_deals(samples, deals, TraversalMode::kEvaluateAverage);
+  return evaluate_deals(samples, TraversalMode::kEvaluateAverage);
 }
 
 double CFRSolver::get_expected_value(Player player) const {

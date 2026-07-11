@@ -169,21 +169,24 @@ int main(int argc, char** argv) {
   }
   const poker::ComboRange a_range = poker::UniformComboRange();
   const poker::ComboRange b_range = poker::UniformComboRange();
-  const auto deals = poker::DealDistribution::Create(a_range, b_range);
-  if (!deals.ok()) {
-    std::cerr << "Error: " << deals.status() << "\n";
+  const poker::Chips stack = config->starting_stack();
+  const poker::ExactPublicState root = poker::MakeInitialState(
+      poker::BettingRules{config->big_blind()}, {stack, stack},
+      {config->small_blind(), config->big_blind()});
+  SetMemoryLimit(memory_limit_mb);
+  auto solver = poker::CFRSolver::Create(
+      {*config, root, {a_range, b_range}});
+  if (!solver.ok()) {
+    std::cerr << "Error: " << solver.status() << "\n";
     return 1;
   }
-
-  SetMemoryLimit(memory_limit_mb);
-  poker::CFRSolver solver(*config);
   const auto start = std::chrono::steady_clock::now();
   const poker::TrainingResult result =
-      solver.run(absl::GetFlag(FLAGS_iterations), *deals);
+      (*solver)->run(absl::GetFlag(FLAGS_iterations));
   const auto end = std::chrono::steady_clock::now();
 
   const std::chrono::duration<double> elapsed = end - start;
-  PrintRunSummary(solver, *config, elapsed.count());
+  PrintRunSummary(**solver, *config, elapsed.count());
   std::cout << "stop_reason="
             << (result.stop_reason ==
                         poker::TrainingStopReason::kIterationsCompleted

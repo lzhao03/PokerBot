@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <random>
 #include <string_view>
@@ -71,6 +72,12 @@ struct ComboRange {
 
   size_t count() const { return active_count; }
   float weight(ComboId combo) const { return weights[combo.index()]; }
+};
+
+struct SolveSpec {
+  SolverConfig config;
+  ExactPublicState root;
+  std::array<ComboRange, kPlayerCount> ranges;
 };
 
 absl::StatusOr<ComboRange> ParseRange(std::string_view text);
@@ -214,21 +221,16 @@ struct CFRSolverTestAccess;
 
 class CFRSolver {
  public:
-  explicit CFRSolver(const SolverConfig& config);
-  CFRSolver(const SolverConfig& config,
-            const ExactPublicState& initial_state);
+  static absl::StatusOr<std::unique_ptr<CFRSolver>> Create(SolveSpec spec);
 
-  TrainingResult run(uint64_t iterations,
-                     const DealDistribution& deals);
+  TrainingResult run(uint64_t iterations);
 
   double evaluate_current(HoleCards player_a,
                           HoleCards player_b);
-  double evaluate_current(int samples,
-                          const DealDistribution& deals);
+  double evaluate_current(int samples);
   absl::StatusOr<double> evaluate_average(HoleCards player_a,
                                           HoleCards player_b);
-  absl::StatusOr<double> evaluate_average(int samples,
-                                          const DealDistribution& deals);
+  absl::StatusOr<double> evaluate_average(int samples);
 
   double get_expected_value(Player player) const;
   uint64_t get_iterations_run() const { return state_.iterations; }
@@ -246,6 +248,8 @@ class CFRSolver {
 
  private:
   friend struct CFRSolverTestAccess;
+
+  CFRSolver(SolveSpec spec, DealDistribution deals);
 
   struct TraversalFrame {
     std::array<double, kPlayerCount> reach = {1.0, 1.0};
@@ -279,17 +283,15 @@ class CFRSolver {
                   TraversalFrame frame,
                   TraversalContext& context);
   double evaluate_deal(const Deal& deal, TraversalMode mode);
-  double evaluate_deals(int samples,
-                        const DealDistribution& deals,
-                        TraversalMode mode);
+  double evaluate_deals(int samples, TraversalMode mode);
   std::optional<InfoSetRow> find_or_create_row(InfoSetKey key,
                                                 uint8_t action_count);
   std::optional<InfoSetRow> find_row(InfoSetKey key) const;
   void log_training_summary() const;
 
-  SolverConfig config_;
+  SolveSpec spec_;
   BettingRules betting_rules_;
-  ExactPublicState initial_state_;
+  DealDistribution deals_;
   std::mt19937 rng_;
   HistoryTree history_;
   CfrState state_;
