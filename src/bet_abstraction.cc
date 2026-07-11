@@ -7,8 +7,8 @@
 namespace poker {
 
 AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
-                                      const DecisionState& state,
-                                      const LegalActionSpace& legal) {
+                                      const DecisionState& state) {
+  const LegalActionSpace legal = LegalActions(state);
   AbstractActions actions;
   if (legal.facing_action()) {
     actions.push_back({ActionKind::kFold, 0});

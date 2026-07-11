@@ -92,9 +92,8 @@ std::vector<GameAction> ActionsFor(const BettingState& state,
   config.pot_fractions[static_cast<size_t>(decision->data.street)].assign(
       sizes.begin(), sizes.end());
   std::vector<GameAction> actions;
-  const LegalActionSpace legal = LegalActions(*decision);
   for (const GameAction& action :
-       SelectAbstractActions(config, *decision, legal)) {
+       SelectAbstractActions(config, *decision)) {
     actions.push_back(action);
   }
   return actions;

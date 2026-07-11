@@ -422,9 +422,8 @@ HistoryId AppendHistory(HistoryTree& tree,
                         const SolverConfig& config) {
   const HistoryId id(static_cast<uint32_t>(tree.nodes.size()));
   if (const auto* decision = std::get_if<DecisionState>(&state)) {
-    const LegalActionSpace legal = LegalActions(*decision);
     const AbstractActions actions = SelectAbstractActions(
-        config.bet_abstraction(), *decision, legal);
+        config.bet_abstraction(), *decision);
     assert(actions.size() <= std::numeric_limits<uint8_t>::max());
     const uint32_t begin = static_cast<uint32_t>(tree.edges.size());
     for (const GameAction& action : actions) {

@@ -20,7 +20,6 @@ struct BetAbstractionConfig {
 using AbstractActions = absl::InlinedVector<GameAction, 8>;
 
 AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
-                                      const DecisionState& state,
-                                      const LegalActionSpace& legal);
+                                      const DecisionState& state);
 
 }  // namespace poker

@@ -100,8 +100,7 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   flop_data.last_full_raise = 2;
   flop_data.street = StreetKind::kFlop;
   const DecisionState flop{flop_data, Player::kB};
-  const LegalActionSpace legal = LegalActions(flop);
-  const AbstractActions actions = SelectAbstractActions(config, flop, legal);
+  const AbstractActions actions = SelectAbstractActions(config, flop);
   bool bet_four = false;
   bool bet_two = false;
   bool all_in = false;
