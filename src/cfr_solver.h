@@ -160,6 +160,7 @@ class CFRSolver {
     std::array<double, kPlayerCount> reach = {1.0, 1.0};
     std::array<const TrainingRangeView*, kPlayerCount> ranges = {
         nullptr, nullptr};
+    std::array<PrivateObservationId, kPlayerCount> private_observations = {};
     uint16_t decision_depth = 0;
     uint16_t scratch_depth = 0;
   };
@@ -237,15 +238,26 @@ class CFRSolver {
       size_t action_count,
       RangeScratchFrame& scratch_frame);
   double nonterminal_leaf_value() const noexcept;
+  std::array<PrivateObservationId, kPlayerCount>
+  private_observations_for_position(const Deal& deal,
+                                    Position position) const;
+  std::array<PrivateObservationId, kPlayerCount>
+  private_observations_after_chance(
+      const std::array<PrivateObservationId, kPlayerCount>& previous,
+      const Deal& deal,
+      Position child) const;
   double evaluate_strategy_node(Position position,
                                 const Deal& deal,
+                                const TraversalFrame& frame,
                                 MutableTraversalGraph& graph);
   double evaluate_strategy_node(Position position,
                                 const Deal& deal,
+                                const TraversalFrame& frame,
                                 FrozenTraversalGraph& graph);
   template <typename Graph>
   double evaluate_strategy_node_impl(Position position,
                                      const Deal& deal,
+                                     const TraversalFrame& frame,
                                      Graph& graph);
   double evaluate_strategy_samples(
       int samples,

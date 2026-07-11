@@ -10,6 +10,7 @@
 #include "src/strategy_tables.h"
 #include "src/training_range.h"
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <exception>
@@ -111,6 +112,48 @@ CFRSolver::Deal CFRSolver::traversal_deal(RangeDeal deal) const {
       deal.player_b_combo,
   };
   return Deal{hands, ComboMask(hands[0]) | ComboMask(hands[1])};
+}
+
+std::array<PrivateObservationId, kPlayerCount>
+CFRSolver::private_observations_for_position(
+    const Deal& deal,
+    Position position) const {
+  if (position.node >= nodes().size()) {
+    throw std::logic_error("private observation node is invalid");
+  }
+  const PublicObservationId public_observation =
+      nodes()[position.node].public_observation;
+  std::array<PrivateObservationId, kPlayerCount> observations;
+  for (int player = 0; player < kPlayerCount; ++player) {
+    observations[player] = private_observation_for_runout(
+        deal.hand(player), position.exact_board, public_observation);
+  }
+  return observations;
+}
+
+std::array<PrivateObservationId, kPlayerCount>
+CFRSolver::private_observations_after_chance(
+    const std::array<PrivateObservationId, kPlayerCount>& previous,
+    const Deal& deal,
+    Position child) const {
+  if (child.node >= nodes().size()) {
+    throw std::logic_error("private observation child node is invalid");
+  }
+  const Node& node = nodes()[child.node];
+  if (node.betting_node_id >= tables().betting_nodes.size()) {
+    throw std::logic_error("private observation betting node is invalid");
+  }
+  const StreetKind street =
+      tables().betting_nodes[node.betting_node_id].state.street;
+  std::array<PrivateObservationId, kPlayerCount> observations;
+  for (int player = 0; player < kPlayerCount; ++player) {
+    observations[player] = advance_private_observation(
+        previous[player], deal.hand(player), street, child.exact_board,
+        node.public_observation);
+    assert(observations[player] == private_observation_for_runout(
+        deal.hand(player), child.exact_board, node.public_observation));
+  }
+  return observations;
 }
 
 CFRSolver::TraversalOptions CFRSolver::traversal_options(
@@ -500,6 +543,8 @@ void CFRSolver::run_growing_iterations(
     VLOG(2) << "Iteration " << i + 1 << "/" << iterations;
     const int cfr_iteration = iterations_run_;
     TraversalFrame frame;
+    frame.private_observations =
+        private_observations_for_position(deal, root_node);
     if (max_depth > 0) {
       frame.ranges[0] = &a_view;
       frame.ranges[1] = &b_view;
@@ -639,6 +684,8 @@ void CFRSolver::run_fixed_storage_iterations(
 
             const int cfr_iteration = iteration_begin + i;
             TraversalFrame frame;
+            frame.private_observations =
+                worker.private_observations_for_position(deal, root_node);
             if (max_depth > 0) {
               frame.ranges[0] = &a_view;
               frame.ranges[1] = &b_view;
@@ -738,6 +785,9 @@ double CFRSolver::CfrTraversal<Graph>::chance(
       samples, position, run_.deal.known_private_cards(), graph_,
       [&](Position child) {
         TraversalFrame child_frame = frame;
+        child_frame.private_observations =
+            solver_.private_observations_after_chance(
+                frame.private_observations, run_.deal, child);
         ++child_frame.scratch_depth;
         if (frame.ranges[0] != nullptr || frame.ranges[1] != nullptr) {
           RangeScratchFrame& scratch =
@@ -776,8 +826,10 @@ double CFRSolver::CfrTraversal<Graph>::decision(
 
   const bool update_player = player == run_.options.update_player;
   const size_t action_count = betting_node.action_count;
-  const PrivateObservationId observation = private_observation_for_runout(
-      hand, position.exact_board, node.public_observation);
+  const PrivateObservationId observation =
+      frame.private_observations[static_cast<size_t>(player)];
+  assert(observation == private_observation_for_runout(
+      hand, position.exact_board, node.public_observation));
   const InfoSetKey infoset{node_id, observation};
   std::optional<ActionBlock> actions;
   if (run_.options.use_fixed_infoset_lookup) {
@@ -986,12 +1038,15 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
   };
   const Deal deal{{player_a_hand, player_b_hand},
                   ComboMask(player_a_hand) | ComboMask(player_b_hand)};
+  TraversalFrame frame;
+  frame.private_observations =
+      private_observations_for_position(deal, root_node);
   if (storage_.is_frozen()) {
     FrozenTraversalGraph graph(*this);
-    return evaluate_strategy_node(root_node, deal, graph);
+    return evaluate_strategy_node(root_node, deal, frame, graph);
   }
   MutableTraversalGraph graph(*this);
-  return evaluate_strategy_node(root_node, deal, graph);
+  return evaluate_strategy_node(root_node, deal, frame, graph);
 }
 
 double CFRSolver::evaluate_strategy(int samples, const HandRange& player_a_range,
@@ -1060,14 +1115,20 @@ double CFRSolver::evaluate_strategy_samples(
     for (int i = 0; i < samples; ++i) {
       const RangeDeal sampled = sampler.sample(rng_);
       const Deal deal = traversal_deal(sampled);
-      total += evaluate_strategy_node(root_node, deal, graph);
+      TraversalFrame frame;
+      frame.private_observations =
+          private_observations_for_position(deal, root_node);
+      total += evaluate_strategy_node(root_node, deal, frame, graph);
     }
   } else {
     MutableTraversalGraph graph(*this);
     for (int i = 0; i < samples; ++i) {
       const RangeDeal sampled = sampler.sample(rng_);
       const Deal deal = traversal_deal(sampled);
-      total += evaluate_strategy_node(root_node, deal, graph);
+      TraversalFrame frame;
+      frame.private_observations =
+          private_observations_for_position(deal, root_node);
+      total += evaluate_strategy_node(root_node, deal, frame, graph);
     }
   }
   return total / samples;
@@ -1076,21 +1137,24 @@ double CFRSolver::evaluate_strategy_samples(
 double CFRSolver::evaluate_strategy_node(
     Position position,
     const Deal& deal,
+    const TraversalFrame& frame,
     MutableTraversalGraph& graph) {
-  return evaluate_strategy_node_impl(position, deal, graph);
+  return evaluate_strategy_node_impl(position, deal, frame, graph);
 }
 
 double CFRSolver::evaluate_strategy_node(
     Position position,
     const Deal& deal,
+    const TraversalFrame& frame,
     FrozenTraversalGraph& graph) {
-  return evaluate_strategy_node_impl(position, deal, graph);
+  return evaluate_strategy_node_impl(position, deal, frame, graph);
 }
 
 template <typename Graph>
 double CFRSolver::evaluate_strategy_node_impl(
     Position position,
     const Deal& deal,
+    const TraversalFrame& frame,
     Graph& graph) {
   const auto& graph_nodes = nodes();
   if (position.node >= graph_nodes.size()) {
@@ -1116,7 +1180,12 @@ double CFRSolver::evaluate_strategy_node_impl(
       return sample_chance_children(
           samples, position, deal.known_private_cards(), graph,
           [&](Position child) {
-            return evaluate_strategy_node_impl(child, deal, graph);
+            TraversalFrame child_frame = frame;
+            child_frame.private_observations =
+                private_observations_after_chance(
+                    frame.private_observations, deal, child);
+            return evaluate_strategy_node_impl(
+                child, deal, child_frame, graph);
           });
     }
     case StrategyTables::NodeKind::kFrontier:
@@ -1134,8 +1203,10 @@ double CFRSolver::evaluate_strategy_node_impl(
   std::array<double, kMaxActionsPerNode> probabilities_storage{};
   absl::Span<double> probabilities(
       probabilities_storage.data(), betting_node.action_count);
-  const PrivateObservationId observation = private_observation_for_runout(
-      deal.hand(player), position.exact_board, node.public_observation);
+  const PrivateObservationId observation =
+      frame.private_observations[static_cast<size_t>(player)];
+  assert(observation == private_observation_for_runout(
+      deal.hand(player), position.exact_board, node.public_observation));
   strategy_store_.average_strategy(
       {node_id, observation}, betting_node.action_count,
       config_.regret_only_training, probabilities);
@@ -1149,11 +1220,13 @@ double CFRSolver::evaluate_strategy_node_impl(
       if (!child.has_value()) {
         continue;
       }
+      const TraversalFrame child_frame = frame;
       value += probabilities[action_index] *
-               evaluate_strategy_node_impl(*child, deal, graph);
+               evaluate_strategy_node_impl(*child, deal, child_frame, graph);
     } else {
+      const TraversalFrame child_frame = frame;
       value += probabilities[action_index] *
-               evaluate_strategy_node_impl(child, deal, graph);
+               evaluate_strategy_node_impl(child, deal, child_frame, graph);
     }
   }
   return value;

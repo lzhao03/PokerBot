@@ -28,7 +28,7 @@ TEST_CASE("coarse private histories use growing storage") {
   config.small_blind = 1;
   config.big_blind = 2;
   config.bet_sizes = {1.0};
-  config.max_depth = 1;
+  config.max_depth = 2;
   config.chance_samples = 1;
   config.regret_only_training = true;
   config.max_info_sets = 500000;

@@ -5,11 +5,19 @@
 #include "doctest/doctest.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <optional>
 #include <stdexcept>
 
 namespace poker {
+
+struct CFRSolverTestAccess {
+  static const StrategyTables& tables(const CFRSolver& solver) {
+    return solver.tables();
+  }
+};
+
 namespace {
 
 using S = SuitKind;
@@ -95,6 +103,40 @@ TEST_CASE("solver lifecycle respects training, limits, and root contracts") {
     invalid.betting.stack[0] = -1;
     CHECK_THROWS_AS(CFRSolver(config, invalid), std::invalid_argument);
   }
+}
+
+TEST_CASE("postflop roots use full private observation history") {
+  SolverConfig config = Config();
+  const BettingRules rules{config.big_blind};
+  ExactPublicState state = MakeInitialState(rules, {12, 12}, {1, 2});
+  state.betting = ApplyAction(
+      state.betting, {ActionKind::kCall, 2});
+  state.betting = ApplyAction(
+      state.betting, {ActionKind::kCheck, 0});
+  const std::array<CardId, 3> flop = {
+      MakeCardId(2, S::kHearts),
+      MakeCardId(7, S::kDiamonds),
+      MakeCardId(12, S::kClubs),
+  };
+  state = ApplyChance(state, flop, rules);
+
+  CFRSolver solver(config, state);
+  solver.run(2, R(kA), R(kB));
+  const StrategyTables& tables = CFRSolverTestAccess::tables(solver);
+  const NodeId root_id = tables.root_node_id;
+  REQUIRE(root_id < tables.nodes.size());
+  const auto& root = tables.nodes[root_id];
+  REQUIRE(root.betting_node_id < tables.betting_nodes.size());
+  const int player =
+      tables.betting_nodes[root.betting_node_id].state.player_to_act;
+  REQUIRE(IsPlayer(player));
+  REQUIRE(root_id < tables.growing_info_sets.size());
+  REQUIRE(tables.growing_info_sets[root_id] != nullptr);
+  const ComboId hand = player == 0 ? kA : kB;
+  const PrivateObservationId expected = private_observation_for_runout(
+      hand, state.board, root.public_observation);
+  CHECK(tables.growing_info_sets[root_id]->rows.contains(expected));
+  CHECK(std::isfinite(solver.evaluate_strategy(kA, kB)));
 }
 
 TEST_CASE("strategy storage performs regret matching, averaging, and freezing") {
