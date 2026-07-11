@@ -437,9 +437,12 @@ BettingState AdvanceBettingStreet(const ChanceState& state,
 ExactPublicState ApplyChance(const ExactPublicState& state,
                              absl::Span<const Card> cards,
                              const BettingRules& rules);
-double TerminalUtility(const ExactPublicState& state,
-                       ComboId player0_hand,
-                       ComboId player1_hand);
+double TerminalUtility(const FoldTerminalState& state,
+                       Player evaluated_player) noexcept;
+double TerminalUtility(const ShowdownState& state,
+                       const RiverBoard& board,
+                       HoleCards player_a,
+                       HoleCards player_b) noexcept;
 bool IsTerminal(const ExactPublicState& state);
 
 }  // namespace poker

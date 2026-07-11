@@ -592,12 +592,15 @@ double CFRSolver::traverse(Position position,
   }
   return std::visit([&](const auto& node) -> double {
     using Node = std::decay_t<decltype(node)>;
-    if constexpr (std::is_same_v<Node, FoldTerminalNode> ||
-                  std::is_same_v<Node, ShowdownNode>) {
+    if constexpr (std::is_same_v<Node, FoldTerminalNode>) {
       ++stats_.terminal_visits;
-      return TerminalUtility({node.state, position.public_state.board()},
-                             deal.hand(Player::kA).combo(),
-                             deal.hand(Player::kB).combo());
+      return TerminalUtility(node.state, Player::kA);
+    } else if constexpr (std::is_same_v<Node, ShowdownNode>) {
+      ++stats_.terminal_visits;
+      return TerminalUtility(
+          node.state,
+          std::get<RiverBoard>(position.public_state.board()),
+          deal.hand(Player::kA), deal.hand(Player::kB));
     } else if constexpr (std::is_same_v<Node, ChanceNode>) {
       const int samples = std::max(1, config_.chance_samples);
       stats_.chance_samples += samples;

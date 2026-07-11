@@ -548,26 +548,24 @@ ExactPublicState ApplyChance(const ExactPublicState& state,
   return child;
 }
 
-double TerminalUtility(const ExactPublicState& state,
-                       ComboId player0_hand,
-                       ComboId player1_hand) {
-  if (!IsTerminal(state)) {
-    throw std::invalid_argument("TerminalUtility requires a terminal state");
-  }
-
-  const BettingData& data = Data(state.betting);
+double TerminalUtility(const FoldTerminalState& state,
+                       Player evaluated_player) noexcept {
+  const BettingData& data = state.data;
   const double player0_committed = data.total_committed[0];
+  const double player0_utility = state.folded == Player::kA
+                                     ? -player0_committed
+                                     : Pot(data) - player0_committed;
+  return evaluated_player == Player::kA ? player0_utility : -player0_utility;
+}
 
-  if (const auto* fold =
-          std::get_if<FoldTerminalState>(&state.betting)) {
-    if (fold->folded == Player::kA) {
-      return -player0_committed;
-    }
-    return Pot(data) - player0_committed;
-  }
-
-  const int comparison = CompareHands(
-      player0_hand, player1_hand, std::get<RiverBoard>(state.board));
+double TerminalUtility(const ShowdownState& state,
+                       const RiverBoard& board,
+                       HoleCards player_a,
+                       HoleCards player_b) noexcept {
+  const BettingData& data = state.data;
+  const double player0_committed = data.total_committed[0];
+  const int comparison = CompareHands(player_a.combo(), player_b.combo(),
+                                      board);
   if (comparison > 0) {
     return Pot(data) - player0_committed;
   }

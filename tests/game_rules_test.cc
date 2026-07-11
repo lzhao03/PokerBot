@@ -553,36 +553,14 @@ TEST_CASE("folds are terminal on every street") {
       StreetKind::kTurn,
       StreetKind::kRiver,
   };
-  const ComboId player0 = H(14, S::kSpades, 13, S::kSpades);
-  const ComboId player1 = H(12, S::kClubs, 11, S::kClubs);
-
   for (StreetKind street : streets) {
     ExactPublicState state = ClosedState(street);
     state.betting = FoldTerminalState{B(state), Player::kA};
     CHECK(IsTerminal(state));
-    CHECK(TerminalUtility(state, player0, player1) ==
+    CHECK(TerminalUtility(std::get<FoldTerminalState>(state.betting),
+                          Player::kA) ==
           doctest::Approx(-10.0));
   }
-}
-
-TEST_CASE("terminal utility rejects nonterminal states") {
-  const ComboId player0 = H(14, S::kSpades, 13, S::kSpades);
-  const ComboId player1 = H(12, S::kClubs, 11, S::kClubs);
-
-  for (StreetKind street : {StreetKind::kPreflop, StreetKind::kFlop,
-                            StreetKind::kTurn}) {
-    const ExactPublicState state = ClosedState(street);
-    CHECK_FALSE(IsTerminal(state));
-    CHECK_THROWS_AS(TerminalUtility(state, player0, player1),
-                    std::invalid_argument);
-  }
-
-  ExactPublicState river = ClosedState(StreetKind::kRiver);
-  river.betting = DecisionState{B(river), Player::kA};
-  B(river).pending_action_mask = kAllPlayersMask;
-  CHECK_FALSE(IsTerminal(river));
-  CHECK_THROWS_AS(TerminalUtility(river, player0, player1),
-                  std::invalid_argument);
 }
 
 TEST_CASE("river terminal utility handles win, loss, and tie") {
@@ -597,8 +575,13 @@ TEST_CASE("river terminal utility handles win, loss, and tie") {
   });
   REQUIRE(B(win).total_committed[0] ==
           B(win).total_committed[1]);
-  const double win_utility = TerminalUtility(win, player0, player1);
-  const double loss_utility = TerminalUtility(win, player1, player0);
+  const ShowdownState& showdown =
+      std::get<ShowdownState>(win.betting);
+  const RiverBoard& board = std::get<RiverBoard>(win.board);
+  const double win_utility = TerminalUtility(
+      showdown, board, HoleCards(player0), HoleCards(player1));
+  const double loss_utility = TerminalUtility(
+      showdown, board, HoleCards(player1), HoleCards(player0));
   CHECK(win_utility == doctest::Approx(10.0));
   CHECK(loss_utility == doctest::Approx(-10.0));
   CHECK(win_utility + loss_utility == doctest::Approx(0.0));
@@ -613,8 +596,11 @@ TEST_CASE("river terminal utility handles win, loss, and tie") {
   REQUIRE(B(tie).total_committed[0] ==
           B(tie).total_committed[1]);
   CHECK(TerminalUtility(
-            tie, H(14, S::kClubs, 13, S::kDiamonds),
-            H(12, S::kClubs, 11, S::kDiamonds)) == doctest::Approx(0.0));
+            std::get<ShowdownState>(tie.betting),
+            std::get<RiverBoard>(tie.board),
+            HoleCards(H(14, S::kClubs, 13, S::kDiamonds)),
+            HoleCards(H(12, S::kClubs, 11, S::kDiamonds))) ==
+        doctest::Approx(0.0));
 }
 
 TEST_CASE("a complete normal hand preserves exact state") {
@@ -691,7 +677,10 @@ TEST_CASE("a complete normal hand preserves exact state") {
 
   const ComboId aces = H(14, S::kClubs, 14, S::kDiamonds);
   const ComboId kings = H(13, S::kClubs, 13, S::kDiamonds);
-  CHECK(TerminalUtility(state, aces, kings) == doctest::Approx(6.0));
+  CHECK(TerminalUtility(
+            std::get<ShowdownState>(state.betting),
+            std::get<RiverBoard>(state.board), HoleCards(aces),
+            HoleCards(kings)) == doctest::Approx(6.0));
 }
 
 TEST_CASE("full raises update the minimum re-raise increment") {
