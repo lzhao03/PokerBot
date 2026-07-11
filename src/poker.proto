@@ -6,7 +6,8 @@ package poker;
 message PokerConfig {
   repeated double bet_sizes = 1;
   int32 starting_stack_size = 2;
-  int32 max_depth = 3;
+  reserved 3;
+  reserved "max_depth";
   bool enable_logging = 4;
   int32 small_blind = 5;
   int32 big_blind = 6;
@@ -24,8 +25,8 @@ message PokerConfig {
   int32 num_training_threads = 15;
   reserved 16;
   reserved "warmup_iterations";
-  // Maximum number of compact public-state rows to allocate. 0 means unlimited.
-  int64 max_public_states = 17;
+  reserved 17;
+  reserved "max_public_states";
   reserved 18;
   reserved "recall_policy";
 }

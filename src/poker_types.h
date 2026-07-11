@@ -65,7 +65,6 @@ inline constexpr int kMaxActionsPerNode = 8;
 struct SolverConfig {
   std::vector<double> bet_sizes;
   int starting_stack_size = 100;
-  int max_depth = 0;
   bool enable_logging = false;
   int small_blind = 1;
   int big_blind = 2;
@@ -76,14 +75,9 @@ struct SolverConfig {
   std::vector<double> river_bet_sizes;
   bool regret_only_training = false;
   // Maximum number of info sets to allocate. 0 means unlimited.
-  // Once this limit is reached, new (combo, node) pairs fall back to
-  // uniform strategy rather than allocating new entries. Controls peak memory.
+  // Training throws when the limit is reached.
   int max_info_sets = 0;
-  // Maximum number of graph nodes to allocate. 0 means
-  // unlimited. Once this limit is reached, new public states are skipped
-  // instead of expanding the sampled branch. Controls peak traversal memory.
-  int max_public_states = 0;
-  // Number of threads to use for parallel training. 0 or 1 = single-threaded.
+  // The reduced solver is single-threaded; values above one are rejected.
   int num_training_threads = 0;
 };
 

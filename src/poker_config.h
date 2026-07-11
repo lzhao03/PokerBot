@@ -29,7 +29,6 @@ inline SolverConfig SolverConfigFromProto(const PokerConfig& config) {
   SolverConfig native;
   native.bet_sizes.assign(config.bet_sizes().begin(), config.bet_sizes().end());
   native.starting_stack_size = config.starting_stack_size();
-  native.max_depth = config.max_depth();
   native.enable_logging = config.enable_logging();
   native.small_blind = config.small_blind();
   native.big_blind = config.big_blind();
@@ -44,7 +43,6 @@ inline SolverConfig SolverConfigFromProto(const PokerConfig& config) {
                                 config.river_bet_sizes().end());
   native.regret_only_training = config.regret_only_training();
   native.max_info_sets = static_cast<int>(config.max_info_sets());
-  native.max_public_states = static_cast<int>(config.max_public_states());
   native.num_training_threads = config.num_training_threads();
   return native;
 }
@@ -83,7 +81,6 @@ inline void AddBetSize(PokerConfig* config, Street street, double size) {
 struct CommonOptionState {
   bool saw_global_bet_size = false;
   bool saw_max_info_sets = false;
-  bool saw_max_public_states = false;
 };
 
 namespace cli_internal {
@@ -144,7 +141,6 @@ inline bool ApplySolverOption(std::string_view argument,
       {"--starting-stack=", &PokerConfig::set_starting_stack_size},
       {"--small-blind=", &PokerConfig::set_small_blind},
       {"--big-blind=", &PokerConfig::set_big_blind},
-      {"--max-depth=", &PokerConfig::set_max_depth},
       {"--chance-samples=", &PokerConfig::set_chance_samples},
       {"--threads=", &PokerConfig::set_num_training_threads},
   };
@@ -164,13 +160,6 @@ inline bool ApplySolverOption(std::string_view argument,
         argument.substr(sizeof("--max-info-sets=") - 1),
         "--max-info-sets"));
     state.saw_max_info_sets = true;
-    return true;
-  }
-  if (argument.starts_with("--max-public-states=")) {
-    config.set_max_public_states(ParseIntOption(
-        argument.substr(sizeof("--max-public-states=") - 1),
-        "--max-public-states"));
-    state.saw_max_public_states = true;
     return true;
   }
   if (argument.starts_with("--bet-size=")) {
@@ -211,10 +200,8 @@ inline constexpr std::string_view kCommonSolverOptionUsage =
     "  --starting-stack=N             solver config override\n"
     "  --small-blind=N                solver config override\n"
     "  --big-blind=N                  solver config override\n"
-    "  --max-depth=N                  solver config override\n"
     "  --chance-samples=N             solver config override\n"
     "  --max-info-sets=N              solver config override\n"
-    "  --max-public-states=N          solver config override\n"
     "  --threads=N                    solver config override\n"
     "  --regret-only                  solver config override\n"
     "  --bet-size=X                   replace/append global bet sizes\n"
