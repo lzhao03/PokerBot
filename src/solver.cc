@@ -11,6 +11,7 @@
 
 #include "absl/container/inlined_vector.h"
 #include "absl/log/log.h"
+#include "absl/status/status.h"
 #include "absl/types/span.h"
 
 namespace poker {
@@ -376,7 +377,7 @@ void AddStrategySum(CfrState& state,
 
 }  // namespace
 
-ComboRange ParseRange(std::string_view text) {
+absl::StatusOr<ComboRange> ParseRange(std::string_view text) {
   std::array<bool, kHandTypeCount> seen = {};
   std::vector<int> selected;
   auto select = [&](HandType type) {
@@ -399,15 +400,27 @@ ComboRange ParseRange(std::string_view text) {
     const std::string_view part = Trim(text.substr(0, comma));
     text = comma == std::string_view::npos ? std::string_view()
                                            : text.substr(comma + 1);
-    if (part.size() == 3 && part[0] == part[1] && part[2] == '+') {
-      if (const auto rank = ParseRank(part[0])) {
-        for (int value = *rank; value <= 14; ++value) {
-          select(HandType{value, value, HandShape::kPair});
-        }
-      }
-    } else if (const auto type = ParseHandType(part)) {
-      select(*type);
+    if (part.empty()) {
+      return absl::InvalidArgumentError("range contains an empty item");
     }
+    if (part.size() == 3 && part[0] == part[1] && part[2] == '+') {
+      const auto rank = ParseRank(part[0]);
+      if (!rank) {
+        return absl::InvalidArgumentError("invalid pair range");
+      }
+      for (int value = *rank; value <= 14; ++value) {
+        select(HandType{value, value, HandShape::kPair});
+      }
+      continue;
+    }
+    const auto type = ParseHandType(part);
+    if (!type) {
+      return absl::InvalidArgumentError("invalid hand range item");
+    }
+    select(*type);
+  }
+  if (selected.empty()) {
+    return absl::InvalidArgumentError("range is empty");
   }
   return ExpandSelected(selected);
 }

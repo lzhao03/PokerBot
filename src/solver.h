@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/status/statusor.h"
 #include "src/card_abstraction.h"
 #include "src/poker.h"
 
@@ -33,7 +34,7 @@ struct ComboRange {
   float weight(ComboId combo) const { return weights[combo.index()]; }
 };
 
-ComboRange ParseRange(std::string_view text);
+absl::StatusOr<ComboRange> ParseRange(std::string_view text);
 ComboRange UniformRange();
 ComboRange SingleComboRange(ComboId combo, float weight = 1.0f);
 

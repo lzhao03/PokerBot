@@ -30,11 +30,14 @@ ABSL_FLAG(std::string, range, kDefaultRange,
 
 namespace {
 
-poker::ComboRange BenchmarkRange(std::string_view text) {
+absl::StatusOr<poker::ComboRange> BenchmarkRange(std::string_view text) {
   if (text == "premium") {
     return poker::ParseRange("AA,KK,QQ,JJ,AKs,AQs,AKo");
   }
-  return text == "all" ? poker::UniformRange() : poker::ParseRange(text);
+  if (text == "all") {
+    return poker::UniformRange();
+  }
+  return poker::ParseRange(text);
 }
 
 double Rate(double count, double seconds) {
@@ -61,8 +64,13 @@ int main(int argc, char** argv) {
 
   try {
     const std::string range = absl::GetFlag(FLAGS_range);
-    const poker::ComboRange a_range = BenchmarkRange(range);
-    const poker::ComboRange b_range = BenchmarkRange(range);
+    const auto parsed_range = BenchmarkRange(range);
+    if (!parsed_range.ok()) {
+      std::cerr << "Error: " << parsed_range.status() << '\n';
+      return 1;
+    }
+    const poker::ComboRange a_range = *parsed_range;
+    const poker::ComboRange b_range = *parsed_range;
 
     std::cout << "case\tseconds\tresult\n";
     Measure("range_expand", [&] {

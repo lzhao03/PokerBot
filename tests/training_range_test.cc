@@ -21,17 +21,24 @@ TEST_CASE("range syntax expands to exact combo weights") {
   };
   const Case cases[] = {
       {"AA", 6}, {"AKs", 4}, {"AKo", 12}, {"AK", 16},
-      {"AA,KK", 12}, {"QQ+", 18}, {"89s+", 0}};
+      {"AA,KK", 12}, {"QQ+", 18}};
   for (const Case& test : cases) {
     CAPTURE(test.text);
-    CHECK(ParseRange(test.text).count() == test.count);
+    const auto range = ParseRange(test.text);
+    REQUIRE(range.ok());
+    CHECK(range->count() == test.count);
   }
 
-  const ComboRange aces = ParseRange("AA");
+  const auto parsed_aces = ParseRange("AA");
+  REQUIRE(parsed_aces.ok());
+  const ComboRange aces = *parsed_aces;
   const ComboId hand = H(14, S::kSpades, 14, S::kHearts);
   CHECK(aces.weight(hand) == doctest::Approx(1.0f / 6.0f));
   CHECK(UniformRange().count() == kComboCount);
   CHECK(SingleComboRange(hand, 2.0f).weight(hand) == 2.0f);
+  CHECK_FALSE(ParseRange("89s+").ok());
+  CHECK_FALSE(ParseRange("AA,,KK").ok());
+  CHECK_FALSE(ParseRange("").ok());
 }
 
 TEST_CASE("deal sampling rejects incompatible ranges") {

@@ -26,6 +26,7 @@ cc_binary(
         "@abseil-cpp//absl/flags:parse",
         "@abseil-cpp//absl/flags:usage",
         "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/status:statusor",
     ],
 )
 
@@ -39,5 +40,6 @@ cc_binary(
         "@abseil-cpp//absl/flags:parse",
         "@abseil-cpp//absl/flags:usage",
         "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/status:statusor",
     ],
 )
