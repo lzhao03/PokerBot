@@ -564,25 +564,22 @@ const InfoSetRow* CFRSolver::find_row(InfoSetKey key,
   return &row->second;
 }
 
-InfoSetRow CFRSolver::find_or_create_row(InfoSetKey key,
-                                         uint8_t action_count) {
+std::optional<InfoSetRow> CFRSolver::find_or_create_row(
+    InfoSetKey key,
+    uint8_t action_count) {
   if (const InfoSetRow* row = find_row(key, action_count)) {
     return *row;
   }
-  if (config_.max_info_sets > 0 &&
-      state_.rows.size() >= static_cast<size_t>(config_.max_info_sets)) {
-    throw std::runtime_error("maximum infoset count exceeded");
+  if (state_.rows.size() >= static_cast<size_t>(config_.max_info_sets)) {
+    return std::nullopt;
   }
 
   const size_t offset = state_.regret_sum.size();
-  if (offset > std::numeric_limits<uint32_t>::max()) {
-    throw std::overflow_error("CFR action table is too large");
-  }
   state_.regret_sum.resize(offset + action_count, 0.0f);
   if (config_.accumulate_average_strategy) {
     state_.strategy_sum.resize(offset + action_count, 0.0f);
   }
-  const InfoSetRow row{static_cast<uint32_t>(offset), action_count};
+  const InfoSetRow row{offset, action_count};
   return state_.rows.emplace(key, row).first->second;
 }
 
@@ -627,7 +624,12 @@ double CFRSolver::traverse(Position position,
       const bool updates = training && context.update_player == player;
       InfoSetRow row;
       if (updates) {
-        row = find_or_create_row(key, action_count);
+        const auto created = find_or_create_row(key, action_count);
+        if (created.has_value()) {
+          row = *created;
+        } else {
+          context.info_set_limit_reached = true;
+        }
       } else if (const InfoSetRow* existing = find_row(key, action_count)) {
         row = *existing;
       }
@@ -654,7 +656,7 @@ double CFRSolver::traverse(Position position,
         return node_value;
       }
       ++stats_.decision_visits;
-      if (!updates) {
+      if (!updates || row.action_count == 0) {
         return node_value;
       }
 
@@ -675,11 +677,12 @@ double CFRSolver::traverse(Position position,
   }, history_.nodes[position.history.index()]);
 }
 
-void CFRSolver::run(uint64_t iterations,
-                    const ComboRange& a_range,
-                    const ComboRange& b_range) {
+TrainingResult CFRSolver::run(uint64_t iterations,
+                              const ComboRange& a_range,
+                              const ComboRange& b_range) {
+  TrainingResult result;
   if (iterations <= 0) {
-    return;
+    return result;
   }
 
   DealSampler sampler(a_range, b_range);
@@ -695,9 +698,15 @@ void CFRSolver::run(uint64_t iterations,
     state_.cumulative_root_utility +=
         traverse(root, frame, context);
     ++state_.iterations;
+    ++result.iterations_completed;
+    if (context.info_set_limit_reached) {
+      result.stop_reason = TrainingStopReason::kInfoSetLimit;
+      break;
+    }
   }
 
   log_training_summary();
+  return result;
 }
 
 double CFRSolver::evaluate_strategy(ComboId player_a_hand,

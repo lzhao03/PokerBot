@@ -176,11 +176,18 @@ int main(int argc, char** argv) {
     SetMemoryLimit(memory_limit_mb);
     poker::CFRSolver solver(*config);
     const auto start = std::chrono::steady_clock::now();
-    solver.run(absl::GetFlag(FLAGS_iterations), a_range, b_range);
+    const poker::TrainingResult result = solver.run(
+        absl::GetFlag(FLAGS_iterations), a_range, b_range);
     const auto end = std::chrono::steady_clock::now();
 
     const std::chrono::duration<double> elapsed = end - start;
     PrintRunSummary(solver, *config, elapsed.count());
+    std::cout << "stop_reason="
+              << (result.stop_reason ==
+                          poker::TrainingStopReason::kIterationsCompleted
+                      ? "iterations_completed"
+                      : "info_set_limit")
+              << "\n";
   } catch (const std::exception& error) {
     std::cerr << "Error: " << error.what() << "\n";
     return 1;

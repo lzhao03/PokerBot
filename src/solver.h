@@ -115,7 +115,7 @@ struct InfoSetKey {
 };
 
 struct InfoSetRow {
-  uint32_t action_offset = 0;
+  size_t action_offset = 0;
   uint8_t action_count = 0;
 
   friend bool operator==(const InfoSetRow&, const InfoSetRow&) = default;
@@ -140,6 +140,17 @@ enum class StrategySource : uint8_t {
   kAverage,
 };
 
+enum class TrainingStopReason : uint8_t {
+  kIterationsCompleted,
+  kInfoSetLimit,
+};
+
+struct TrainingResult {
+  uint64_t iterations_completed = 0;
+  TrainingStopReason stop_reason =
+      TrainingStopReason::kIterationsCompleted;
+};
+
 struct Deal {
   std::array<HoleCards, kPlayerCount> hands = {};
   CardMask blocked_mask = 0;
@@ -157,8 +168,9 @@ class CFRSolver {
   CFRSolver(const SolverConfig& config,
             const ExactPublicState& initial_state);
 
-  void run(uint64_t iterations, const ComboRange& player_a_range,
-           const ComboRange& player_b_range);
+  TrainingResult run(uint64_t iterations,
+                     const ComboRange& player_a_range,
+                     const ComboRange& player_b_range);
 
   double evaluate_strategy(ComboId player_a_hand,
                            ComboId player_b_hand,
@@ -200,6 +212,7 @@ class CFRSolver {
     TraversalMode mode = TraversalMode::kTrain;
     std::optional<Player> update_player;
     uint64_t iteration = 0;
+    bool info_set_limit_reached = false;
   };
 
   Position root_position() const;
@@ -214,7 +227,8 @@ class CFRSolver {
   double traverse(Position position,
                   TraversalFrame frame,
                   TraversalContext& context);
-  InfoSetRow find_or_create_row(InfoSetKey key, uint8_t action_count);
+  std::optional<InfoSetRow> find_or_create_row(InfoSetKey key,
+                                                uint8_t action_count);
   const InfoSetRow* find_row(InfoSetKey key, uint8_t action_count) const;
   void log_training_summary() const;
 

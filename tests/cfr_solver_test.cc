@@ -175,11 +175,14 @@ TEST_CASE("postflop roots use full observation identity") {
       {tree.root, public_state.observation(), private_id}));
 }
 
-TEST_CASE("unsupported execution modes and caps fail explicitly") {
+TEST_CASE("infoset caps stop after completing the current iteration") {
   SolverConfig capped = Config();
   capped.max_info_sets = 1;
   CFRSolver solver(capped);
-  CHECK_THROWS_AS(solver.run(2, R(kA), R(kB)), std::runtime_error);
+  const TrainingResult result = solver.run(2, R(kA), R(kB));
+  CHECK(result.iterations_completed == 1);
+  CHECK(result.stop_reason == TrainingStopReason::kInfoSetLimit);
+  CHECK(solver.get_iterations_run() == 1);
 }
 
 TEST_CASE("average strategy storage is optional") {
