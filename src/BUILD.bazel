@@ -381,6 +381,7 @@ cc_library(
         ":betting_abstraction",
         ":strategy_store",
     ],
+    visibility = ["//tests:__pkg__"],
 )
 
 cc_library(
@@ -399,6 +400,7 @@ cc_library(
         ":betting_abstraction",
         ":strategy_store",
     ],
+    visibility = ["//tests:__pkg__"],
 )
 
 cc_test(

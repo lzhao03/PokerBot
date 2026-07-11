@@ -1,6 +1,8 @@
 #pragma once
 
+#include <optional>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "absl/types/span.h"
@@ -76,8 +78,6 @@ struct GraphBuilderTestAccess {
 
 namespace test {
 
-using PublicObservationTrace = std::vector<PublicObservationId>;
-
 inline SolverConfig IdentityConfig() {
   SolverConfig config;
   config.bet_sizes = {0.5, 1.0, 1.25};
@@ -89,6 +89,8 @@ inline SolverConfig IdentityConfig() {
 
 class IdentityGraph {
  public:
+  using ActionRecord = std::pair<int, GameAction>;
+
   IdentityGraph()
       : config_(IdentityConfig()),
         betting_(config_),
@@ -104,6 +106,7 @@ class IdentityGraph {
     if (!node.has_value()) {
       throw std::logic_error("failed to create root node");
     }
+    record_action_history(*node, {});
     return *node;
   }
 
@@ -122,6 +125,9 @@ class IdentityGraph {
       throw std::logic_error("action is absent from abstraction menu");
     }
 
+    std::vector<ActionRecord> history = action_history(parent);
+    history.emplace_back(state.betting.player_to_act, action);
+
     const auto child = graph_.get_or_create_action_child(
         parent, action_index, state.board);
     if (!child.has_value()) {
@@ -131,12 +137,14 @@ class IdentityGraph {
     if (access_.action_child(parent, action_index) != *child) {
       throw std::logic_error("action child accessor mismatch");
     }
+    record_action_history(*child, std::move(history));
     return *child;
   }
 
   NodeId chance_child(NodeId parent,
                       ExactPublicState& state,
                       absl::Span<const CardId> cards) {
+    const std::vector<ActionRecord> history = action_history(parent);
     state = ApplyChance(state, cards, rules_);
     const auto child = graph_.get_or_create_chance_child(parent, state);
     if (!child.has_value()) {
@@ -147,7 +155,18 @@ class IdentityGraph {
     if (access_.chance_child(parent, observation) != *child) {
       throw std::logic_error("chance child accessor mismatch");
     }
+    record_action_history(*child, history);
     return *child;
+  }
+
+  std::vector<GameAction> own_actions(NodeId node, int player) const {
+    std::vector<GameAction> actions;
+    for (const auto& [actor, action] : action_history(node)) {
+      if (actor == player) {
+        actions.push_back(action);
+      }
+    }
+    return actions;
   }
 
   const GraphBuilderTestAccess& access() const { return access_; }
@@ -165,6 +184,32 @@ class IdentityGraph {
   }
 
  private:
+  const std::vector<ActionRecord>& action_history(NodeId node) const {
+    const BettingNodeId betting = access_.betting_history(node);
+    if (betting >= action_histories_.size() ||
+        !action_history_present_[betting]) {
+      throw std::logic_error("missing test action history");
+    }
+    return action_histories_[betting];
+  }
+
+  void record_action_history(NodeId node,
+                             std::vector<ActionRecord> history) {
+    const BettingNodeId betting = access_.betting_history(node);
+    if (action_histories_.size() <= betting) {
+      action_histories_.resize(static_cast<size_t>(betting) + 1);
+      action_history_present_.resize(static_cast<size_t>(betting) + 1);
+    }
+    if (action_history_present_[betting]) {
+      if (action_histories_[betting] != history) {
+        throw std::logic_error("betting node merged distinct action paths");
+      }
+      return;
+    }
+    action_histories_[betting] = std::move(history);
+    action_history_present_[betting] = true;
+  }
+
   SolverConfig config_;
   BettingRules rules_{2};
   SolverStorage storage_;
@@ -172,6 +217,8 @@ class IdentityGraph {
   TraversalStats stats_;
   GraphBuilder graph_;
   GraphBuilderTestAccess access_;
+  std::vector<std::vector<ActionRecord>> action_histories_;
+  std::vector<bool> action_history_present_;
 };
 
 inline PublicObservationId PublicObservation(

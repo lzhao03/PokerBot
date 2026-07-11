@@ -818,6 +818,22 @@ bool GraphBuilder::validate_prebuilt_nodes(
   stats.action_transition_prebuild_complete = true;
   stats.chance_transition_prebuild_complete = true;
 
+  if (tables().node_ids.size() != graph_nodes.size()) {
+    stats.action_transition_prebuild_complete = false;
+    stats.chance_transition_prebuild_complete = false;
+    return false;
+  }
+  for (NodeId node_id = 0; node_id < graph_nodes.size(); ++node_id) {
+    const Node& node = graph_nodes[node_id];
+    const NodeKey key{node.betting_node_id, node.public_observation};
+    const auto stored = tables().node_ids.find(key);
+    if (stored == tables().node_ids.end() || stored->second != node_id) {
+      stats.action_transition_prebuild_complete = false;
+      stats.chance_transition_prebuild_complete = false;
+      return false;
+    }
+  }
+
   NodeBfs bfs(root_id, root_board, graph_nodes.size());
 
   auto valid_child_id = [&](NodeId node_id) {
@@ -853,6 +869,30 @@ bool GraphBuilder::validate_prebuilt_nodes(
     }
     const BettingNode& node = tables().betting_nodes[graph_node.betting_node_id];
     ValidateBettingNode(node);
+    if (node.kind != BettingNodeKind(node.state)) {
+      stats.action_transition_prebuild_complete = false;
+      stats.chance_transition_prebuild_complete = false;
+      return false;
+    }
+    if (node.kind == StrategyTables::NodeKind::kDecision) {
+      const ActionMenu menu =
+          betting_abstraction_.actions_for_betting_node(node.state);
+      if (menu.count != node.action_count) {
+        stats.action_transition_prebuild_complete = false;
+        return false;
+      }
+      for (uint8_t action = 0; action < menu.count; ++action) {
+        const size_t edge = static_cast<size_t>(node.action_begin) + action;
+        if (edge >= tables().betting_edges.size() ||
+            tables().betting_edges[edge].action != menu.actions[action]) {
+          stats.action_transition_prebuild_complete = false;
+          return false;
+        }
+      }
+    } else if (node.action_count != 0) {
+      stats.action_transition_prebuild_complete = false;
+      return false;
+    }
     if (node.kind == StrategyTables::NodeKind::kTerminal) {
       continue;
     }
@@ -870,7 +910,11 @@ bool GraphBuilder::validate_prebuilt_nodes(
             entry.node_id, expected_observation);
         const NodeId child_id = child.value_or(kInvalidNodeId);
         const bool valid_child = valid_child_id(child_id) &&
-            graph_nodes[child_id].public_observation == expected_observation;
+            graph_nodes[child_id].public_observation == expected_observation &&
+            graph_nodes[child_id].betting_node_id == node.chance_child &&
+            node.chance_child < tables().betting_nodes.size() &&
+            tables().betting_nodes[node.chance_child].state ==
+                child_state.betting;
         if (!valid_child) {
           mark_missing_chance();
         }
@@ -896,9 +940,16 @@ bool GraphBuilder::validate_prebuilt_nodes(
       const NodeId child_id =
           tables().action_child(entry.node_id, action_index)
               .value_or(kInvalidNodeId);
+      const size_t edge_index = static_cast<size_t>(node.action_begin) +
+                                static_cast<size_t>(action_index);
+      const BettingEdge& edge = tables().betting_edges[edge_index];
       const bool valid_child = valid_child_id(child_id) &&
           graph_nodes[child_id].public_observation ==
-              graph_node.public_observation;
+              graph_node.public_observation &&
+          graph_nodes[child_id].betting_node_id == edge.child &&
+          edge.child < tables().betting_nodes.size() &&
+          tables().betting_nodes[edge.child].state ==
+              ApplyAction(node.state, edge.action);
       if (!valid_child) {
         mark_missing_action();
       }
