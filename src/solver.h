@@ -135,11 +135,6 @@ struct SolverStats {
   uint64_t terminal_visits = 0;
 };
 
-enum class StrategySource : uint8_t {
-  kCurrent,
-  kAverage,
-};
-
 enum class TrainingStopReason : uint8_t {
   kIterationsCompleted,
   kInfoSetLimit,
@@ -193,12 +188,14 @@ class CFRSolver {
   TrainingResult run(uint64_t iterations,
                      const DealDistribution& deals);
 
-  double evaluate_strategy(ComboId player_a_hand,
-                           ComboId player_b_hand,
-                           StrategySource source);
-  double evaluate_strategy(int samples,
-                           const DealDistribution& deals,
-                           StrategySource source);
+  double evaluate_current(HoleCards player_a,
+                          HoleCards player_b);
+  double evaluate_current(int samples,
+                          const DealDistribution& deals);
+  absl::StatusOr<double> evaluate_average(HoleCards player_a,
+                                          HoleCards player_b);
+  absl::StatusOr<double> evaluate_average(int samples,
+                                          const DealDistribution& deals);
 
   double get_expected_value(Player player) const;
   uint64_t get_iterations_run() const { return state_.iterations; }
@@ -248,6 +245,10 @@ class CFRSolver {
   double traverse(Position position,
                   TraversalFrame frame,
                   TraversalContext& context);
+  double evaluate_deal(const Deal& deal, TraversalMode mode);
+  double evaluate_deals(int samples,
+                        const DealDistribution& deals,
+                        TraversalMode mode);
   std::optional<InfoSetRow> find_or_create_row(InfoSetKey key,
                                                 uint8_t action_count);
   const InfoSetRow* find_row(InfoSetKey key, uint8_t action_count) const;

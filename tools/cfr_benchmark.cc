@@ -105,11 +105,13 @@ int main(int argc, char** argv) {
 
     solver->reset_stats();
     Measure("evaluate_range", [&] {
-      return solver->evaluate_strategy(
-          absl::GetFlag(FLAGS_eval_samples), *deals,
-          config.accumulate_average_strategy
-              ? poker::StrategySource::kAverage
-              : poker::StrategySource::kCurrent);
+      if (!config.accumulate_average_strategy) {
+        return solver->evaluate_current(
+            absl::GetFlag(FLAGS_eval_samples), *deals);
+      }
+      const auto value = solver->evaluate_average(
+          absl::GetFlag(FLAGS_eval_samples), *deals);
+      return value.ok() ? *value : 0.0;
     });
   } catch (const std::exception& error) {
     std::cerr << "Error: " << error.what() << '\n';

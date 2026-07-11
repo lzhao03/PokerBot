@@ -137,8 +137,10 @@ TEST_CASE("training mutates only CFR state") {
 
   const CfrState before = CFRSolverTestAccess::state(solver);
   const int64_t updates = solver.get_cfr_update_count();
-  CHECK(std::isfinite(
-      solver.evaluate_strategy(kA, kB, StrategySource::kAverage)));
+  const auto value =
+      solver.evaluate_average(HoleCards(kA), HoleCards(kB));
+  REQUIRE(value.ok());
+  CHECK(std::isfinite(*value));
   CHECK(solver.get_history_count() == history_count);
   CHECK(solver.get_cfr_update_count() == updates);
   CHECK(CFRSolverTestAccess::state(solver).rows == before.rows);
@@ -212,10 +214,9 @@ TEST_CASE("average strategy storage is optional") {
 
   CHECK(CFRSolverTestAccess::state(solver).strategy_sum.empty());
   CHECK(std::isfinite(
-      solver.evaluate_strategy(kA, kB, StrategySource::kCurrent)));
-  CHECK_THROWS_AS(
-      solver.evaluate_strategy(kA, kB, StrategySource::kAverage),
-      std::logic_error);
+      solver.evaluate_current(HoleCards(kA), HoleCards(kB))));
+  CHECK_FALSE(
+      solver.evaluate_average(HoleCards(kA), HoleCards(kB)).ok());
 }
 
 }  // namespace

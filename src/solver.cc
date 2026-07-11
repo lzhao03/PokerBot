@@ -709,49 +709,59 @@ TrainingResult CFRSolver::run(uint64_t iterations,
   return result;
 }
 
-double CFRSolver::evaluate_strategy(ComboId player_a_hand,
-                                    ComboId player_b_hand,
-                                    StrategySource source) {
-  if (source == StrategySource::kAverage &&
-      !config_.accumulate_average_strategy) {
-    throw std::logic_error("average strategy accumulation is disabled");
-  }
+double CFRSolver::evaluate_deal(const Deal& deal, TraversalMode mode) {
   const Position root = root_position();
-  const Deal deal{{HoleCards(player_a_hand), HoleCards(player_b_hand)},
-                  ComboMask(player_a_hand) | ComboMask(player_b_hand)};
   TraversalFrame frame;
   frame.private_observations = private_observations_for_position(deal, root);
-  const TraversalMode mode = source == StrategySource::kCurrent
-                                 ? TraversalMode::kEvaluateCurrent
-                                 : TraversalMode::kEvaluateAverage;
   TraversalContext context{deal, mode};
   return traverse(root, frame, context);
 }
 
-double CFRSolver::evaluate_strategy(int samples,
-                                    const DealDistribution& deals,
-                                    StrategySource source) {
+double CFRSolver::evaluate_deals(int samples,
+                                 const DealDistribution& deals,
+                                 TraversalMode mode) {
   if (samples <= 0) {
     return 0.0;
   }
-  if (source == StrategySource::kAverage &&
-      !config_.accumulate_average_strategy) {
-    throw std::logic_error("average strategy accumulation is disabled");
-  }
-  const Position root = root_position();
-  const TraversalMode mode = source == StrategySource::kCurrent
-                                 ? TraversalMode::kEvaluateCurrent
-                                 : TraversalMode::kEvaluateAverage;
-
   double value = 0.0;
   for (int sample = 0; sample < samples; ++sample) {
-    const Deal deal = deals.sample(rng_);
-    TraversalFrame frame;
-    frame.private_observations = private_observations_for_position(deal, root);
-    TraversalContext context{deal, mode};
-    value += traverse(root, frame, context);
+    value += evaluate_deal(deals.sample(rng_), mode);
   }
   return value / samples;
+}
+
+double CFRSolver::evaluate_current(HoleCards player_a,
+                                   HoleCards player_b) {
+  const Deal deal{{player_a, player_b},
+                  ComboMask(player_a.combo()) | ComboMask(player_b.combo())};
+  return evaluate_deal(deal, TraversalMode::kEvaluateCurrent);
+}
+
+double CFRSolver::evaluate_current(int samples,
+                                   const DealDistribution& deals) {
+  return evaluate_deals(samples, deals, TraversalMode::kEvaluateCurrent);
+}
+
+absl::StatusOr<double> CFRSolver::evaluate_average(
+    HoleCards player_a,
+    HoleCards player_b) {
+  if (!config_.accumulate_average_strategy) {
+    return absl::FailedPreconditionError(
+        "average strategy accumulation is disabled");
+  }
+  const Deal deal{{player_a, player_b},
+                  ComboMask(player_a.combo()) | ComboMask(player_b.combo())};
+  return evaluate_deal(deal, TraversalMode::kEvaluateAverage);
+}
+
+absl::StatusOr<double> CFRSolver::evaluate_average(
+    int samples,
+    const DealDistribution& deals) {
+  if (!config_.accumulate_average_strategy) {
+    return absl::FailedPreconditionError(
+        "average strategy accumulation is disabled");
+  }
+  return evaluate_deals(samples, deals, TraversalMode::kEvaluateAverage);
 }
 
 double CFRSolver::get_expected_value(Player player) const {
