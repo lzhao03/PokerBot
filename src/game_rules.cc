@@ -28,33 +28,22 @@ Chips CommitChips(BettingState& state, int player, Chips requested) {
   return committed;
 }
 
-void AdvanceStreet(ExactPublicState& state,
-                   absl::Span<const CardId> cards,
-                   const BettingRules& rules) {
-  switch (state.betting.street) {
+void DealNextStreet(BoardRunout& board,
+                    StreetKind street,
+                    absl::Span<const CardId> cards) {
+  switch (street) {
     case StreetKind::kPreflop:
-      state.board.deal_flop(cards);
-      state.betting.street = StreetKind::kFlop;
+      board.deal_flop(cards);
       break;
     case StreetKind::kFlop:
-      state.board.deal_turn(cards[0]);
-      state.betting.street = StreetKind::kTurn;
+      board.deal_turn(cards[0]);
       break;
     case StreetKind::kTurn:
-      state.board.deal_river(cards[0]);
-      state.betting.street = StreetKind::kRiver;
+      board.deal_river(cards[0]);
       break;
     case StreetKind::kRiver:
       break;
   }
-  state.betting.street_committed = {0, 0};
-  state.betting.last_full_raise = rules.minimum_bet;
-  state.betting.pending_action_mask = kAllPlayersMask;
-  state.betting.player_to_act = FirstPlayerForStreet(state.betting.street);
-  if (IsBettingRoundOver(state.betting)) {
-    state.betting.player_to_act = -1;
-  }
-  assert(IsValidBettingState(state.betting));
 }
 
 void RefundUnmatchedCommitment(BettingState& state) {
@@ -319,6 +308,29 @@ BettingState ApplyAction(const BettingState& state,
   return ApplyActionUnchecked(state, action);
 }
 
+BettingState AdvanceBettingStreet(const BettingState& state,
+                                  const BettingRules& rules) {
+  if (rules.minimum_bet <= 0) {
+    throw std::invalid_argument("minimum bet must be positive");
+  }
+  if (!IsBettingRoundOver(state) || state.player_to_act != -1 ||
+      state.street == StreetKind::kRiver) {
+    throw std::invalid_argument("betting state is not a chance node");
+  }
+
+  BettingState child = state;
+  child.street = static_cast<StreetKind>(static_cast<int>(state.street) + 1);
+  child.street_committed = {0, 0};
+  child.last_full_raise = rules.minimum_bet;
+  child.pending_action_mask = kAllPlayersMask;
+  child.player_to_act = FirstPlayerForStreet(child.street);
+  if (IsBettingRoundOver(child)) {
+    child.player_to_act = -1;
+  }
+  assert(IsValidBettingState(child));
+  return child;
+}
+
 ExactPublicState ApplyChance(const ExactPublicState& state,
                              absl::Span<const CardId> cards,
                              const BettingRules& rules) {
@@ -335,8 +347,9 @@ ExactPublicState ApplyChance(const ExactPublicState& state,
     throw std::invalid_argument("Incorrect number of chance cards");
   }
 
-  ExactPublicState child = state;
-  AdvanceStreet(child, cards, rules);
+  ExactPublicState child{AdvanceBettingStreet(state.betting, rules),
+                         state.board};
+  DealNextStreet(child.board, state.betting.street, cards);
   return child;
 }
 

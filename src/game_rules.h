@@ -21,6 +21,8 @@ ActionMenu LegalActions(const BettingState& state,
                         absl::Span<const double> bet_sizes);
 BettingState ApplyAction(const BettingState& state,
                          const GameAction& action);
+BettingState AdvanceBettingStreet(const BettingState& state,
+                                  const BettingRules& rules);
 ExactPublicState ApplyChance(const ExactPublicState& state,
                              absl::Span<const CardId> cards,
                              const BettingRules& rules);
