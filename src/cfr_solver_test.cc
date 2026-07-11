@@ -29,10 +29,8 @@ ComboId H(int r0, S s0, int r1, S s1) {
   return CardsToComboId(MakeCardId(r0, s0), MakeCardId(r1, s1));
 }
 
-HandRange R(ComboId hand) {
-  HandRange range;
-  range.add_combo(hand, 1.0);
-  return range;
+ComboRange R(ComboId hand) {
+  return SingleComboRange(hand);
 }
 
 SolverConfig Config() {

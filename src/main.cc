@@ -107,10 +107,8 @@ int main(int argc, char** argv) {
     if (!option_state.saw_max_info_sets) {
       config.set_max_info_sets(kDefaultMaxInfoSets);
     }
-    poker::HandRange a_range;
-    poker::HandRange b_range;
-    a_range.set_uniform_range();
-    b_range.set_uniform_range();
+    const poker::ComboRange a_range = poker::UniformRange();
+    const poker::ComboRange b_range = poker::UniformRange();
 
     const poker::SolverConfig native_config =
         poker::SolverConfigFromProto(config);

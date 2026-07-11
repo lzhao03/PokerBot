@@ -14,7 +14,6 @@
 #include "src/game_state.h"
 #include "src/hand_range.h"
 #include "src/poker_types.h"
-#include "src/training_range.h"
 
 namespace poker {
 
@@ -93,6 +92,15 @@ enum class StrategySource : uint8_t {
   kAverage,
 };
 
+struct Deal {
+  std::array<ComboId, kPlayerCount> hands = {};
+  CardMask blocked_mask = 0;
+
+  ComboId hand(int player) const {
+    return hands[static_cast<size_t>(player)];
+  }
+};
+
 struct CFRSolverTestAccess;
 
 class CFRSolver {
@@ -101,14 +109,14 @@ class CFRSolver {
   CFRSolver(const SolverConfig& config,
             const ExactPublicState& initial_state);
 
-  void run(int iterations, const HandRange& player_a_range,
-           const HandRange& player_b_range);
+  void run(uint64_t iterations, const ComboRange& player_a_range,
+           const ComboRange& player_b_range);
 
   double evaluate_strategy(ComboId player_a_hand,
                            ComboId player_b_hand,
                            StrategySource source);
-  double evaluate_strategy(int samples, const HandRange& player_a_range,
-                           const HandRange& player_b_range,
+  double evaluate_strategy(int samples, const ComboRange& player_a_range,
+                           const ComboRange& player_b_range,
                            StrategySource source);
 
   double get_expected_value(int player_id) const;
@@ -121,15 +129,6 @@ class CFRSolver {
 
  private:
   friend struct CFRSolverTestAccess;
-
-  struct Deal {
-    std::array<ComboId, kPlayerCount> hands = {};
-    CardMask blocked_mask = 0;
-
-    ComboId hand(int player) const {
-      return hands[static_cast<size_t>(player)];
-    }
-  };
 
   struct TraversalFrame {
     std::array<double, kPlayerCount> reach = {1.0, 1.0};
@@ -149,7 +148,6 @@ class CFRSolver {
     uint64_t iteration = 0;
   };
 
-  Deal traversal_deal(RangeDeal deal) const;
   Position root_position() const;
   Position action_child(Position position, int action_index) const;
   Position sample_chance_child(Position position, const Deal& deal);

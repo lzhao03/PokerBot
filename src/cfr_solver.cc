@@ -85,6 +85,84 @@ HistoryTree BuildHistoryTree(const BettingState& root,
   return tree;
 }
 
+class DealSampler {
+ public:
+  DealSampler(const ComboRange& player_a, const ComboRange& player_b) {
+    a_hands_.reserve(player_a.count());
+    a_cumulative_.reserve(player_a.count());
+    b_offsets_.reserve(player_a.count());
+    b_counts_.reserve(player_a.count());
+    b_hands_.reserve(player_a.count() * player_b.count());
+    b_cumulative_.reserve(player_a.count() * player_b.count());
+
+    for (uint16_t a_index = 0; a_index < player_a.active_count; ++a_index) {
+      const ComboId a = player_a.active[a_index];
+      const float a_weight = player_a.weight(a);
+      if (a_weight <= 0.0f) {
+        continue;
+      }
+      const uint32_t offset = static_cast<uint32_t>(b_hands_.size());
+      float b_total = 0.0f;
+      for (uint16_t b_index = 0; b_index < player_b.active_count; ++b_index) {
+        const ComboId b = player_b.active[b_index];
+        const float b_weight = player_b.weight(b);
+        if (b_weight <= 0.0f || (ComboMask(a) & ComboMask(b)) != 0) {
+          continue;
+        }
+        b_total += b_weight;
+        b_hands_.push_back(b);
+        b_cumulative_.push_back(b_total);
+      }
+      if (b_total <= 0.0f) {
+        continue;
+      }
+      a_hands_.push_back(a);
+      b_offsets_.push_back(offset);
+      b_counts_.push_back(
+          static_cast<uint16_t>(b_hands_.size() - offset));
+      total_ += a_weight * b_total;
+      a_cumulative_.push_back(total_);
+    }
+    if (total_ <= 0.0f) {
+      throw std::invalid_argument(
+          "could not sample non-overlapping hands from ranges");
+    }
+  }
+
+  Deal sample(std::mt19937& rng) const {
+    const size_t a_index = SampleIndex(a_cumulative_, total_, rng);
+    const size_t offset = b_offsets_[a_index];
+    const uint16_t count = b_counts_[a_index];
+    const float b_total = b_cumulative_[offset + count - 1];
+    const size_t relative = SampleIndex(
+        absl::Span<const float>(b_cumulative_).subspan(offset, count),
+        b_total, rng);
+    const ComboId a = a_hands_[a_index];
+    const ComboId b = b_hands_[offset + relative];
+    return {{a, b}, ComboMask(a) | ComboMask(b)};
+  }
+
+ private:
+  static size_t SampleIndex(absl::Span<const float> cumulative,
+                            float total,
+                            std::mt19937& rng) {
+    std::uniform_real_distribution<float> distribution(0.0f, total);
+    const auto found = std::upper_bound(
+        cumulative.begin(), cumulative.end(), distribution(rng));
+    return found == cumulative.end()
+               ? cumulative.size() - 1
+               : static_cast<size_t>(found - cumulative.begin());
+  }
+
+  std::vector<ComboId> a_hands_;
+  std::vector<float> a_cumulative_;
+  std::vector<uint32_t> b_offsets_;
+  std::vector<uint16_t> b_counts_;
+  std::vector<ComboId> b_hands_;
+  std::vector<float> b_cumulative_;
+  float total_ = 0.0f;
+};
+
 void FillUniform(absl::Span<double> probabilities) {
   if (!probabilities.empty()) {
     std::fill(probabilities.begin(), probabilities.end(),
@@ -189,14 +267,6 @@ CFRSolver::CFRSolver(const SolverConfig& config,
       state_.strategy_sum.reserve(rows * 4);
     }
   }
-}
-
-CFRSolver::Deal CFRSolver::traversal_deal(RangeDeal deal) const {
-  const std::array<ComboId, kPlayerCount> hands = {
-      deal.player_a_combo,
-      deal.player_b_combo,
-  };
-  return {hands, ComboMask(hands[0]) | ComboMask(hands[1])};
 }
 
 Position CFRSolver::root_position() const {
@@ -388,19 +458,17 @@ double CFRSolver::traverse(Position position,
   return node_value;
 }
 
-void CFRSolver::run(int iterations,
-                    const HandRange& a_range_spec,
-                    const HandRange& b_range_spec) {
+void CFRSolver::run(uint64_t iterations,
+                    const ComboRange& a_range,
+                    const ComboRange& b_range) {
   if (iterations <= 0) {
     return;
   }
 
-  const TrainingRange a_range = BuildTrainingRange(a_range_spec);
-  const TrainingRange b_range = BuildTrainingRange(b_range_spec);
-  RangeSampler sampler(a_range, b_range);
+  DealSampler sampler(a_range, b_range);
   const Position root = root_position();
-  for (int i = 0; i < iterations; ++i) {
-    const Deal deal = traversal_deal(sampler.sample(rng_));
+  for (uint64_t i = 0; i < iterations; ++i) {
+    const Deal deal = sampler.sample(rng_);
     TraversalFrame frame;
     frame.private_observations = private_observations_for_position(deal, root);
     const int update_player = static_cast<int>(state_.iterations % kPlayerCount);
@@ -434,8 +502,8 @@ double CFRSolver::evaluate_strategy(ComboId player_a_hand,
 }
 
 double CFRSolver::evaluate_strategy(int samples,
-                                    const HandRange& player_a_range,
-                                    const HandRange& player_b_range,
+                                    const ComboRange& player_a_range,
+                                    const ComboRange& player_b_range,
                                     StrategySource source) {
   if (samples <= 0) {
     return 0.0;
@@ -444,9 +512,7 @@ double CFRSolver::evaluate_strategy(int samples,
       !config_.accumulate_average_strategy) {
     throw std::logic_error("average strategy accumulation is disabled");
   }
-  const TrainingRange a_range = BuildTrainingRange(player_a_range);
-  const TrainingRange b_range = BuildTrainingRange(player_b_range);
-  RangeSampler sampler(a_range, b_range);
+  DealSampler sampler(player_a_range, player_b_range);
   const Position root = root_position();
   const TraversalMode mode = source == StrategySource::kCurrent
                                  ? TraversalMode::kEvaluateCurrent
@@ -454,7 +520,7 @@ double CFRSolver::evaluate_strategy(int samples,
 
   double value = 0.0;
   for (int sample = 0; sample < samples; ++sample) {
-    const Deal deal = traversal_deal(sampler.sample(rng_));
+    const Deal deal = sampler.sample(rng_);
     TraversalFrame frame;
     frame.private_observations = private_observations_for_position(deal, root);
     TraversalContext context{deal, mode};

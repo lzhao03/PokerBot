@@ -15,13 +15,10 @@ namespace {
 #error "strict_abstraction_test requires one coarse abstraction"
 #endif
 
-HandRange Range(int first_rank, int second_rank, SuitKind suit) {
-  HandRange range;
-  range.add_combo(
-      CardsToComboId(MakeCardId(first_rank, suit),
-                     MakeCardId(second_rank, suit)),
-      1.0);
-  return range;
+ComboRange Range(int first_rank, int second_rank, SuitKind suit) {
+  const ComboId combo = CardsToComboId(
+      MakeCardId(first_rank, suit), MakeCardId(second_rank, suit));
+  return SingleComboRange(combo);
 }
 
 TEST_CASE("mixed abstractions support history traversal") {

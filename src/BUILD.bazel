@@ -156,17 +156,6 @@ cc_library(
     hdrs = ["hand_range.h"],
     deps = [
         ":combo",
-        ":training_range",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "training_range",
-    srcs = ["training_range.cc"],
-    hdrs = ["training_range.h"],
-    deps = [
-        ":combo",
     ],
     visibility = ["//visibility:public"],
 )
@@ -179,7 +168,6 @@ CFR_SOLVER_DEPS = [
     ":game_rules",
     ":game_state",
     ":hand_range",
-    ":training_range",
     "@abseil-cpp//absl/container:flat_hash_map",
     "@abseil-cpp//absl/log:log",
     "@abseil-cpp//absl/types:span",
@@ -249,7 +237,6 @@ cc_test(
         ":hand_evaluator",
         ":hand_evaluator_table_builder",
         ":hand_range",
-        ":training_range",
     ],
 )
 
@@ -319,7 +306,6 @@ cc_binary(
         ":cfr_solver",
         ":hand_range",
         ":poker_config",
-        ":training_range",
         "@abseil-cpp//absl/log:initialize",
     ],
 )
@@ -335,7 +321,6 @@ cc_binary(
         ":cfr_solver_no_stats",
         ":hand_range",
         ":poker_config",
-        ":training_range",
         "@abseil-cpp//absl/log:initialize",
     ],
 )

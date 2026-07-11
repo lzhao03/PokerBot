@@ -12,7 +12,6 @@
 #include "src/build_flags.h"
 #include "src/hand_range.h"
 #include "src/poker_config.h"
-#include "src/training_range.h"
 
 namespace {
 
@@ -26,16 +25,11 @@ struct Options {
   std::string range = kDefaultRange;
 };
 
-poker::HandRange BenchmarkRange(std::string_view text) {
-  poker::HandRange range;
+poker::ComboRange BenchmarkRange(std::string_view text) {
   if (text == "premium") {
-    range.set_from_string("AA,KK,QQ,JJ,AKs,AQs,AKo");
-  } else if (text == "all") {
-    range.set_uniform_range();
-  } else {
-    range.set_from_string(std::string(text));
+    return poker::ParseRange("AA,KK,QQ,JJ,AKs,AQs,AKo");
   }
-  return range;
+  return text == "all" ? poker::UniformRange() : poker::ParseRange(text);
 }
 
 double Rate(double count, double seconds) {
@@ -94,12 +88,12 @@ int main(int argc, char** argv) {
     }
 
     const poker::SolverConfig config = poker::SolverConfigFromProto(proto);
-    const poker::HandRange a_range = BenchmarkRange(options.range);
-    const poker::HandRange b_range = BenchmarkRange(options.range);
+    const poker::ComboRange a_range = BenchmarkRange(options.range);
+    const poker::ComboRange b_range = BenchmarkRange(options.range);
 
     std::cout << "case\tseconds\tresult\n";
     Measure("range_expand", [&] {
-      return poker::BuildTrainingRange(a_range).active_count;
+      return a_range.count();
     });
 
     std::unique_ptr<poker::CFRSolver> solver;

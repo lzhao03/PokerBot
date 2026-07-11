@@ -1,565 +1,212 @@
 #include "src/hand_range.h"
 
 #include <algorithm>
+#include <array>
 #include <optional>
-#include <sstream>
 #include <string_view>
-
-#include "src/training_range.h"
+#include <vector>
 
 namespace poker {
-
 namespace {
 
 constexpr int kHandTypeCount = 169;
 
-struct HandType {
-  enum class Shape {
-    kPair,
-    kSuited,
-    kOffsuit,
-    kAnyNonPair,
-  };
-
-  int high_rank = 0;
-  int low_rank = 0;
-  Shape shape = Shape::kPair;
+enum class HandShape {
+  kPair,
+  kSuited,
+  kOffsuit,
+  kAny,
 };
 
-std::optional<int> RankFromChar(char rank) {
+struct HandType {
+  int high = 0;
+  int low = 0;
+  HandShape shape = HandShape::kPair;
+};
+
+std::optional<int> Rank(char rank) {
   switch (rank) {
-    case 'A':
-      return 14;
-    case 'K':
-      return 13;
-    case 'Q':
-      return 12;
-    case 'J':
-      return 11;
-    case 'T':
-      return 10;
-    case '9':
-    case '8':
-    case '7':
-    case '6':
-    case '5':
-    case '4':
-    case '3':
-    case '2':
-      return rank - '0';
+    case 'A': return 14;
+    case 'K': return 13;
+    case 'Q': return 12;
+    case 'J': return 11;
+    case 'T': return 10;
+    default:
+      return rank >= '2' && rank <= '9'
+                 ? std::optional<int>(rank - '0')
+                 : std::nullopt;
   }
-  return std::nullopt;
 }
 
-char RankToChar(int rank) {
-  switch (rank) {
-    case 14:
-      return 'A';
-    case 13:
-      return 'K';
-    case 12:
-      return 'Q';
-    case 11:
-      return 'J';
-    case 10:
-      return 'T';
-    case 9:
-    case 8:
-    case 7:
-    case 6:
-    case 5:
-    case 4:
-    case 3:
-    case 2:
-      return static_cast<char>('0' + rank);
+int NonPairOffset(int high, int low) {
+  high -= 2;
+  low -= 2;
+  return high * (high - 1) / 2 + low;
+}
+
+std::optional<int> HandTypeIndex(HandType type) {
+  if (type.high < type.low) {
+    std::swap(type.high, type.low);
   }
-  return '?';
+  if (type.low < 2 || type.high > 14) {
+    return std::nullopt;
+  }
+  if (type.high == type.low) {
+    return type.shape == HandShape::kPair
+               ? std::optional<int>(type.high - 2)
+               : std::nullopt;
+  }
+  const int offset = NonPairOffset(type.high, type.low);
+  if (type.shape == HandShape::kSuited) {
+    return 13 + offset;
+  }
+  return type.shape == HandShape::kOffsuit
+             ? std::optional<int>(91 + offset)
+             : std::nullopt;
 }
 
-bool IsValidRank(int rank) {
-  return rank >= 2 && rank <= 14;
-}
-
-int NonPairOffset(int high_rank, int low_rank) {
-  const int high = high_rank - 2;
-  const int low = low_rank - 2;
-  return (high * (high - 1) / 2) + low;
-}
-
-std::optional<HandType> DecodeHandTypeIndex(int index) {
+std::optional<HandType> DecodeHandType(int index) {
   if (index < 0 || index >= kHandTypeCount) {
     return std::nullopt;
   }
   if (index < 13) {
-    const int rank = index + 2;
-    return HandType{rank, rank, HandType::Shape::kPair};
+    return HandType{index + 2, index + 2, HandShape::kPair};
   }
-
   const bool suited = index < 91;
   int offset = suited ? index - 13 : index - 91;
   int high = 1;
-  while (offset >= (high * (high + 1) / 2)) {
+  while (offset >= high * (high + 1) / 2) {
     ++high;
   }
-  const int low = offset - (high * (high - 1) / 2);
+  const int low = offset - high * (high - 1) / 2;
   return HandType{high + 2, low + 2,
-                  suited ? HandType::Shape::kSuited
-                         : HandType::Shape::kOffsuit};
-}
-
-std::optional<int> EncodeHandTypeIndex(HandType type) {
-  if (!IsValidRank(type.high_rank) || !IsValidRank(type.low_rank)) {
-    return std::nullopt;
-  }
-  if (type.high_rank < type.low_rank) {
-    std::swap(type.high_rank, type.low_rank);
-  }
-  if (type.high_rank == type.low_rank) {
-    return type.shape == HandType::Shape::kPair
-               ? std::optional<int>(type.high_rank - 2)
-               : std::nullopt;
-  }
-
-  const int offset = NonPairOffset(type.high_rank, type.low_rank);
-  if (type.shape == HandType::Shape::kSuited) {
-    return 13 + offset;
-  }
-  if (type.shape == HandType::Shape::kOffsuit) {
-    return 91 + offset;
-  }
-  return std::nullopt;
-}
-
-ComboId MakeCombo(int first_rank, SuitKind first_suit, int second_rank,
-                  SuitKind second_suit) {
-  return CardsToComboId(MakeCardId(first_rank, first_suit),
-                        MakeCardId(second_rank, second_suit));
-}
-
-std::string ExactHandKey(ComboId combo_id) {
-  const ComboInfo& combo = GetComboInfo(combo_id);
-  std::ostringstream oss;
-  const CardId cards[2] = {combo.card0, combo.card1};
-  for (int i = 0; i < 2; ++i) {
-    if (i > 0) {
-      oss << "-";
-    }
-    oss << RankFromCardId(cards[i]) << ":"
-        << 1 + SuitIndex(SuitFromCardId(cards[i]));
-  }
-  return oss.str();
-}
-
-std::vector<ComboId> ExpandHandType(HandType type) {
-  std::vector<ComboId> combos;
-  const SuitKind suits[] = {SuitKind::kHearts, SuitKind::kDiamonds,
-                            SuitKind::kClubs, SuitKind::kSpades};
-
-  if (!IsValidRank(type.high_rank) || !IsValidRank(type.low_rank)) {
-    return combos;
-  }
-
-  if (type.high_rank < type.low_rank) {
-    std::swap(type.high_rank, type.low_rank);
-  }
-
-  if (type.high_rank == type.low_rank) {
-    for (int i = 0; i < 4; ++i) {
-      for (int j = i + 1; j < 4; ++j) {
-        combos.push_back(MakeCombo(type.high_rank, suits[i], type.high_rank,
-                                   suits[j]));
-      }
-    }
-    return combos;
-  }
-
-  for (SuitKind first_suit : suits) {
-    for (SuitKind second_suit : suits) {
-      const bool suited = first_suit == second_suit;
-      if (type.shape == HandType::Shape::kAnyNonPair ||
-          (type.shape == HandType::Shape::kSuited && suited) ||
-          (type.shape == HandType::Shape::kOffsuit && !suited)) {
-        combos.push_back(MakeCombo(type.high_rank, first_suit, type.low_rank,
-                                   second_suit));
-      }
-    }
-  }
-  return combos;
-}
-
-int ComboCountForHandType(HandType type) {
-  if (!IsValidRank(type.high_rank) || !IsValidRank(type.low_rank)) {
-    return 0;
-  }
-  if (type.high_rank == type.low_rank) {
-    return type.shape == HandType::Shape::kPair ? 6 : 0;
-  }
-
-  switch (type.shape) {
-    case HandType::Shape::kSuited:
-      return 4;
-    case HandType::Shape::kOffsuit:
-      return 12;
-    case HandType::Shape::kAnyNonPair:
-      return 16;
-    case HandType::Shape::kPair:
-      return 0;
-  }
-  return 0;
-}
-
-int ComboCountForHandTypeIndex(int index) {
-  const std::optional<HandType> type = DecodeHandTypeIndex(index);
-  return type.has_value() ? ComboCountForHandType(*type) : 0;
-}
-
-std::vector<ComboId> ExpandHandTypeIndex(int index) {
-  const std::optional<HandType> type = DecodeHandTypeIndex(index);
-  return type.has_value() ? ExpandHandType(*type) : std::vector<ComboId>();
-}
-
-std::string FormatHandType(HandType type) {
-  if (type.high_rank < type.low_rank) {
-    std::swap(type.high_rank, type.low_rank);
-  }
-
-  std::string key;
-  key += RankToChar(type.high_rank);
-  key += RankToChar(type.low_rank);
-  if (type.high_rank != type.low_rank) {
-    if (type.shape == HandType::Shape::kSuited) {
-      key += 's';
-    } else if (type.shape == HandType::Shape::kOffsuit) {
-      key += 'o';
-    }
-  }
-  return key;
+                  suited ? HandShape::kSuited : HandShape::kOffsuit};
 }
 
 std::optional<HandType> ParseHandType(std::string_view text) {
   if (text.size() != 2 && text.size() != 3) {
     return std::nullopt;
   }
-
-  std::optional<int> first_rank = RankFromChar(text[0]);
-  std::optional<int> second_rank = RankFromChar(text[1]);
-  if (!first_rank.has_value() || !second_rank.has_value()) {
+  const auto first = Rank(text[0]);
+  const auto second = Rank(text[1]);
+  if (!first || !second) {
     return std::nullopt;
   }
-
-  HandType type{std::max(*first_rank, *second_rank),
-                std::min(*first_rank, *second_rank),
-                HandType::Shape::kPair};
-  if (type.high_rank == type.low_rank) {
+  HandType type{std::max(*first, *second), std::min(*first, *second),
+                HandShape::kPair};
+  if (type.high == type.low) {
     return text.size() == 2 ? std::optional<HandType>(type) : std::nullopt;
   }
   if (text.size() == 2) {
-    type.shape = HandType::Shape::kAnyNonPair;
-    return type;
-  }
-  if (text[2] == 's') {
-    type.shape = HandType::Shape::kSuited;
-    return type;
-  }
-  if (text[2] == 'o') {
-    type.shape = HandType::Shape::kOffsuit;
-    return type;
-  }
-  return std::nullopt;
-}
-
-std::optional<ComboId> RepresentativeComboForHandTypeIndex(int index) {
-  std::optional<HandType> type = DecodeHandTypeIndex(index);
-  if (!type.has_value()) {
+    type.shape = HandShape::kAny;
+  } else if (text[2] == 's') {
+    type.shape = HandShape::kSuited;
+  } else if (text[2] == 'o') {
+    type.shape = HandShape::kOffsuit;
+  } else {
     return std::nullopt;
   }
-  if (type->shape == HandType::Shape::kPair) {
-    return MakeCombo(type->high_rank, SuitKind::kSpades, type->high_rank,
-                     SuitKind::kHearts);
+  return type;
+}
+
+std::vector<ComboId> Expand(HandType type) {
+  constexpr std::array<SuitKind, 4> suits = {
+      SuitKind::kHearts, SuitKind::kDiamonds,
+      SuitKind::kClubs, SuitKind::kSpades};
+  std::vector<ComboId> combos;
+  for (size_t first = 0; first < suits.size(); ++first) {
+    for (size_t second = 0; second < suits.size(); ++second) {
+      if (type.high == type.low && first >= second) {
+        continue;
+      }
+      const bool suited = first == second;
+      if (type.high != type.low && type.shape != HandShape::kAny &&
+          suited != (type.shape == HandShape::kSuited)) {
+        continue;
+      }
+      combos.push_back(CardsToComboId(
+          MakeCardId(type.high, suits[first]),
+          MakeCardId(type.low, suits[second])));
+    }
   }
-  return MakeCombo(type->high_rank, SuitKind::kSpades, type->low_rank,
-                   type->shape == HandType::Shape::kSuited
-                       ? SuitKind::kSpades
-                       : SuitKind::kHearts);
+  return combos;
+}
+
+std::string_view Trim(std::string_view text) {
+  const size_t first = text.find_first_not_of(" \t");
+  if (first == std::string_view::npos) {
+    return {};
+  }
+  const size_t last = text.find_last_not_of(" \t");
+  return text.substr(first, last - first + 1);
+}
+
+ComboRange ExpandSelected(const std::vector<int>& selected) {
+  ComboRange range;
+  for (int index : selected) {
+    const auto combos = Expand(*DecodeHandType(index));
+    const float weight = 1.0f / combos.size();
+    for (ComboId combo : combos) {
+      range.add(combo, weight);
+    }
+  }
+  return range;
 }
 
 }  // namespace
 
-HandRange::HandRange() : total_weight_(0.0) {}
-
-void HandRange::add_combo(ComboId combo_id, double weight) {
-  if (combo_id >= kComboCount || weight <= 0.0) {
-    return;
-  }
-
-  for (auto& pair : exact_hand_weights_) {
-    if (pair.first == combo_id) {
-      total_weight_ += weight - pair.second;
-      pair.second = weight;
-      return;
-    }
-  }
-
-  exact_hand_weights_.emplace_back(combo_id, weight);
-  total_weight_ += weight;
+bool ComboRange::empty() const {
+  return active_count == 0;
 }
 
-void HandRange::add_hand_by_index(int index, double weight) {
-  if (index < 0 || index >= kHandTypeCount || weight <= 0.0) {
-    return;
-  }
-
-  for (auto& pair : hand_weights_) {
-    if (pair.first == index) {
-      total_weight_ += weight - pair.second;
-      pair.second = weight;
-      return;
-    }
-  }
-
-  hand_weights_.emplace_back(index, weight);
-  total_weight_ += weight;
-}
-
-double HandRange::get_probability(ComboId combo_id) const {
-  if (combo_id >= kComboCount || total_weight_ <= 0.0) {
-    return 0.0;
-  }
-
-  double hand_weight = 0.0;
-  for (const auto& pair : exact_hand_weights_) {
-    if (pair.first == combo_id) {
-      hand_weight += pair.second;
-    }
-  }
-
-  int index = combo_to_index(combo_id);
-  if (index >= 0) {
-    for (const auto& pair : hand_weights_) {
-      if (pair.first == index) {
-        const int combo_count = ComboCountForHandTypeIndex(index);
-        if (combo_count > 0) {
-          hand_weight += pair.second / combo_count;
-        }
-        break;
+ComboRange ParseRange(std::string_view text) {
+  std::array<bool, kHandTypeCount> seen = {};
+  std::vector<int> selected;
+  auto select = [&](HandType type) {
+    auto add = [&](HandType candidate) {
+      const auto index = HandTypeIndex(candidate);
+      if (index && !seen[*index]) {
+        seen[*index] = true;
+        selected.push_back(*index);
       }
+    };
+    if (type.shape == HandShape::kAny) {
+      type.shape = HandShape::kSuited;
+      add(type);
+      type.shape = HandShape::kOffsuit;
     }
-  }
-
-  return hand_weight / total_weight_;
-}
-
-void HandRange::clear() {
-  hand_weights_.clear();
-  exact_hand_weights_.clear();
-  total_weight_ = 0.0;
-}
-
-void HandRange::set_uniform_range() {
-  clear();
-
-  // Assign uniform weight to all 169 hand types, not exact combos.
-  double weight = 1.0 / kHandTypeCount;
-
-  for (int i = 0; i < kHandTypeCount; ++i) {
-    add_hand_by_index(i, weight);
-  }
-}
-
-void HandRange::set_from_string(const std::string& range_str) {
-  clear();
-
-  std::istringstream iss(range_str);
-  std::string component;
-
-  while (std::getline(iss, component, ',')) {
-    component.erase(0, component.find_first_not_of(" \t"));
-    component.erase(component.find_last_not_of(" \t") + 1);
-
-    if (!component.empty()) {
-      parse_range_component(component);
-    }
-  }
-
-  normalize();
-}
-
-std::string HandRange::to_string() const {
-  std::ostringstream oss;
-
-  std::vector<std::pair<int, double>> hand_weights = hand_weights_;
-  std::sort(hand_weights.begin(), hand_weights.end());
-
-  std::vector<ComboId> exact_combos;
-  exact_combos.reserve(exact_hand_weights_.size());
-  for (const auto& pair : exact_hand_weights_) {
-    exact_combos.push_back(pair.first);
-  }
-  std::sort(exact_combos.begin(), exact_combos.end(),
-            [](ComboId left, ComboId right) {
-              return ExactHandKey(left) < ExactHandKey(right);
-            });
-
-  bool needs_separator = false;
-  auto append_part = [&](const std::string& text) {
-    if (!text.empty()) {
-      if (needs_separator) {
-        oss << ",";
-      }
-      oss << text;
-      needs_separator = true;
-    }
+    add(type);
   };
-
-  for (const auto& [index, weight] : hand_weights) {
-    (void)weight;
-    const std::optional<HandType> type = DecodeHandTypeIndex(index);
-    if (type.has_value()) {
-      append_part(FormatHandType(*type));
+  while (!text.empty()) {
+    const size_t comma = text.find(',');
+    const std::string_view part = Trim(text.substr(0, comma));
+    text = comma == std::string_view::npos ? std::string_view()
+                                           : text.substr(comma + 1);
+    if (part.size() == 3 && part[0] == part[1] && part[2] == '+') {
+      if (const auto rank = Rank(part[0])) {
+        for (int value = *rank; value <= 14; ++value) {
+          select(HandType{value, value, HandShape::kPair});
+        }
+      }
+    } else if (const auto type = ParseHandType(part)) {
+      select(*type);
     }
   }
-
-  for (ComboId combo_id : exact_combos) {
-    append_part("[" + ExactHandKey(combo_id) + "]");
-  }
-
-  return oss.str();
+  return ExpandSelected(selected);
 }
 
-double HandRange::get_total_weight() const {
-  return total_weight_;
+ComboRange UniformRange() {
+  std::vector<int> selected(kHandTypeCount);
+  for (int index = 0; index < kHandTypeCount; ++index) {
+    selected[index] = index;
+  }
+  return ExpandSelected(selected);
 }
 
-void HandRange::normalize() {
-  if (total_weight_ <= 0.0) {
-    return;
-  }
-
-  for (auto& pair : hand_weights_) {
-    pair.second /= total_weight_;
-  }
-
-  for (auto& pair : exact_hand_weights_) {
-    pair.second /= total_weight_;
-  }
-
-  total_weight_ = 1.0;
-}
-
-int HandRange::combo_to_index(ComboId combo_id) {
-  if (combo_id >= kComboCount) {
-    return -1;
-  }
-
-  const ComboInfo& combo = GetComboInfo(combo_id);
-  int rank1 = RankFromCardId(combo.card0);
-  int rank2 = RankFromCardId(combo.card1);
-  SuitKind suit1 = SuitFromCardId(combo.card0);
-  SuitKind suit2 = SuitFromCardId(combo.card1);
-
-  HandType type{std::max(rank1, rank2), std::min(rank1, rank2),
-                rank1 == rank2
-                    ? HandType::Shape::kPair
-                    : (suit1 == suit2 ? HandType::Shape::kSuited
-                                       : HandType::Shape::kOffsuit)};
-  return EncodeHandTypeIndex(type).value_or(-1);
-}
-
-std::optional<ComboId> HandRange::index_to_combo(int index) {
-  return RepresentativeComboForHandTypeIndex(index);
-}
-
-std::string HandRange::combo_to_string(ComboId combo_id) {
-  if (combo_id >= kComboCount) {
-    return "";
-  }
-
-  const ComboInfo& combo = GetComboInfo(combo_id);
-  int rank1 = RankFromCardId(combo.card0);
-  int rank2 = RankFromCardId(combo.card1);
-  SuitKind suit1 = SuitFromCardId(combo.card0);
-  SuitKind suit2 = SuitFromCardId(combo.card1);
-
-  if (rank1 < rank2) {
-    std::swap(rank1, rank2);
-    std::swap(suit1, suit2);
-  }
-
-  const HandType type{rank1, rank2,
-                      rank1 == rank2
-                          ? HandType::Shape::kPair
-                          : (suit1 == suit2 ? HandType::Shape::kSuited
-                                             : HandType::Shape::kOffsuit)};
-  return FormatHandType(type);
-}
-
-int HandRange::string_to_index(const std::string& hand_str) {
-  const std::optional<HandType> type = ParseHandType(hand_str);
-  if (!type.has_value()) {
-    return -1;
-  }
-  return EncodeHandTypeIndex(*type).value_or(-1);
-}
-
-void HandRange::parse_range_component(const std::string& component) {
-  if (component.size() == 3 && component[0] == component[1] &&
-      component[2] == '+') {
-    std::optional<int> start_rank = RankFromChar(component[0]);
-    if (!start_rank.has_value()) {
-      return;
-    }
-
-    for (int rank = *start_rank; rank <= 14; ++rank) {
-      add_hand_by_index(rank - 2, 1.0);
-    }
-    return;
-  }
-
-  if (component.find('+') != std::string::npos) {
-    return;
-  }
-
-  const std::optional<HandType> type = ParseHandType(component);
-  if (!type.has_value()) {
-    return;
-  }
-
-  if (type->shape == HandType::Shape::kAnyNonPair) {
-    HandType suited = *type;
-    suited.shape = HandType::Shape::kSuited;
-    HandType offsuit = *type;
-    offsuit.shape = HandType::Shape::kOffsuit;
-    add_hand_by_index(EncodeHandTypeIndex(suited).value_or(-1), 1.0);
-    add_hand_by_index(EncodeHandTypeIndex(offsuit).value_or(-1), 1.0);
-    return;
-  }
-
-  const std::optional<int> index = EncodeHandTypeIndex(*type);
-  if (index.has_value()) {
-    add_hand_by_index(*index, 1.0);
-  }
-}
-
-TrainingRange BuildTrainingRange(const HandRange& range) {
-  TrainingRange training_range;
-
-  for (const auto& [combo_id, weight] : range.exact_combo_weights()) {
-    training_range.add(combo_id, static_cast<float>(weight));
-  }
-
-  for (const auto& [hand_type_index, weight] : range.hand_type_weights()) {
-    const std::vector<ComboId> combos = ExpandHandTypeIndex(hand_type_index);
-    if (combos.empty()) {
-      continue;
-    }
-
-    const float combo_weight = static_cast<float>(weight / combos.size());
-    for (ComboId combo_id : combos) {
-      training_range.add(combo_id, combo_weight);
-    }
-  }
-
-  return training_range;
+ComboRange SingleComboRange(ComboId combo, float weight) {
+  ComboRange range;
+  range.add(combo, weight);
+  return range;
 }
 
 }  // namespace poker
