@@ -17,6 +17,7 @@
 #include "absl/status/statusor.h"
 #include "src/bet_abstraction.h"
 #include "src/card_abstraction.h"
+#include "src/fingerprint.h"
 #include "src/poker.h"
 
 namespace poker {
@@ -75,13 +76,6 @@ struct ComboRange {
 
   size_t count() const { return active_count; }
   float weight(ComboId combo) const { return weights[combo.index()]; }
-};
-
-struct ModelFingerprint {
-  std::array<std::byte, 32> bytes = {};
-
-  friend bool operator==(const ModelFingerprint&,
-                         const ModelFingerprint&) = default;
 };
 
 struct SolveSpec {

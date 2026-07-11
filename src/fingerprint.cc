@@ -1,0 +1,154 @@
+#include "src/fingerprint.h"
+
+#include <array>
+#include <bit>
+
+namespace poker {
+namespace {
+
+constexpr std::array<uint32_t, 64> kRoundConstants = {
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+    0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+    0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+    0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+    0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+    0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+};
+
+}  // namespace
+
+void FingerprintBuilder::add_bytes(
+    absl::Span<const uint8_t> bytes) noexcept {
+  total_bytes_ += bytes.size();
+  for (uint8_t byte : bytes) {
+    block_[block_size_++] = byte;
+    if (block_size_ == block_.size()) {
+      transform();
+      block_size_ = 0;
+    }
+  }
+}
+
+void FingerprintBuilder::add_u8(uint8_t value) noexcept {
+  add_bytes(absl::Span<const uint8_t>(&value, 1));
+}
+
+void FingerprintBuilder::add_u32(uint32_t value) noexcept {
+  std::array<uint8_t, 4> bytes = {};
+  for (size_t index = 0; index < bytes.size(); ++index) {
+    bytes[index] =
+        static_cast<uint8_t>(value >> static_cast<unsigned>(index * 8));
+  }
+  add_bytes(bytes);
+}
+
+void FingerprintBuilder::add_u64(uint64_t value) noexcept {
+  std::array<uint8_t, 8> bytes = {};
+  for (size_t index = 0; index < bytes.size(); ++index) {
+    bytes[index] =
+        static_cast<uint8_t>(value >> static_cast<unsigned>(index * 8));
+  }
+  add_bytes(bytes);
+}
+
+void FingerprintBuilder::add_i32(int32_t value) noexcept {
+  add_u32(static_cast<uint32_t>(value));
+}
+
+void FingerprintBuilder::add_float(float value) noexcept {
+  add_u32(std::bit_cast<uint32_t>(value));
+}
+
+void FingerprintBuilder::add_double(double value) noexcept {
+  add_u64(std::bit_cast<uint64_t>(value));
+}
+
+ModelFingerprint FingerprintBuilder::finish() noexcept {
+  const uint64_t bit_count = total_bytes_ * 8;
+  add_u8(0x80);
+  while (block_size_ != 56) add_u8(0);
+  std::array<uint8_t, 8> length = {};
+  for (size_t index = 0; index < length.size(); ++index) {
+    length[7 - index] =
+        static_cast<uint8_t>(bit_count >> static_cast<unsigned>(index * 8));
+  }
+  add_bytes(length);
+
+  ModelFingerprint fingerprint;
+  for (size_t word = 0; word < state_.size(); ++word) {
+    for (size_t byte = 0; byte < 4; ++byte) {
+      fingerprint.bytes[word * 4 + byte] = static_cast<std::byte>(
+          state_[word] >> static_cast<unsigned>((3 - byte) * 8));
+    }
+  }
+  return fingerprint;
+}
+
+void FingerprintBuilder::transform() noexcept {
+  std::array<uint32_t, 64> words = {};
+  for (size_t index = 0; index < 16; ++index) {
+    const size_t offset = index * 4;
+    words[index] =
+        (static_cast<uint32_t>(block_[offset]) << 24) |
+        (static_cast<uint32_t>(block_[offset + 1]) << 16) |
+        (static_cast<uint32_t>(block_[offset + 2]) << 8) |
+        static_cast<uint32_t>(block_[offset + 3]);
+  }
+  for (size_t index = 16; index < words.size(); ++index) {
+    const uint32_t s0 = std::rotr(words[index - 15], 7) ^
+                        std::rotr(words[index - 15], 18) ^
+                        (words[index - 15] >> 3);
+    const uint32_t s1 = std::rotr(words[index - 2], 17) ^
+                        std::rotr(words[index - 2], 19) ^
+                        (words[index - 2] >> 10);
+    words[index] = words[index - 16] + s0 + words[index - 7] + s1;
+  }
+
+  uint32_t a = state_[0];
+  uint32_t b = state_[1];
+  uint32_t c = state_[2];
+  uint32_t d = state_[3];
+  uint32_t e = state_[4];
+  uint32_t f = state_[5];
+  uint32_t g = state_[6];
+  uint32_t h = state_[7];
+  for (size_t index = 0; index < words.size(); ++index) {
+    const uint32_t s1 =
+        std::rotr(e, 6) ^ std::rotr(e, 11) ^ std::rotr(e, 25);
+    const uint32_t choice = (e & f) ^ (~e & g);
+    const uint32_t temp1 =
+        h + s1 + choice + kRoundConstants[index] + words[index];
+    const uint32_t s0 =
+        std::rotr(a, 2) ^ std::rotr(a, 13) ^ std::rotr(a, 22);
+    const uint32_t majority = (a & b) ^ (a & c) ^ (b & c);
+    const uint32_t temp2 = s0 + majority;
+    h = g;
+    g = f;
+    f = e;
+    e = d + temp1;
+    d = c;
+    c = b;
+    b = a;
+    a = temp1 + temp2;
+  }
+  state_[0] += a;
+  state_[1] += b;
+  state_[2] += c;
+  state_[3] += d;
+  state_[4] += e;
+  state_[5] += f;
+  state_[6] += g;
+  state_[7] += h;
+}
+
+}  // namespace poker

@@ -53,11 +53,13 @@ cc_library(
 SOLVER_SRCS = [
     "card_abstraction.cc",
     "evaluation.cc",
+    "fingerprint.cc",
     "solver.cc",
 ]
 SOLVER_HDRS = [
     "card_abstraction.h",
     "evaluation.h",
+    "fingerprint.h",
     "solver.h",
 ]
 SOLVER_DEPS = [
