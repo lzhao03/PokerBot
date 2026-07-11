@@ -1,8 +1,10 @@
 #include "src/cfr_solver.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <stdexcept>
+#include <vector>
 
 #include "doctest/doctest.h"
 #include "src/combo.h"
@@ -94,6 +96,29 @@ TEST_CASE("training mutates only CFR state") {
   CHECK(CFRSolverTestAccess::state(solver).rows == before.rows);
   CHECK(CFRSolverTestAccess::state(solver).regret_sum == before.regret_sum);
   CHECK(CFRSolverTestAccess::state(solver).strategy_sum == before.strategy_sum);
+}
+
+TEST_CASE("infoset action rows are contiguous") {
+  CFRSolver solver(Config());
+  solver.run(4, R(kA), R(kB));
+  const CfrState& state = CFRSolverTestAccess::state(solver);
+
+  std::vector<InfoSetRow> rows;
+  rows.reserve(state.rows.size());
+  for (const auto& entry : state.rows) {
+    rows.push_back(entry.second);
+  }
+  std::sort(rows.begin(), rows.end(), [](InfoSetRow left, InfoSetRow right) {
+    return left.action_offset < right.action_offset;
+  });
+
+  size_t offset = 0;
+  for (const InfoSetRow row : rows) {
+    CHECK(row.action_offset == offset);
+    offset += row.action_count;
+  }
+  CHECK(offset == state.regret_sum.size());
+  CHECK(state.strategy_sum.size() == state.regret_sum.size());
 }
 
 TEST_CASE("postflop roots use full observation identity") {

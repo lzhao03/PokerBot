@@ -18,8 +18,6 @@
 namespace poker {
 namespace {
 
-constexpr size_t kActionBlockAlignment = 64 / sizeof(float);
-
 SolverConfig NormalizedConfig(SolverConfig config) {
   if (config.num_training_threads > 1) {
     throw std::invalid_argument(
@@ -276,10 +274,7 @@ InfoSetRow CFRSolver::find_or_create_row(InfoSetKey key,
     throw std::runtime_error("maximum infoset count exceeded");
   }
 
-  const size_t padding =
-      (kActionBlockAlignment - state_.regret_sum.size() % kActionBlockAlignment) %
-      kActionBlockAlignment;
-  const size_t offset = state_.regret_sum.size() + padding;
+  const size_t offset = state_.regret_sum.size();
   if (offset > std::numeric_limits<uint32_t>::max()) {
     throw std::overflow_error("CFR action table is too large");
   }
