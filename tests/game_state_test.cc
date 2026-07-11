@@ -17,7 +17,7 @@ TEST_CASE("heads-up blinds define pot and call amount") {
         std::array<Chips, kPlayerCount>{1, 2});
   CHECK(betting.last_full_raise == 2);
   CHECK(Pot(betting) == 3);
-  CHECK(HighestStreetCommitment(betting) == 2);
+  CHECK(CurrentWager(betting) == 2);
   CHECK(ToCall(betting, Player::kA) == 1);
   CHECK(ToCall(betting, Player::kB) == 0);
   CHECK(MaxContestableAdditional(betting, Player::kA) == 19);

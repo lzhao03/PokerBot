@@ -344,12 +344,12 @@ inline Chips Pot(const BettingData& state) noexcept {
   return state.total_committed[0] + state.total_committed[1];
 }
 
-inline Chips HighestStreetCommitment(const BettingData& state) noexcept {
+inline Chips CurrentWager(const BettingData& state) noexcept {
   return std::max(state.street_committed[0], state.street_committed[1]);
 }
 
 inline Chips ToCall(const BettingData& state, Player player) noexcept {
-  return HighestStreetCommitment(state) - state.street_committed[Index(player)];
+  return CurrentWager(state) - state.street_committed[Index(player)];
 }
 
 inline Chips MaxContestableAdditional(const BettingData& state,

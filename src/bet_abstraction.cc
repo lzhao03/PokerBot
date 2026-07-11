@@ -12,14 +12,11 @@ AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
   const BettingData& data = state.data;
   const size_t player = Index(state.actor);
   const Chips current_to = data.street_committed[player];
-  const Chips highest_to = HighestStreetCommitment(data);
+  const Chips highest_to = CurrentWager(data);
   const Chips to_call = highest_to - current_to;
-  const Chips call_to =
-      std::min(highest_to, current_to + data.stack[player]);
-  const Chips all_in_to =
-      current_to + MaxContestableAdditional(data, state.actor);
-  const Chips min_full_raise_to =
-      (highest_to > 0 ? highest_to : current_to) + data.last_full_raise;
+  const Chips call_to = std::min(highest_to, current_to + data.stack[player]);
+  const Chips all_in_to = current_to + MaxContestableAdditional(data, state.actor);
+  const Chips min_full_raise_to = (highest_to > 0 ? highest_to : current_to) + data.last_full_raise;
   AbstractActions actions;
   if (to_call > 0) {
     actions.push_back({ActionKind::kFold, 0});
@@ -28,8 +25,7 @@ AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
     actions.push_back({ActionKind::kCheck, 0});
   }
 
-  const ActionKind kind =
-      highest_to > 0 ? ActionKind::kRaise : ActionKind::kBet;
+  const ActionKind kind = highest_to > 0 ? ActionKind::kRaise : ActionKind::kBet;
   const auto& fractions = config.pot_fractions[std::to_underlying(data.street)];
   const Chips pot_after_call = Pot(data) + to_call;
   for (double fraction : fractions) {

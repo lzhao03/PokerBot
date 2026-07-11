@@ -88,7 +88,7 @@ BettingState ApplyActionUnchecked(const DecisionState& state,
   const Player player = state.actor;
   const Player opponent = Opponent(player);
   const size_t player_index = Index(player);
-  const Chips highest_before = HighestStreetCommitment(child);
+  const Chips highest_before = CurrentWager(child);
   const Chips current = child.street_committed[player_index];
   const Chips delta = action.target_street_commitment - current;
 
@@ -362,7 +362,7 @@ bool IsLegalAction(const DecisionState& state,
   }
 
   const Chips current_to = data.street_committed[player];
-  const Chips highest_to = HighestStreetCommitment(data);
+  const Chips highest_to = CurrentWager(data);
   const Chips to_call = highest_to - current_to;
   const Chips call_to =
       std::min(highest_to, current_to + data.stack[player]);
