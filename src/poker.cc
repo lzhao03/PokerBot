@@ -16,13 +16,12 @@ namespace {
 std::array<ComboInfo, kComboCount> BuildComboTable() {
   std::array<ComboInfo, kComboCount> combos;
   int combo = 0;
-  for (int first = 0; first < kDeckCardCount; ++first) {
-    for (int second = first + 1; second < kDeckCardCount; ++second) {
+  for (size_t first = 0; first < kDeck.size(); ++first) {
+    for (size_t second = first + 1; second < kDeck.size(); ++second) {
       combos[combo++] = {
-          static_cast<CardId>(first),
-          static_cast<CardId>(second),
-          CardBit(static_cast<CardId>(first)) |
-              CardBit(static_cast<CardId>(second)),
+          kDeck[first],
+          kDeck[second],
+          CardBit(kDeck[first]) | CardBit(kDeck[second]),
       };
     }
   }
@@ -52,7 +51,7 @@ Chips CommitChips(BettingState& state, int player, Chips requested) {
 
 void DealNextStreet(BoardRunout& board,
                     StreetKind street,
-                    absl::Span<const CardId> cards) {
+                    absl::Span<const Card> cards) {
   switch (street) {
     case StreetKind::kPreflop:
       board.deal_flop(cards);
@@ -229,8 +228,8 @@ CardMask ComboMask(ComboId combo_id) {
   return GetComboInfo(combo_id).mask;
 }
 
-std::optional<ComboId> MaybeCardsToComboId(CardId first, CardId second) {
-  if (first >= kDeckCardCount || second >= kDeckCardCount || first == second) {
+std::optional<ComboId> MaybeCardsToComboId(Card first, Card second) {
+  if (first == second) {
     return std::nullopt;
   }
   if (second < first) {
@@ -238,14 +237,14 @@ std::optional<ComboId> MaybeCardsToComboId(CardId first, CardId second) {
   }
 
   ComboId combo = 0;
-  for (int card = 0; card < first; ++card) {
+  for (size_t card = 0; card < first.index(); ++card) {
     combo += static_cast<ComboId>(kDeckCardCount - card - 1);
   }
-  combo += static_cast<ComboId>(second - first - 1);
+  combo += static_cast<ComboId>(second.index() - first.index() - 1);
   return combo;
 }
 
-ComboId CardsToComboId(CardId first, CardId second) {
+ComboId CardsToComboId(Card first, Card second) {
   const std::optional<ComboId> combo = MaybeCardsToComboId(first, second);
   if (!combo.has_value()) {
     throw std::invalid_argument("Invalid exact two-card combo");
@@ -278,7 +277,7 @@ int BoardCardsForStreet(StreetKind street) {
   }
 }
 
-absl::InlinedVector<CardId, 5> SampleStreetCards(
+absl::InlinedVector<Card, 5> SampleStreetCards(
     StreetKind street,
     const BoardRunout& board,
     CardMask known_private_cards,
@@ -293,17 +292,16 @@ absl::InlinedVector<CardId, 5> SampleStreetCards(
   if (count == 1) {
     std::uniform_int_distribution<int> card_dist(0, kDeckCardCount - 1);
     for (int attempt = 0; attempt < kDeckCardCount; ++attempt) {
-      const CardId candidate = static_cast<CardId>(card_dist(rng));
+      const Card candidate = kDeck[static_cast<size_t>(card_dist(rng))];
       if ((blocked & CardBit(candidate)) == 0) {
         return {candidate};
       }
     }
   }
 
-  std::array<CardId, kDeckCardCount> candidates = {};
+  std::array<Card, kDeckCardCount> candidates = {};
   int candidate_count = 0;
-  for (int card_id = 0; card_id < kDeckCardCount; ++card_id) {
-    const CardId candidate = static_cast<CardId>(card_id);
+  for (Card candidate : kDeck) {
     if ((blocked & CardBit(candidate)) == 0) {
       candidates[candidate_count++] = candidate;
     }
@@ -312,7 +310,7 @@ absl::InlinedVector<CardId, 5> SampleStreetCards(
     throw std::runtime_error("Not enough cards to sample next street");
   }
 
-  absl::InlinedVector<CardId, 5> sampled;
+  absl::InlinedVector<Card, 5> sampled;
   sampled.reserve(count);
   for (int i = 0; i < count; ++i) {
     std::uniform_int_distribution<int> card_dist(i, candidate_count - 1);
@@ -457,7 +455,7 @@ BettingState AdvanceBettingStreet(const BettingState& state,
 }
 
 ExactPublicState ApplyChance(const ExactPublicState& state,
-                             absl::Span<const CardId> cards,
+                             absl::Span<const Card> cards,
                              const BettingRules& rules) {
   if (rules.minimum_bet <= 0) {
     throw std::invalid_argument("minimum bet must be positive");

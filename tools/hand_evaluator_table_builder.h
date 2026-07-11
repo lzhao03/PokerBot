@@ -27,7 +27,7 @@ struct TableData {
   std::vector<std::pair<int, uint16_t>> products;
 };
 
-EvaluationScore EvaluateFiveCardScore(const std::array<CardId, 5>& cards);
+EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards);
 int CompareScores(const EvaluationScore& first, const EvaluationScore& second);
 TableData BuildCactusTables();
 

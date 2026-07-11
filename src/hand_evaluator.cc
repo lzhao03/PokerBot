@@ -23,15 +23,15 @@ HandEvaluation ToHandEvaluation(
 class SevenCardHand {
  public:
   static SevenCardHand FromHoleAndBoard(ComboId hole_cards,
-                                        absl::Span<const CardId> board_cards) {
+                                        absl::Span<const Card> board_cards) {
     SevenCardHand hand(hole_cards);
-    for (CardId card : board_cards) {
+    for (Card card : board_cards) {
       hand.append(card);
     }
     return hand;
   }
 
-  absl::Span<const CardId> cards() const {
+  absl::Span<const Card> cards() const {
     return {cards_.data(), count_};
   }
 
@@ -43,16 +43,16 @@ class SevenCardHand {
     count_ = 2;
   }
 
-  void append(CardId card) {
+  void append(Card card) {
     cards_[count_] = card;
     ++count_;
   }
 
-  std::array<CardId, 7> cards_ = {};
+  std::array<Card, 7> cards_ = {};
   size_t count_ = 0;
 };
 
-int BuildCactusCard(CardId card) {
+int BuildCactusCard(Card card) {
   static constexpr std::array<int, 13> kRankPrimes = {
       2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41};
   static constexpr std::array<int, 4> kSuitBits = {
@@ -67,15 +67,15 @@ const std::array<int, kDeckCardCount>& CactusCardTable() {
   static const std::array<int, kDeckCardCount> table = [] {
     std::array<int, kDeckCardCount> out = {};
     for (int id = 0; id < kDeckCardCount; ++id) {
-      out[static_cast<size_t>(id)] = BuildCactusCard(static_cast<CardId>(id));
+      out[static_cast<size_t>(id)] = BuildCactusCard(kDeck[id]);
     }
     return out;
   }();
   return table;
 }
 
-int CactusCard(CardId card) {
-  return CactusCardTable()[static_cast<size_t>(card)];
+int CactusCard(Card card) {
+  return CactusCardTable()[card.index()];
 }
 
 uint16_t ProductRank(int product) {
@@ -104,7 +104,7 @@ uint16_t EvalFiveCactus(const std::array<int, 5>& cards) {
   return ProductRank(product);
 }
 
-uint16_t EvalBestCactus(absl::Span<const CardId> cards) {
+uint16_t EvalBestCactus(absl::Span<const Card> cards) {
   if (cards.size() < 5) {
     throw std::invalid_argument("Need at least 5 cards to find best hand");
   }
@@ -155,13 +155,13 @@ uint16_t HandValue(ComboId hand, const BoardRunout& board) {
 }
 
 const hand_evaluator_tables::ScoreRecord& ScoreForCards(
-    absl::Span<const CardId> cards) {
+    absl::Span<const Card> cards) {
   return hand_evaluator_tables::kCactusScores[EvalBestCactus(cards)];
 }
 
 }  // namespace
 
-HandEvaluation EvaluateFiveCards(const std::array<CardId, 5>& cards) {
+HandEvaluation EvaluateFiveCards(const std::array<Card, 5>& cards) {
   return ToHandEvaluation(ScoreForCards(absl::MakeConstSpan(cards)));
 }
 

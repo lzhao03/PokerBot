@@ -58,7 +58,7 @@ struct HandEvaluation {
   }
 };
 
-HandEvaluation EvaluateFiveCards(const std::array<CardId, 5>& cards);
+HandEvaluation EvaluateFiveCards(const std::array<Card, 5>& cards);
 int CompareHands(ComboId first,
                  ComboId second,
                  const BoardRunout& board);

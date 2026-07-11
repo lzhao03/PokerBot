@@ -35,7 +35,7 @@ TEST_CASE("mixed abstractions support history traversal") {
       state.betting, {ActionKind::kCall, 2});
   state.betting = ApplyAction(
       state.betting, {ActionKind::kCheck, 0});
-  const std::array<CardId, 3> flop = {
+  const std::array<Card, 3> flop = {
       MakeCardId(2, SuitKind::kDiamonds),
       MakeCardId(7, SuitKind::kSpades),
       MakeCardId(9, SuitKind::kDiamonds),

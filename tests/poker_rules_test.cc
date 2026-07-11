@@ -10,7 +10,7 @@ namespace {
 
 using S = SuitKind;
 
-CardId C(int rank, S suit) { return MakeCardId(rank, suit); }
+Card C(int rank, S suit) { return MakeCardId(rank, suit); }
 
 ExactPublicState Root() {
   ExactPublicState state;

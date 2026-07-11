@@ -17,7 +17,7 @@ constexpr BettingRules kRules{2};
 
 using S = SuitKind;
 
-CardId C(int rank, S suit) { return MakeCardId(rank, suit); }
+Card C(int rank, S suit) { return MakeCardId(rank, suit); }
 
 ComboId H(int first_rank,
           S first_suit,
@@ -27,7 +27,7 @@ ComboId H(int first_rank,
                         C(second_rank, second_suit));
 }
 
-std::array<CardId, 3> Flop() {
+std::array<Card, 3> Flop() {
   return {
       MakeCardId(2, SuitKind::kHearts),
       MakeCardId(7, SuitKind::kDiamonds),
@@ -68,10 +68,10 @@ ExactPublicState ClosedState(StreetKind street) {
   return state;
 }
 
-ExactPublicState Showdown(std::array<CardId, kMaxBoardCards> cards) {
+ExactPublicState Showdown(std::array<Card, kMaxBoardCards> cards) {
   ExactPublicState state = ClosedState(StreetKind::kRiver);
   state.board = BoardRunout::Preflop();
-  state.board.deal_flop(absl::Span<const CardId>(cards.data(), 3));
+  state.board.deal_flop(absl::Span<const Card>(cards.data(), 3));
   state.board.deal_turn(cards[3]);
   state.board.deal_river(cards[4]);
   return state;
@@ -139,7 +139,7 @@ void CheckGeneralInvariants(
                                   state.betting.total_committed[1]);
 
   CardMask seen = 0;
-  for (CardId card : state.board.cards()) {
+  for (Card card : state.board.cards()) {
     CHECK((seen & CardBit(card)) == 0);
     seen |= CardBit(card);
   }
@@ -168,10 +168,8 @@ void CheckGeneratedRollout(uint32_t seed) {
   const std::array<Chips, kPlayerCount> initial_chips = {20, 20};
   const std::array<double, 3> sizes = {1.0, 0.25, 0.5};
   const std::array<double, 3> sorted_sizes = {0.25, 0.5, 1.0};
-  std::array<CardId, kDeckCardCount> deck = {};
-  for (int id = 0; id < kDeckCardCount; ++id) {
-    deck[static_cast<size_t>(id)] = static_cast<CardId>(id);
-  }
+  std::array<Card, kDeckCardCount> deck = {};
+  std::copy(kDeck.begin(), kDeck.end(), deck.begin());
   std::mt19937 rng(seed);
 
   CheckGeneralInvariants(state, initial_chips);
@@ -196,8 +194,8 @@ void CheckGeneratedRollout(uint32_t seed) {
     }
 
     std::shuffle(deck.begin(), deck.end(), rng);
-    std::vector<CardId> cards;
-    for (CardId card : deck) {
+    std::vector<Card> cards;
+    for (Card card : deck) {
       if (!state.board.contains(card)) {
         cards.push_back(card);
       }
@@ -461,14 +459,14 @@ TEST_CASE("preflop all-in runout skips later decisions") {
   CHECK(state.betting.player_to_act == -1);
   CHECK_FALSE(IsTerminal(state));
 
-  const std::array<CardId, 1> turn = {
+  const std::array<Card, 1> turn = {
       MakeCardId(9, SuitKind::kSpades),
   };
   state = ApplyChance(state, turn, kRules);
   CHECK(state.betting.player_to_act == -1);
   CHECK_FALSE(IsTerminal(state));
 
-  const std::array<CardId, 1> river = {
+  const std::array<Card, 1> river = {
       MakeCardId(3, SuitKind::kHearts),
   };
   state = ApplyChance(state, river, kRules);
@@ -614,7 +612,7 @@ TEST_CASE("a complete normal hand preserves exact state") {
                   StreetKind::kFlop, -1, 0, board,
                   StatePhase::kChance);
 
-  const std::array<CardId, 1> turn = {C(9, S::kSpades)};
+  const std::array<Card, 1> turn = {C(9, S::kSpades)};
   state = ApplyChance(state, turn, kRules);
   board.deal_turn(turn[0]);
   CheckExactState("turn", state, {16, 16}, {4, 4}, {0, 0}, 2,
@@ -631,7 +629,7 @@ TEST_CASE("a complete normal hand preserves exact state") {
                   {0, 0}, 2, StreetKind::kTurn, -1, 0, board,
                   StatePhase::kChance);
 
-  const std::array<CardId, 1> river = {C(3, S::kHearts)};
+  const std::array<Card, 1> river = {C(3, S::kHearts)};
   state = ApplyChance(state, river, kRules);
   board.deal_river(river[0]);
   CheckExactState("river", state, {16, 16}, {4, 4}, {0, 0}, 2,
@@ -701,14 +699,14 @@ TEST_CASE("a short all-in raise preserves the full-raise increment") {
                   2, StreetKind::kFlop, -1, 0, board,
                   StatePhase::kChance);
 
-  const std::array<CardId, 1> turn = {C(9, S::kSpades)};
+  const std::array<Card, 1> turn = {C(9, S::kSpades)};
   state = ApplyChance(state, turn, kRules);
   board.deal_turn(turn[0]);
   CheckExactState("automatic turn", state, {15, 0}, {5, 5}, {0, 0}, 2,
                   StreetKind::kTurn, -1, kAllPlayersMask, board,
                   StatePhase::kChance);
 
-  const std::array<CardId, 1> river = {C(3, S::kHearts)};
+  const std::array<Card, 1> river = {C(3, S::kHearts)};
   state = ApplyChance(state, river, kRules);
   board.deal_river(river[0]);
   CheckExactState("automatic river", state, {15, 0}, {5, 5}, {0, 0}, 2,

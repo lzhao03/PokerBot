@@ -31,7 +31,7 @@ struct HandType {
   HandShape shape = HandShape::kPair;
 };
 
-std::optional<int> Rank(char rank) {
+std::optional<int> ParseRank(char rank) {
   switch (rank) {
     case 'A': return 14;
     case 'K': return 13;
@@ -94,8 +94,8 @@ std::optional<HandType> ParseHandType(std::string_view text) {
   if (text.size() != 2 && text.size() != 3) {
     return std::nullopt;
   }
-  const auto first = Rank(text[0]);
-  const auto second = Rank(text[1]);
+  const auto first = ParseRank(text[0]);
+  const auto second = ParseRank(text[1]);
   if (!first || !second) {
     return std::nullopt;
   }
@@ -400,7 +400,7 @@ ComboRange ParseRange(std::string_view text) {
     text = comma == std::string_view::npos ? std::string_view()
                                            : text.substr(comma + 1);
     if (part.size() == 3 && part[0] == part[1] && part[2] == '+') {
-      if (const auto rank = Rank(part[0])) {
+      if (const auto rank = ParseRank(part[0])) {
         for (int value = *rank; value <= 14; ++value) {
           select(HandType{value, value, HandShape::kPair});
         }

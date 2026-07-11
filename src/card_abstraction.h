@@ -38,7 +38,7 @@ static_assert(kCoarsePublicStreetObservationCount <
               (uint32_t{1} << kPublicObservationBitsPerStreet));
 
 struct ExactChanceObservation {
-  std::array<CardId, 3> cards = {};
+  std::array<Card, 3> cards = {};
   uint8_t count = 0;
 
   friend bool operator==(const ExactChanceObservation&,
@@ -156,7 +156,7 @@ inline int MadeBucket(const ComboInfo& combo, const BoardFeatures& features) {
 inline int DrawBucket(const ComboInfo& combo, const BoardFeatures& features) {
   std::array<uint8_t, 4> suit_counts = features.suit_counts;
   uint16_t rank_mask = features.rank_mask;
-  auto add_card = [&](CardId card) {
+  auto add_card = [&](Card card) {
     ++suit_counts[static_cast<size_t>(SuitIndex(SuitFromCardId(card)))];
     rank_mask |= static_cast<uint16_t>(1u << (RankFromCardId(card) - 2));
   };
@@ -176,7 +176,7 @@ inline int DrawBucket(const ComboInfo& combo, const BoardFeatures& features) {
 inline BoardFeatures board_features(const BoardRunout& board) {
   BoardFeatures features;
   features.card_count = board.count();
-  for (CardId card : board.cards()) {
+  for (Card card : board.cards()) {
     const int rank = RankFromCardId(card);
     const size_t rank_index = static_cast<size_t>(rank - 2);
     const size_t suit_index =
@@ -202,8 +202,8 @@ inline PublicObservationId exact_public_observation(
   // Pack the canonical flop and ordered turn/river into one history ID.
   PublicObservationId observation = board.count();
   size_t shift = 3;
-  for (CardId card : board.cards()) {
-    observation |= static_cast<PublicObservationId>(card) << shift;
+  for (Card card : board.cards()) {
+    observation |= static_cast<PublicObservationId>(card.index()) << shift;
     shift += 6;
   }
   return observation;

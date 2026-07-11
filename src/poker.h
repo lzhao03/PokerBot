@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -14,7 +15,6 @@
 
 namespace poker {
 
-using CardId = uint8_t;
 using CardMask = uint64_t;
 using BoardBucketId = uint64_t;
 using PublicObservationId = uint64_t;
@@ -26,12 +26,6 @@ constexpr int kDeckCardCount = 52;
 constexpr int kMaxBoardCards = 5;
 constexpr int kPlayerCount = 2;
 constexpr int kComboCount = 1326;
-
-struct ComboInfo {
-  CardId card0 = 0;
-  CardId card1 = 0;
-  CardMask mask = 0;
-};
 
 enum class Player : uint8_t {
   kA = 0,
@@ -48,6 +42,62 @@ enum class SuitKind : uint8_t {
   kClubs = 2,
   kSpades = 3,
 };
+
+enum class Rank : uint8_t {
+  kTwo,
+  kThree,
+  kFour,
+  kFive,
+  kSix,
+  kSeven,
+  kEight,
+  kNine,
+  kTen,
+  kJack,
+  kQueen,
+  kKing,
+  kAce,
+};
+
+class Card {
+ public:
+  constexpr Card() = default;
+  constexpr Card(Rank rank, SuitKind suit) noexcept
+      : value_(static_cast<uint8_t>(
+            static_cast<uint8_t>(suit) * 13 +
+            static_cast<uint8_t>(rank))) {}
+
+  constexpr size_t index() const noexcept { return value_; }
+  constexpr Rank rank() const noexcept {
+    return static_cast<Rank>(value_ % 13);
+  }
+  constexpr SuitKind suit() const noexcept {
+    return static_cast<SuitKind>(value_ / 13);
+  }
+
+  friend constexpr auto operator<=>(const Card&, const Card&) = default;
+
+ private:
+  uint8_t value_ = 0;
+};
+
+struct ComboInfo {
+  Card card0;
+  Card card1;
+  CardMask mask = 0;
+};
+
+inline constexpr std::array<Card, kDeckCardCount> kDeck = [] {
+  std::array<Card, kDeckCardCount> cards = {};
+  size_t index = 0;
+  for (uint8_t suit = 0; suit < 4; ++suit) {
+    for (uint8_t rank = 0; rank < 13; ++rank) {
+      cards[index++] = Card(static_cast<Rank>(rank),
+                            static_cast<SuitKind>(suit));
+    }
+  }
+  return cards;
+}();
 
 enum class StreetKind : uint8_t {
   kPreflop = 0,
@@ -94,15 +144,15 @@ inline int SuitIndex(SuitKind suit) {
   return static_cast<int>(suit);
 }
 
-inline int RankFromCardId(CardId card_id) {
-  return 2 + static_cast<int>(card_id % 13);
+inline int RankFromCardId(Card card) {
+  return 2 + static_cast<int>(card.rank());
 }
 
-inline SuitKind SuitFromCardId(CardId card_id) {
-  return static_cast<SuitKind>(card_id / 13);
+inline SuitKind SuitFromCardId(Card card) {
+  return card.suit();
 }
 
-inline CardId MakeCardId(int rank, SuitKind suit) {
+inline Card MakeCardId(int rank, SuitKind suit) {
   if (rank == 1) {
     rank = 14;
   }
@@ -112,15 +162,15 @@ inline CardId MakeCardId(int rank, SuitKind suit) {
       suit_index >= 4) {
     throw std::invalid_argument("Invalid card");
   }
-  return static_cast<CardId>(suit_index * 13 + rank_index);
+  return Card(static_cast<Rank>(rank_index), suit);
 }
 
-inline CardMask CardBit(CardId card_id) {
-  return CardMask{1} << card_id;
+inline CardMask CardBit(Card card) {
+  return CardMask{1} << card.index();
 }
 
-inline int EncodedCard(CardId card_id) {
-  return RankFromCardId(card_id) * 8 + 1 + SuitIndex(SuitFromCardId(card_id));
+inline int EncodedCard(Card card) {
+  return RankFromCardId(card) * 8 + 1 + SuitIndex(SuitFromCardId(card));
 }
 
 inline bool IsPlayer(int player) {
@@ -159,7 +209,7 @@ class BoardRunout {
  public:
   static BoardRunout Preflop() { return BoardRunout(); }
 
-  void deal_flop(absl::Span<const CardId> cards) {
+  void deal_flop(absl::Span<const Card> cards) {
     if (count_ != 0) {
       throw std::logic_error("flop requires a preflop runout");
     }
@@ -168,7 +218,7 @@ class BoardRunout {
     }
 
     CardMask dealt_mask = 0;
-    for (CardId card : cards) {
+    for (Card card : cards) {
       const CardMask bit = CardBit(card);
       if ((dealt_mask & bit) != 0) {
         throw std::invalid_argument("duplicate board card");
@@ -182,28 +232,28 @@ class BoardRunout {
     count_ = 3;
   }
 
-  void deal_turn(CardId card) {
+  void deal_turn(Card card) {
     if (count_ != 3) {
       throw std::logic_error("turn requires a dealt flop");
     }
     deal_card(card, 3);
   }
 
-  void deal_river(CardId card) {
+  void deal_river(Card card) {
     if (count_ != 4) {
       throw std::logic_error("river requires a dealt turn");
     }
     deal_card(card, 4);
   }
 
-  absl::Span<const CardId> cards() const {
-    return absl::Span<const CardId>(cards_.data(), count_);
+  absl::Span<const Card> cards() const {
+    return absl::Span<const Card>(cards_.data(), count_);
   }
 
   CardMask mask() const { return mask_; }
   uint8_t count() const { return count_; }
 
-  bool contains(CardId card) const {
+  bool contains(Card card) const {
     return (mask_ & CardBit(card)) != 0;
   }
 
@@ -212,7 +262,7 @@ class BoardRunout {
  private:
   BoardRunout() = default;
 
-  void deal_card(CardId card, size_t index) {
+  void deal_card(Card card, size_t index) {
     if (contains(card)) {
       throw std::invalid_argument("duplicate board card");
     }
@@ -221,7 +271,7 @@ class BoardRunout {
     ++count_;
   }
 
-  std::array<CardId, kMaxBoardCards> cards_ = {};
+  std::array<Card, kMaxBoardCards> cards_ = {};
   CardMask mask_ = 0;
   uint8_t count_ = 0;
 };
@@ -275,12 +325,12 @@ using SolverActions = absl::InlinedVector<GameAction, 8>;
 
 const ComboInfo& GetComboInfo(ComboId combo_id);
 CardMask ComboMask(ComboId combo_id);
-std::optional<ComboId> MaybeCardsToComboId(CardId first, CardId second);
-ComboId CardsToComboId(CardId first, CardId second);
+std::optional<ComboId> MaybeCardsToComboId(Card first, Card second);
+ComboId CardsToComboId(Card first, Card second);
 
 int CardsForNextStreet(StreetKind street);
 int BoardCardsForStreet(StreetKind street);
-absl::InlinedVector<CardId, 5> SampleStreetCards(
+absl::InlinedVector<Card, 5> SampleStreetCards(
     StreetKind street,
     const BoardRunout& board,
     CardMask known_private_cards,
@@ -297,7 +347,7 @@ BettingState ApplyAction(const BettingState& state,
 BettingState AdvanceBettingStreet(const BettingState& state,
                                   const BettingRules& rules);
 ExactPublicState ApplyChance(const ExactPublicState& state,
-                             absl::Span<const CardId> cards,
+                             absl::Span<const Card> cards,
                              const BettingRules& rules);
 double TerminalUtility(const ExactPublicState& state,
                        ComboId player0_hand,

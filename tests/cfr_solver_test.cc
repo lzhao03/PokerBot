@@ -135,7 +135,7 @@ TEST_CASE("postflop roots use full observation identity") {
   ExactPublicState root = MakeInitialState(rules, {8, 8}, {1, 2});
   root.betting = ApplyAction(root.betting, {ActionKind::kCall, 2});
   root.betting = ApplyAction(root.betting, {ActionKind::kCheck, 0});
-  const std::array<CardId, 3> flop = {
+  const std::array<Card, 3> flop = {
       MakeCardId(2, S::kHearts), MakeCardId(7, S::kDiamonds),
       MakeCardId(12, S::kClubs)};
   root = ApplyChance(root, flop, rules);

@@ -41,10 +41,10 @@ TEST_CASE("deal sampling rejects incompatible ranges") {
     sizes = {1.0};
   }
 
-  const ComboRange a = SingleComboRange(CardsToComboId(0, 1));
+  const ComboRange a = SingleComboRange(CardsToComboId(kDeck[0], kDeck[1]));
   ComboRange b;
-  b.add(CardsToComboId(0, 2));
-  b.add(CardsToComboId(1, 3));
+  b.add(CardsToComboId(kDeck[0], kDeck[2]));
+  b.add(CardsToComboId(kDeck[1], kDeck[3]));
   CFRSolver solver(config);
   CHECK_THROWS_AS(solver.run(1, a, b), std::invalid_argument);
 

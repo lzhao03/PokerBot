@@ -25,7 +25,7 @@ EvaluationScore ScoreForDistinctRanks(int rank_mask, bool flush) {
   static constexpr std::array<SuitKind, 5> kNonFlushSuits = {
       SuitKind::kHearts, SuitKind::kDiamonds, SuitKind::kClubs,
       SuitKind::kSpades, SuitKind::kHearts};
-  std::array<CardId, 5> cards = {};
+  std::array<Card, 5> cards = {};
   size_t index = 0;
   for (int rank_index = 0; rank_index < 13; ++rank_index) {
     if ((rank_mask & (1 << rank_index)) == 0) {
@@ -42,7 +42,7 @@ EvaluationScore ScoreForRankMultiset(const std::array<int, 5>& rank_indices) {
   static constexpr std::array<SuitKind, 4> kSuits = {
       SuitKind::kHearts, SuitKind::kDiamonds, SuitKind::kClubs,
       SuitKind::kSpades};
-  std::array<CardId, 5> cards = {};
+  std::array<Card, 5> cards = {};
   std::array<int, 13> rank_counts = {};
   for (size_t i = 0; i < rank_indices.size(); ++i) {
     const int rank_index = rank_indices[i];
@@ -80,17 +80,17 @@ bool EvaluationScore::operator<(const EvaluationScore& other) const {
   return kickers < other.kickers;
 }
 
-EvaluationScore EvaluateFiveCardScore(const std::array<CardId, 5>& cards) {
+EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards) {
   std::array<int, 5> ranks;
   size_t rank_count = 0;
-  for (CardId card : cards) {
+  for (Card card : cards) {
     ranks[rank_count] = RankFromCardId(card);
     ++rank_count;
   }
   std::sort(ranks.begin(), ranks.end(), std::greater<int>());
 
   bool flush = true;
-  for (CardId card : cards) {
+  for (Card card : cards) {
     if (SuitFromCardId(card) != SuitFromCardId(cards[0])) {
       flush = false;
       break;

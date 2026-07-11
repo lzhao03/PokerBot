@@ -10,22 +10,22 @@
 namespace poker {
 namespace {
 
-CardId Card(int rank, SuitKind suit) {
+Card C(int rank, SuitKind suit) {
   return MakeCardId(rank, suit);
 }
 
-BoardRunout Flop(std::array<CardId, 3> cards) {
+BoardRunout Flop(std::array<Card, 3> cards) {
   BoardRunout runout = BoardRunout::Preflop();
   runout.deal_flop(cards);
   return runout;
 }
 
 TEST_CASE("flop order canonicalizes while later streets remain observable") {
-  const CardId ace = Card(14, SuitKind::kSpades);
-  const CardId king = Card(13, SuitKind::kSpades);
-  const CardId queen = Card(12, SuitKind::kSpades);
-  const CardId jack = Card(11, SuitKind::kHearts);
-  const CardId ten = Card(10, SuitKind::kDiamonds);
+  const Card ace = C(14, SuitKind::kSpades);
+  const Card king = C(13, SuitKind::kSpades);
+  const Card queen = C(12, SuitKind::kSpades);
+  const Card jack = C(11, SuitKind::kHearts);
+  const Card ten = C(10, SuitKind::kDiamonds);
 
   BoardRunout first = Flop({ace, king, queen});
   BoardRunout permuted = Flop({queen, ace, king});
@@ -46,9 +46,9 @@ TEST_CASE("flop order canonicalizes while later streets remain observable") {
 }
 
 TEST_CASE("runout dealing enforces street and card invariants") {
-  const CardId first = Card(2, SuitKind::kHearts);
-  const CardId second = Card(7, SuitKind::kDiamonds);
-  const CardId third = Card(12, SuitKind::kClubs);
+  const Card first = C(2, SuitKind::kHearts);
+  const Card second = C(7, SuitKind::kDiamonds);
+  const Card third = C(12, SuitKind::kClubs);
   BoardRunout runout = Flop({third, first, second});
 
   CHECK(runout.count() == 3);
@@ -58,24 +58,24 @@ TEST_CASE("runout dealing enforces street and card invariants") {
   CHECK_THROWS_AS(runout.deal_turn(first), std::invalid_argument);
 
   BoardRunout preflop = BoardRunout::Preflop();
-  const std::array<CardId, 2> short_flop = {first, second};
+  const std::array<Card, 2> short_flop = {first, second};
   CHECK_THROWS_AS(preflop.deal_flop(short_flop), std::invalid_argument);
   CHECK_THROWS_AS(preflop.deal_turn(first), std::logic_error);
   BoardRunout no_turn = Flop({first, second, third});
-  CHECK_THROWS_AS(no_turn.deal_river(Card(9, SuitKind::kSpades)),
+  CHECK_THROWS_AS(no_turn.deal_river(C(9, SuitKind::kSpades)),
                   std::logic_error);
-  const std::array<CardId, 3> duplicate_flop = {first, second, first};
+  const std::array<Card, 3> duplicate_flop = {first, second, first};
   CHECK_THROWS_AS(preflop.deal_flop(duplicate_flop),
                   std::invalid_argument);
 }
 
 TEST_CASE("hand evaluator recognizes a royal flush") {
-  const std::array<CardId, 5> cards = {
-      Card(10, SuitKind::kHearts),
-      Card(11, SuitKind::kHearts),
-      Card(12, SuitKind::kHearts),
-      Card(13, SuitKind::kHearts),
-      Card(14, SuitKind::kHearts),
+  const std::array<Card, 5> cards = {
+      C(10, SuitKind::kHearts),
+      C(11, SuitKind::kHearts),
+      C(12, SuitKind::kHearts),
+      C(13, SuitKind::kHearts),
+      C(14, SuitKind::kHearts),
   };
 
   CHECK(EvaluateFiveCards(cards).rank == HandRank::ROYAL_FLUSH);
