@@ -25,25 +25,20 @@ inline constexpr int kHighBuckets = 3;
 static_assert(kCoarsePublicStreetObservationCount <
               (uint32_t{1} << kPublicObservationBitsPerStreet));
 
-constexpr int StraightWindowDensity(size_t rank_mask) {
-  int best = 0;
-  for (int start = 0; start <= 8; ++start) {
-    best = std::max(
-        best, std::popcount((rank_mask >> start) & size_t{0x1F}));
-  }
-  constexpr size_t wheel_mask = (size_t{1} << 12) | 0x0F;
-  return std::max(best, std::popcount(rank_mask & wheel_mask));
-}
-
-constexpr std::array<uint8_t, 8192> BuildStraightDensityTable() {
+inline const auto kStraightDensity = [] {
   std::array<uint8_t, 8192> table = {};
   for (size_t mask = 0; mask < table.size(); ++mask) {
-    table[mask] = static_cast<uint8_t>(StraightWindowDensity(mask));
+    int density = 0;
+    for (int start = 0; start <= 8; ++start) {
+      density = std::max(
+          density, std::popcount((mask >> start) & size_t{0x1F}));
+    }
+    constexpr size_t wheel_mask = (size_t{1} << 12) | 0x0F;
+    density = std::max(density, std::popcount(mask & wheel_mask));
+    table[mask] = static_cast<uint8_t>(density);
   }
   return table;
-}
-
-inline const auto kStraightDensity = BuildStraightDensityTable();
+}();
 
 int HighRankGroup(int rank) noexcept {
   if (rank >= 14) {
