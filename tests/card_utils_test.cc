@@ -356,6 +356,14 @@ TEST_CASE("equity observations are cached, bounded, and suit invariant") {
   const uint64_t preflop = ObservePrivate(abstraction, hand, position).value();
   CHECK(preflop >= 1);
   CHECK(preflop <= 169);
+  std::set<uint64_t> preflop_classes;
+  for (size_t first = 0; first < kDeck.size(); ++first) {
+    for (size_t second = first + 1; second < kDeck.size(); ++second) {
+      preflop_classes.insert(ObservePrivate(
+          abstraction, H(kDeck[first], kDeck[second]), position).value());
+    }
+  }
+  CHECK(preflop_classes.size() == 169);
   for (const auto& [street, board, maximum] : {
            std::tuple{StreetKind::kFlop, Board{flop}, uint64_t{32}},
            std::tuple{StreetKind::kTurn, Board{turn}, uint64_t{32}},
