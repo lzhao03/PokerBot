@@ -31,7 +31,7 @@ AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
   for (double fraction : fractions) {
     const Chips raise_by = std::max(
         Chips{1},
-        static_cast<Chips>(std::llround(fraction * pot_after_call)));
+        static_cast<Chips>(std::ceil(fraction * pot_after_call)));
     const Chips target = highest_to + raise_by;
     if (target >= min_full_raise_to && target < all_in_to &&
         actions.back().target_street_commitment != target) {

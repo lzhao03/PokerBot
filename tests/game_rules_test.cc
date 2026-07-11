@@ -311,6 +311,13 @@ TEST_CASE("pot fractions use the pot after calling") {
   CHECK(HasAction(bets, {ActionKind::Bet, 50}));
   CHECK(HasAction(bets, {ActionKind::Bet, 100}));
 
+  const BettingState fractional_pot =
+      State({200, 200}, {5, 5}, {0, 0}, 0, 2);
+  const std::array<double, 1> fraction = {0.21};
+  const std::vector<GameAction> rounded_up =
+      ActionsFor(fractional_pot, fraction);
+  CHECK(HasAction(rounded_up, {ActionKind::Bet, 3}));
+
   const std::array<double, 1> pot = {1.0};
   const BettingState facing =
       State({200, 200}, {37, 63}, {0, 25}, 0, 25);
