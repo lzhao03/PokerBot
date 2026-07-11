@@ -69,6 +69,8 @@ cc_binary(
         "@abseil-cpp//absl/flags:usage",
         "@abseil-cpp//absl/log:globals",
         "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/status:status",
+        "@abseil-cpp//absl/status:statusor",
         "@abseil-cpp//absl/strings",
     ],
 )

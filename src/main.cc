@@ -2,6 +2,8 @@
 
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
 #include "absl/flags/usage.h"
@@ -22,7 +24,7 @@ ABSL_FLAG(int, starting_stack, 100, "starting stack in chips");
 ABSL_FLAG(int, small_blind, 1, "small blind in chips");
 ABSL_FLAG(int, big_blind, 2, "big blind in chips");
 ABSL_FLAG(int, chance_samples, 1, "chance samples per chance node");
-ABSL_FLAG(int, max_info_sets, 500000, "maximum infosets; 0 is unlimited");
+ABSL_FLAG(int, max_info_sets, 500000, "maximum infosets");
 ABSL_FLAG(int64_t, max_memory_mb, 4096,
           "hard memory limit in MB; 0 is unlimited");
 ABSL_FLAG(bool, accumulate_average_strategy, true,
@@ -56,28 +58,34 @@ void SetMemoryLimit(int64_t megabytes) {
   }
 }
 
-std::vector<double> ParseBetSizes(const std::vector<std::string>& values) {
+absl::StatusOr<std::vector<double>> ParseBetSizes(
+    const std::vector<std::string>& values) {
   std::vector<double> sizes;
   sizes.reserve(values.size());
   for (const std::string& value : values) {
     double size = 0.0;
     if (!absl::SimpleAtod(value, &size)) {
-      throw std::invalid_argument("invalid bet size: " + value);
+      return absl::InvalidArgumentError("invalid bet size: " + value);
     }
     sizes.push_back(size);
   }
   return sizes;
 }
 
-void OverrideBetSizes(poker::SolverConfig& config,
-                      poker::StreetKind street,
-                      const std::vector<std::string>& values) {
+absl::Status OverrideBetSizes(poker::SolverConfig& config,
+                              poker::StreetKind street,
+                              const std::vector<std::string>& values) {
   if (!values.empty()) {
-    config.bet_sizes[static_cast<size_t>(street)] = ParseBetSizes(values);
+    const auto sizes = ParseBetSizes(values);
+    if (!sizes.ok()) {
+      return sizes.status();
+    }
+    config.bet_sizes[static_cast<size_t>(street)] = *sizes;
   }
+  return absl::OkStatus();
 }
 
-poker::SolverConfig ConfigFromFlags() {
+absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
   poker::SolverConfig config;
   config.starting_stack = absl::GetFlag(FLAGS_starting_stack);
   config.small_blind = absl::GetFlag(FLAGS_small_blind);
@@ -87,22 +95,35 @@ poker::SolverConfig ConfigFromFlags() {
   config.accumulate_average_strategy =
       absl::GetFlag(FLAGS_accumulate_average_strategy);
 
-  const std::vector<double> sizes =
-      ParseBetSizes(absl::GetFlag(FLAGS_bet_sizes));
-  config.bet_sizes.fill(sizes);
-  OverrideBetSizes(config, poker::StreetKind::kPreflop,
-                   absl::GetFlag(FLAGS_preflop_bet_sizes));
-  OverrideBetSizes(config, poker::StreetKind::kFlop,
-                   absl::GetFlag(FLAGS_flop_bet_sizes));
-  OverrideBetSizes(config, poker::StreetKind::kTurn,
-                   absl::GetFlag(FLAGS_turn_bet_sizes));
-  OverrideBetSizes(config, poker::StreetKind::kRiver,
-                   absl::GetFlag(FLAGS_river_bet_sizes));
+  const auto sizes = ParseBetSizes(absl::GetFlag(FLAGS_bet_sizes));
+  if (!sizes.ok()) {
+    return sizes.status();
+  }
+  config.bet_sizes.fill(*sizes);
+  for (const auto& [street, values] : {
+           std::pair{poker::StreetKind::kPreflop,
+                     absl::GetFlag(FLAGS_preflop_bet_sizes)},
+           std::pair{poker::StreetKind::kFlop,
+                     absl::GetFlag(FLAGS_flop_bet_sizes)},
+           std::pair{poker::StreetKind::kTurn,
+                     absl::GetFlag(FLAGS_turn_bet_sizes)},
+           std::pair{poker::StreetKind::kRiver,
+                     absl::GetFlag(FLAGS_river_bet_sizes)},
+       }) {
+    const absl::Status status = OverrideBetSizes(config, street, values);
+    if (!status.ok()) {
+      return status;
+    }
+  }
+  const absl::Status status = poker::ValidateSolverConfig(config);
+  if (!status.ok()) {
+    return status;
+  }
   return config;
 }
 
 bool CapHit(size_t count, int cap) {
-  return cap > 0 && count >= static_cast<size_t>(cap);
+  return count >= static_cast<size_t>(cap);
 }
 
 void PrintRunSummary(const poker::CFRSolver& solver,
@@ -143,18 +164,22 @@ int main(int argc, char** argv) {
     if (memory_limit_mb < 0) {
       throw std::invalid_argument("--max_memory_mb must be non-negative");
     }
-    const poker::SolverConfig config = ConfigFromFlags();
+    const auto config = ConfigFromFlags();
+    if (!config.ok()) {
+      std::cerr << "Error: " << config.status() << "\n";
+      return 1;
+    }
     const poker::ComboRange a_range = poker::UniformRange();
     const poker::ComboRange b_range = poker::UniformRange();
 
     SetMemoryLimit(memory_limit_mb);
-    poker::CFRSolver solver(config);
+    poker::CFRSolver solver(*config);
     const auto start = std::chrono::steady_clock::now();
     solver.run(absl::GetFlag(FLAGS_iterations), a_range, b_range);
     const auto end = std::chrono::steady_clock::now();
 
     const std::chrono::duration<double> elapsed = end - start;
-    PrintRunSummary(solver, config, elapsed.count());
+    PrintRunSummary(solver, *config, elapsed.count());
   } catch (const std::exception& error) {
     std::cerr << "Error: " << error.what() << "\n";
     return 1;

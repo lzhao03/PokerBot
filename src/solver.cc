@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -423,6 +424,29 @@ absl::StatusOr<ComboRange> ParseRange(std::string_view text) {
     return absl::InvalidArgumentError("range is empty");
   }
   return ExpandSelected(selected);
+}
+
+absl::Status ValidateSolverConfig(const SolverConfig& config) {
+  if (config.starting_stack <= 0 || config.small_blind <= 0 ||
+      config.big_blind < config.small_blind ||
+      config.starting_stack < config.big_blind) {
+    return absl::InvalidArgumentError("invalid stack or blind configuration");
+  }
+  if (config.chance_samples <= 0) {
+    return absl::InvalidArgumentError("chance_samples must be positive");
+  }
+  if (config.max_info_sets <= 0) {
+    return absl::InvalidArgumentError("max_info_sets must be positive");
+  }
+  for (const auto& street_sizes : config.bet_sizes) {
+    for (double size : street_sizes) {
+      if (!std::isfinite(size) || size <= 0.0) {
+        return absl::InvalidArgumentError(
+            "bet sizes must be finite and positive");
+      }
+    }
+  }
+  return absl::OkStatus();
 }
 
 ComboRange UniformRange() {

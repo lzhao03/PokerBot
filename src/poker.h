@@ -162,9 +162,7 @@ struct SolverConfig {
   Chips big_blind = 2;
   int chance_samples = 1;
   bool accumulate_average_strategy = true;
-  // Maximum number of info sets to allocate. 0 means unlimited.
-  // Training throws when the limit is reached.
-  int max_info_sets = 0;
+  int max_info_sets = 500000;
 };
 
 inline int SuitIndex(SuitKind suit) {
