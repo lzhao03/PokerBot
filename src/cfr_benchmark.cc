@@ -358,8 +358,6 @@ int main(int argc, char** argv) {
     poker::HandRange a_range = BenchmarkRange(options);
     poker::HandRange b_range = BenchmarkRange(options);
 
-    std::cout << "recall_policy\t"
-              << poker::RecallPolicyName(config.recall_policy) << "\n";
     PrintBenchmarkHeader();
 
     RunBenchmark("range_expand", [&] {

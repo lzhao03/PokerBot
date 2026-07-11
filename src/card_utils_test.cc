@@ -86,11 +86,6 @@ BoardRunout Rename(const BoardRunout& board, const std::array<S, 4>& suits) {
   return Runout(absl::Span<const CardId>(cards.data(), board.count()));
 }
 
-ComboId Rename(ComboId hand, const std::array<S, 4>& suits) {
-  const ComboInfo& combo = GetComboInfo(hand);
-  return H(Rename(combo.card0, suits), Rename(combo.card1, suits));
-}
-
 TEST_CASE("combo ids are an exhaustive canonical bijection") {
   ComboId expected = 0;
   for (int a = 0; a < kDeckCardCount; ++a) {
@@ -155,22 +150,11 @@ TEST_CASE("sampling and card abstractions preserve identity") {
         absl::Span<const CardId>(permuted.data(), board.count()));
     const BoardFeatures features = board_features(board);
     CHECK(board_features(reversed) == features);
-    CHECK(exact_board_bucket(board) == board.mask());
-    CHECK(exact_board_bucket(board) == exact_board_bucket(reversed));
-    const PublicStreetObservation public_observation =
-        observe_public_street(street, board, features);
-    CHECK(public_observation.value == exact_board_bucket(board));
-    CHECK(board_bucket(street, board, features) == public_observation.value);
     CHECK(board_texture_bucket(street, features) ==
           board_texture_bucket(street, board_features(reversed)));
-    CHECK(exact_private_bucket(hand) == hand);
     const PrivateStreetObservation private_observation =
         observe_private_street(hand, street, features);
     CHECK(private_observation.value == hand);
-    CHECK(private_bucket(hand, street, features) ==
-          private_observation.value);
-    CHECK(coarse_private_bucket(hand, street, features) <
-          kCoarsePrivateStreetObservationCount);
 
     std::array<S, 4> suits = {
         S::kHearts, S::kDiamonds, S::kClubs, S::kSpades};
@@ -178,9 +162,6 @@ TEST_CASE("sampling and card abstractions preserve identity") {
     const BoardRunout renamed_board = Rename(board, suits);
     CHECK(board_texture_bucket(street, features) ==
           board_texture_bucket(street, board_features(renamed_board)));
-    CHECK(coarse_private_bucket(hand, street, features) ==
-          coarse_private_bucket(Rename(hand, suits), street,
-                                board_features(renamed_board)));
 
     const auto sampled = SampleStreetCards(street, board, ComboMask(hand), rng);
     CHECK(sampled.size() == static_cast<size_t>(CardsForNextStreet(street)));

@@ -41,8 +41,6 @@ TEST_CASE("public observation traces retain colliding street prefixes") {
   CHECK(local_flop_observation.exact_cards.count == 0);
   CHECK(local_flop_observation.value <
         kCoarsePublicStreetObservationCount);
-  CHECK(board_bucket(StreetKind::kFlop, state_a.board) ==
-        local_flop_observation.value);
 
   node_a = test::CheckCheck(graph, node_a, state_a);
   node_b = test::CheckCheck(graph, node_b, state_b);

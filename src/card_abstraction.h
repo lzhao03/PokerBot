@@ -180,10 +180,6 @@ inline uint8_t straight_density(uint16_t rank_mask) {
   return card_abstraction_detail::kStraightDensity[rank_mask & 0x1FFF];
 }
 
-inline BoardBucketId exact_board_bucket(const BoardRunout& board) {
-  return board.mask();
-}
-
 inline PublicObservationId exact_public_observation(
     const BoardRunout& board) {
   // Pack the canonical flop and ordered turn/river into one history ID.
@@ -313,8 +309,7 @@ inline PublicStreetObservation observe_public_street(
   if constexpr (kCoarsePublicBuckets) {
     return {board_texture_bucket(street, features), {}};
   } else {
-    return {exact_board_bucket(board),
-            exact_chance_observation(street, board)};
+    return {0, exact_chance_observation(street, board)};
   }
 }
 
@@ -370,21 +365,9 @@ inline PublicObservationId public_observation_id(
   return exact_public_observation(board);
 }
 
-inline BoardBucketId board_bucket(StreetKind street,
-                                    const BoardRunout& board,
-                                    const BoardFeatures& features) {
-  return observe_public_street(street, board, features).value;
-}
+namespace card_abstraction_detail {
 
-inline BoardBucketId board_bucket(StreetKind street, const BoardRunout& board) {
-  return board_bucket(street, board, board_features(board));
-}
-
-inline PrivateBucketId exact_private_bucket(ComboId combo_id) {
-  return combo_id;
-}
-
-inline PrivateBucketId coarse_private_bucket(
+inline PrivateBucketId CoarsePrivateBucket(
     ComboId combo_id,
     StreetKind street,
     const BoardFeatures& features) {
@@ -411,14 +394,17 @@ inline PrivateBucketId coarse_private_bucket(
   return static_cast<PrivateBucketId>(local_bucket);
 }
 
+}  // namespace card_abstraction_detail
+
 inline PrivateStreetObservation observe_private_street(
     ComboId combo_id,
     StreetKind street,
     const BoardFeatures& features) {
   if constexpr (kCoarsePrivateBuckets) {
-    return {coarse_private_bucket(combo_id, street, features)};
+    return {card_abstraction_detail::CoarsePrivateBucket(
+        combo_id, street, features)};
   } else {
-    return {exact_private_bucket(combo_id)};
+    return {combo_id};
   }
 }
 
@@ -427,12 +413,6 @@ inline PrivateStreetObservation observe_private_street(
     StreetKind street,
     const BoardRunout& board) {
   return observe_private_street(combo_id, street, board_features(board));
-}
-
-inline PrivateBucketId private_bucket(ComboId combo_id,
-                                      StreetKind street,
-                                      const BoardFeatures& features) {
-  return observe_private_street(combo_id, street, features).value;
 }
 
 inline PrivateObservationId exact_private_observation(ComboId hand) {

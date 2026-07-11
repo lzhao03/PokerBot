@@ -350,7 +350,7 @@ TEST_CASE("strict infoset identity preserves complete observations") {
   const StrategyTables::InfoSetKey key_a{node_a, private_a};
   const StrategyTables::InfoSetKey key_b{node_b, private_b};
   CHECK(key_a.node_id == key_b.node_id);
-  CHECK(key_a.private_id == key_b.private_id);
+  CHECK(key_a.private_observation == key_b.private_observation);
 
   const BettingAbstraction abstraction(test::IdentityConfig());
   const int player = state_a.betting.player_to_act;

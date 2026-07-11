@@ -164,8 +164,6 @@ TEST_CASE("exact observations contain only the current street reveal") {
   const ComboId hand = CardsToComboId(
       C(14, S::kHearts), C(13, S::kHearts));
   CHECK(observe_private_street(hand, StreetKind::kRiver, board).value == hand);
-  CHECK(private_bucket(hand, StreetKind::kRiver, board_features(board)) ==
-        hand);
 }
 
 TEST_CASE("exact private observation is always the hand") {

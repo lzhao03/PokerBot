@@ -238,15 +238,6 @@ class CFRSolver {
       size_t action_count,
       RangeScratchFrame& scratch_frame);
   double nonterminal_leaf_value() const noexcept;
-  bool uses_legacy_imperfect_recall() const noexcept;
-  PrivateInfoSetId private_info_set_id(
-      ComboId hand,
-      Position position,
-      PrivateObservationId observation) const;
-  PrivateInfoSetId private_info_set_id_for_runout(
-      ComboId hand,
-      const BoardRunout& board,
-      NodeId node_id) const;
   std::array<PrivateObservationId, kPlayerCount>
   private_observations_for_position(const Deal& deal,
                                     Position position) const;

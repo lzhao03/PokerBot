@@ -52,9 +52,6 @@ TEST_CASE("private observation traces retain colliding street prefixes") {
   CHECK(local_flop_a.value != local_flop_b.value);
   CHECK(local_flop_a.value <
         kCoarsePrivateStreetObservationCount);
-  CHECK(private_bucket(hand, StreetKind::kFlop,
-                       board_features(state_a.board)) ==
-        local_flop_a.value);
   CHECK(preflop_observation != flop_observation_a);
 
   node_a = test::CheckCheck(graph, node_a, state_a);

@@ -135,21 +135,6 @@ cc_library(
 )
 
 cc_library(
-    name = "betting_abstraction_coarse_buckets",
-    srcs = ["betting_abstraction.cc"],
-    hdrs = ["betting_abstraction.h"],
-    copts = [
-        "-DPOKER_COARSE_PRIVATE_BUCKETS=1",
-        "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
-    ],
-    deps = [
-        ":game_rules",
-        ":poker_types",
-    ],
-    visibility = ["//tests:__pkg__"],
-)
-
-cc_library(
     name = "game_rules",
     srcs = ["game_rules.cc"],
     hdrs = ["game_rules.h"],
@@ -230,46 +215,6 @@ cc_library(
     ],
 )
 
-cc_library(
-    name = "strategy_store_coarse_buckets",
-    srcs = ["strategy_store.cc"],
-    hdrs = [
-        "strategy_store.h",
-        "solver_stats.h",
-    ],
-    copts = [
-        "-DPOKER_COARSE_PRIVATE_BUCKETS=1",
-        "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
-    ],
-    deps = [
-        ":build_flags",
-        ":poker_types",
-        ":strategy_tables",
-        "@abseil-cpp//absl/types:span",
-    ],
-    visibility = ["//tests:__pkg__"],
-)
-
-cc_library(
-    name = "strategy_store_coarse_buckets_no_stats",
-    srcs = ["strategy_store.cc"],
-    hdrs = [
-        "strategy_store.h",
-        "solver_stats.h",
-    ],
-    copts = [
-        "-DPOKER_COARSE_PRIVATE_BUCKETS=1",
-        "-DPOKER_ENABLE_TRAVERSAL_STATS=0",
-        "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
-    ],
-    deps = [
-        ":build_flags",
-        ":poker_types",
-        ":strategy_tables",
-        "@abseil-cpp//absl/types:span",
-    ],
-)
-
 CFR_SOLVER_DEPS = [
     ":build_flags",
     ":card_abstraction",
@@ -337,32 +282,10 @@ cc_library(
         "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
     ],
     deps = CFR_SOLVER_DEPS + [
-        ":betting_abstraction_coarse_buckets",
-        ":strategy_store_coarse_buckets",
+        ":betting_abstraction",
+        ":strategy_store",
     ],
     visibility = ["//tests:__pkg__"],
-)
-
-cc_library(
-    name = "cfr_solver_coarse_buckets_no_stats",
-    srcs = [
-        "cfr_solver.cc",
-        "graph_builder.cc",
-    ],
-    hdrs = [
-        "coarse_chance_transitions.h",
-        "cfr_solver.h",
-        "graph_builder.h",
-    ],
-    copts = [
-        "-DPOKER_COARSE_PRIVATE_BUCKETS=1",
-        "-DPOKER_ENABLE_TRAVERSAL_STATS=0",
-        "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
-    ],
-    deps = CFR_SOLVER_DEPS + [
-        ":betting_abstraction_coarse_buckets",
-        ":strategy_store_coarse_buckets_no_stats",
-    ],
 )
 
 cc_library(
@@ -421,29 +344,26 @@ cc_test(
         ":hand_evaluator",
         ":hand_evaluator_table_builder",
         ":hand_range",
-        ":poker_config",
         ":strategy_store",
         ":training_range",
     ],
 )
 
 cc_test(
-    name = "cfr_coarse_test",
-    srcs = ["cfr_board_bucket_test.cc"],
+    name = "unsupported_coarse_abstraction_test",
+    srcs = ["unsupported_abstraction_test.cc"],
     copts = [
         "-DPOKER_COARSE_PRIVATE_BUCKETS=1",
         "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
     ],
     deps = DOCTEST_DEPS + [
-        ":combo",
-        ":cfr_solver_coarse_buckets_no_stats",
-        ":hand_range",
+        ":cfr_solver_coarse_buckets",
     ],
 )
 
 cc_test(
-    name = "recall_policy_coarse_private_test",
-    srcs = ["recall_policy_test.cc"],
+    name = "strict_abstraction_coarse_private_test",
+    srcs = ["strict_abstraction_test.cc"],
     copts = ["-DPOKER_COARSE_PRIVATE_BUCKETS=1"],
     deps = DOCTEST_DEPS + [
         ":cfr_solver_coarse_private",
@@ -454,8 +374,8 @@ cc_test(
 )
 
 cc_test(
-    name = "recall_policy_coarse_public_test",
-    srcs = ["recall_policy_test.cc"],
+    name = "strict_abstraction_coarse_public_test",
+    srcs = ["strict_abstraction_test.cc"],
     copts = ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
     deps = DOCTEST_DEPS + [
         ":cfr_solver_coarse_public",
@@ -509,24 +429,6 @@ cc_binary(
     deps = [
         ":build_flags",
         ":cfr_solver_no_stats",
-        ":hand_range",
-        ":poker_config",
-        ":training_range",
-        "@abseil-cpp//absl/log:initialize",
-    ],
-)
-
-cc_binary(
-    name = "cfr_coarse_prod_benchmark",
-    srcs = ["cfr_benchmark.cc"],
-    copts = [
-        "-DPOKER_BENCHMARK_PROD_DEFAULTS=1",
-        "-DPOKER_COARSE_PRIVATE_BUCKETS=1",
-        "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
-    ],
-    deps = [
-        ":build_flags",
-        ":cfr_solver_coarse_buckets_no_stats",
         ":hand_range",
         ":poker_config",
         ":training_range",

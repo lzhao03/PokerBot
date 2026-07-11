@@ -12,7 +12,7 @@ namespace poker {
 namespace {
 
 #if POKER_COARSE_PUBLIC_BUCKETS == POKER_COARSE_PRIVATE_BUCKETS
-#error "recall_policy_test requires one coarse abstraction"
+#error "strict_abstraction_test requires one coarse abstraction"
 #endif
 
 HandRange Range(int first_rank, int second_rank, SuitKind suit) {

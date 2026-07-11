@@ -64,7 +64,6 @@ bool operator!=(const CacheLineAlignedAllocator<T>&,
 
 class StrategyTables {
  public:
-  using BoardBucketId = poker::BoardBucketId;
   static constexpr uint32_t kInvalidActionOffset =
       std::numeric_limits<uint32_t>::max();
 
@@ -129,15 +128,15 @@ class StrategyTables {
 
   struct InfoSetKey {
     NodeId node_id = 0;
-    PrivateInfoSetId private_id = 0;
+    PrivateObservationId private_observation = 0;
   };
 
   struct GrowingPublicInfoSets {
-    absl::flat_hash_map<PrivateInfoSetId, InfoSetRow> rows;
+    absl::flat_hash_map<PrivateObservationId, InfoSetRow> rows;
   };
 
   struct FrozenInfoSetEntry {
-    PrivateInfoSetId private_id = 0;
+    PrivateObservationId private_observation = 0;
     uint32_t action_offset = kInvalidActionOffset;
   };
 

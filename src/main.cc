@@ -57,8 +57,6 @@ void PrintRunSummary(const poker::CFRSolver& solver,
   const int64_t touches = solver.get_traversal_stats().action_entry_touches;
 
   std::cout << "iterations=" << solver.get_iterations_run() << "\n";
-  std::cout << "recall_policy="
-            << poker::RecallPolicyName(config.recall_policy) << "\n";
   std::cout << "info_sets=" << info_sets << "\n";
   std::cout << "max_info_sets=" << config.max_info_sets << "\n";
   std::cout << "info_set_cap_hit=" << CapHit(info_sets, config.max_info_sets)

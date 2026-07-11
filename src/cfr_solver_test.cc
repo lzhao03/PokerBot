@@ -1,6 +1,5 @@
 #include "src/cfr_solver.h"
 #include "src/combo.h"
-#include "src/poker_config.h"
 #include "src/strategy_store.h"
 
 #include "doctest/doctest.h"
@@ -106,18 +105,6 @@ TEST_CASE("solver lifecycle respects training, limits, and root contracts") {
   }
 }
 
-TEST_CASE("recall policy defaults to strict and legacy requires opt-in") {
-  PokerConfig proto = DefaultPokerConfig();
-  CHECK(SolverConfigFromProto(proto).recall_policy ==
-        RecallPolicy::kRequirePerfectRecall);
-
-  CommonOptionState state;
-  REQUIRE(ApplySolverOption(
-      "--allow-legacy-imperfect-recall", proto, state));
-  CHECK(SolverConfigFromProto(proto).recall_policy ==
-        RecallPolicy::kAllowLegacyImperfectRecall);
-}
-
 TEST_CASE("postflop roots use full private observation history") {
   SolverConfig config = Config();
   const BettingRules rules{config.big_blind};
@@ -215,7 +202,7 @@ TEST_CASE("strategy storage performs regret matching, averaging, and freezing") 
   const auto& entries = storage.mutable_tables->frozen_info_set_entries;
   CHECK(std::is_sorted(
       entries.begin(), entries.end(), [](const auto& a, const auto& b) {
-        return a.private_id < b.private_id;
+        return a.private_observation < b.private_observation;
       }));
   storage.freeze();
   const auto frozen = store.find_frozen(base_key, 3);
