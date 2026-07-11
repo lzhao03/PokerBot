@@ -448,10 +448,15 @@ CFRSolver::CFRSolver(const SolverConfig& config,
   assert(IsValidBettingData(Data(initial_state_.betting)));
   history_ = BuildHistoryTree(initial_state_.betting, betting_rules_, config_);
   const size_t rows = static_cast<size_t>(config_.max_info_sets());
+  size_t max_actions = 3;
+  for (StreetKind street : {StreetKind::kPreflop, StreetKind::kFlop,
+                            StreetKind::kTurn, StreetKind::kRiver}) {
+    max_actions = std::max(max_actions, config_.bet_sizes(street).size() + 3);
+  }
   state_.rows.reserve(rows);
-  state_.regret_sum.reserve(rows * 4);
+  state_.regret_sum.reserve(rows * max_actions);
   if (config_.accumulate_average_strategy()) {
-    state_.strategy_sum.reserve(rows * 4);
+    state_.strategy_sum.reserve(rows * max_actions);
   }
 }
 

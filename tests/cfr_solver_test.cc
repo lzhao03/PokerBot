@@ -154,6 +154,19 @@ TEST_CASE("training mutates only CFR state") {
   CHECK(CFRSolverTestAccess::state(solver).strategy_sum == before.strategy_sum);
 }
 
+TEST_CASE("training uses preallocated action arrays") {
+  CFRSolver solver(Config());
+  const CfrState& before = CFRSolverTestAccess::state(solver);
+  const size_t regret_capacity = before.regret_sum.capacity();
+  const size_t strategy_capacity = before.strategy_sum.capacity();
+
+  solver.run(4, Deals(R(kA), R(kB)));
+
+  const CfrState& after = CFRSolverTestAccess::state(solver);
+  CHECK(after.regret_sum.capacity() == regret_capacity);
+  CHECK(after.strategy_sum.capacity() == strategy_capacity);
+}
+
 TEST_CASE("infoset action rows are contiguous") {
   CFRSolver solver(Config());
   solver.run(4, Deals(R(kA), R(kB)));

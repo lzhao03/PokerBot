@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <random>
 #include <stdexcept>
 #include <type_traits>
@@ -222,6 +223,10 @@ absl::StatusOr<SolverConfig> SolverConfig::Create(
     return absl::InvalidArgumentError("max_info_sets must be positive");
   }
   for (const auto& street_sizes : options.bet_sizes) {
+    if (street_sizes.size() >
+        std::numeric_limits<uint8_t>::max() - size_t{3}) {
+      return absl::InvalidArgumentError("too many bet sizes");
+    }
     for (double size : street_sizes) {
       if (!std::isfinite(size) || size <= 0.0) {
         return absl::InvalidArgumentError(
