@@ -1,9 +1,11 @@
 #include "src/evaluation.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <random>
 #include <type_traits>
 
@@ -15,12 +17,18 @@ namespace poker {
 namespace {
 
 struct EvaluationFrame {
+  std::array<double, kPlayerCount> reach = {1.0, 1.0};
   std::array<PrivateObservationId, kPlayerCount> private_observations = {};
 };
 
 struct EvaluationCounters {
-  uint64_t lookups = 0;
-  uint64_t missing = 0;
+  std::array<uint64_t, kPlayerCount> lookups = {};
+  std::array<uint64_t, kPlayerCount> missing = {};
+};
+
+struct ProfileEstimate {
+  ValueEstimate value;
+  EvaluationCounters counters;
 };
 
 std::mt19937 MakeEvaluationRng(uint64_t seed) {
@@ -134,9 +142,9 @@ double TraverseProfile(const CFRSolver& game,
           position.history, position.public_state.observation(),
           frame.private_observations[player]};
       absl::InlinedVector<float, 8> probabilities(node.edges.count, 0.0f);
-      ++counters.lookups;
+      ++counters.lookups[player];
       if (!policies[player]->strategy(key, absl::MakeSpan(probabilities))) {
-        ++counters.missing;
+        ++counters.missing[player];
       }
       double value = 0.0;
       for (uint8_t action = 0; action < node.edges.count; ++action) {
@@ -152,21 +160,14 @@ double TraverseProfile(const CFRSolver& game,
 
 }  // namespace
 
-absl::StatusOr<ValueEstimate> EstimateExpectedValue(
+namespace {
+
+ProfileEstimate EstimateProfile(
     const CFRSolver& game,
     const Policy& player_a,
     const Policy& player_b,
     uint64_t samples,
     uint64_t seed) {
-  if (samples == 0) {
-    return absl::InvalidArgumentError("evaluation samples must be positive");
-  }
-  if (player_a.model != game.model_fingerprint() ||
-      player_b.model != game.model_fingerprint()) {
-    return absl::FailedPreconditionError(
-        "policy model does not match game");
-  }
-
   std::mt19937 rng = MakeEvaluationRng(seed);
   const Position root = RootPosition(game);
   const std::array<const Policy*, kPlayerCount> policies = {
@@ -188,8 +189,239 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
                   static_cast<double>(samples - 1) /
                   static_cast<double>(samples))
       : 0.0;
-  return ValueEstimate{mean, standard_error, samples, counters.lookups,
-                       counters.missing};
+  const uint64_t lookups = counters.lookups[0] + counters.lookups[1];
+  const uint64_t missing = counters.missing[0] + counters.missing[1];
+  return {{mean, standard_error, samples, lookups, missing}, counters};
+}
+
+void FillUniform(absl::Span<double> probabilities) {
+  if (!probabilities.empty()) {
+    std::fill(probabilities.begin(), probabilities.end(),
+              1.0 / probabilities.size());
+  }
+}
+
+void RegretMatch(const CfrState& state,
+                 const InfoSetRow* row,
+                 absl::Span<double> probabilities) {
+  if (row == nullptr) {
+    FillUniform(probabilities);
+    return;
+  }
+  double sum = 0.0;
+  for (size_t action = 0; action < probabilities.size(); ++action) {
+    const float regret = state.regret_sum[row->action_offset + action];
+    probabilities[action] = std::max(0.0, static_cast<double>(regret));
+    sum += probabilities[action];
+  }
+  if (sum <= 0.0) {
+    FillUniform(probabilities);
+    return;
+  }
+  for (double& probability : probabilities) probability /= sum;
+}
+
+std::optional<InfoSetRow> FindOrCreateResponseRow(
+    CfrState& state,
+    InfoSetKey key,
+    uint8_t action_count,
+    size_t max_info_sets) {
+  const auto found = state.rows.find(key);
+  if (found != state.rows.end()) return found->second;
+  if (state.rows.size() >= max_info_sets) return std::nullopt;
+  const size_t offset = state.regret_sum.size();
+  state.regret_sum.resize(offset + action_count, 0.0f);
+  state.strategy_sum.resize(offset + action_count, 0.0f);
+  const InfoSetRow row{offset};
+  state.rows.emplace(key, row);
+  return row;
+}
+
+struct ResponseTrainingContext {
+  Player responder = Player::kA;
+  const Policy& opponent;
+  CfrState& state;
+  uint64_t iteration = 0;
+  size_t max_info_sets = 0;
+  bool info_set_limit_reached = false;
+  uint64_t opponent_lookups = 0;
+  uint64_t missing_opponent_lookups = 0;
+};
+
+double TraverseResponse(const CFRSolver& game,
+                        Position position,
+                        EvaluationFrame frame,
+                        const Deal& deal,
+                        std::mt19937& rng,
+                        ResponseTrainingContext& context) {
+  const HistoryTree& history = game.history_tree();
+  return std::visit([&](const auto& node) -> double {
+    using Node = std::decay_t<decltype(node)>;
+    if constexpr (std::is_same_v<Node, FoldTerminalNode>) {
+      return TerminalUtility(node.state, Player::kA);
+    } else if constexpr (std::is_same_v<Node, ShowdownNode>) {
+      const auto* board =
+          std::get_if<RiverBoard>(&position.public_state.board());
+      assert(board != nullptr);
+      return TerminalUtility(node.state, *board, deal.hand(Player::kA),
+                             deal.hand(Player::kB));
+    } else if constexpr (std::is_same_v<Node, ChanceNode>) {
+      double value = 0.0;
+      const int samples = game.solve_spec().config.chance_samples();
+      for (int sample = 0; sample < samples; ++sample) {
+        const Position child = ChanceChild(game, position, deal, rng);
+        EvaluationFrame child_frame = frame;
+        AdvancePrivateObservations(game, child_frame, child, deal);
+        value += TraverseResponse(game, child, child_frame, deal, rng,
+                                  context);
+      }
+      return value / samples;
+    } else {
+      const Player actor = node.state.actor;
+      const size_t player = Index(actor);
+      const InfoSetKey key{
+          position.history, position.public_state.observation(),
+          frame.private_observations[player]};
+      const bool responds = actor == context.responder;
+      std::optional<InfoSetRow> row;
+      absl::InlinedVector<double, 8> probabilities(node.edges.count, 0.0);
+      if (responds) {
+        row = FindOrCreateResponseRow(context.state, key, node.edges.count,
+                                      context.max_info_sets);
+        if (!row) context.info_set_limit_reached = true;
+        const InfoSetRow* strategy_row = row ? &*row : nullptr;
+        RegretMatch(context.state, strategy_row,
+                    absl::MakeSpan(probabilities));
+      } else {
+        absl::InlinedVector<float, 8> stored(node.edges.count, 0.0f);
+        ++context.opponent_lookups;
+        if (!context.opponent.strategy(key, absl::MakeSpan(stored))) {
+          ++context.missing_opponent_lookups;
+        }
+        std::copy(stored.begin(), stored.end(), probabilities.begin());
+      }
+
+      absl::InlinedVector<double, 8> values(node.edges.count, 0.0);
+      double node_value = 0.0;
+      for (uint8_t action = 0; action < node.edges.count; ++action) {
+        EvaluationFrame child_frame = frame;
+        child_frame.reach[player] *= probabilities[action];
+        values[action] = TraverseResponse(
+            game, ActionChild(game, position, action), child_frame, deal, rng,
+            context);
+        node_value += probabilities[action] * values[action];
+      }
+      if (!responds || !row) return node_value;
+
+      const double sign = actor == Player::kA ? 1.0 : -1.0;
+      const double opponent_reach = frame.reach[Index(Opponent(actor))];
+      for (uint8_t action = 0; action < node.edges.count; ++action) {
+        const size_t index = row->action_offset + action;
+        const float delta = static_cast<float>(
+            opponent_reach * sign * (values[action] - node_value));
+        context.state.regret_sum[index] =
+            std::max(0.0f, context.state.regret_sum[index] + delta);
+        context.state.strategy_sum[index] += static_cast<float>(
+            frame.reach[player] * static_cast<double>(context.iteration + 1) *
+            probabilities[action]);
+      }
+      return node_value;
+    }
+  }, history.nodes[position.history.index()]);
+}
+
+}  // namespace
+
+absl::StatusOr<ValueEstimate> EstimateExpectedValue(
+    const CFRSolver& game,
+    const Policy& player_a,
+    const Policy& player_b,
+    uint64_t samples,
+    uint64_t seed) {
+  if (samples == 0) {
+    return absl::InvalidArgumentError("evaluation samples must be positive");
+  }
+  if (player_a.model != game.model_fingerprint() ||
+      player_b.model != game.model_fingerprint()) {
+    return absl::FailedPreconditionError(
+        "policy model does not match game");
+  }
+  return EstimateProfile(game, player_a, player_b, samples, seed).value;
+}
+
+absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
+    const CFRSolver& game,
+    Player responder,
+    const Policy& opponent,
+    const BestResponseConfig& config) {
+  if (config.training_iterations == 0 || config.evaluation_samples == 0) {
+    return absl::InvalidArgumentError(
+        "best-response iteration counts must be positive");
+  }
+  if (opponent.model != game.model_fingerprint()) {
+    return absl::FailedPreconditionError(
+        "opponent policy model does not match game");
+  }
+
+  const SolverConfig& solver_config = game.solve_spec().config;
+  const size_t max_info_sets =
+      static_cast<size_t>(solver_config.max_info_sets());
+  size_t max_actions = 3;
+  for (const auto& fractions :
+       solver_config.bet_abstraction().pot_fractions) {
+    max_actions = std::max(max_actions, fractions.size() + 3);
+  }
+
+  CfrState response_state;
+  response_state.rows.reserve(max_info_sets);
+  response_state.regret_sum.reserve(max_info_sets * max_actions);
+  response_state.strategy_sum.reserve(max_info_sets * max_actions);
+  std::mt19937 rng = MakeEvaluationRng(config.seed);
+  const Position root = RootPosition(game);
+  ResponseTrainingContext context{
+      responder, opponent, response_state, 0, max_info_sets};
+  BestResponseResult result;
+  result.responder = responder;
+  for (uint64_t iteration = 0; iteration < config.training_iterations;
+       ++iteration) {
+    const Deal deal = game.deal_distribution().sample(rng);
+    EvaluationFrame frame = InitialFrame(game, root, deal);
+    context.iteration = iteration;
+    const double value =
+        TraverseResponse(game, root, frame, deal, rng, context);
+    response_state.cumulative_root_utility += value;
+    ++response_state.iterations;
+    ++result.training_iterations_completed;
+    if (context.info_set_limit_reached) {
+      result.stop_reason = TrainingStopReason::kInfoSetLimit;
+      break;
+    }
+  }
+
+  auto response = ExtractAveragePolicy(
+      response_state, game.history_tree(), game.model_fingerprint());
+  if (!response.ok()) return response.status();
+  result.response_policy = std::move(*response);
+  const uint64_t evaluation_seed = config.seed ^ 0x9e3779b97f4a7c15ULL;
+  const Policy& player_a = responder == Player::kA
+                               ? result.response_policy
+                               : opponent;
+  const Policy& player_b = responder == Player::kB
+                               ? result.response_policy
+                               : opponent;
+  const ProfileEstimate estimate = EstimateProfile(
+      game, player_a, player_b, config.evaluation_samples, evaluation_seed);
+  result.value = responder == Player::kA
+                     ? estimate.value.mean
+                     : -estimate.value.mean;
+  result.standard_error = estimate.value.standard_error;
+  const size_t opponent_index = Index(Opponent(responder));
+  result.opponent_policy_lookups =
+      context.opponent_lookups + estimate.counters.lookups[opponent_index];
+  result.missing_opponent_lookups =
+      context.missing_opponent_lookups +
+      estimate.counters.missing[opponent_index];
+  return result;
 }
 
 }  // namespace poker

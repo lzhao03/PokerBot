@@ -144,6 +144,7 @@ TEST_CASE("solver configuration rejects invalid boundary values") {
 
 const ComboId kA = H(14, S::kHearts, 14, S::kSpades);
 const ComboId kB = H(13, S::kClubs, 13, S::kDiamonds);
+const ComboId kC = H(12, S::kClubs, 12, S::kDiamonds);
 
 TEST_CASE("small exact solver baseline is deterministic") {
   auto solver = MakeSolver(
@@ -436,6 +437,57 @@ TEST_CASE("checkpoint restore rejects mismatched and corrupt state") {
   bad_value.state.regret_sum[0] =
       std::numeric_limits<float>::infinity();
   CHECK_FALSE(SaveCheckpoint(bad_value, "invalid.checkpoint").ok());
+}
+
+TEST_CASE("approximate responses are reproducible and respect infosets") {
+  ComboRange opponent_range;
+  opponent_range.add(kB);
+  opponent_range.add(kC);
+  auto game = MakeSolver(Config(), R(kA), opponent_range);
+  game->run(20);
+  const auto opponent = game->extract_average_policy();
+  REQUIRE(opponent.ok());
+
+  const SerializedRngState rng_before = game->checkpoint().rng;
+  const BestResponseConfig config{30, 20, 91};
+  const auto first = TrainApproximateBestResponse(
+      *game, Player::kA, *opponent, config);
+  const auto second = TrainApproximateBestResponse(
+      *game, Player::kA, *opponent, config);
+  REQUIRE(first.ok());
+  REQUIRE(second.ok());
+  CHECK(first->response_policy.rows == second->response_policy.rows);
+  CHECK(first->response_policy.probabilities ==
+        second->response_policy.probabilities);
+  CHECK(first->value == second->value);
+  CHECK(first->standard_error == second->standard_error);
+  CHECK(first->opponent_policy_lookups > 0);
+  CHECK(game->checkpoint().rng == rng_before);
+
+  size_t root_rows = 0;
+  for (const auto& [key, row] : first->response_policy.rows) {
+    (void)row;
+    const auto* node =
+        std::get_if<DecisionNode>(&game->history_tree().nodes[
+            key.history.index()]);
+    REQUIRE(node != nullptr);
+    CHECK(node->state.actor == Player::kA);
+    root_rows += key.history == game->history_tree().root ? 1 : 0;
+  }
+  CHECK(root_rows == 1);
+}
+
+TEST_CASE("approximate response reports infoset capacity") {
+  auto game = MakeSolver(Config(true, 1), R(kA), R(kB));
+  game->run(1);
+  const auto opponent = game->extract_average_policy();
+  REQUIRE(opponent.ok());
+  const auto response = TrainApproximateBestResponse(
+      *game, Player::kA, *opponent, BestResponseConfig{10, 2, 7});
+  REQUIRE(response.ok());
+  CHECK(response->stop_reason == TrainingStopReason::kInfoSetLimit);
+  CHECK(response->training_iterations_completed == 1);
+  CHECK(response->response_policy.rows.size() == 1);
 }
 
 }  // namespace
