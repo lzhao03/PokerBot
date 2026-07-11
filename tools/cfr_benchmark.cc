@@ -1,15 +1,18 @@
 #include "src/solver.h"
+#include "src/evaluation.h"
 
 #include <chrono>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
 #include "absl/flags/usage.h"
 #include "absl/log/initialize.h"
+#include "absl/status/status.h"
 
 #ifndef POKER_BENCHMARK_PROD_DEFAULTS
 #define POKER_BENCHMARK_PROD_DEFAULTS 0
@@ -26,6 +29,16 @@ ABSL_FLAG(int, iterations, kDefaultIterations, "CFR iterations");
 ABSL_FLAG(int, eval_samples, kDefaultEvalSamples, "evaluation samples");
 ABSL_FLAG(std::string, range, kDefaultRange,
           "premium, all, or a poker range");
+ABSL_FLAG(double, training_seconds, 0.0,
+          "train for this wall-clock duration; 0 uses iterations");
+ABSL_FLAG(std::string, private_abstraction, "handcrafted36",
+          "handcrafted36 or equity");
+ABSL_FLAG(std::string, private_recall, "auto",
+          "auto, current, or history");
+ABSL_FLAG(std::string, equity_model, "", "equity model path");
+ABSL_FLAG(uint64_t, evaluation_seed, 1, "policy evaluation seed");
+ABSL_FLAG(uint64_t, best_response_iterations, 0,
+          "approximate best-response iterations; 0 disables it");
 
 namespace {
 
@@ -41,6 +54,43 @@ absl::StatusOr<poker::ComboRange> BenchmarkRange(std::string_view text) {
 
 double Rate(double count, double seconds) {
   return seconds > 0.0 ? count / seconds : 0.0;
+}
+
+absl::StatusOr<poker::SolverConfig> BenchmarkConfig() {
+  poker::SolverConfigOptions options;
+  const std::string kind = absl::GetFlag(FLAGS_private_abstraction);
+  if (kind == "handcrafted36") {
+    options.card_abstraction.private_kind =
+        poker::PrivateAbstractionKind::kHandcrafted36;
+  } else if (kind == "equity") {
+    options.card_abstraction.private_kind =
+        poker::PrivateAbstractionKind::kEquityPotential;
+    const std::string path = absl::GetFlag(FLAGS_equity_model);
+    if (path.empty()) {
+      return absl::InvalidArgumentError(
+          "--equity_model is required for equity abstraction");
+    }
+    auto model = poker::LoadEquityBucketModel(path);
+    if (!model.ok()) return model.status();
+    options.card_abstraction.equity_model = std::move(*model);
+  } else {
+    return absl::InvalidArgumentError("invalid private abstraction");
+  }
+  const std::string recall = absl::GetFlag(FLAGS_private_recall);
+  if (recall == "auto") {
+    options.card_abstraction.recall_mode =
+        kind == "equity" ? poker::RecallMode::kCurrentBucketOnly
+                         : poker::RecallMode::kBucketHistory;
+  } else if (recall == "current") {
+    options.card_abstraction.recall_mode =
+        poker::RecallMode::kCurrentBucketOnly;
+  } else if (recall == "history") {
+    options.card_abstraction.recall_mode =
+        poker::RecallMode::kBucketHistory;
+  } else {
+    return absl::InvalidArgumentError("invalid private recall mode");
+  }
+  return poker::SolverConfig::Create(std::move(options));
 }
 
 template <typename Function>
@@ -59,7 +109,12 @@ int main(int argc, char** argv) {
   absl::SetProgramUsageMessage("Benchmark the heads-up poker CFR solver.");
   absl::ParseCommandLine(argc, argv);
   absl::InitializeLog();
-  const poker::SolverConfig config = poker::SolverConfig::Default();
+  const auto config_result = BenchmarkConfig();
+  if (!config_result.ok()) {
+    std::cerr << "Error: " << config_result.status() << '\n';
+    return 1;
+  }
+  const poker::SolverConfig config = *config_result;
 
   const std::string range = absl::GetFlag(FLAGS_range);
   const auto parsed_range = BenchmarkRange(range);
@@ -94,7 +149,19 @@ int main(int argc, char** argv) {
     return 1;
   }
   const double training_seconds = Measure("train_range", [&] {
-    solver->run(absl::GetFlag(FLAGS_iterations));
+    const double seconds = absl::GetFlag(FLAGS_training_seconds);
+    if (seconds <= 0.0) {
+      solver->run(absl::GetFlag(FLAGS_iterations));
+    } else {
+      const auto deadline = std::chrono::steady_clock::now() +
+          std::chrono::duration<double>(seconds);
+      while (std::chrono::steady_clock::now() < deadline) {
+        if (solver->run(1).stop_reason ==
+            poker::TrainingStopReason::kInfoSetLimit) {
+          break;
+        }
+      }
+    }
     return solver->get_expected_value(poker::Player::kA);
   });
   const auto training = solver->get_stats();
@@ -108,6 +175,8 @@ int main(int argc, char** argv) {
             << "history_nodes\t" << solver->get_history_count() << '\n'
             << "regret_bytes\t" << solver->get_regret_bytes() << '\n'
             << "strategy_bytes\t" << solver->get_strategy_bytes() << '\n';
+  std::cout << "equity_cache_entries\t"
+            << solver->card_abstraction().cache_size() << '\n';
 
   solver->reset_stats();
   Measure("evaluate_range", [&] {
@@ -119,5 +188,41 @@ int main(int argc, char** argv) {
         absl::GetFlag(FLAGS_eval_samples));
     return value.ok() ? *value : 0.0;
   });
+
+  const auto policy = solver->extract_average_policy();
+  if (policy.ok()) {
+    const auto profile = poker::EstimateExpectedValue(
+        *solver, *policy, *policy,
+        static_cast<uint64_t>(absl::GetFlag(FLAGS_eval_samples)),
+        absl::GetFlag(FLAGS_evaluation_seed));
+    if (profile.ok()) {
+      std::cout << "policy_ev\t" << profile->mean << '\n'
+                << "policy_standard_error\t" << profile->standard_error
+                << '\n'
+                << "policy_lookups\t" << profile->policy_lookups << '\n'
+                << "missing_policy_lookups\t"
+                << profile->missing_policy_lookups << '\n';
+    }
+    const uint64_t response_iterations =
+        absl::GetFlag(FLAGS_best_response_iterations);
+    if (response_iterations > 0) {
+      const auto exploitability = poker::EstimateExploitability(
+          *solver, *policy,
+          {response_iterations,
+           static_cast<uint64_t>(absl::GetFlag(FLAGS_eval_samples)),
+           absl::GetFlag(FLAGS_evaluation_seed)});
+      if (exploitability.ok()) {
+        std::cout << "nash_conv\t" << exploitability->nash_conv << '\n'
+                  << "exploitability\t" << exploitability->exploitability
+                  << '\n'
+                  << "missing_response_lookups\t"
+                  << exploitability->player_a_response
+                             .missing_opponent_lookups +
+                         exploitability->player_b_response
+                             .missing_opponent_lookups
+                  << '\n';
+      }
+    }
+  }
   return 0;
 }
