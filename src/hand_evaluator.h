@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "absl/types/span.h"
 #include "src/poker.h"
 
 namespace poker {
@@ -59,28 +58,9 @@ struct HandEvaluation {
   }
 };
 
-class HandEvaluator {
- public:
-  HandEvaluator() = default;
-
-  HandEvaluation evaluate(const std::array<CardId, 5>& cards) const;
-  HandEvaluation evaluate_hand(ComboId hole_cards,
-                               const BoardRunout& board) const;
-
-  uint16_t hand_value(ComboId hand, const BoardRunout& board) const;
-  uint16_t hand_value(
-      ComboId hand,
-      const std::array<CardId, kMaxBoardCards>& board_cards,
-      uint8_t board_count) const;
-
-  int compare_hands(ComboId hand1, ComboId hand2,
-                    const BoardRunout& board) const;
-  int compare_hands(ComboId hand1, ComboId hand2,
-                    const std::array<CardId, kMaxBoardCards>& board_cards,
-                    uint8_t board_count) const;
-
- private:
-  HandEvaluation find_best_hand(absl::Span<const CardId> cards) const;
-};
+HandEvaluation EvaluateFiveCards(const std::array<CardId, 5>& cards);
+int CompareHands(ComboId first,
+                 ComboId second,
+                 const BoardRunout& board);
 
 }  // namespace poker

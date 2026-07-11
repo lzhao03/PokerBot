@@ -31,21 +31,6 @@ class SevenCardHand {
     return hand;
   }
 
-  static SevenCardHand FromHoleAndBoard(
-      ComboId hole_cards,
-      const BoardRunout& board) {
-    return FromHoleAndBoard(hole_cards, board.cards());
-  }
-
-  static SevenCardHand FromHoleAndBoard(
-      ComboId hole_cards,
-      const std::array<CardId, kMaxBoardCards>& board_cards,
-      uint8_t board_count) {
-    return FromHoleAndBoard(
-        hole_cards,
-        absl::Span<const CardId>(board_cards.data(), board_count));
-  }
-
   absl::Span<const CardId> cards() const {
     return {cards_.data(), count_};
   }
@@ -163,6 +148,12 @@ int CompareCactusValues(uint16_t first, uint16_t second) {
   return 0;
 }
 
+uint16_t HandValue(ComboId hand, const BoardRunout& board) {
+  const SevenCardHand cards =
+      SevenCardHand::FromHoleAndBoard(hand, board.cards());
+  return EvalBestCactus(cards.cards());
+}
+
 const hand_evaluator_tables::ScoreRecord& ScoreForCards(
     absl::Span<const CardId> cards) {
   return hand_evaluator_tables::kCactusScores[EvalBestCactus(cards)];
@@ -170,53 +161,15 @@ const hand_evaluator_tables::ScoreRecord& ScoreForCards(
 
 }  // namespace
 
-HandEvaluation HandEvaluator::evaluate(
-    const std::array<CardId, 5>& cards) const {
+HandEvaluation EvaluateFiveCards(const std::array<CardId, 5>& cards) {
   return ToHandEvaluation(ScoreForCards(absl::MakeConstSpan(cards)));
 }
 
-HandEvaluation HandEvaluator::evaluate_hand(
-    ComboId hole_cards,
-    const BoardRunout& board) const {
-  const SevenCardHand cards =
-      SevenCardHand::FromHoleAndBoard(hole_cards, board);
-  return find_best_hand(cards.cards());
-}
-
-uint16_t HandEvaluator::hand_value(ComboId hand, const BoardRunout& board) const {
-  const SevenCardHand cards = SevenCardHand::FromHoleAndBoard(hand, board);
-  return EvalBestCactus(cards.cards());
-}
-
-uint16_t HandEvaluator::hand_value(
-    ComboId hand,
-    const std::array<CardId, kMaxBoardCards>& board_cards,
-    uint8_t board_count) const {
-  const SevenCardHand cards =
-      SevenCardHand::FromHoleAndBoard(hand, board_cards, board_count);
-  return EvalBestCactus(cards.cards());
-}
-
-int HandEvaluator::compare_hands(
-    ComboId hand1,
-    ComboId hand2,
-    const BoardRunout& board) const {
-  return CompareCactusValues(hand_value(hand1, board),
-                             hand_value(hand2, board));
-}
-
-int HandEvaluator::compare_hands(
-    ComboId hand1,
-    ComboId hand2,
-    const std::array<CardId, kMaxBoardCards>& board_cards,
-    uint8_t board_count) const {
-  return CompareCactusValues(hand_value(hand1, board_cards, board_count),
-                             hand_value(hand2, board_cards, board_count));
-}
-
-HandEvaluation HandEvaluator::find_best_hand(
-    absl::Span<const CardId> cards) const {
-  return ToHandEvaluation(ScoreForCards(cards));
+int CompareHands(ComboId first,
+                 ComboId second,
+                 const BoardRunout& board) {
+  return CompareCactusValues(HandValue(first, board),
+                             HandValue(second, board));
 }
 
 }  // namespace poker

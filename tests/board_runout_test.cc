@@ -78,7 +78,7 @@ TEST_CASE("hand evaluator recognizes a royal flush") {
       Card(14, SuitKind::kHearts),
   };
 
-  CHECK(HandEvaluator().evaluate(cards).rank == HandRank::ROYAL_FLUSH);
+  CHECK(EvaluateFiveCards(cards).rank == HandRank::ROYAL_FLUSH);
 }
 
 }  // namespace

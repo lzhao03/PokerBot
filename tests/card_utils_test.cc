@@ -106,8 +106,7 @@ TEST_CASE("combo ids are an exhaustive canonical bijection") {
 }
 
 TEST_CASE("hand evaluator matches an independent five-card oracle") {
-  HandEvaluator evaluator;
-  const auto wheel = evaluator.evaluate(std::array<CardId, 5>{
+  const auto wheel = EvaluateFiveCards(std::array<CardId, 5>{
       C(14, S::kHearts), C(5, S::kDiamonds), C(4, S::kClubs),
       C(3, S::kSpades), C(2, S::kHearts)});
   CHECK(wheel.rank == HandRank::STRAIGHT);
@@ -122,7 +121,7 @@ TEST_CASE("hand evaluator matches an independent five-card oracle") {
     const ComboId b = H(deck[2], deck[3]);
     const BoardRunout board = B({deck[4], deck[5], deck[6], deck[7], deck[8]});
     CAPTURE(trial);
-    CHECK(evaluator.compare_hands(a, b, board) ==
+    CHECK(CompareHands(a, b, board) ==
           ReferenceCompare(a, b, board));
   }
 }

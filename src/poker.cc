@@ -485,7 +485,6 @@ double TerminalUtility(const ExactPublicState& state,
     throw std::invalid_argument("TerminalUtility requires a terminal state");
   }
 
-  static const HandEvaluator evaluator;
   const double player0_committed = state.betting.total_committed[0];
 
   if (state.betting.folded_player >= 0) {
@@ -495,8 +494,8 @@ double TerminalUtility(const ExactPublicState& state,
     return Pot(state.betting) - player0_committed;
   }
 
-  const int comparison =
-      evaluator.compare_hands(player0_hand, player1_hand, state.board);
+  const int comparison = CompareHands(player0_hand, player1_hand,
+                                      state.board);
   if (comparison > 0) {
     return Pot(state.betting) - player0_committed;
   }
