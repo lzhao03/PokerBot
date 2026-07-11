@@ -11,7 +11,6 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "src/card_abstraction.h"
-#include "src/game_state.h"
 #include "src/poker.h"
 
 namespace poker {

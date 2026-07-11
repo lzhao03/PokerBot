@@ -1,7 +1,7 @@
 #include "tests/rules_test_support.h"
 
 #include "doctest/doctest.h"
-#include "src/game_state.h"
+#include "src/poker.h"
 
 namespace poker {
 namespace {

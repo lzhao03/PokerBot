@@ -1,5 +1,4 @@
 #include "src/solver.h"
-#include "src/game_rules.h"
 
 #include "doctest/doctest.h"
 

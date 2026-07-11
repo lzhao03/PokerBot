@@ -1,6 +1,6 @@
 #pragma once
 
-#include "src/game_rules.h"
+#include "src/poker.h"
 
 namespace poker::test {
 

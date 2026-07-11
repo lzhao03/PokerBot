@@ -1,4 +1,4 @@
-#include "src/game_rules.h"
+#include "src/poker.h"
 
 #include "doctest/doctest.h"
 

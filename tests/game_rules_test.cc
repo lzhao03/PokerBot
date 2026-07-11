@@ -1,7 +1,6 @@
 #include "tests/rules_test_support.h"
 
 #include "doctest/doctest.h"
-#include "src/game_rules.h"
 #include "src/poker.h"
 
 #include <algorithm>

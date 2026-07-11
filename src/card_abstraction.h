@@ -13,7 +13,6 @@
 #ifndef POKER_COARSE_PRIVATE_BUCKETS
 #define POKER_COARSE_PRIVATE_BUCKETS 0
 #endif
-#include "src/game_state.h"
 #include "src/poker.h"
 
 namespace poker {

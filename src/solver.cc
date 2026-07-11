@@ -16,7 +16,6 @@
 #include "absl/container/inlined_vector.h"
 #include "absl/log/log.h"
 #include "absl/types/span.h"
-#include "src/game_rules.h"
 
 namespace poker {
 namespace {

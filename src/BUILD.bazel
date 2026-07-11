@@ -9,8 +9,6 @@ cc_library(
         "poker.cc",
     ],
     hdrs = [
-        "game_rules.h",
-        "game_state.h",
         "hand_evaluator.h",
         "poker.h",
     ],

@@ -1,5 +1,5 @@
 #include "doctest/doctest.h"
-#include "src/game_state.h"
+#include "src/poker.h"
 #include "src/hand_evaluator.h"
 
 #include <algorithm>

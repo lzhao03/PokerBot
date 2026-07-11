@@ -6,7 +6,6 @@
 #include <cstdint>
 
 #include "absl/types/span.h"
-#include "src/game_state.h"
 #include "src/poker.h"
 
 namespace poker {
