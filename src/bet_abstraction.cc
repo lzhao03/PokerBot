@@ -19,10 +19,10 @@ AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
   const Chips min_full_raise_to = (highest_to > 0 ? highest_to : current_to) + data.last_full_raise;
   AbstractActions actions;
   if (to_call > 0) {
-    actions.push_back({ActionKind::Fold, 0});
-    actions.push_back({ActionKind::Call, call_to});
+    actions.emplace_back(ActionKind::Fold, 0);
+    actions.emplace_back(ActionKind::Call, call_to);
   } else {
-    actions.push_back({ActionKind::Check, 0});
+    actions.emplace_back(ActionKind::Check, 0);
   }
 
   const ActionKind kind = highest_to > 0 ? ActionKind::Raise : ActionKind::Bet;
@@ -34,7 +34,7 @@ AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
         static_cast<Chips>(std::llround(fraction * pot_after_call)));
     const Chips target = highest_to + raise_by;
     if (target >= min_full_raise_to && target < all_in_to) {
-      actions.push_back({kind, target});
+      actions.emplace_back(kind, target);
     }
   }
 
@@ -45,7 +45,7 @@ AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
             });
   actions.erase(std::unique(actions.begin(), actions.end()), actions.end());
   if (all_in_to > call_to) {
-    actions.push_back({ActionKind::AllIn, all_in_to});
+    actions.emplace_back(ActionKind::AllIn, all_in_to);
   }
 
   for (const GameAction& action : actions) {
