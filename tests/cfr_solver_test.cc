@@ -75,6 +75,10 @@ SolverConfig Config(bool accumulate_average = true,
   options.starting_stack = 8;
   options.small_blind = 1;
   options.big_blind = 2;
+  options.card_abstraction = {
+      PublicCardMode::kExactCanonical,
+      PrivateCardMode::kExactCanonical,
+  };
   for (auto& fractions : options.bet_abstraction.pot_fractions) {
     fractions = {0.5, 1.0};
   }
@@ -96,6 +100,10 @@ TEST_CASE("solver configuration rejects invalid boundary values") {
   options.max_info_sets = 10;
   options.bet_abstraction.pot_fractions[0] = {-0.5};
   CHECK_FALSE(SolverConfig::Create(options).ok());
+
+  const SolverConfig defaults = SolverConfig::Default();
+  CHECK(defaults.card_abstraction().public_mode == PublicCardMode::kTexture);
+  CHECK(defaults.card_abstraction().private_mode == PrivateCardMode::kCoarse);
 }
 
 const ComboId kA = H(14, S::kHearts, 14, S::kSpades);
@@ -224,10 +232,10 @@ TEST_CASE("postflop roots use full observation identity") {
   const Player player =
       std::get<DecisionNode>(tree.nodes[tree.root.index()]).state.actor;
   const ComboId hand = player == Player::kA ? kA : kB;
-  const PublicPosition public_state =
-      PublicPosition::Root(Data(root.betting).street, root.board);
-  const PrivateObservationId private_id =
-      private_observation_for_runout(hand, public_state);
+  const PublicPosition public_state = PublicPosition::Root(
+      config.card_abstraction(), Data(root.betting).street, root.board);
+  const PrivateObservationId private_id = ObservePrivate(
+      config.card_abstraction(), hand, public_state);
   CHECK(CFRSolverTestAccess::state(solver).rows.contains(
       {tree.root, public_state.observation(), private_id}));
 }

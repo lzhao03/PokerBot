@@ -502,7 +502,8 @@ CFRSolver::CFRSolver(const SolverConfig& config,
 
 Position CFRSolver::root_position() const {
   return {history_.root,
-          PublicPosition::Root(Data(initial_state_.betting).street,
+          PublicPosition::Root(config_.card_abstraction(),
+                               Data(initial_state_.betting).street,
                                initial_state_.board)};
 }
 
@@ -533,7 +534,7 @@ Position CFRSolver::sample_chance_child(Position position,
       node->state, position.public_state.board(), *sampled, betting_rules_);
   position.history = node->child;
   position.public_state = position.public_state.after_chance(
-      Data(child.betting).street, child.board);
+      config_.card_abstraction(), Data(child.betting).street, child.board);
   return position;
 }
 
@@ -544,8 +545,8 @@ CFRSolver::private_observations_for_position(
   std::array<PrivateObservationId, kPlayerCount> observations;
   for (size_t player = 0; player < kPlayerCount; ++player) {
     const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
-    observations[player] =
-        private_observation_for_runout(hand, position.public_state);
+    observations[player] = ObservePrivate(
+        config_.card_abstraction(), hand, position.public_state);
   }
   return observations;
 }
@@ -556,10 +557,11 @@ void CFRSolver::advance_private_observations(
     const Position& child) const {
   for (size_t player = 0; player < kPlayerCount; ++player) {
     const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
-    frame.private_observations[player] = advance_private_observation(
-        frame.private_observations[player], hand, child.public_state);
-    assert(frame.private_observations[player] ==
-           private_observation_for_runout(hand, child.public_state));
+    frame.private_observations[player] = AdvancePrivateObservation(
+        config_.card_abstraction(), frame.private_observations[player], hand,
+        child.public_state);
+    assert(frame.private_observations[player] == ObservePrivate(
+               config_.card_abstraction(), hand, child.public_state));
   }
 }
 
@@ -627,8 +629,8 @@ double CFRSolver::traverse(Position position,
           position.history, position.public_state.observation(),
           frame.private_observations[player_index]};
       const ComboId hand = deal.hand(player).combo();
-      assert(key.private_observation ==
-             private_observation_for_runout(hand, position.public_state));
+      assert(key.private_observation == ObservePrivate(
+                 config_.card_abstraction(), hand, position.public_state));
       const bool training = context.mode == TraversalMode::kTrain;
       const bool updates = training && context.update_player == player;
       std::optional<InfoSetRow> row;

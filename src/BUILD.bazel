@@ -50,7 +50,10 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
-SOLVER_SRCS = ["solver.cc"]
+SOLVER_SRCS = [
+    "card_abstraction.cc",
+    "solver.cc",
+]
 SOLVER_HDRS = [
     "card_abstraction.h",
     "solver.h",
@@ -74,24 +77,6 @@ cc_library(
     copts = CORE_COPTS,
     deps = SOLVER_DEPS,
     visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "solver_coarse_private",
-    srcs = SOLVER_SRCS,
-    hdrs = SOLVER_HDRS,
-    copts = CORE_COPTS + ["-DPOKER_COARSE_PRIVATE_BUCKETS=1"],
-    deps = SOLVER_DEPS,
-    visibility = ["//tests:__pkg__"],
-)
-
-cc_library(
-    name = "solver_coarse_public",
-    srcs = SOLVER_SRCS,
-    hdrs = SOLVER_HDRS,
-    copts = CORE_COPTS + ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
-    deps = SOLVER_DEPS,
-    visibility = ["//tests:__pkg__"],
 )
 
 cc_binary(

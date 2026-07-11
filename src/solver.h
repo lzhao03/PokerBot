@@ -19,6 +19,7 @@ namespace poker {
 
 struct SolverConfigOptions {
   BetAbstractionConfig bet_abstraction;
+  CardAbstractionConfig card_abstraction;
   Chips starting_stack = 100;
   Chips small_blind = 1;
   Chips big_blind = 2;
@@ -34,6 +35,9 @@ class SolverConfig {
 
   const BetAbstractionConfig& bet_abstraction() const noexcept {
     return options_.bet_abstraction;
+  }
+  const CardAbstractionConfig& card_abstraction() const noexcept {
+    return options_.card_abstraction;
   }
   Chips starting_stack() const noexcept { return options_.starting_stack; }
   Chips small_blind() const noexcept { return options_.small_blind; }
@@ -126,8 +130,7 @@ struct HistoryTree {
 
 struct Position {
   HistoryId history;
-  PublicPosition public_state =
-      PublicPosition::Root(StreetKind::kPreflop, PreflopBoard{});
+  PublicPosition public_state;
 };
 
 struct InfoSetKey {

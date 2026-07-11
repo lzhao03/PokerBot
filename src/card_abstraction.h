@@ -1,72 +1,32 @@
 #pragma once
 
-#include <algorithm>
 #include <array>
-#include <cassert>
-#include <cstddef>
 #include <cstdint>
 #include <utility>
 
-#ifndef POKER_COARSE_PUBLIC_BUCKETS
-#define POKER_COARSE_PUBLIC_BUCKETS 0
-#endif
-
-#ifndef POKER_COARSE_PRIVATE_BUCKETS
-#define POKER_COARSE_PRIVATE_BUCKETS 0
-#endif
 #include "src/card_canonicalization.h"
 #include "src/poker.h"
 
 namespace poker {
 
-inline constexpr bool kCoarsePublicBuckets =
-    POKER_COARSE_PUBLIC_BUCKETS != 0;
-inline constexpr bool kCoarsePrivateBuckets =
-    POKER_COARSE_PRIVATE_BUCKETS != 0;
-
-static_assert(!(kCoarsePublicBuckets && kCoarsePrivateBuckets),
-              "coarse public and private abstractions are incompatible");
-
 using PrivateBucketId = uint16_t;
 
 inline constexpr uint32_t kCoarsePrivateStreetObservationCount = 36;
 inline constexpr uint32_t kCoarsePublicStreetObservationCount = 108;
-inline constexpr int kPrivateObservationBitsPerStreet = 6;
-inline constexpr int kPublicObservationBitsPerStreet = 7;
 
-static_assert(kCoarsePrivateStreetObservationCount <
-              (uint32_t{1} << kPrivateObservationBitsPerStreet));
-static_assert(kCoarsePublicStreetObservationCount <
-              (uint32_t{1} << kPublicObservationBitsPerStreet));
-
-enum class PostflopStreet : uint8_t {
-  kFlop,
-  kTurn,
-  kRiver,
+enum class PublicCardMode : uint8_t {
+  kExactCanonical,
+  kTexture,
 };
 
-struct ExactChanceObservation {
-  std::array<Card, 3> cards = {};
-  uint8_t count = 0;
-
-  friend bool operator==(const ExactChanceObservation&,
-                         const ExactChanceObservation&) = default;
+enum class PrivateCardMode : uint8_t {
+  kExactCanonical,
+  kCoarse,
 };
 
-struct PublicStreetObservation {
-  // Transitional graph key. Exact-mode histories should use exact_cards.
-  BoardBucketId value = 0;
-  ExactChanceObservation exact_cards;
-
-  friend bool operator==(const PublicStreetObservation&,
-                         const PublicStreetObservation&) = default;
-};
-
-struct PrivateStreetObservation {
-  PrivateBucketId value = 0;
-
-  friend bool operator==(const PrivateStreetObservation&,
-                         const PrivateStreetObservation&) = default;
+struct CardAbstractionConfig {
+  PublicCardMode public_mode = PublicCardMode::kTexture;
+  PrivateCardMode private_mode = PrivateCardMode::kCoarse;
 };
 
 struct BoardFeatures {
@@ -83,9 +43,13 @@ struct BoardFeatures {
 
 class PublicPosition {
  public:
-  static PublicPosition Root(StreetKind street, Board board);
+  static PublicPosition Root(const CardAbstractionConfig& config,
+                             StreetKind street,
+                             Board board);
 
-  PublicPosition after_chance(StreetKind street, Board board) const;
+  PublicPosition after_chance(const CardAbstractionConfig& config,
+                              StreetKind street,
+                              Board board) const;
 
   StreetKind street() const noexcept { return street_; }
   const Board& board() const noexcept { return board_; }
@@ -108,439 +72,27 @@ class PublicPosition {
   BoardFeatures features_;
 };
 
-namespace card_abstraction_detail {
+BoardFeatures BoardFeaturesFor(const Board& board) noexcept;
+BoardBucketId BoardTextureBucket(StreetKind street,
+                                 const BoardFeatures& features) noexcept;
+PrivateBucketId CoarsePrivateBucket(ComboId hand,
+                                    StreetKind street,
+                                    const BoardFeatures& features) noexcept;
 
-inline constexpr int kSuitBuckets = 4;
-inline constexpr int kStraightBuckets = 3;
-inline constexpr int kHighBuckets = 3;
-constexpr uint8_t StraightWindowDensity(uint16_t rank_mask) {
-  uint8_t best = 0;
-  for (int start = 0; start <= 8; ++start) {
-    const uint8_t count = static_cast<uint8_t>(
-        __builtin_popcount(static_cast<unsigned int>((rank_mask >> start) &
-                                                     0x1F)));
-    best = std::max(best, count);
-  }
-  const uint16_t wheel_mask = static_cast<uint16_t>((1u << 12) | 0x0F);
-  const uint8_t wheel_count = static_cast<uint8_t>(
-      __builtin_popcount(static_cast<unsigned int>(rank_mask & wheel_mask)));
-  return std::max(best, wheel_count);
-}
+PublicObservationId ObservePublic(const CardAbstractionConfig& config,
+                                  StreetKind street,
+                                  const Board& board) noexcept;
+PrivateObservationId ObservePrivate(const CardAbstractionConfig& config,
+                                    ComboId hand,
+                                    const PublicPosition& position) noexcept;
 
-constexpr std::array<uint8_t, 8192> BuildStraightDensityTable() {
-  std::array<uint8_t, 8192> table = {};
-  for (size_t mask = 0; mask < table.size(); ++mask) {
-    table[mask] = StraightWindowDensity(static_cast<uint16_t>(mask));
-  }
-  return table;
-}
-
-inline constexpr std::array<uint8_t, 8192> kStraightDensity =
-    BuildStraightDensityTable();
-
-inline int HighRankGroup(int rank) {
-  if (rank >= 14) {
-    return 0;
-  }
-  if (rank >= 12) {
-    return 1;
-  }
-  return rank >= 9 ? 2 : 3;
-}
-
-inline int LowRankGroup(int rank) {
-  if (rank >= 10) {
-    return 0;
-  }
-  return rank >= 7 ? 1 : 2;
-}
-
-inline int HoleStrengthBucket(int high, int low, bool pair, bool suited) {
-  if (pair || high == 14 || (high >= 13 && low >= 10)) {
-    return 0;
-  }
-  const int gap = high - low;
-  if ((high >= 11 && low >= 8) || (suited && gap <= 2)) {
-    return 1;
-  }
-  return 2;
-}
-
-inline int MadeBucket(const ComboInfo& combo, const BoardFeatures& features) {
-  std::array<uint8_t, 13> rank_counts = features.rank_counts;
-  ++rank_counts[static_cast<size_t>(PokerRank(combo.card0) - 2)];
-  ++rank_counts[static_cast<size_t>(PokerRank(combo.card1) - 2)];
-
-  int pairs = 0;
-  int max_count = 0;
-  for (uint8_t count : rank_counts) {
-    if (count >= 2) {
-      ++pairs;
-    }
-    max_count = std::max(max_count, static_cast<int>(count));
-  }
-  if (max_count >= 3) {
-    return 3;
-  }
-  if (pairs >= 2) {
-    return 2;
-  }
-  return pairs == 1 ? 1 : 0;
-}
-
-inline int DrawBucket(const ComboInfo& combo, const BoardFeatures& features) {
-  std::array<uint8_t, 4> suit_counts = features.suit_counts;
-  uint16_t rank_mask = features.rank_mask;
-  auto add_card = [&](Card card) {
-    ++suit_counts[static_cast<size_t>(SuitIndex(CardSuit(card)))];
-    rank_mask |= static_cast<uint16_t>(1u << (PokerRank(card) - 2));
-  };
-  add_card(combo.card0);
-  add_card(combo.card1);
-
-  for (uint8_t count : suit_counts) {
-    if (count >= 4) {
-      return 2;
-    }
-  }
-  return kStraightDensity[rank_mask] >= 4 ? 1 : 0;
-}
-
-}  // namespace card_abstraction_detail
-
-inline BoardFeatures board_features(const Board& board) {
-  BoardFeatures features;
-  features.card_count = BoardCount(board);
-  for (Card card : BoardCards(board)) {
-    const int rank = PokerRank(card);
-    const size_t rank_index = static_cast<size_t>(rank - 2);
-    const size_t suit_index =
-        static_cast<size_t>(SuitIndex(CardSuit(card)));
-    ++features.rank_counts[rank_index];
-    ++features.suit_counts[suit_index];
-    features.max_rank_count =
-        std::max(features.max_rank_count, features.rank_counts[rank_index]);
-    features.max_suit_count =
-        std::max(features.max_suit_count, features.suit_counts[suit_index]);
-    features.max_rank = std::max(features.max_rank, static_cast<uint8_t>(rank));
-    features.rank_mask |= static_cast<uint16_t>(1u << rank_index);
-  }
-  return features;
-}
-
-inline uint8_t straight_density(uint16_t rank_mask) {
-  return card_abstraction_detail::kStraightDensity[rank_mask & 0x1FFF];
-}
-
-inline BoardBucketId board_texture_bucket(
-    StreetKind,
-    const BoardFeatures& features) {
-  if (features.card_count == 0) {
-    return 0;
-  }
-
-  const int paired_bucket = features.max_rank_count >= 3
-                                ? 2
-                                : (features.max_rank_count == 2 ? 1 : 0);
-  int suit_bucket = 0;
-  if (features.max_suit_count >= 4) {
-    suit_bucket = 3;
-  } else if (features.max_suit_count >= 3) {
-    suit_bucket = 2;
-  } else if (features.max_suit_count == 2) {
-    suit_bucket = 1;
-  }
-
-  const int density = straight_density(features.rank_mask);
-  const int straight_bucket = density >= 4 ? 2 : (density >= 3 ? 1 : 0);
-  const int high_bucket = features.max_rank >= 14
-                              ? 0
-                              : (features.max_rank >= 11 ? 1 : 2);
-  const int texture =
-      (((paired_bucket * card_abstraction_detail::kSuitBuckets) +
-        suit_bucket) *
-           card_abstraction_detail::kStraightBuckets +
-       straight_bucket) *
-          card_abstraction_detail::kHighBuckets +
-      high_bucket;
-  return static_cast<BoardBucketId>(texture);
-}
-
-inline constexpr PublicObservationId initial_public_observation() {
-  return PublicObservationId();
-}
-
-constexpr int public_observation_shift(PostflopStreet street) noexcept {
-  return static_cast<int>(street) * kPublicObservationBitsPerStreet;
-}
-
-constexpr PostflopStreet ToPostflopStreet(StreetKind street) noexcept {
-  assert(street != StreetKind::kPreflop);
-  return static_cast<PostflopStreet>(static_cast<int>(street) - 1);
-}
-
-inline PublicStreetObservation current_public_street_observation(
-    PublicObservationId history,
-    StreetKind street) {
-  if (street == StreetKind::kPreflop) {
-    return {};
-  }
-  constexpr uint64_t kSlotMask =
-      (uint64_t{1} << kPublicObservationBitsPerStreet) - 1;
-  const uint64_t encoded =
-      (history.value() >>
-       public_observation_shift(ToPostflopStreet(street))) & kSlotMask;
-  return {encoded == 0 ? 0 : encoded - 1, {}};
-}
-
-inline PublicObservationId advance_public_observation(
-    PublicObservationId previous,
-    StreetKind new_street,
-    PublicStreetObservation current) {
-  assert(current.value < kCoarsePublicStreetObservationCount);
-  assert(new_street != StreetKind::kPreflop);
-  const int shift =
-      public_observation_shift(ToPostflopStreet(new_street));
-  constexpr uint64_t kSlotMask =
-      (uint64_t{1} << kPublicObservationBitsPerStreet) - 1;
-  const uint64_t previous_value = previous.value();
-  const uint64_t slot_mask = kSlotMask << shift;
-  const uint64_t later =
-      previous_value >> (shift + kPublicObservationBitsPerStreet);
-  assert((previous_value & slot_mask) == 0 && later == 0);
-  if (new_street != StreetKind::kFlop) {
-    const int previous_shift = shift - kPublicObservationBitsPerStreet;
-    assert(((previous_value >> previous_shift) & kSlotMask) != 0);
-  }
-  return PublicObservationId(previous_value | ((current.value + 1) << shift));
-}
-
-inline ExactChanceObservation exact_chance_observation(
-    StreetKind street,
-    const Board& board) {
-  constexpr std::array<uint8_t, 4> kOffsets = {0, 0, 3, 4};
-  constexpr std::array<uint8_t, 4> kCounts = {0, 3, 1, 1};
-  ExactChanceObservation observation;
-  const size_t street_index = static_cast<size_t>(street);
-  if (street_index >= kCounts.size()) {
-    return observation;
-  }
-  const size_t offset = kOffsets[street_index];
-  const size_t count = kCounts[street_index];
-  const auto cards = BoardCards(board);
-  if (cards.size() < offset + count) {
-    return observation;
-  }
-  std::copy_n(cards.begin() + offset, count, observation.cards.begin());
-  observation.count = static_cast<uint8_t>(count);
-  return observation;
-}
-
-inline PublicStreetObservation observe_public_street(
-    StreetKind street,
-    const Board& board,
-    const BoardFeatures& features) {
-  if constexpr (kCoarsePublicBuckets) {
-    return {board_texture_bucket(street, features), {}};
-  } else {
-    return {0, exact_chance_observation(street, board)};
-  }
-}
-
-inline PublicStreetObservation observe_public_street(
-    StreetKind street,
-    const Board& board) {
-  return observe_public_street(street, board, board_features(board));
-}
-
-inline PublicObservationId public_observation_after_chance(
-    PublicObservationId previous,
-    StreetKind new_street,
-    const Board& board) {
-  if constexpr (kCoarsePublicBuckets) {
-    return advance_public_observation(
-        previous, new_street, observe_public_street(new_street, board));
-  }
-  return CanonicalPublicObservation(board);
-}
-
-inline PublicObservationId public_observation_id(
-    StreetKind street,
-    const Board& board) {
-  if constexpr (kCoarsePublicBuckets) {
-    PublicObservationId history = initial_public_observation();
-    if (street == StreetKind::kPreflop) {
-      return history;
-    }
-
-    const auto cards = BoardCards(board);
-    const std::array<Card, 3> flop_cards = {cards[0], cards[1], cards[2]};
-    const FlopBoard flop = DealFlop(PreflopBoard{}, flop_cards);
-    history = advance_public_observation(
-        history, StreetKind::kFlop,
-        observe_public_street(StreetKind::kFlop, Board{flop}));
-    if (street == StreetKind::kFlop) {
-      return history;
-    }
-
-    const TurnBoard turn = DealTurn(flop, cards[3]);
-    history = advance_public_observation(
-        history, StreetKind::kTurn,
-        observe_public_street(StreetKind::kTurn, Board{turn}));
-    if (street == StreetKind::kTurn) {
-      return history;
-    }
-
-    const RiverBoard river = DealRiver(turn, cards[4]);
-    return advance_public_observation(
-        history, StreetKind::kRiver,
-        observe_public_street(StreetKind::kRiver, Board{river}));
-  }
-  return CanonicalPublicObservation(board);
-}
-
-inline PublicPosition PublicPosition::Root(StreetKind street, Board board) {
-  const BoardFeatures features = board_features(board);
-  const PublicObservationId observation = public_observation_id(street, board);
-  return PublicPosition(street, std::move(board), observation, features);
-}
-
-inline PublicPosition PublicPosition::after_chance(
-    StreetKind street,
-    Board board) const {
-  const BoardFeatures features = board_features(board);
-  const PublicObservationId observation = public_observation_after_chance(
-      observation_, street, board);
-  return PublicPosition(street, std::move(board), observation, features);
-}
-
-namespace card_abstraction_detail {
-
-inline PrivateBucketId CoarsePrivateBucket(
-    ComboId combo_id,
-    StreetKind street,
-    const BoardFeatures& features) {
-  const ComboInfo& combo = GetComboInfo(combo_id);
-  const int rank0 = PokerRank(combo.card0);
-  const int rank1 = PokerRank(combo.card1);
-  const int high = rank0 > rank1 ? rank0 : rank1;
-  const int low = rank0 > rank1 ? rank1 : rank0;
-  const bool pair = rank0 == rank1;
-  const bool suited = CardSuit(combo.card0) ==
-                      CardSuit(combo.card1);
-
-  if (street == StreetKind::kPreflop || features.card_count == 0) {
-    const int shape = pair ? 0 : (suited ? 1 : 2);
-    return static_cast<PrivateBucketId>(
-        shape * 12 + card_abstraction_detail::HighRankGroup(high) * 3 +
-        card_abstraction_detail::LowRankGroup(low));
-  }
-
-  const int local_bucket =
-      card_abstraction_detail::MadeBucket(combo, features) * 9 +
-      card_abstraction_detail::DrawBucket(combo, features) * 3 +
-      card_abstraction_detail::HoleStrengthBucket(high, low, pair, suited);
-  return static_cast<PrivateBucketId>(local_bucket);
-}
-
-}  // namespace card_abstraction_detail
-
-inline PrivateStreetObservation observe_private_street(
-    ComboId combo_id,
-    StreetKind street,
-    const BoardFeatures& features) {
-  if constexpr (kCoarsePrivateBuckets) {
-    return {card_abstraction_detail::CoarsePrivateBucket(
-        combo_id, street, features)};
-  } else {
-    return {static_cast<PrivateBucketId>(combo_id.index())};
-  }
-}
-
-inline PrivateStreetObservation observe_private_street(
-    ComboId combo_id,
-    StreetKind street,
-    const Board& board) {
-  return observe_private_street(combo_id, street, board_features(board));
-}
-
-inline PrivateObservationId exact_private_observation(
-    ComboId hand,
-    const Board& board) {
-  return CanonicalizeObservation(hand, board).private_observation;
-}
-
-inline PrivateObservationId initial_private_observation(ComboId hand) {
-  if constexpr (!kCoarsePrivateBuckets) {
-    return exact_private_observation(hand, Board{PreflopBoard{}});
-  }
-  const auto preflop = observe_private_street(
-      hand, StreetKind::kPreflop, Board{PreflopBoard{}});
-  return PrivateObservationId(preflop.value + 1);
-}
-
-inline PrivateObservationId advance_private_observation(
+PrivateObservationId InitialPrivateObservation(
+    const CardAbstractionConfig& config,
+    ComboId hand) noexcept;
+PrivateObservationId AdvancePrivateObservation(
+    const CardAbstractionConfig& config,
     PrivateObservationId previous,
     ComboId hand,
-    const PublicPosition& child) {
-  const StreetKind new_street = child.street();
-  assert(new_street != StreetKind::kPreflop);
-  if constexpr (!kCoarsePrivateBuckets) {
-    return exact_private_observation(hand, child.board());
-  }
-
-  const auto current = observe_private_street(
-      hand, new_street, child.features());
-  assert(current.value < kCoarsePrivateStreetObservationCount);
-  constexpr uint64_t kSlotMask =
-      (uint64_t{1} << kPrivateObservationBitsPerStreet) - 1;
-  const int shift = static_cast<int>(new_street) *
-                    kPrivateObservationBitsPerStreet;
-  const uint64_t previous_value = previous.value();
-  const uint64_t slot_mask = kSlotMask << shift;
-  const uint64_t later =
-      previous_value >> (shift + kPrivateObservationBitsPerStreet);
-  const uint64_t prior =
-      (previous_value >> (shift - kPrivateObservationBitsPerStreet)) &
-      kSlotMask;
-  assert((previous_value & slot_mask) == 0 && later == 0 && prior != 0);
-  const uint64_t encoded =
-      (uint64_t{current.value} + 1) << static_cast<unsigned>(shift);
-  return PrivateObservationId(previous_value | encoded);
-}
-
-inline PrivateObservationId private_observation_for_runout(
-    ComboId hand,
-    const PublicPosition& position) {
-  const StreetKind street = position.street();
-  if constexpr (!kCoarsePrivateBuckets) {
-    return exact_private_observation(hand, position.board());
-  }
-
-  PrivateObservationId observation = initial_private_observation(hand);
-  if (street == StreetKind::kPreflop) {
-    return observation;
-  }
-  const auto cards = BoardCards(position.board());
-  const std::array<Card, 3> flop_cards = {cards[0], cards[1], cards[2]};
-  const FlopBoard flop = DealFlop(PreflopBoard{}, flop_cards);
-  observation = advance_private_observation(
-      observation, hand,
-      PublicPosition::Root(StreetKind::kFlop, Board{flop}));
-  if (street == StreetKind::kFlop) {
-    return observation;
-  }
-  const TurnBoard turn = DealTurn(flop, cards[3]);
-  observation = advance_private_observation(
-      observation, hand,
-      PublicPosition::Root(StreetKind::kTurn, Board{turn}));
-  if (street == StreetKind::kTurn) {
-    return observation;
-  }
-  const RiverBoard river = DealRiver(turn, cards[4]);
-  return advance_private_observation(
-      observation, hand,
-      PublicPosition::Root(StreetKind::kRiver, Board{river}));
-}
+    const PublicPosition& child) noexcept;
 
 }  // namespace poker

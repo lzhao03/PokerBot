@@ -1,6 +1,7 @@
 #include "src/card_abstraction.h"
 #include "src/hand_evaluator.h"
 #include "src/poker.h"
+#include "src/solver.h"
 #include "tools/hand_evaluator_table_builder.h"
 
 #include "doctest/doctest.h"
@@ -156,20 +157,19 @@ TEST_CASE("sampling and card abstractions preserve identity") {
     }
     const Board reversed = Runout(
         absl::Span<const Card>(permuted.data(), BoardCount(board)));
-    const BoardFeatures features = board_features(board);
-    CHECK(board_features(reversed) == features);
-    CHECK(board_texture_bucket(street, features) ==
-          board_texture_bucket(street, board_features(reversed)));
-    const PrivateStreetObservation private_observation =
-        observe_private_street(hand, street, features);
-    CHECK(private_observation.value == hand.index());
+    const BoardFeatures features = BoardFeaturesFor(board);
+    CHECK(BoardFeaturesFor(reversed) == features);
+    CHECK(BoardTextureBucket(street, features) ==
+          BoardTextureBucket(street, BoardFeaturesFor(reversed)));
+    CHECK(CoarsePrivateBucket(hand, street, features) <
+          kCoarsePrivateStreetObservationCount);
 
     std::array<S, 4> suits = {
         S::kHearts, S::kDiamonds, S::kClubs, S::kSpades};
     std::shuffle(suits.begin(), suits.end(), rng);
     const Board renamed_board = Rename(board, suits);
-    CHECK(board_texture_bucket(street, features) ==
-          board_texture_bucket(street, board_features(renamed_board)));
+    CHECK(BoardTextureBucket(street, features) ==
+          BoardTextureBucket(street, BoardFeaturesFor(renamed_board)));
 
     const auto sampled_result =
         SampleStreetCards(street, board, ComboMask(hand), rng);
@@ -263,6 +263,75 @@ TEST_CASE("canonical observation counts match holdem suit isomorphisms") {
     }
   }
   CHECK(public_observations.size() == 1755);
+}
+
+TEST_CASE("all abstraction modes preserve observation history") {
+  const std::array<CardAbstractionConfig, 4> configs = {{
+      {PublicCardMode::kExactCanonical, PrivateCardMode::kExactCanonical},
+      {PublicCardMode::kExactCanonical, PrivateCardMode::kCoarse},
+      {PublicCardMode::kTexture, PrivateCardMode::kExactCanonical},
+      {PublicCardMode::kTexture, PrivateCardMode::kCoarse},
+  }};
+  const ComboId hand = H(C(14, S::kHearts), C(13, S::kSpades));
+  const FlopBoard flop = DealFlop(
+      PreflopBoard{},
+      {C(2, S::kHearts), C(7, S::kHearts), C(12, S::kClubs)});
+  const TurnBoard turn = DealTurn(flop, C(9, S::kDiamonds));
+  const RiverBoard river = DealRiver(turn, C(4, S::kSpades));
+
+  for (const CardAbstractionConfig& config : configs) {
+    CAPTURE(static_cast<int>(config.public_mode));
+    CAPTURE(static_cast<int>(config.private_mode));
+    PublicPosition position = PublicPosition::Root(
+        config, StreetKind::kPreflop, Board{PreflopBoard{}});
+    PrivateObservationId private_id =
+        InitialPrivateObservation(config, hand);
+
+    for (const auto& [street, board] : {
+             std::pair{StreetKind::kFlop, Board{flop}},
+             std::pair{StreetKind::kTurn, Board{turn}},
+             std::pair{StreetKind::kRiver, Board{river}},
+         }) {
+      position = position.after_chance(config, street, board);
+      private_id =
+          AdvancePrivateObservation(config, private_id, hand, position);
+      CHECK(position.observation() == ObservePublic(config, street, board));
+      CHECK(private_id == ObservePrivate(config, hand, position));
+    }
+
+    const std::array<S, 4> renamed_suits = {
+        S::kClubs, S::kSpades, S::kHearts, S::kDiamonds};
+    const Board renamed_board = Rename(Board{river}, renamed_suits);
+    const ComboId renamed_hand = Rename(hand, renamed_suits);
+    const PublicPosition renamed = PublicPosition::Root(
+        config, StreetKind::kRiver, renamed_board);
+    CHECK(renamed.observation() == position.observation());
+    CHECK(ObservePrivate(config, renamed_hand, renamed) == private_id);
+  }
+}
+
+TEST_CASE("coarse public exact private keeps relative flush information") {
+  const CardAbstractionConfig config{
+      PublicCardMode::kTexture, PrivateCardMode::kExactCanonical};
+  const Board board = B({C(2, S::kHearts), C(7, S::kHearts),
+                         C(12, S::kClubs)});
+  const ComboId hand = H(C(14, S::kHearts), C(13, S::kSpades));
+  const PublicPosition position =
+      PublicPosition::Root(config, StreetKind::kFlop, board);
+
+  const std::array<S, 4> suits = {
+      S::kDiamonds, S::kClubs, S::kSpades, S::kHearts};
+  const Board renamed_board = Rename(board, suits);
+  const ComboId renamed_hand = Rename(hand, suits);
+  const PublicPosition renamed =
+      PublicPosition::Root(config, StreetKind::kFlop, renamed_board);
+
+  const InfoSetKey key{HistoryId(7), position.observation(),
+                       ObservePrivate(config, hand, position)};
+  const InfoSetKey renamed_key{
+      HistoryId(7), renamed.observation(),
+      ObservePrivate(config, renamed_hand, renamed)};
+  CHECK(key == renamed_key);
 }
 
 }  // namespace
