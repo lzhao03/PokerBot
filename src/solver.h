@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <random>
@@ -11,6 +12,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "src/bet_abstraction.h"
 #include "src/card_abstraction.h"
@@ -176,6 +178,30 @@ struct CfrState {
   double cumulative_root_utility = 0.0;
 };
 
+struct PolicyRow {
+  size_t action_offset = 0;
+  uint8_t action_count = 0;
+
+  friend bool operator==(const PolicyRow&, const PolicyRow&) = default;
+};
+
+struct Policy {
+  absl::flat_hash_map<InfoSetKey, PolicyRow> rows;
+  std::vector<float> probabilities;
+  ModelFingerprint model;
+
+  bool strategy(InfoSetKey key, absl::Span<float> output) const;
+};
+
+struct PolicyEvaluationResult {
+  double value = 0.0;
+  uint64_t missing_lookups = 0;
+};
+
+absl::Status SavePolicy(const Policy& policy,
+                        const std::filesystem::path& path);
+absl::StatusOr<Policy> LoadPolicy(const std::filesystem::path& path);
+
 struct SolverStats {
   uint64_t decision_visits = 0;
   uint64_t chance_samples = 0;
@@ -238,6 +264,14 @@ class CFRSolver {
   absl::StatusOr<double> evaluate_average(HoleCards player_a,
                                           HoleCards player_b);
   absl::StatusOr<double> evaluate_average(int samples);
+  absl::StatusOr<Policy> extract_average_policy() const;
+  absl::StatusOr<PolicyEvaluationResult> evaluate_policy(
+      const Policy& policy,
+      HoleCards player_a,
+      HoleCards player_b);
+  absl::StatusOr<PolicyEvaluationResult> evaluate_policy(
+      const Policy& policy,
+      int samples);
 
   double get_expected_value(Player player) const;
   uint64_t get_iterations_run() const { return state_.iterations; }
@@ -270,6 +304,7 @@ class CFRSolver {
     kTrain,
     kEvaluateCurrent,
     kEvaluateAverage,
+    kEvaluatePolicy,
   };
 
   struct TraversalContext {
@@ -278,6 +313,8 @@ class CFRSolver {
     std::optional<Player> update_player;
     uint64_t iteration = 0;
     bool info_set_limit_reached = false;
+    const Policy* policy = nullptr;
+    uint64_t missing_policy_lookups = 0;
   };
 
   Position root_position() const;

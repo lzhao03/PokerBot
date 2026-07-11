@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -18,6 +21,7 @@ struct CFRSolverTestAccess {
   static const CfrState& state(const CFRSolver& solver) {
     return solver.state_;
   }
+  static CfrState& state(CFRSolver& solver) { return solver.state_; }
 };
 
 namespace {
@@ -295,6 +299,74 @@ TEST_CASE("average strategy storage is optional") {
       solver->evaluate_current(HoleCards(kA), HoleCards(kB))));
   CHECK_FALSE(
       solver->evaluate_average(HoleCards(kA), HoleCards(kB)).ok());
+}
+
+TEST_CASE("average policies are normalized and persist exactly") {
+  auto solver = MakeSolver(Config(), R(kA), R(kB));
+  solver->run(4);
+  const auto extracted = solver->extract_average_policy();
+  REQUIRE(extracted.ok());
+  const Policy policy = *extracted;
+  REQUIRE_FALSE(policy.rows.empty());
+  for (const auto& [key, row] : policy.rows) {
+    std::vector<float> probabilities(row.action_count);
+    CHECK(policy.strategy(key, absl::MakeSpan(probabilities)));
+    double sum = 0.0;
+    for (float probability : probabilities) sum += probability;
+    CHECK(sum == doctest::Approx(1.0));
+  }
+
+  std::array<float, 3> missing = {};
+  CHECK_FALSE(policy.strategy(
+      {HistoryId(std::numeric_limits<uint32_t>::max()),
+       PublicObservationId(), PrivateObservationId()},
+      absl::MakeSpan(missing)));
+  for (float probability : missing) {
+    CHECK(probability == doctest::Approx(1.0 / missing.size()));
+  }
+
+  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
+  REQUIRE(test_tmpdir != nullptr);
+  const std::filesystem::path path =
+      std::filesystem::path(test_tmpdir) / "average.policy";
+  REQUIRE(SavePolicy(policy, path).ok());
+  const auto loaded = LoadPolicy(path);
+  REQUIRE(loaded.ok());
+  CHECK(loaded->model == policy.model);
+  CHECK(loaded->rows == policy.rows);
+  CHECK(loaded->probabilities == policy.probabilities);
+
+  const auto evaluated =
+      solver->evaluate_policy(policy, HoleCards(kA), HoleCards(kB));
+  REQUIRE(evaluated.ok());
+  CHECK(std::isfinite(evaluated->value));
+
+  Policy empty;
+  empty.model = policy.model;
+  const auto fallback =
+      solver->evaluate_policy(empty, HoleCards(kA), HoleCards(kB));
+  REQUIRE(fallback.ok());
+  CHECK(fallback->missing_lookups > 0);
+
+  auto different = MakeSolver(Config(), R(kB), R(kA));
+  CHECK_FALSE(different->evaluate_policy(
+      policy, HoleCards(kA), HoleCards(kB)).ok());
+}
+
+TEST_CASE("zero average mass extracts as uniform policy") {
+  auto solver = MakeSolver(Config(), R(kA), R(kB));
+  solver->run(1);
+  CfrState& state = CFRSolverTestAccess::state(*solver);
+  std::fill(state.strategy_sum.begin(), state.strategy_sum.end(), 0.0f);
+  const auto extracted = solver->extract_average_policy();
+  REQUIRE(extracted.ok());
+  for (const auto& [key, row] : extracted->rows) {
+    std::vector<float> probabilities(row.action_count);
+    REQUIRE(extracted->strategy(key, absl::MakeSpan(probabilities)));
+    for (float probability : probabilities) {
+      CHECK(probability == doctest::Approx(1.0 / row.action_count));
+    }
+  }
 }
 
 }  // namespace

@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
+#include <fstream>
 #include <limits>
 #include <optional>
 #include <type_traits>
@@ -292,6 +293,131 @@ ModelFingerprint FingerprintModel(const SolveSpec& spec,
     hash.add_u32(edge.child.value());
   }
   return hash.finish();
+}
+
+using Bytes = std::vector<uint8_t>;
+
+void AppendU8(Bytes& bytes, uint8_t value) {
+  bytes.push_back(value);
+}
+
+void AppendU32(Bytes& bytes, uint32_t value) {
+  for (size_t index = 0; index < 4; ++index) {
+    bytes.push_back(
+        static_cast<uint8_t>(value >> static_cast<unsigned>(index * 8)));
+  }
+}
+
+void AppendU64(Bytes& bytes, uint64_t value) {
+  for (size_t index = 0; index < 8; ++index) {
+    bytes.push_back(
+        static_cast<uint8_t>(value >> static_cast<unsigned>(index * 8)));
+  }
+}
+
+void AppendFingerprint(Bytes& bytes, ModelFingerprint fingerprint) {
+  for (std::byte byte : fingerprint.bytes) {
+    bytes.push_back(std::to_integer<uint8_t>(byte));
+  }
+}
+
+class ByteReader {
+ public:
+  explicit ByteReader(absl::Span<const uint8_t> bytes) : bytes_(bytes) {}
+
+  std::optional<uint8_t> read_u8() {
+    if (remaining() < 1) return std::nullopt;
+    return bytes_[offset_++];
+  }
+
+  std::optional<uint32_t> read_u32() {
+    if (remaining() < 4) return std::nullopt;
+    uint32_t value = 0;
+    for (size_t index = 0; index < 4; ++index) {
+      value |= static_cast<uint32_t>(bytes_[offset_++])
+               << static_cast<unsigned>(index * 8);
+    }
+    return value;
+  }
+
+  std::optional<uint64_t> read_u64() {
+    if (remaining() < 8) return std::nullopt;
+    uint64_t value = 0;
+    for (size_t index = 0; index < 8; ++index) {
+      value |= static_cast<uint64_t>(bytes_[offset_++])
+               << static_cast<unsigned>(index * 8);
+    }
+    return value;
+  }
+
+  std::optional<ModelFingerprint> read_fingerprint() {
+    if (remaining() < ModelFingerprint{}.bytes.size()) return std::nullopt;
+    ModelFingerprint fingerprint;
+    for (std::byte& byte : fingerprint.bytes) {
+      byte = static_cast<std::byte>(bytes_[offset_++]);
+    }
+    return fingerprint;
+  }
+
+  size_t remaining() const { return bytes_.size() - offset_; }
+
+ private:
+  absl::Span<const uint8_t> bytes_;
+  size_t offset_ = 0;
+};
+
+absl::Status WriteBytes(const std::filesystem::path& path,
+                        absl::Span<const uint8_t> bytes) {
+  std::filesystem::path temporary = path;
+  temporary += ".tmp";
+  std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+  if (!output) {
+    return absl::UnavailableError("could not open output file");
+  }
+  output.write(reinterpret_cast<const char*>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+  output.close();
+  if (!output) {
+    std::error_code ignored;
+    std::filesystem::remove(temporary, ignored);
+    return absl::DataLossError("could not write output file");
+  }
+  std::error_code error;
+  std::filesystem::rename(temporary, path, error);
+  if (error) {
+    std::filesystem::remove(temporary, error);
+    return absl::UnavailableError("could not replace output file");
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<Bytes> ReadBytes(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary | std::ios::ate);
+  if (!input) {
+    return absl::NotFoundError("could not open input file");
+  }
+  const std::streamoff end = input.tellg();
+  if (end < 0 || static_cast<uint64_t>(end) >
+                     std::numeric_limits<size_t>::max()) {
+    return absl::DataLossError("invalid input file size");
+  }
+  Bytes bytes(static_cast<size_t>(end));
+  input.seekg(0);
+  input.read(reinterpret_cast<char*>(bytes.data()), end);
+  if (!input) {
+    return absl::DataLossError("could not read input file");
+  }
+  return bytes;
+}
+
+bool KeyLess(const InfoSetKey& left, const InfoSetKey& right) {
+  if (left.history != right.history) {
+    return left.history < right.history;
+  }
+  if (left.public_observation != right.public_observation) {
+    return left.public_observation < right.public_observation;
+  }
+  return left.private_observation < right.private_observation;
 }
 
 constexpr int kHandTypeCount = 169;
@@ -643,6 +769,152 @@ void AddStrategySum(CfrState& state,
 
 }  // namespace
 
+bool Policy::strategy(InfoSetKey key, absl::Span<float> output) const {
+  const auto found = rows.find(key);
+  if (found == rows.end() || found->second.action_count != output.size() ||
+      found->second.action_offset + output.size() > probabilities.size()) {
+    if (!output.empty()) {
+      std::fill(output.begin(), output.end(), 1.0f / output.size());
+    }
+    return false;
+  }
+  const size_t offset = found->second.action_offset;
+  std::copy_n(probabilities.begin() + static_cast<ptrdiff_t>(offset),
+              output.size(), output.begin());
+  return true;
+}
+
+namespace {
+
+absl::Status ValidatePolicy(const Policy& policy) {
+  std::vector<PolicyRow> rows;
+  rows.reserve(policy.rows.size());
+  for (const auto& [key, row] : policy.rows) {
+    (void)key;
+    if (row.action_count == 0 ||
+        row.action_offset + row.action_count > policy.probabilities.size()) {
+      return absl::DataLossError("invalid policy row span");
+    }
+    double sum = 0.0;
+    for (size_t action = 0; action < row.action_count; ++action) {
+      const float probability =
+          policy.probabilities[row.action_offset + action];
+      if (!std::isfinite(probability) || probability < 0.0f ||
+          probability > 1.0f) {
+        return absl::DataLossError("invalid policy probability");
+      }
+      sum += probability;
+    }
+    if (std::abs(sum - 1.0) > 1e-5) {
+      return absl::DataLossError("policy row is not normalized");
+    }
+    rows.push_back(row);
+  }
+  std::sort(rows.begin(), rows.end(), [](PolicyRow left, PolicyRow right) {
+    return left.action_offset < right.action_offset;
+  });
+  size_t offset = 0;
+  for (PolicyRow row : rows) {
+    if (row.action_offset != offset) {
+      return absl::DataLossError("policy rows are not contiguous");
+    }
+    offset += row.action_count;
+  }
+  return offset == policy.probabilities.size()
+             ? absl::OkStatus()
+             : absl::DataLossError("policy array size does not match rows");
+}
+
+constexpr std::array<uint8_t, 8> kPolicyMagic = {
+    'P', 'K', 'P', 'O', 'L', 'C', 'Y', '1'};
+
+}  // namespace
+
+absl::Status SavePolicy(const Policy& policy,
+                        const std::filesystem::path& path) {
+  const absl::Status valid = ValidatePolicy(policy);
+  if (!valid.ok()) return valid;
+
+  std::vector<std::pair<InfoSetKey, PolicyRow>> rows(
+      policy.rows.begin(), policy.rows.end());
+  std::sort(rows.begin(), rows.end(), [](const auto& left, const auto& right) {
+    return KeyLess(left.first, right.first);
+  });
+
+  Bytes bytes;
+  bytes.insert(bytes.end(), kPolicyMagic.begin(), kPolicyMagic.end());
+  AppendU32(bytes, 1);
+  AppendFingerprint(bytes, policy.model);
+  AppendU64(bytes, rows.size());
+  AppendU64(bytes, policy.probabilities.size());
+  for (const auto& [key, row] : rows) {
+    AppendU32(bytes, key.history.value());
+    AppendU64(bytes, key.public_observation.value());
+    AppendU64(bytes, key.private_observation.value());
+    AppendU64(bytes, row.action_offset);
+    AppendU8(bytes, row.action_count);
+  }
+  for (float probability : policy.probabilities) {
+    AppendU32(bytes, std::bit_cast<uint32_t>(probability));
+  }
+  return WriteBytes(path, bytes);
+}
+
+absl::StatusOr<Policy> LoadPolicy(const std::filesystem::path& path) {
+  const auto file = ReadBytes(path);
+  if (!file.ok()) return file.status();
+  ByteReader reader(*file);
+  for (uint8_t expected : kPolicyMagic) {
+    const auto actual = reader.read_u8();
+    if (!actual || *actual != expected) {
+      return absl::DataLossError("invalid policy file magic");
+    }
+  }
+  const auto version = reader.read_u32();
+  const auto model = reader.read_fingerprint();
+  const auto row_count = reader.read_u64();
+  const auto probability_count = reader.read_u64();
+  if (!version || *version != 1 || !model || !row_count ||
+      !probability_count || *row_count > reader.remaining() / 29 ||
+      *probability_count > reader.remaining() / sizeof(float)) {
+    return absl::DataLossError("invalid policy file header");
+  }
+
+  Policy policy;
+  policy.model = *model;
+  policy.rows.reserve(static_cast<size_t>(*row_count));
+  for (uint64_t index = 0; index < *row_count; ++index) {
+    const auto history = reader.read_u32();
+    const auto public_observation = reader.read_u64();
+    const auto private_observation = reader.read_u64();
+    const auto offset = reader.read_u64();
+    const auto action_count = reader.read_u8();
+    if (!history || !public_observation || !private_observation || !offset ||
+        !action_count || *offset > std::numeric_limits<size_t>::max()) {
+      return absl::DataLossError("truncated policy row");
+    }
+    const InfoSetKey key{HistoryId(*history),
+                         PublicObservationId(*public_observation),
+                         PrivateObservationId(*private_observation)};
+    const PolicyRow row{static_cast<size_t>(*offset), *action_count};
+    if (!policy.rows.emplace(key, row).second) {
+      return absl::DataLossError("duplicate policy row");
+    }
+  }
+  policy.probabilities.resize(static_cast<size_t>(*probability_count));
+  for (float& probability : policy.probabilities) {
+    const auto bits = reader.read_u32();
+    if (!bits) return absl::DataLossError("truncated policy probabilities");
+    probability = std::bit_cast<float>(*bits);
+  }
+  if (reader.remaining() != 0) {
+    return absl::DataLossError("trailing policy data");
+  }
+  const absl::Status valid = ValidatePolicy(policy);
+  if (!valid.ok()) return valid;
+  return policy;
+}
+
 absl::StatusOr<SolverConfig> SolverConfig::Create(
     SolverConfigOptions options) {
   if (options.starting_stack <= 0 || options.small_blind <= 0 ||
@@ -921,7 +1193,14 @@ double CFRSolver::traverse(Position position,
 
       absl::InlinedVector<double, 8> probabilities(action_count, 0.0);
       absl::InlinedVector<double, 8> values(action_count, 0.0);
-      if (context.mode == TraversalMode::kEvaluateAverage) {
+      if (context.mode == TraversalMode::kEvaluatePolicy) {
+        assert(context.policy != nullptr);
+        absl::InlinedVector<float, 8> stored(action_count, 0.0f);
+        if (!context.policy->strategy(key, absl::MakeSpan(stored))) {
+          ++context.missing_policy_lookups;
+        }
+        std::copy(stored.begin(), stored.end(), probabilities.begin());
+      } else if (context.mode == TraversalMode::kEvaluateAverage) {
         AverageStrategy(state_, strategy_row, absl::MakeSpan(probabilities));
       } else {
         RegretMatch(state_, strategy_row, absl::MakeSpan(probabilities));
@@ -1038,6 +1317,89 @@ absl::StatusOr<double> CFRSolver::evaluate_average(int samples) {
         "average strategy accumulation is disabled");
   }
   return evaluate_deals(samples, TraversalMode::kEvaluateAverage);
+}
+
+absl::StatusOr<Policy> CFRSolver::extract_average_policy() const {
+  if (!spec_.config.accumulate_average_strategy()) {
+    return absl::FailedPreconditionError(
+        "average strategy accumulation is disabled");
+  }
+  Policy policy;
+  policy.model = model_;
+  policy.rows.reserve(state_.rows.size());
+  policy.probabilities.resize(state_.strategy_sum.size());
+  for (const auto& [key, row] : state_.rows) {
+    if (key.history.index() >= history_.nodes.size()) {
+      return absl::DataLossError("infoset references an invalid history");
+    }
+    const auto* node =
+        std::get_if<DecisionNode>(&history_.nodes[key.history.index()]);
+    if (node == nullptr) {
+      return absl::DataLossError("infoset history is not a decision");
+    }
+    const uint8_t count = node->edges.count;
+    if (row.action_offset + count > state_.strategy_sum.size()) {
+      return absl::DataLossError("infoset strategy span is invalid");
+    }
+    policy.rows.emplace(key, PolicyRow{row.action_offset, count});
+    double sum = 0.0;
+    for (size_t action = 0; action < count; ++action) {
+      const float value = state_.strategy_sum[row.action_offset + action];
+      if (!std::isfinite(value)) {
+        return absl::DataLossError("nonfinite average strategy value");
+      }
+      sum += std::max(0.0f, value);
+    }
+    for (size_t action = 0; action < count; ++action) {
+      const float value = state_.strategy_sum[row.action_offset + action];
+      policy.probabilities[row.action_offset + action] =
+          sum > 0.0 ? static_cast<float>(std::max(0.0f, value) / sum)
+                    : 1.0f / count;
+    }
+  }
+  const absl::Status valid = ValidatePolicy(policy);
+  if (!valid.ok()) return valid;
+  return policy;
+}
+
+absl::StatusOr<PolicyEvaluationResult> CFRSolver::evaluate_policy(
+    const Policy& policy,
+    HoleCards player_a,
+    HoleCards player_b) {
+  if (policy.model != model_) {
+    return absl::FailedPreconditionError("policy model does not match solver");
+  }
+  const Deal deal{{player_a, player_b},
+                  ComboMask(player_a.combo()) | ComboMask(player_b.combo())};
+  const Position root = root_position();
+  TraversalFrame frame;
+  frame.private_observations = private_observations_for_position(deal, root);
+  TraversalContext context{deal, TraversalMode::kEvaluatePolicy};
+  context.policy = &policy;
+  const double value = traverse(root, frame, context);
+  return PolicyEvaluationResult{value, context.missing_policy_lookups};
+}
+
+absl::StatusOr<PolicyEvaluationResult> CFRSolver::evaluate_policy(
+    const Policy& policy,
+    int samples) {
+  if (policy.model != model_) {
+    return absl::FailedPreconditionError("policy model does not match solver");
+  }
+  PolicyEvaluationResult result;
+  if (samples <= 0) return result;
+  for (int sample = 0; sample < samples; ++sample) {
+    const Deal deal = deals_.sample(rng_);
+    const Position root = root_position();
+    TraversalFrame frame;
+    frame.private_observations = private_observations_for_position(deal, root);
+    TraversalContext context{deal, TraversalMode::kEvaluatePolicy};
+    context.policy = &policy;
+    result.value += traverse(root, frame, context);
+    result.missing_lookups += context.missing_policy_lookups;
+  }
+  result.value /= samples;
+  return result;
 }
 
 double CFRSolver::get_expected_value(Player player) const {
