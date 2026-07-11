@@ -28,13 +28,13 @@ static_assert(kCoarsePublicStreetObservationCount <
 constexpr uint8_t StraightWindowDensity(uint16_t rank_mask) {
   uint8_t best = 0;
   for (int start = 0; start <= 8; ++start) {
-    const uint8_t count = static_cast<uint8_t>(__builtin_popcount(
-        static_cast<unsigned int>((rank_mask >> start) & 0x1F)));
+    const uint8_t count = static_cast<uint8_t>(
+        std::popcount(static_cast<uint16_t>((rank_mask >> start) & 0x1F)));
     best = std::max(best, count);
   }
   const uint16_t wheel_mask = static_cast<uint16_t>((1u << 12) | 0x0F);
-  const uint8_t wheel_count = static_cast<uint8_t>(__builtin_popcount(
-      static_cast<unsigned int>(rank_mask & wheel_mask)));
+  const uint8_t wheel_count = static_cast<uint8_t>(
+      std::popcount(static_cast<uint16_t>(rank_mask & wheel_mask)));
   return std::max(best, wheel_count);
 }
 
@@ -46,7 +46,7 @@ constexpr std::array<uint8_t, 8192> BuildStraightDensityTable() {
   return table;
 }
 
-inline constexpr auto kStraightDensity = BuildStraightDensityTable();
+inline const auto kStraightDensity = BuildStraightDensityTable();
 
 int HighRankGroup(int rank) noexcept {
   if (rank >= 14) {
