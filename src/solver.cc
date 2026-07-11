@@ -183,11 +183,11 @@ HistoryId AppendHistory(HistoryTree& tree,
                         const BettingState& state,
                         const BettingRules& rules,
                         const SolverConfig& config) {
-  const HistoryId id = static_cast<HistoryId>(tree.nodes.size());
+  const HistoryId id(static_cast<uint32_t>(tree.nodes.size()));
   tree.nodes.push_back(HistoryNode{state, 0, 0, kInvalidHistoryId,
                                    KindFor(state)});
 
-  const HistoryNodeKind kind = tree.nodes[id].kind;
+  const HistoryNodeKind kind = tree.nodes[id.index()].kind;
   if (kind == HistoryNodeKind::kDecision) {
     const SolverTransitions transitions = GenerateTransitions(config, state);
     if (transitions.size() > std::numeric_limits<uint8_t>::max()) {
@@ -195,8 +195,9 @@ HistoryId AppendHistory(HistoryTree& tree,
     }
     const uint32_t begin = static_cast<uint32_t>(tree.edges.size());
     tree.edges.resize(tree.edges.size() + transitions.size());
-    tree.nodes[id].action_begin = begin;
-    tree.nodes[id].action_count = static_cast<uint8_t>(transitions.size());
+    tree.nodes[id.index()].action_begin = begin;
+    tree.nodes[id.index()].action_count =
+        static_cast<uint8_t>(transitions.size());
 
     for (size_t action = 0; action < transitions.size(); ++action) {
       const SolverTransition& transition = transitions[action];
@@ -208,7 +209,7 @@ HistoryId AppendHistory(HistoryTree& tree,
     const BettingState child_state = AdvanceBettingStreet(state, rules);
     const HistoryId child =
         AppendHistory(tree, child_state, rules, config);
-    tree.nodes[id].chance_child = child;
+    tree.nodes[id.index()].chance_child = child;
   }
   return id;
 }
@@ -492,10 +493,10 @@ Position CFRSolver::root_position() const {
 }
 
 Position CFRSolver::action_child(Position position, int action_index) const {
-  if (position.history >= history_.nodes.size()) {
+  if (position.history.index() >= history_.nodes.size()) {
     throw std::logic_error("action parent history is invalid");
   }
-  const HistoryNode& node = history_.nodes[position.history];
+  const HistoryNode& node = history_.nodes[position.history.index()];
   if (action_index < 0 || action_index >= node.action_count) {
     throw std::logic_error("action index is out of range");
   }
@@ -505,10 +506,10 @@ Position CFRSolver::action_child(Position position, int action_index) const {
 
 Position CFRSolver::sample_chance_child(Position position,
                                         const Deal& deal) {
-  if (position.history >= history_.nodes.size()) {
+  if (position.history.index() >= history_.nodes.size()) {
     throw std::logic_error("chance parent history is invalid");
   }
-  const HistoryNode& node = history_.nodes[position.history];
+  const HistoryNode& node = history_.nodes[position.history.index()];
   if (node.kind != HistoryNodeKind::kChance ||
       node.chance_child == kInvalidHistoryId) {
     throw std::logic_error("expected a chance history");
@@ -542,7 +543,7 @@ void CFRSolver::advance_private_observations(
     TraversalFrame& frame,
     const Deal& deal,
     const Position& child) const {
-  const StreetKind street = history_.nodes[child.history].state.street;
+  const StreetKind street = history_.nodes[child.history.index()].state.street;
   for (int player = 0; player < kPlayerCount; ++player) {
     const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
     frame.private_observations[player] = advance_private_observation(
@@ -592,10 +593,10 @@ double CFRSolver::traverse(Position position,
                            TraversalFrame frame,
                            TraversalContext& context) {
   const Deal& deal = context.deal;
-  if (position.history >= history_.nodes.size()) {
+  if (position.history.index() >= history_.nodes.size()) {
     throw std::logic_error("traversal history is invalid");
   }
-  const HistoryNode& node = history_.nodes[position.history];
+  const HistoryNode& node = history_.nodes[position.history.index()];
   if (node.kind == HistoryNodeKind::kTerminal) {
     ++stats_.terminal_visits;
     return TerminalUtility({node.state, position.board},

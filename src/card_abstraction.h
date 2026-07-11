@@ -200,13 +200,13 @@ inline uint8_t straight_density(uint16_t rank_mask) {
 inline PublicObservationId exact_public_observation(
     const BoardRunout& board) {
   // Pack the canonical flop and ordered turn/river into one history ID.
-  PublicObservationId observation = board.count();
+  uint64_t observation = board.count();
   size_t shift = 3;
   for (Card card : board.cards()) {
-    observation |= static_cast<PublicObservationId>(card.index()) << shift;
+    observation |= static_cast<uint64_t>(card.index()) << shift;
     shift += 6;
   }
-  return observation;
+  return PublicObservationId(observation);
 }
 
 inline BoardBucketId board_texture_bucket(
@@ -244,7 +244,7 @@ inline BoardBucketId board_texture_bucket(
 }
 
 inline constexpr PublicObservationId initial_public_observation() {
-  return 0;
+  return PublicObservationId();
 }
 
 inline int public_observation_shift(StreetKind street) {
@@ -266,10 +266,10 @@ inline PublicStreetObservation current_public_street_observation(
   if (street == StreetKind::kPreflop) {
     return {};
   }
-  constexpr PublicObservationId kSlotMask =
-      (PublicObservationId{1} << kPublicObservationBitsPerStreet) - 1;
-  const PublicObservationId encoded =
-      (history >> public_observation_shift(street)) & kSlotMask;
+  constexpr uint64_t kSlotMask =
+      (uint64_t{1} << kPublicObservationBitsPerStreet) - 1;
+  const uint64_t encoded =
+      (history.value() >> public_observation_shift(street)) & kSlotMask;
   return {encoded == 0 ? 0 : encoded - 1, {}};
 }
 
@@ -281,21 +281,22 @@ inline PublicObservationId advance_public_observation(
     throw std::invalid_argument("public street observation is out of range");
   }
   const int shift = public_observation_shift(new_street);
-  constexpr PublicObservationId kSlotMask =
-      (PublicObservationId{1} << kPublicObservationBitsPerStreet) - 1;
-  const PublicObservationId slot_mask = kSlotMask << shift;
-  const PublicObservationId later =
-      previous >> (shift + kPublicObservationBitsPerStreet);
-  if ((previous & slot_mask) != 0 || later != 0) {
+  constexpr uint64_t kSlotMask =
+      (uint64_t{1} << kPublicObservationBitsPerStreet) - 1;
+  const uint64_t previous_value = previous.value();
+  const uint64_t slot_mask = kSlotMask << shift;
+  const uint64_t later =
+      previous_value >> (shift + kPublicObservationBitsPerStreet);
+  if ((previous_value & slot_mask) != 0 || later != 0) {
     throw std::invalid_argument("public street observation already exists");
   }
   if (new_street != StreetKind::kFlop) {
     const int previous_shift = shift - kPublicObservationBitsPerStreet;
-    if (((previous >> previous_shift) & kSlotMask) == 0) {
+    if (((previous_value >> previous_shift) & kSlotMask) == 0) {
       throw std::invalid_argument("public observation history is incomplete");
     }
   }
-  return previous | ((current.value + 1) << shift);
+  return PublicObservationId(previous_value | ((current.value + 1) << shift));
 }
 
 inline ExactChanceObservation exact_chance_observation(
@@ -433,7 +434,7 @@ inline PrivateStreetObservation observe_private_street(
 }
 
 inline PrivateObservationId exact_private_observation(ComboId hand) {
-  return PrivateObservationId{hand.index()};
+  return PrivateObservationId(hand.index());
 }
 
 inline PrivateObservationId initial_private_observation(ComboId hand) {
@@ -442,7 +443,7 @@ inline PrivateObservationId initial_private_observation(ComboId hand) {
   }
   const auto preflop = observe_private_street(
       hand, StreetKind::kPreflop, BoardRunout::Preflop());
-  return preflop.value + 1;
+  return PrivateObservationId(preflop.value + 1);
 }
 
 inline PrivateObservationId advance_private_observation(
@@ -468,19 +469,21 @@ inline PrivateObservationId advance_private_observation(
   if (current.value >= kCoarsePrivateStreetObservationCount) {
     throw std::invalid_argument("private street observation is out of range");
   }
-  constexpr PrivateObservationId kSlotMask =
-      (PrivateObservationId{1} << kPrivateObservationBitsPerStreet) - 1;
+  constexpr uint64_t kSlotMask =
+      (uint64_t{1} << kPrivateObservationBitsPerStreet) - 1;
   const int shift = static_cast<int>(new_street) *
                     kPrivateObservationBitsPerStreet;
-  const PrivateObservationId slot_mask = kSlotMask << shift;
-  const PrivateObservationId later =
-      previous >> (shift + kPrivateObservationBitsPerStreet);
-  const PrivateObservationId prior =
-      (previous >> (shift - kPrivateObservationBitsPerStreet)) & kSlotMask;
-  if ((previous & slot_mask) != 0 || later != 0 || prior == 0) {
+  const uint64_t previous_value = previous.value();
+  const uint64_t slot_mask = kSlotMask << shift;
+  const uint64_t later =
+      previous_value >> (shift + kPrivateObservationBitsPerStreet);
+  const uint64_t prior =
+      (previous_value >> (shift - kPrivateObservationBitsPerStreet)) &
+      kSlotMask;
+  if ((previous_value & slot_mask) != 0 || later != 0 || prior == 0) {
     throw std::invalid_argument("private observation history is invalid");
   }
-  return previous | ((current.value + 1) << shift);
+  return PrivateObservationId(previous_value | ((current.value + 1) << shift));
 }
 
 inline PrivateObservationId private_observation_for_runout(

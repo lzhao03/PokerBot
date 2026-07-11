@@ -39,9 +39,21 @@ absl::Status ValidateSolverConfig(const SolverConfig& config);
 ComboRange UniformRange();
 ComboRange SingleComboRange(ComboId combo, float weight = 1.0f);
 
-using HistoryId = uint32_t;
-inline constexpr HistoryId kInvalidHistoryId =
-    std::numeric_limits<HistoryId>::max();
+class HistoryId {
+ public:
+  constexpr HistoryId() = default;
+  explicit constexpr HistoryId(uint32_t value) noexcept : value_(value) {}
+
+  constexpr size_t index() const noexcept { return value_; }
+  constexpr uint32_t value() const noexcept { return value_; }
+  friend constexpr auto operator<=>(const HistoryId&,
+                                    const HistoryId&) = default;
+
+ private:
+  uint32_t value_ = std::numeric_limits<uint32_t>::max();
+};
+
+inline constexpr HistoryId kInvalidHistoryId;
 
 enum class HistoryNodeKind : uint8_t {
   kDecision,
@@ -76,15 +88,16 @@ struct Position {
 
 struct InfoSetKey {
   HistoryId history = kInvalidHistoryId;
-  PublicObservationId public_observation = 0;
-  PrivateObservationId private_observation = 0;
+  PublicObservationId public_observation;
+  PrivateObservationId private_observation;
 
   friend bool operator==(const InfoSetKey&, const InfoSetKey&) = default;
 
   template <typename H>
   friend H AbslHashValue(H h, const InfoSetKey& key) {
-    return H::combine(std::move(h), key.history, key.public_observation,
-                      key.private_observation);
+    return H::combine(std::move(h), key.history.value(),
+                      key.public_observation.value(),
+                      key.private_observation.value());
   }
 };
 

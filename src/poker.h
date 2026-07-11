@@ -18,8 +18,6 @@ namespace poker {
 
 using CardMask = uint64_t;
 using BoardBucketId = uint64_t;
-using PublicObservationId = uint64_t;
-using PrivateObservationId = uint64_t;
 using Chips = int32_t;
 
 constexpr int kDeckCardCount = 52;
@@ -96,6 +94,34 @@ class ComboId {
                                                      Card second);
 
   uint16_t value_ = 0;
+};
+
+class PublicObservationId {
+ public:
+  constexpr PublicObservationId() = default;
+  explicit constexpr PublicObservationId(uint64_t value) noexcept
+      : value_(value) {}
+
+  constexpr uint64_t value() const noexcept { return value_; }
+  friend constexpr auto operator<=>(const PublicObservationId&,
+                                    const PublicObservationId&) = default;
+
+ private:
+  uint64_t value_ = 0;
+};
+
+class PrivateObservationId {
+ public:
+  constexpr PrivateObservationId() = default;
+  explicit constexpr PrivateObservationId(uint64_t value) noexcept
+      : value_(value) {}
+
+  constexpr uint64_t value() const noexcept { return value_; }
+  friend constexpr auto operator<=>(const PrivateObservationId&,
+                                    const PrivateObservationId&) = default;
+
+ private:
+  uint64_t value_ = 0;
 };
 
 struct ComboInfo {

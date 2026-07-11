@@ -69,26 +69,26 @@ TEST_CASE("small exact solver baseline is deterministic") {
 TEST_CASE("history tree stores direct rule transitions") {
   CFRSolver solver(Config());
   const HistoryTree& tree = CFRSolverTestAccess::history(solver);
-  REQUIRE(tree.root < tree.nodes.size());
+  REQUIRE(tree.root.index() < tree.nodes.size());
 
-  for (HistoryId id = 0; id < tree.nodes.size(); ++id) {
+  for (size_t id = 0; id < tree.nodes.size(); ++id) {
     const HistoryNode& node = tree.nodes[id];
     if (node.kind == HistoryNodeKind::kDecision) {
       REQUIRE(node.action_count > 0);
       for (uint8_t action = 0; action < node.action_count; ++action) {
         const HistoryEdge& edge = tree.edges[node.action_begin + action];
-        REQUIRE(edge.child < tree.nodes.size());
-        CHECK(tree.nodes[edge.child].state ==
+        REQUIRE(edge.child.index() < tree.nodes.size());
+        CHECK(tree.nodes[edge.child.index()].state ==
               Apply(node.state, edge.action));
       }
     } else if (node.kind == HistoryNodeKind::kChance) {
-      REQUIRE(node.chance_child < tree.nodes.size());
-      CHECK(tree.nodes[node.chance_child].state ==
+      REQUIRE(node.chance_child.index() < tree.nodes.size());
+      CHECK(tree.nodes[node.chance_child.index()].state ==
             AdvanceBettingStreet(node.state, BettingRules{2}));
     }
   }
 
-  const HistoryNode& root = tree.nodes[tree.root];
+  const HistoryNode& root = tree.nodes[tree.root.index()];
   REQUIRE(root.action_count >= 2);
   CHECK(tree.edges[root.action_begin].child !=
         tree.edges[root.action_begin + 1].child);
@@ -152,7 +152,7 @@ TEST_CASE("postflop roots use full observation identity") {
   CFRSolver solver(config, root);
   solver.run(2, R(kA), R(kB));
   const HistoryTree& tree = CFRSolverTestAccess::history(solver);
-  const int player = tree.nodes[tree.root].state.player_to_act;
+  const int player = tree.nodes[tree.root.index()].state.player_to_act;
   const ComboId hand = player == 0 ? kA : kB;
   const PublicObservationId public_id =
       public_observation_id(root.betting.street, root.board);
