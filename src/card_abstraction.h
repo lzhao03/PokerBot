@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <utility>
 
 #ifndef POKER_COARSE_PUBLIC_BUCKETS
 #define POKER_COARSE_PUBLIC_BUCKETS 0
@@ -71,6 +72,33 @@ struct BoardFeatures {
   uint8_t max_rank = 0;
 
   friend bool operator==(const BoardFeatures&, const BoardFeatures&) = default;
+};
+
+class PublicPosition {
+ public:
+  static PublicPosition Root(StreetKind street, Board board);
+
+  PublicPosition after_chance(StreetKind street, Board board) const;
+
+  StreetKind street() const noexcept { return street_; }
+  const Board& board() const noexcept { return board_; }
+  PublicObservationId observation() const noexcept { return observation_; }
+  const BoardFeatures& features() const noexcept { return features_; }
+
+ private:
+  PublicPosition(StreetKind street,
+                 Board board,
+                 PublicObservationId observation,
+                 BoardFeatures features)
+      : street_(street),
+        board_(std::move(board)),
+        observation_(observation),
+        features_(features) {}
+
+  StreetKind street_ = StreetKind::kPreflop;
+  Board board_ = PreflopBoard{};
+  PublicObservationId observation_;
+  BoardFeatures features_;
 };
 
 namespace card_abstraction_detail {
@@ -383,6 +411,21 @@ inline PublicObservationId public_observation_id(
   return exact_public_observation(board);
 }
 
+inline PublicPosition PublicPosition::Root(StreetKind street, Board board) {
+  const BoardFeatures features = board_features(board);
+  const PublicObservationId observation = public_observation_id(street, board);
+  return PublicPosition(street, std::move(board), observation, features);
+}
+
+inline PublicPosition PublicPosition::after_chance(
+    StreetKind street,
+    Board board) const {
+  const BoardFeatures features = board_features(board);
+  const PublicObservationId observation = public_observation_after_chance(
+      observation_, street, board);
+  return PublicPosition(street, std::move(board), observation, features);
+}
+
 namespace card_abstraction_detail {
 
 inline PrivateBucketId CoarsePrivateBucket(
@@ -449,14 +492,10 @@ inline PrivateObservationId initial_private_observation(ComboId hand) {
 inline PrivateObservationId advance_private_observation(
     PrivateObservationId previous,
     ComboId hand,
-    StreetKind new_street,
-    const Board& exact_board,
-    PublicObservationId public_observation) {
+    const PublicPosition& child) {
+  const StreetKind new_street = child.street();
   if (new_street == StreetKind::kPreflop) {
     throw std::invalid_argument("preflop private observation is initial");
-  }
-  if (public_observation != public_observation_id(new_street, exact_board)) {
-    throw std::invalid_argument("public observation does not match runout");
   }
   if constexpr (!kCoarsePrivateBuckets) {
     if (previous != exact_private_observation(hand)) {
@@ -465,7 +504,8 @@ inline PrivateObservationId advance_private_observation(
     return previous;
   }
 
-  const auto current = observe_private_street(hand, new_street, exact_board);
+  const auto current = observe_private_street(
+      hand, new_street, child.features());
   if (current.value >= kCoarsePrivateStreetObservationCount) {
     throw std::invalid_argument("private street observation is out of range");
   }
@@ -488,27 +528,8 @@ inline PrivateObservationId advance_private_observation(
 
 inline PrivateObservationId private_observation_for_runout(
     ComboId hand,
-    const Board& runout,
-    PublicObservationId public_observation) {
-  StreetKind street = StreetKind::kPreflop;
-  switch (BoardCount(runout)) {
-    case 0:
-      break;
-    case 3:
-      street = StreetKind::kFlop;
-      break;
-    case 4:
-      street = StreetKind::kTurn;
-      break;
-    case 5:
-      street = StreetKind::kRiver;
-      break;
-    default:
-      throw std::invalid_argument("invalid board runout count");
-  }
-  if (public_observation != public_observation_id(street, runout)) {
-    throw std::invalid_argument("public observation does not match runout");
-  }
+    const PublicPosition& position) {
+  const StreetKind street = position.street();
   if constexpr (!kCoarsePrivateBuckets) {
     return exact_private_observation(hand);
   }
@@ -517,25 +538,23 @@ inline PrivateObservationId private_observation_for_runout(
   if (street == StreetKind::kPreflop) {
     return observation;
   }
-  const auto cards = BoardCards(runout);
+  const auto cards = BoardCards(position.board());
   const std::array<Card, 3> flop = {cards[0], cards[1], cards[2]};
   Board prefix = DealFlop(PreflopBoard{}, flop);
   observation = advance_private_observation(
-      observation, hand, StreetKind::kFlop, prefix,
-      public_observation_id(StreetKind::kFlop, prefix));
+      observation, hand, PublicPosition::Root(StreetKind::kFlop, prefix));
   if (street == StreetKind::kFlop) {
     return observation;
   }
   prefix = DealTurn(std::get<FlopBoard>(prefix), cards[3]);
   observation = advance_private_observation(
-      observation, hand, StreetKind::kTurn, prefix,
-      public_observation_id(StreetKind::kTurn, prefix));
+      observation, hand, PublicPosition::Root(StreetKind::kTurn, prefix));
   if (street == StreetKind::kTurn) {
     return observation;
   }
   prefix = DealRiver(std::get<TurnBoard>(prefix), cards[4]);
   return advance_private_observation(
-      observation, hand, StreetKind::kRiver, prefix, public_observation);
+      observation, hand, PublicPosition::Root(StreetKind::kRiver, prefix));
 }
 
 }  // namespace poker

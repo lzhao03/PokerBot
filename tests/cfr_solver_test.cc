@@ -160,12 +160,12 @@ TEST_CASE("postflop roots use full observation identity") {
   const Player player =
       std::get<DecisionState>(tree.nodes[tree.root.index()].state).actor;
   const ComboId hand = player == Player::kA ? kA : kB;
-  const PublicObservationId public_id =
-      public_observation_id(Data(root.betting).street, root.board);
+  const PublicPosition public_state =
+      PublicPosition::Root(Data(root.betting).street, root.board);
   const PrivateObservationId private_id =
-      private_observation_for_runout(hand, root.board, public_id);
+      private_observation_for_runout(hand, public_state);
   CHECK(CFRSolverTestAccess::state(solver).rows.contains(
-      {tree.root, public_id, private_id}));
+      {tree.root, public_state.observation(), private_id}));
 }
 
 TEST_CASE("unsupported execution modes and caps fail explicitly") {

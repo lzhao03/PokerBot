@@ -83,8 +83,8 @@ struct HistoryTree {
 
 struct Position {
   HistoryId history = kInvalidHistoryId;
-  Board board = PreflopBoard{};
-  PublicObservationId public_observation = initial_public_observation();
+  PublicPosition public_state =
+      PublicPosition::Root(StreetKind::kPreflop, PreflopBoard{});
 };
 
 struct InfoSetKey {

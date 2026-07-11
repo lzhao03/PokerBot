@@ -490,9 +490,9 @@ CFRSolver::CFRSolver(const SolverConfig& config,
 }
 
 Position CFRSolver::root_position() const {
-  return {history_.root, initial_state_.board,
-          public_observation_id(Data(initial_state_.betting).street,
-                                initial_state_.board)};
+  return {history_.root,
+          PublicPosition::Root(Data(initial_state_.betting).street,
+                               initial_state_.board)};
 }
 
 Position CFRSolver::action_child(Position position, int action_index) const {
@@ -519,14 +519,15 @@ Position CFRSolver::sample_chance_child(Position position,
   }
 
   const BettingData& data = Data(node.state);
-  const auto cards = SampleStreetCards(data.street, position.board,
+  const auto cards = SampleStreetCards(data.street,
+                                       position.public_state.board(),
                                        deal.blocked_mask, rng_);
   const ExactPublicState child =
-      ApplyChance({node.state, position.board}, cards, betting_rules_);
+      ApplyChance({node.state, position.public_state.board()}, cards,
+                  betting_rules_);
   position.history = node.chance_child;
-  position.board = child.board;
-  position.public_observation = public_observation_after_chance(
-      position.public_observation, Data(child.betting).street, child.board);
+  position.public_state = position.public_state.after_chance(
+      Data(child.betting).street, child.board);
   return position;
 }
 
@@ -537,8 +538,8 @@ CFRSolver::private_observations_for_position(
   std::array<PrivateObservationId, kPlayerCount> observations;
   for (int player = 0; player < kPlayerCount; ++player) {
     const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
-    observations[player] = private_observation_for_runout(
-        hand, position.board, position.public_observation);
+    observations[player] =
+        private_observation_for_runout(hand, position.public_state);
   }
   return observations;
 }
@@ -547,16 +548,12 @@ void CFRSolver::advance_private_observations(
     TraversalFrame& frame,
     const Deal& deal,
     const Position& child) const {
-  const StreetKind street =
-      Data(history_.nodes[child.history.index()].state).street;
   for (int player = 0; player < kPlayerCount; ++player) {
     const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
     frame.private_observations[player] = advance_private_observation(
-        frame.private_observations[player], hand, street,
-        child.board, child.public_observation);
+        frame.private_observations[player], hand, child.public_state);
     assert(frame.private_observations[player] ==
-           private_observation_for_runout(
-               hand, child.board, child.public_observation));
+           private_observation_for_runout(hand, child.public_state));
   }
 }
 
@@ -604,7 +601,7 @@ double CFRSolver::traverse(Position position,
   const HistoryNode& node = history_.nodes[position.history.index()];
   if (node.kind == HistoryNodeKind::kTerminal) {
     ++stats_.terminal_visits;
-    return TerminalUtility({node.state, position.board},
+    return TerminalUtility({node.state, position.public_state.board()},
                            deal.hand(Player::kA).combo(),
                            deal.hand(Player::kB).combo());
   }
@@ -627,11 +624,11 @@ double CFRSolver::traverse(Position position,
   }
   const Player player = decision->actor;
   const size_t player_index = Index(player);
-  const InfoSetKey key{position.history, position.public_observation,
+  const InfoSetKey key{position.history, position.public_state.observation(),
                        frame.private_observations[player_index]};
   const ComboId hand = deal.hand(player).combo();
   assert(key.private_observation == private_observation_for_runout(
-      hand, position.board, position.public_observation));
+      hand, position.public_state));
   const bool training = context.mode == TraversalMode::kTrain;
   const bool updates = training && context.update_player == player;
   InfoSetRow row;
