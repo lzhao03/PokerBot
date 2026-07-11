@@ -2,9 +2,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <stdexcept>
 #include <utility>
 
 #ifndef POKER_COARSE_PUBLIC_BUCKETS
@@ -37,6 +37,12 @@ static_assert(kCoarsePrivateStreetObservationCount <
               (uint32_t{1} << kPrivateObservationBitsPerStreet));
 static_assert(kCoarsePublicStreetObservationCount <
               (uint32_t{1} << kPublicObservationBitsPerStreet));
+
+enum class PostflopStreet : uint8_t {
+  kFlop,
+  kTurn,
+  kRiver,
+};
 
 struct ExactChanceObservation {
   std::array<Card, 3> cards = {};
@@ -275,17 +281,13 @@ inline constexpr PublicObservationId initial_public_observation() {
   return PublicObservationId();
 }
 
-inline int public_observation_shift(StreetKind street) {
-  switch (street) {
-    case StreetKind::kFlop:
-      return 0;
-    case StreetKind::kTurn:
-      return kPublicObservationBitsPerStreet;
-    case StreetKind::kRiver:
-      return 2 * kPublicObservationBitsPerStreet;
-    case StreetKind::kPreflop:
-      throw std::invalid_argument("preflop has no public street observation");
-  }
+constexpr int public_observation_shift(PostflopStreet street) noexcept {
+  return static_cast<int>(street) * kPublicObservationBitsPerStreet;
+}
+
+constexpr PostflopStreet ToPostflopStreet(StreetKind street) noexcept {
+  assert(street != StreetKind::kPreflop);
+  return static_cast<PostflopStreet>(static_cast<int>(street) - 1);
 }
 
 inline PublicStreetObservation current_public_street_observation(
@@ -297,7 +299,8 @@ inline PublicStreetObservation current_public_street_observation(
   constexpr uint64_t kSlotMask =
       (uint64_t{1} << kPublicObservationBitsPerStreet) - 1;
   const uint64_t encoded =
-      (history.value() >> public_observation_shift(street)) & kSlotMask;
+      (history.value() >>
+       public_observation_shift(ToPostflopStreet(street))) & kSlotMask;
   return {encoded == 0 ? 0 : encoded - 1, {}};
 }
 
@@ -305,24 +308,20 @@ inline PublicObservationId advance_public_observation(
     PublicObservationId previous,
     StreetKind new_street,
     PublicStreetObservation current) {
-  if (current.value >= kCoarsePublicStreetObservationCount) {
-    throw std::invalid_argument("public street observation is out of range");
-  }
-  const int shift = public_observation_shift(new_street);
+  assert(current.value < kCoarsePublicStreetObservationCount);
+  assert(new_street != StreetKind::kPreflop);
+  const int shift =
+      public_observation_shift(ToPostflopStreet(new_street));
   constexpr uint64_t kSlotMask =
       (uint64_t{1} << kPublicObservationBitsPerStreet) - 1;
   const uint64_t previous_value = previous.value();
   const uint64_t slot_mask = kSlotMask << shift;
   const uint64_t later =
       previous_value >> (shift + kPublicObservationBitsPerStreet);
-  if ((previous_value & slot_mask) != 0 || later != 0) {
-    throw std::invalid_argument("public street observation already exists");
-  }
+  assert((previous_value & slot_mask) == 0 && later == 0);
   if (new_street != StreetKind::kFlop) {
     const int previous_shift = shift - kPublicObservationBitsPerStreet;
-    if (((previous_value >> previous_shift) & kSlotMask) == 0) {
-      throw std::invalid_argument("public observation history is incomplete");
-    }
+    assert(((previous_value >> previous_shift) & kSlotMask) != 0);
   }
   return PublicObservationId(previous_value | ((current.value + 1) << shift));
 }
@@ -494,21 +493,15 @@ inline PrivateObservationId advance_private_observation(
     ComboId hand,
     const PublicPosition& child) {
   const StreetKind new_street = child.street();
-  if (new_street == StreetKind::kPreflop) {
-    throw std::invalid_argument("preflop private observation is initial");
-  }
+  assert(new_street != StreetKind::kPreflop);
   if constexpr (!kCoarsePrivateBuckets) {
-    if (previous != exact_private_observation(hand)) {
-      throw std::invalid_argument("exact private observation changed");
-    }
+    assert(previous == exact_private_observation(hand));
     return previous;
   }
 
   const auto current = observe_private_street(
       hand, new_street, child.features());
-  if (current.value >= kCoarsePrivateStreetObservationCount) {
-    throw std::invalid_argument("private street observation is out of range");
-  }
+  assert(current.value < kCoarsePrivateStreetObservationCount);
   constexpr uint64_t kSlotMask =
       (uint64_t{1} << kPrivateObservationBitsPerStreet) - 1;
   const int shift = static_cast<int>(new_street) *
@@ -520,9 +513,7 @@ inline PrivateObservationId advance_private_observation(
   const uint64_t prior =
       (previous_value >> (shift - kPrivateObservationBitsPerStreet)) &
       kSlotMask;
-  if ((previous_value & slot_mask) != 0 || later != 0 || prior == 0) {
-    throw std::invalid_argument("private observation history is invalid");
-  }
+  assert((previous_value & slot_mask) == 0 && later == 0 && prior != 0);
   return PrivateObservationId(previous_value | ((current.value + 1) << shift));
 }
 
