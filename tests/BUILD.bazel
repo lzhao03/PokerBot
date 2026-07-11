@@ -41,6 +41,23 @@ cc_test(
 )
 
 cc_test(
+    name = "compiled_solver_architecture_test",
+    srcs = [
+        "compiled_lifecycle_test.cc",
+        "compiled_solver_test_support.h",
+        "frozen_training_parity_test.cc",
+        "storage_ownership_test.cc",
+    ],
+    deps = [
+        "//src:cfr_solver",
+        "//src:combo",
+        "//src:game_rules",
+        "//src:hand_range",
+        "@doctest//:main",
+    ],
+)
+
+cc_test(
     name = "observation_identity_coarse_test",
     srcs = [
         "identity_test_support.h",
