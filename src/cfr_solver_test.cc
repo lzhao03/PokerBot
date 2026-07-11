@@ -123,12 +123,13 @@ TEST_CASE("postflop roots use full private observation history") {
   CFRSolver solver(config, state);
   solver.run(2, R(kA), R(kB));
   const StrategyTables& tables = CFRSolverTestAccess::tables(solver);
-  const NodeId root_id = tables.root_node_id;
-  REQUIRE(root_id < tables.nodes.size());
-  const auto& root = tables.nodes[root_id];
-  REQUIRE(root.betting_node_id < tables.betting_nodes.size());
+  const PublicGraph& graph = tables.graph;
+  const NodeId root_id = graph.root;
+  REQUIRE(root_id < graph.nodes.size());
+  const auto& root = graph.nodes[root_id];
+  REQUIRE(root.betting_node_id < graph.betting_nodes.size());
   const int player =
-      tables.betting_nodes[root.betting_node_id].state.player_to_act;
+      graph.betting_nodes[root.betting_node_id].state.player_to_act;
   REQUIRE(IsPlayer(player));
   REQUIRE(root_id < tables.growing_info_sets.size());
   REQUIRE(tables.growing_info_sets[root_id] != nullptr);
@@ -143,11 +144,11 @@ TEST_CASE("strategy storage performs regret matching, averaging, and freezing") 
   SolverConfig config;
   SolverStorage storage;
   TraversalStats stats;
-  storage.mutable_tables->nodes.resize(1);
-  storage.mutable_tables->betting_nodes.resize(1);
-  storage.mutable_tables->nodes[0].betting_node_id = 0;
-  auto& node = storage.mutable_tables->betting_nodes[0];
-  node.kind = StrategyTables::NodeKind::kDecision;
+  storage.mutable_tables->graph.nodes.resize(1);
+  storage.mutable_tables->graph.betting_nodes.resize(1);
+  storage.mutable_tables->graph.nodes[0].betting_node_id = 0;
+  auto& node = storage.mutable_tables->graph.betting_nodes[0];
+  node.kind = PublicGraph::NodeKind::kDecision;
   node.state.player_to_act = 0;
   node.state.last_full_raise = 1;
   node.action_count = 3;

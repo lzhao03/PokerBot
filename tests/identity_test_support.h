@@ -15,21 +15,21 @@ struct GraphBuilderTestAccess {
   explicit GraphBuilderTestAccess(GraphBuilder& graph) : graph_(graph) {}
 
   NodeId root_node() const {
-    return graph_.tables().root_node_id;
+    return graph_.graph().root;
   }
 
   NodeId action_child(NodeId parent, int action) const {
-    const auto child = graph_.tables().action_child(parent, action);
-    if (!child.has_value()) {
+    const NodeId child = graph_.graph().action_child(parent, action);
+    if (child == kInvalidNodeId) {
       throw std::logic_error("missing action child");
     }
-    return *child;
+    return child;
   }
 
   NodeId chance_child(NodeId parent,
                       PublicObservationId observation) const {
-    const StrategyTables::ChanceTransitionKey key{parent, observation};
-    const auto& children = graph_.tables().public_chance_child_ids;
+    const ChanceTransitionKey key{parent, observation};
+    const auto& children = graph_.build_state_.chance_children;
     const auto child = children.find(key);
     if (child == children.end()) {
       throw std::logic_error("missing chance child");
@@ -39,11 +39,7 @@ struct GraphBuilderTestAccess {
 
   NodeId frozen_chance_child(NodeId parent,
                              PublicObservationId observation) const {
-    const auto child = graph_.tables().chance_child(parent, observation);
-    if (!child.has_value()) {
-      throw std::logic_error("missing frozen chance child");
-    }
-    return *child;
+    return graph_.graph().required_chance_child(parent, observation);
   }
 
   PublicObservationId public_observation(NodeId node) const {
@@ -61,12 +57,12 @@ struct GraphBuilderTestAccess {
 
   void set_public_observation(NodeId node,
                               PublicObservationId observation) {
-    graph_.mtables().nodes.at(node).public_observation = observation;
+    graph_.mgraph().nodes.at(node).public_observation = observation;
   }
 
  private:
-  const StrategyTables::Node& graph_node(NodeId node) const {
-    const auto& nodes = graph_.tables().nodes;
+  const PublicGraph::PublicNode& graph_node(NodeId node) const {
+    const auto& nodes = graph_.graph().nodes;
     if (node >= nodes.size()) {
       throw std::logic_error("invalid graph node");
     }

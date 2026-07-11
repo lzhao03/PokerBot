@@ -80,7 +80,7 @@ class StrategyStore {
  public:
   using InfoSetKey = StrategyTables::InfoSetKey;
   using InfoSetRow = StrategyTables::InfoSetRow;
-  using Node = StrategyTables::Node;
+  using Node = PublicGraph::PublicNode;
   using GrowingPublicInfoSets = StrategyTables::GrowingPublicInfoSets;
   using FrozenInfoSetEntry = StrategyTables::FrozenInfoSetEntry;
   using FrozenPublicInfoSetRange = StrategyTables::FrozenPublicInfoSetRange;

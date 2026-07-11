@@ -139,7 +139,7 @@ struct CFRSolverTestAccess {
     RangeSampler sampler(a_range, b_range);
     solver.rng_.seed(seed_value);
     solver.run_growing_iterations(
-        iterations, solver.tables().root_node_id, sampler, a_view, b_view,
+        iterations, solver.tables().graph.root, sampler, a_view, b_view,
         solver.config_.max_depth);
   }
 
@@ -153,7 +153,7 @@ struct CFRSolverTestAccess {
     const RangeSampler sampler(a_range, b_range);
     solver.rng_.seed(seed_value);
     solver.run_fixed_storage_iterations(
-        iterations, 1, solver.tables().root_node_id,
+        iterations, 1, solver.tables().graph.root,
         solver.initial_state_.board, sampler, a_range, b_range);
   }
 
@@ -169,6 +169,10 @@ struct CFRSolverTestAccess {
         solver.storage_.frozen_tables.get(),
         solver.storage_.cfr_state.get(),
     };
+  }
+
+  static const PublicGraph& public_graph(const CFRSolver& solver) {
+    return solver.tables().graph;
   }
 
   static std::shared_ptr<CfrState> copy_cfr_state(
@@ -187,39 +191,40 @@ struct CFRSolverTestAccess {
                                        ComboId a_hand,
                                        ComboId b_hand) {
     const StrategyTables& tables = solver.tables();
+    const PublicGraph& graph = tables.graph;
     const CfrState& state = solver.storage_.cfr_state_ref();
     test::SolverSnapshot result;
-    result.root_node_id = tables.root_node_id;
-    result.node_count = tables.nodes.size();
-    result.betting_node_count = tables.betting_nodes.size();
+    result.root_node_id = graph.root;
+    result.node_count = graph.nodes.size();
+    result.betting_node_count = graph.betting_nodes.size();
     result.action_transition_count = std::count_if(
-        tables.action_child_ids.begin(), tables.action_child_ids.end(),
-        [&](NodeId child) { return child < tables.nodes.size(); });
-    result.chance_transition_count = tables.chance_child_entries.size();
+        graph.action_children.begin(), graph.action_children.end(),
+        [&](NodeId child) { return child < graph.nodes.size(); });
+    result.chance_transition_count = graph.chance_children.size();
     result.info_set_count = tables.info_set_count;
     result.action_entry_count = state.regret_sum.size();
     result.regrets.assign(state.regret_sum.begin(), state.regret_sum.end());
     result.strategy_sums.assign(state.strategy_sum.begin(),
                                 state.strategy_sum.end());
 
-    if (tables.root_node_id >= tables.nodes.size()) {
+    if (graph.root >= graph.nodes.size()) {
       return result;
     }
-    const auto& root = tables.nodes[tables.root_node_id];
-    if (root.betting_node_id >= tables.betting_nodes.size()) {
+    const auto& root = graph.nodes[graph.root];
+    if (root.betting_node_id >= graph.betting_nodes.size()) {
       return result;
     }
-    const auto& root_betting = tables.betting_nodes[root.betting_node_id];
+    const auto& root_betting = graph.betting_nodes[root.betting_node_id];
     for (uint8_t i = 0; i < root_betting.action_count; ++i) {
       result.root_actions.push_back(
-          tables.betting_edges[root_betting.action_begin + i].action);
+          graph.betting_edges[root_betting.action_begin + i].action);
     }
 
-    std::vector<NodeId> selected_nodes = {tables.root_node_id};
+    std::vector<NodeId> selected_nodes = {graph.root};
     for (uint8_t i = 0; i < root_betting.action_count; ++i) {
-      const auto child = tables.action_child(tables.root_node_id, i);
-      if (child.has_value()) {
-        selected_nodes.push_back(*child);
+      const NodeId child = graph.action_child(graph.root, i);
+      if (child != kInvalidNodeId) {
+        selected_nodes.push_back(child);
       }
     }
     for (NodeId node_id : selected_nodes) {
@@ -242,17 +247,18 @@ struct CFRSolverTestAccess {
       ComboId a_hand,
       ComboId b_hand) {
     const StrategyTables& tables = solver.tables();
-    if (node_id >= tables.nodes.size() ||
+    const PublicGraph& graph = tables.graph;
+    if (node_id >= graph.nodes.size() ||
         node_id >= tables.frozen_info_set_ranges.size()) {
       return std::nullopt;
     }
-    const auto& node = tables.nodes[node_id];
-    if (node.betting_node_id >= tables.betting_nodes.size()) {
+    const auto& node = graph.nodes[node_id];
+    if (node.betting_node_id >= graph.betting_nodes.size()) {
       return std::nullopt;
     }
-    const auto& betting = tables.betting_nodes[node.betting_node_id];
+    const auto& betting = graph.betting_nodes[node.betting_node_id];
     const int player = betting.state.player_to_act;
-    if (betting.kind != StrategyTables::NodeKind::kDecision ||
+    if (betting.kind != PublicGraph::NodeKind::kDecision ||
         !IsPlayer(player)) {
       return std::nullopt;
     }

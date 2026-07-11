@@ -2,8 +2,10 @@
 
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/types/span.h"
 #include "src/betting_abstraction.h"
 #include "src/card_abstraction.h"
@@ -17,9 +19,41 @@ namespace poker {
 
 struct GraphBuilderTestAccess;
 
+struct PublicNodeKey {
+  BettingNodeId betting_history_id = 0;
+  PublicObservationId public_observation = 0;
+
+  friend bool operator==(const PublicNodeKey&, const PublicNodeKey&) = default;
+
+  template <typename H>
+  friend H AbslHashValue(H h, const PublicNodeKey& key) {
+    return H::combine(std::move(h), key.betting_history_id,
+                      key.public_observation);
+  }
+};
+
+struct ChanceTransitionKey {
+  NodeId parent_node_id = 0;
+  PublicObservationId child_public_observation = 0;
+
+  friend bool operator==(const ChanceTransitionKey&,
+                         const ChanceTransitionKey&) = default;
+
+  template <typename H>
+  friend H AbslHashValue(H h, const ChanceTransitionKey& key) {
+    return H::combine(std::move(h), key.parent_node_id,
+                      key.child_public_observation);
+  }
+};
+
+struct PublicGraphBuildState {
+  absl::flat_hash_map<PublicNodeKey, NodeId> node_ids;
+  absl::flat_hash_map<ChanceTransitionKey, NodeId> chance_children;
+};
+
 class GraphBuilder {
  public:
-  using Node = StrategyTables::Node;
+  using Node = PublicGraph::PublicNode;
 
   GraphBuilder(const SolverConfig& config,
                const BettingRules& rules,
@@ -47,16 +81,16 @@ class GraphBuilder {
  private:
   friend struct GraphBuilderTestAccess;
 
-  using BettingNodeId = StrategyTables::BettingNodeId;
-  using BettingNode = StrategyTables::BettingNode;
-  using BettingEdge = StrategyTables::BettingEdge;
-  using NodeKey = StrategyTables::NodeKey;
-  using ChanceTransitionKey = StrategyTables::ChanceTransitionKey;
+  using BettingNodeId = poker::BettingNodeId;
+  using BettingNode = PublicGraph::BettingNode;
+  using BettingEdge = PublicGraph::BettingEdge;
 
   const StrategyTables& tables() const { return storage_.frozen_ref(); }
   StrategyTables& mtables() { return storage_.mutable_ref(); }
+  const PublicGraph& graph() const { return tables().graph; }
+  PublicGraph& mgraph() { return mtables().graph; }
   const std::vector<Node>& nodes() const {
-    return tables().nodes;
+    return graph().nodes;
   }
 
   BettingNodeId append_betting_node(const BettingState& state);
@@ -67,8 +101,8 @@ class GraphBuilder {
   BettingNodeId get_or_create_chance_betting_child(
       BettingNodeId parent_node_id,
       const BettingState& child_state);
-  NodeKey node_key(BettingNodeId betting_node_id,
-                   PublicObservationId public_observation) const;
+  PublicNodeKey node_key(BettingNodeId betting_node_id,
+                         PublicObservationId public_observation) const;
   std::optional<NodeId> find_node(
       BettingNodeId betting_node_id,
       PublicObservationId public_observation) const;
@@ -98,6 +132,7 @@ class GraphBuilder {
   SolverStorage& storage_;
   const BettingAbstraction& betting_abstraction_;
   TraversalStats& stats_;
+  PublicGraphBuildState build_state_;
 };
 
 }  // namespace poker

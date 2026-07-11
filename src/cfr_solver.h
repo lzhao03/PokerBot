@@ -72,12 +72,12 @@ class CFRSolver {
   const CfrState& cfr_state() const {
     return storage_.cfr_state_ref();
   }
-  const std::vector<StrategyTables::Node>& nodes() const {
-    return tables().nodes;
+  const std::vector<PublicGraph::PublicNode>& nodes() const {
+    return tables().graph.nodes;
   }
 
   using InfoSetKey = StrategyTables::InfoSetKey;
-  using Node = StrategyTables::Node;
+  using Node = PublicGraph::PublicNode;
 
   struct Deal {
     std::array<ComboId, kPlayerCount> hands = {};

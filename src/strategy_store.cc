@@ -94,10 +94,6 @@ void SolverStorage::freeze() {
   if (is_frozen()) {
     return;
   }
-  mutable_tables->node_ids.clear();
-  mutable_tables->node_ids.rehash(0);
-  mutable_tables->public_chance_child_ids.clear();
-  mutable_tables->public_chance_child_ids.rehash(0);
   mutable_tables->growing_info_sets.clear();
   frozen_tables = mutable_tables;
   mutable_tables.reset();
@@ -369,19 +365,19 @@ bool StrategyStore::build_frozen_info_set_index() {
   StrategyTables& tables = tables_for_growth();
   tables.frozen_info_set_entries.clear();
   tables.frozen_info_set_entries.reserve(tables.info_set_count);
-  tables.frozen_info_set_ranges.assign(tables.nodes.size(), {});
+  tables.frozen_info_set_ranges.assign(tables.graph.nodes.size(), {});
 
-  for (NodeId node_id = 0; node_id < tables.nodes.size(); ++node_id) {
+  for (NodeId node_id = 0; node_id < tables.graph.nodes.size(); ++node_id) {
     const GrowingPublicInfoSets* rows = growing_rows(node_id);
     if (rows == nullptr) {
       continue;
     }
-    const Node& row = tables.nodes[node_id];
-    if (row.betting_node_id >= tables.betting_nodes.size()) {
+    const Node& row = tables.graph.nodes[node_id];
+    if (row.betting_node_id >= tables.graph.betting_nodes.size()) {
       return false;
     }
     const size_t action_count =
-        tables.betting_nodes[row.betting_node_id].action_count;
+        tables.graph.betting_nodes[row.betting_node_id].action_count;
     if (!action_count_matches(node_id, action_count)) {
       return false;
     }
@@ -531,15 +527,15 @@ bool StrategyStore::action_count_matches(NodeId node_id,
     return false;
   }
   const auto& tables = frozen_tables();
-  if (node_id >= tables.nodes.size()) {
+  if (node_id >= tables.graph.nodes.size()) {
     return false;
   }
-  const auto& row = tables.nodes[node_id];
-  if (row.betting_node_id >= tables.betting_nodes.size()) {
+  const auto& row = tables.graph.nodes[node_id];
+  if (row.betting_node_id >= tables.graph.betting_nodes.size()) {
     return false;
   }
-  const auto& node = tables.betting_nodes[row.betting_node_id];
-  return node.kind == StrategyTables::NodeKind::kDecision &&
+  const auto& node = tables.graph.betting_nodes[row.betting_node_id];
+  return node.kind == PublicGraph::NodeKind::kDecision &&
          IsPlayer(node.state.player_to_act) &&
          node.action_count == action_count;
 }

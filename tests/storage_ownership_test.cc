@@ -5,6 +5,22 @@
 namespace poker {
 namespace {
 
+TEST_CASE("public graph exposes compiled topology independently") {
+  const SolverConfig config = test::CompiledConfig();
+  const HandRange a_range = test::ExactRange(test::kPlayerAHand);
+  const HandRange b_range = test::ExactRange(test::kPlayerBHand);
+  CFRSolver solver(config, test::TurnRoot());
+  CFRSolverTestAccess::prepare(solver, a_range, b_range);
+
+  const PublicGraph& graph = CFRSolverTestAccess::public_graph(solver);
+  CHECK(graph.root == 0);
+  CHECK(graph.nodes.size() == 2085);
+  CHECK(graph.betting_nodes.size() == 64);
+  CHECK(graph.action_children.size() == 1748);
+  CHECK(graph.chance_children.size() == 336);
+  CHECK(graph.action_child(graph.root, 0) == 1);
+}
+
 TEST_CASE("freezing transfers topology and retains cumulative storage") {
   const SolverConfig config = test::CompiledConfig();
   const HandRange a_range = test::ExactRange(test::kPlayerAHand);

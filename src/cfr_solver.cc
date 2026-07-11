@@ -98,15 +98,8 @@ CFRSolver::CFRSolver(const SolverConfig& config,
   }
   if (config_.max_public_states > 0) {
     const auto node_cap = static_cast<size_t>(config_.max_public_states);
-    storage_.mutable_ref().node_ids.reserve(node_cap);
-    storage_.mutable_ref().nodes.reserve(node_cap);
-    storage_.mutable_ref().public_chance_child_ids.reserve(node_cap);
-    storage_.mutable_ref().action_child_ids.reserve(node_cap * 4);
-    storage_.mutable_ref().chance_child_entries.reserve(node_cap);
     storage_.mutable_ref().frozen_info_set_ranges.reserve(node_cap);
     storage_.mutable_ref().growing_info_sets.reserve(node_cap);
-    storage_.mutable_ref().betting_nodes.reserve(node_cap);
-    storage_.mutable_ref().betting_edges.reserve(node_cap);
   }
 }
 
@@ -144,11 +137,11 @@ CFRSolver::private_observations_after_chance(
     throw std::logic_error("private observation child node is invalid");
   }
   const Node& node = nodes()[child.node];
-  if (node.betting_node_id >= tables().betting_nodes.size()) {
+  if (node.betting_node_id >= tables().graph.betting_nodes.size()) {
     throw std::logic_error("private observation betting node is invalid");
   }
   const StreetKind street =
-      tables().betting_nodes[node.betting_node_id].state.street;
+      tables().graph.betting_nodes[node.betting_node_id].state.street;
   std::array<PrivateObservationId, kPlayerCount> observations;
   for (int player = 0; player < kPlayerCount; ++player) {
     observations[player] = advance_private_observation(
@@ -220,11 +213,12 @@ CFRSolver::MutableTraversalGraph::sample_chance_child(
     return std::nullopt;
   }
   const Node& graph_node = nodes[parent.node];
-  if (graph_node.betting_node_id >= solver_.tables().betting_nodes.size()) {
+  if (graph_node.betting_node_id >=
+      solver_.tables().graph.betting_nodes.size()) {
     return std::nullopt;
   }
   ExactPublicState exact_parent_state{
-      solver_.tables().betting_nodes[graph_node.betting_node_id].state,
+      solver_.tables().graph.betting_nodes[graph_node.betting_node_id].state,
       parent.exact_board,
   };
   const auto cards = SampleStreetCards(exact_parent_state.betting.street,
@@ -257,20 +251,17 @@ NodeId CFRSolver::FrozenTraversalGraph::required_action_child_id(
     throw std::logic_error("frozen action parent node is invalid");
   }
   const Node& node = graph_nodes[parent_node_id];
-  if (node.betting_node_id >= solver_.tables().betting_nodes.size()) {
+  if (node.betting_node_id >=
+      solver_.tables().graph.betting_nodes.size()) {
     throw std::logic_error("frozen action parent betting node is invalid");
   }
   const auto& betting_node =
-      solver_.tables().betting_nodes[node.betting_node_id];
+      solver_.tables().graph.betting_nodes[node.betting_node_id];
   if (action_index < 0 || action_index >= betting_node.action_count) {
     throw std::logic_error("frozen action child index out of range");
   }
-  const size_t child_slot = static_cast<size_t>(node.action_child_offset) +
-                            static_cast<size_t>(action_index);
-  if (child_slot >= solver_.tables().action_child_ids.size()) {
-    throw std::logic_error("required action child node is missing");
-  }
-  const NodeId child_id = solver_.tables().action_child_ids[child_slot];
+  const NodeId child_id =
+      solver_.tables().graph.action_child(parent_node_id, action_index);
   if (child_id == kInvalidNodeId ||
       child_id == kCappedNodeId ||
       child_id >= graph_nodes.size()) {
@@ -291,15 +282,14 @@ NodeId CFRSolver::FrozenTraversalGraph::required_chance_child_id(
       public_observation_after_chance(
           parent_observation, child_state.betting.street,
           child_state.board);
-  const auto child_id =
-      solver_.tables().chance_child(parent_node_id, child_observation);
-  if (!child_id.has_value() ||
-      *child_id == kInvalidNodeId ||
-      *child_id == kCappedNodeId ||
-      *child_id >= solver_.nodes().size()) {
+  const NodeId child_id = solver_.tables().graph.required_chance_child(
+      parent_node_id, child_observation);
+  if (child_id == kInvalidNodeId ||
+      child_id == kCappedNodeId ||
+      child_id >= solver_.nodes().size()) {
     throw std::logic_error("required chance child node is missing");
   }
-  return *child_id;
+  return child_id;
 }
 
 CFRSolver::Position CFRSolver::FrozenTraversalGraph::action_child(
@@ -319,11 +309,12 @@ CFRSolver::Position CFRSolver::FrozenTraversalGraph::sample_chance_child(
     throw std::logic_error("frozen chance parent node is invalid");
   }
   const Node& graph_node = nodes[parent.node];
-  if (graph_node.betting_node_id >= solver_.tables().betting_nodes.size()) {
+  if (graph_node.betting_node_id >=
+      solver_.tables().graph.betting_nodes.size()) {
     throw std::logic_error("frozen chance parent betting node is invalid");
   }
   ExactPublicState exact_parent_state{
-      solver_.tables().betting_nodes[graph_node.betting_node_id].state,
+      solver_.tables().graph.betting_nodes[graph_node.betting_node_id].state,
       parent.exact_board,
   };
   const auto cards = SampleStreetCards(exact_parent_state.betting.street,
@@ -352,12 +343,12 @@ bool CFRSolver::prebuild_info_set_rows(
       continue;
     }
     const Node& graph_node = nodes()[node_id];
-    if (graph_node.betting_node_id >= tables().betting_nodes.size()) {
+    if (graph_node.betting_node_id >= tables().graph.betting_nodes.size()) {
       continue;
     }
     const auto& betting_node =
-        tables().betting_nodes[graph_node.betting_node_id];
-    if (betting_node.kind != StrategyTables::NodeKind::kDecision ||
+        tables().graph.betting_nodes[graph_node.betting_node_id];
+    if (betting_node.kind != PublicGraph::NodeKind::kDecision ||
         betting_node.action_count == 0 ||
         !IsPlayer(betting_node.state.player_to_act)) {
       continue;
@@ -420,8 +411,9 @@ void CFRSolver::run(int iterations,
   const NodeId root_id = *maybe_root_id;
   const auto& root_row = nodes()[root_id];
   int root_actions = 0;
-  if (root_row.betting_node_id < tables().betting_nodes.size()) {
-    root_actions = tables().betting_nodes[root_row.betting_node_id].action_count;
+  if (root_row.betting_node_id < tables().graph.betting_nodes.size()) {
+    root_actions =
+        tables().graph.betting_nodes[root_row.betting_node_id].action_count;
   }
   VLOG(1) << "Root node has " << root_actions << " actions";
 
@@ -735,20 +727,21 @@ double CFRSolver::CfrTraversal<Graph>::value(
     return 0.0;
   }
   const Node& node = graph_nodes[node_id];
-  if (node.betting_node_id >= solver_.tables().betting_nodes.size()) {
+  if (node.betting_node_id >=
+      solver_.tables().graph.betting_nodes.size()) {
     return 0.0;
   }
   const auto& betting_node =
-      solver_.tables().betting_nodes[node.betting_node_id];
+      solver_.tables().graph.betting_nodes[node.betting_node_id];
 
   switch (betting_node.kind) {
-    case StrategyTables::NodeKind::kTerminal:
+    case PublicGraph::NodeKind::kTerminal:
       return terminal(position, node);
-    case StrategyTables::NodeKind::kChance:
+    case PublicGraph::NodeKind::kChance:
       return chance(position, frame);
-    case StrategyTables::NodeKind::kFrontier:
+    case PublicGraph::NodeKind::kFrontier:
       return solver_.nonterminal_leaf_value();
-    case StrategyTables::NodeKind::kDecision:
+    case PublicGraph::NodeKind::kDecision:
       break;
   }
 
@@ -765,7 +758,7 @@ double CFRSolver::CfrTraversal<Graph>::terminal(
     Position position,
     const Node& node) {
   const auto& betting_node =
-      solver_.tables().betting_nodes[node.betting_node_id];
+      solver_.tables().graph.betting_nodes[node.betting_node_id];
   solver_.traversal_stats_.record_terminal(
       betting_node.state.folded_player < 0);
   const ExactPublicState state{
@@ -811,12 +804,13 @@ double CFRSolver::CfrTraversal<Graph>::decision(
     const Node& node,
     const TraversalFrame& frame) {
   const NodeId node_id = position.node;
-  if (node.betting_node_id >= solver_.tables().betting_nodes.size()) {
+  if (node.betting_node_id >=
+      solver_.tables().graph.betting_nodes.size()) {
     return 0.0;
   }
   const auto& betting_node =
-      solver_.tables().betting_nodes[node.betting_node_id];
-  if (betting_node.kind != StrategyTables::NodeKind::kDecision ||
+      solver_.tables().graph.betting_nodes[node.betting_node_id];
+  if (betting_node.kind != PublicGraph::NodeKind::kDecision ||
       betting_node.action_count == 0 ||
       !IsPlayer(betting_node.state.player_to_act)) {
     return 0.0;
@@ -1160,20 +1154,21 @@ double CFRSolver::evaluate_strategy_node_impl(
   }
   const NodeId node_id = position.node;
   const Node& node = graph_nodes[node_id];
-  if (node.betting_node_id >= tables().betting_nodes.size()) {
+  if (node.betting_node_id >= tables().graph.betting_nodes.size()) {
     return 0.0;
   }
-  const auto& betting_node = tables().betting_nodes[node.betting_node_id];
+  const auto& betting_node =
+      tables().graph.betting_nodes[node.betting_node_id];
 
   switch (betting_node.kind) {
-    case StrategyTables::NodeKind::kTerminal: {
+    case PublicGraph::NodeKind::kTerminal: {
       const ExactPublicState state{
           betting_node.state,
           position.exact_board,
       };
       return TerminalUtility(state, deal.hand(0), deal.hand(1));
     }
-    case StrategyTables::NodeKind::kChance: {
+    case PublicGraph::NodeKind::kChance: {
       const int samples = ChanceSamples(config_);
       return sample_chance_children(
           samples, position, deal.known_private_cards(), graph,
@@ -1186,12 +1181,12 @@ double CFRSolver::evaluate_strategy_node_impl(
                 child, deal, child_frame, graph);
           });
     }
-    case StrategyTables::NodeKind::kFrontier:
+    case PublicGraph::NodeKind::kFrontier:
       return nonterminal_leaf_value();
-    case StrategyTables::NodeKind::kDecision:
+    case PublicGraph::NodeKind::kDecision:
       break;
   }
-  if (betting_node.kind != StrategyTables::NodeKind::kDecision ||
+  if (betting_node.kind != PublicGraph::NodeKind::kDecision ||
       betting_node.action_count == 0 ||
       !IsPlayer(betting_node.state.player_to_act)) {
     return 0.0;

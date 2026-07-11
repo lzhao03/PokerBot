@@ -173,8 +173,11 @@ cc_library(
 
 cc_library(
     name = "strategy_tables",
-    srcs = ["strategy_tables.cc"],
-    hdrs = ["strategy_tables.h"],
+    srcs = ["public_graph.cc"],
+    hdrs = [
+        "public_graph.h",
+        "strategy_tables.h",
+    ],
     deps = [
         ":game_state",
         ":poker_types",
