@@ -171,12 +171,13 @@ ExactPublicState DefaultInitialState(const SolverConfig& config) {
 }
 
 HistoryNodeKind KindFor(const BettingState& state) {
-  if (state.folded_player >= 0 ||
-      (state.street == StreetKind::kRiver && IsBettingRoundOver(state))) {
+  if (std::holds_alternative<FoldTerminalState>(state) ||
+      std::holds_alternative<ShowdownState>(state)) {
     return HistoryNodeKind::kTerminal;
   }
-  return IsBettingRoundOver(state) ? HistoryNodeKind::kChance
-                                   : HistoryNodeKind::kDecision;
+  return std::holds_alternative<ChanceState>(state)
+             ? HistoryNodeKind::kChance
+             : HistoryNodeKind::kDecision;
 }
 
 HistoryId AppendHistory(HistoryTree& tree,
@@ -189,7 +190,8 @@ HistoryId AppendHistory(HistoryTree& tree,
 
   const HistoryNodeKind kind = tree.nodes[id.index()].kind;
   if (kind == HistoryNodeKind::kDecision) {
-    const SolverTransitions transitions = GenerateTransitions(config, state);
+    const SolverTransitions transitions =
+        GenerateTransitions(config, std::get<DecisionState>(state));
     if (transitions.size() > std::numeric_limits<uint8_t>::max()) {
       throw std::invalid_argument("too many configured solver actions");
     }
@@ -206,7 +208,8 @@ HistoryId AppendHistory(HistoryTree& tree,
       tree.edges[begin + action] = {transition.action, child};
     }
   } else if (kind == HistoryNodeKind::kChance) {
-    const BettingState child_state = AdvanceBettingStreet(state, rules);
+    const BettingState child_state =
+        AdvanceBettingStreet(std::get<ChanceState>(state), rules);
     const HistoryId child =
         AppendHistory(tree, child_state, rules, config);
     tree.nodes[id.index()].chance_child = child;
@@ -472,7 +475,7 @@ CFRSolver::CFRSolver(const SolverConfig& config,
       betting_rules_{config_.big_blind > 0 ? config_.big_blind : 2},
       initial_state_(initial_state),
       rng_(12345) {
-  if (!IsValidBettingState(initial_state_.betting)) {
+  if (!IsValidBettingData(Data(initial_state_.betting))) {
     throw std::invalid_argument("initial betting state is invalid");
   }
   history_ = BuildHistoryTree(initial_state_.betting, betting_rules_, config_);
@@ -488,7 +491,7 @@ CFRSolver::CFRSolver(const SolverConfig& config,
 
 Position CFRSolver::root_position() const {
   return {history_.root, initial_state_.board,
-          public_observation_id(initial_state_.betting.street,
+          public_observation_id(Data(initial_state_.betting).street,
                                 initial_state_.board)};
 }
 
@@ -515,14 +518,15 @@ Position CFRSolver::sample_chance_child(Position position,
     throw std::logic_error("expected a chance history");
   }
 
-  const auto cards = SampleStreetCards(node.state.street, position.board,
+  const BettingData& data = Data(node.state);
+  const auto cards = SampleStreetCards(data.street, position.board,
                                        deal.blocked_mask, rng_);
   const ExactPublicState child =
       ApplyChance({node.state, position.board}, cards, betting_rules_);
   position.history = node.chance_child;
   position.board = child.board;
   position.public_observation = public_observation_after_chance(
-      position.public_observation, child.betting.street, child.board);
+      position.public_observation, Data(child.betting).street, child.board);
   return position;
 }
 
@@ -543,7 +547,8 @@ void CFRSolver::advance_private_observations(
     TraversalFrame& frame,
     const Deal& deal,
     const Position& child) const {
-  const StreetKind street = history_.nodes[child.history.index()].state.street;
+  const StreetKind street =
+      Data(history_.nodes[child.history.index()].state).street;
   for (int player = 0; player < kPlayerCount; ++player) {
     const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
     frame.private_observations[player] = advance_private_observation(
@@ -616,17 +621,19 @@ double CFRSolver::traverse(Position position,
     return value / samples;
   }
 
-  const int player = node.state.player_to_act;
-  if (!IsPlayer(player) || node.action_count == 0) {
+  const auto* decision = std::get_if<DecisionState>(&node.state);
+  if (decision == nullptr || node.action_count == 0) {
     throw std::logic_error("decision history has no acting player or actions");
   }
+  const Player player = decision->actor;
+  const size_t player_index = Index(player);
   const InfoSetKey key{position.history, position.public_observation,
-                       frame.private_observations[player]};
-  const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
+                       frame.private_observations[player_index]};
+  const ComboId hand = deal.hand(player).combo();
   assert(key.private_observation == private_observation_for_runout(
       hand, position.board, position.public_observation));
   const bool training = context.mode == TraversalMode::kTrain;
-  const bool updates = training && player == context.update_player;
+  const bool updates = training && context.update_player == player;
   InfoSetRow row;
   if (updates) {
     row = find_or_create_row(key, node.action_count);
@@ -650,7 +657,7 @@ double CFRSolver::traverse(Position position,
   double node_value = 0.0;
   for (uint8_t action = 0; action < node.action_count; ++action) {
     TraversalFrame child_frame = frame;
-    child_frame.reach[player] *= probabilities[action];
+    child_frame.reach[player_index] *= probabilities[action];
     values[action] =
         traverse(action_child(position, action), child_frame, context);
     node_value += probabilities[action] * values[action];
@@ -664,8 +671,8 @@ double CFRSolver::traverse(Position position,
     return node_value;
   }
 
-  const double sign = player == 0 ? 1.0 : -1.0;
-  const double opponent_reach = frame.reach[Opponent(player)];
+  const double sign = player == Player::kA ? 1.0 : -1.0;
+  const double opponent_reach = frame.reach[Index(Opponent(player))];
   for (uint8_t action = 0; action < node.action_count; ++action) {
     const double regret = opponent_reach * sign * (values[action] - node_value);
     AddCfrPlusRegret(state_, row, action, static_cast<float>(regret));
@@ -673,7 +680,7 @@ double CFRSolver::traverse(Position position,
 
   if (config_.accumulate_average_strategy) {
     const double weight =
-        frame.reach[player] * static_cast<double>(context.iteration + 1);
+        frame.reach[player_index] * static_cast<double>(context.iteration + 1);
     AddStrategySum(state_, row, probabilities, weight);
   }
   return node_value;
@@ -692,7 +699,8 @@ void CFRSolver::run(uint64_t iterations,
     const Deal deal = sampler.sample(rng_);
     TraversalFrame frame;
     frame.private_observations = private_observations_for_position(deal, root);
-    const int update_player = static_cast<int>(state_.iterations % kPlayerCount);
+    const Player update_player =
+        state_.iterations % kPlayerCount == 0 ? Player::kA : Player::kB;
     TraversalContext context{
         deal, TraversalMode::kTrain, update_player, state_.iterations};
     state_.cumulative_root_utility +=

@@ -13,8 +13,19 @@ using S = SuitKind;
 
 Card C(int rank, S suit) { return MakeCardId(rank, suit); }
 
+BettingData& B(BettingState& state) {
+  return std::visit([](auto& phase) -> BettingData& { return phase.data; },
+                    state);
+}
+
+BettingData& B(ExactPublicState& state) { return B(state.betting); }
+
 BettingState Apply(const BettingState& state, GameAction action) {
-  const auto child = TryApplyAction(state, action);
+  const auto* decision = std::get_if<DecisionState>(&state);
+  if (decision == nullptr) {
+    throw std::invalid_argument("expected decision state");
+  }
+  const auto child = TryApplyAction(*decision, action);
   if (!child.ok()) {
     throw std::invalid_argument(std::string(child.status().message()));
   }
@@ -23,10 +34,10 @@ BettingState Apply(const BettingState& state, GameAction action) {
 
 ExactPublicState Root() {
   ExactPublicState state;
-  state.betting.stack = {19, 18};
-  state.betting.total_committed = {1, 2};
-  state.betting.street_committed = {1, 2};
-  state.betting.last_full_raise = 2;
+  B(state).stack = {19, 18};
+  B(state).total_committed = {1, 2};
+  B(state).street_committed = {1, 2};
+  B(state).last_full_raise = 2;
   return state;
 }
 
@@ -42,29 +53,28 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
                   std::invalid_argument);
 
   ExactPublicState short_call = Root();
-  short_call.betting.stack = {3, 12};
-  short_call.betting.total_committed = {1, 8};
-  short_call.betting.street_committed = {1, 8};
+  B(short_call).stack = {3, 12};
+  B(short_call).total_committed = {1, 8};
+  B(short_call).street_committed = {1, 8};
   short_call.betting = Apply(short_call.betting,
                                    {ActionKind::kCall, 4});
-  CHECK(IsBettingRoundOver(short_call.betting));
-  CHECK(short_call.betting.stack[0] == 0);
-  CHECK(short_call.betting.total_committed ==
+  CHECK(std::holds_alternative<ChanceState>(short_call.betting));
+  CHECK(B(short_call).stack[0] == 0);
+  CHECK(B(short_call).total_committed ==
         std::array<Chips, kPlayerCount>{4, 4});
-  CHECK(short_call.betting.street_committed ==
+  CHECK(B(short_call).street_committed ==
         std::array<Chips, kPlayerCount>{4, 4});
-  CHECK(short_call.betting.stack[1] == 16);
+  CHECK(B(short_call).stack[1] == 16);
 
   SolverConfig config;
   config.bet_sizes[static_cast<size_t>(StreetKind::kPreflop)] = {0.5};
   config.bet_sizes[static_cast<size_t>(StreetKind::kFlop)] = {1.0};
-  BettingState flop;
-  flop.stack = {98, 98};
-  flop.total_committed = {2, 2};
-  flop.last_full_raise = 2;
-  flop.street = StreetKind::kFlop;
-  flop.player_to_act = 1;
-  flop.folded_player = -1;
+  BettingData flop_data;
+  flop_data.stack = {98, 98};
+  flop_data.total_committed = {2, 2};
+  flop_data.last_full_raise = 2;
+  flop_data.street = StreetKind::kFlop;
+  const DecisionState flop{flop_data, Player::kB};
   const SolverTransitions transitions = GenerateTransitions(config, flop);
   bool bet_four = false;
   bool bet_two = false;

@@ -8,18 +8,19 @@ namespace {
 
 TEST_CASE("heads-up blinds define pot and call amount") {
   const ExactPublicState state = test::InitialHeadsUpState(20, 20, 1, 2);
+  const BettingData& betting = Data(state.betting);
 
-  CHECK(state.betting.stack == std::array<Chips, kPlayerCount>{19, 18});
-  CHECK(state.betting.total_committed ==
+  CHECK(betting.stack == std::array<Chips, kPlayerCount>{19, 18});
+  CHECK(betting.total_committed ==
         std::array<Chips, kPlayerCount>{1, 2});
-  CHECK(state.betting.street_committed ==
+  CHECK(betting.street_committed ==
         std::array<Chips, kPlayerCount>{1, 2});
-  CHECK(state.betting.last_full_raise == 2);
-  CHECK(Pot(state.betting) == 3);
-  CHECK(HighestStreetCommitment(state.betting) == 2);
-  CHECK(ToCall(state.betting, 0) == 1);
-  CHECK(ToCall(state.betting, 1) == 0);
-  CHECK(MaxContestableAdditional(state.betting, 0) == 19);
+  CHECK(betting.last_full_raise == 2);
+  CHECK(Pot(betting) == 3);
+  CHECK(HighestStreetCommitment(betting) == 2);
+  CHECK(ToCall(betting, Player::kA) == 1);
+  CHECK(ToCall(betting, Player::kB) == 0);
+  CHECK(MaxContestableAdditional(betting, Player::kA) == 19);
 }
 
 }  // namespace

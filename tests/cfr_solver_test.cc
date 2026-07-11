@@ -33,7 +33,11 @@ ComboRange R(ComboId hand) {
 }
 
 BettingState Apply(const BettingState& state, GameAction action) {
-  const auto child = TryApplyAction(state, action);
+  const auto* decision = std::get_if<DecisionState>(&state);
+  if (decision == nullptr) {
+    throw std::invalid_argument("expected decision state");
+  }
+  const auto child = TryApplyAction(*decision, action);
   if (!child.ok()) {
     throw std::invalid_argument(std::string(child.status().message()));
   }
@@ -84,7 +88,8 @@ TEST_CASE("history tree stores direct rule transitions") {
     } else if (node.kind == HistoryNodeKind::kChance) {
       REQUIRE(node.chance_child.index() < tree.nodes.size());
       CHECK(tree.nodes[node.chance_child.index()].state ==
-            AdvanceBettingStreet(node.state, BettingRules{2}));
+            AdvanceBettingStreet(std::get<ChanceState>(node.state),
+                                 BettingRules{2}));
     }
   }
 
@@ -152,10 +157,11 @@ TEST_CASE("postflop roots use full observation identity") {
   CFRSolver solver(config, root);
   solver.run(2, R(kA), R(kB));
   const HistoryTree& tree = CFRSolverTestAccess::history(solver);
-  const int player = tree.nodes[tree.root.index()].state.player_to_act;
-  const ComboId hand = player == 0 ? kA : kB;
+  const Player player =
+      std::get<DecisionState>(tree.nodes[tree.root.index()].state).actor;
+  const ComboId hand = player == Player::kA ? kA : kB;
   const PublicObservationId public_id =
-      public_observation_id(root.betting.street, root.board);
+      public_observation_id(Data(root.betting).street, root.board);
   const PrivateObservationId private_id =
       private_observation_for_runout(hand, root.board, public_id);
   CHECK(CFRSolverTestAccess::state(solver).rows.contains(

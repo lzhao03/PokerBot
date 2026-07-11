@@ -34,19 +34,17 @@ const std::array<ComboInfo, kComboCount>& ComboTable() {
   return table;
 }
 
-int FirstPlayerForStreet(StreetKind street) {
-  return street == StreetKind::kPreflop ? 0 : 1;
+Player FirstPlayerForStreet(StreetKind street) {
+  return street == StreetKind::kPreflop ? Player::kA : Player::kB;
 }
 
-Chips CommitChips(BettingState& state, int player, Chips requested) {
-  if (requested <= 0) {
-    throw std::invalid_argument("Action commitment delta must be positive");
-  }
-
-  const Chips committed = std::min(requested, state.stack[player]);
-  state.stack[player] -= committed;
-  state.total_committed[player] += committed;
-  state.street_committed[player] += committed;
+Chips CommitChips(BettingData& state, Player player, Chips requested) {
+  assert(requested > 0);
+  const size_t index = Index(player);
+  const Chips committed = std::min(requested, state.stack[index]);
+  state.stack[index] -= committed;
+  state.total_committed[index] += committed;
+  state.street_committed[index] += committed;
   return committed;
 }
 
@@ -68,23 +66,23 @@ void DealNextStreet(BoardRunout& board,
   }
 }
 
-void RefundUnmatchedCommitment(BettingState& state) {
-  if (state.folded_player >= 0 ||
-      state.street_committed[0] == state.street_committed[1]) {
+void RefundUnmatchedCommitment(BettingData& state) {
+  if (state.street_committed[0] == state.street_committed[1]) {
     return;
   }
-  const int player = state.street_committed[0] > state.street_committed[1]
-                         ? 0
-                         : 1;
+  const Player player = state.street_committed[0] > state.street_committed[1]
+                            ? Player::kA
+                            : Player::kB;
+  const size_t index = Index(player);
+  const size_t opponent = Index(Opponent(player));
   const Chips excess =
-      state.street_committed[player] -
-      state.street_committed[Opponent(player)];
-  state.street_committed[player] -= excess;
-  state.total_committed[player] -= excess;
-  state.stack[player] += excess;
+      state.street_committed[index] - state.street_committed[opponent];
+  state.street_committed[index] -= excess;
+  state.total_committed[index] -= excess;
+  state.stack[index] += excess;
 }
 
-Chips ConcreteBetAmount(const BettingState& state, double size) {
+Chips ConcreteBetAmount(const BettingData& state, double size) {
   if (size <= 0.0) {
     return 0;
   }
@@ -102,29 +100,31 @@ struct ActionLimits {
   bool wager_open = false;
 };
 
-ActionLimits LimitsFor(const BettingState& state, int player) {
+ActionLimits LimitsFor(const DecisionState& state) {
+  const BettingData& data = state.data;
+  const Player player = state.actor;
+  const size_t index = Index(player);
   ActionLimits limits;
-  limits.current = state.street_committed[player];
-  limits.highest = HighestStreetCommitment(state);
+  limits.current = data.street_committed[index];
+  limits.highest = HighestStreetCommitment(data);
   limits.call_target =
-      std::min(limits.highest, limits.current + state.stack[player]);
+      std::min(limits.highest, limits.current + data.stack[index]);
   limits.maximum_target =
-      limits.current + MaxContestableAdditional(state, player);
+      limits.current + MaxContestableAdditional(data, player);
   limits.wager_open = limits.highest > 0;
   limits.minimum_aggressive_target =
-      limits.wager_open ? limits.highest + state.last_full_raise
-                        : limits.current + state.last_full_raise;
+      limits.wager_open ? limits.highest + data.last_full_raise
+                        : limits.current + data.last_full_raise;
   return limits;
 }
 
-bool IsLegalAction(const BettingState& state, const GameAction& action) {
-  const int player = state.player_to_act;
-  if (!IsPlayer(player) || state.folded_player >= 0 ||
-      state.stack[player] <= 0) {
+bool IsLegalAction(const DecisionState& state, const GameAction& action) {
+  const BettingData& data = state.data;
+  if (data.stack[Index(state.actor)] <= 0) {
     return false;
   }
 
-  const ActionLimits limits = LimitsFor(state, player);
+  const ActionLimits limits = LimitsFor(state);
   const Chips to_call = limits.highest - limits.current;
   const Chips target = action.target_street_commitment;
   switch (action.kind) {
@@ -150,30 +150,43 @@ bool IsLegalAction(const BettingState& state, const GameAction& action) {
   }
 }
 
-BettingState ApplyActionUnchecked(const BettingState& state,
+bool IsBettingRoundOver(const BettingData& state) noexcept {
+  const bool commitments_match =
+      state.street_committed[0] == state.street_committed[1];
+  if (state.pending_action_mask == 0 && commitments_match) {
+    return true;
+  }
+  if (!AnyPlayerAllIn(state)) {
+    return false;
+  }
+  if (state.stack[0] == 0 && state.stack[1] == 0) {
+    return true;
+  }
+  const Player live_player =
+      state.stack[0] > 0 ? Player::kA : Player::kB;
+  return ToCall(state, live_player) == 0;
+}
+
+BettingState ApplyActionUnchecked(const DecisionState& state,
                                   const GameAction& action) {
-  BettingState child = state;
-  assert(IsPlayer(child.player_to_act));
-  const int player = child.player_to_act;
-  const int opponent = Opponent(player);
+  BettingData child = state.data;
+  const Player player = state.actor;
+  const Player opponent = Opponent(player);
+  const size_t player_index = Index(player);
   const Chips highest_before = HighestStreetCommitment(child);
-  const Chips current = child.street_committed[player];
+  const Chips current = child.street_committed[player_index];
   const Chips delta = action.target_street_commitment - current;
 
   switch (action.kind) {
     case ActionKind::kFold:
-      child.folded_player = player;
-      child.player_to_act = -1;
-      break;
+      return FoldTerminalState{child, player};
     case ActionKind::kCheck:
-      child.player_to_act = opponent;
       break;
     case ActionKind::kCall:
     case ActionKind::kBet:
     case ActionKind::kRaise:
     case ActionKind::kAllIn:
       CommitChips(child, player, delta);
-      child.player_to_act = opponent;
       break;
     case ActionKind::kNoAction:
       break;
@@ -183,30 +196,31 @@ BettingState ApplyActionUnchecked(const BettingState& state,
       action.target_street_commitment > highest_before;
   if (aggressive) {
     const Chips raise_size =
-        child.street_committed[player] - highest_before;
+        child.street_committed[player_index] - highest_before;
     if (raise_size >= child.last_full_raise) {
       child.last_full_raise = raise_size;
     }
   }
-  if (action.kind != ActionKind::kFold) {
-    if (aggressive) {
-      child.pending_action_mask = PlayerBit(opponent);
-    } else {
-      child.pending_action_mask &=
-          static_cast<uint8_t>(~PlayerBit(player));
-    }
+  if (aggressive) {
+    child.pending_action_mask = PlayerBit(static_cast<int>(opponent));
+  } else {
+    child.pending_action_mask &=
+        static_cast<uint8_t>(~PlayerBit(static_cast<int>(player)));
   }
   if (IsBettingRoundOver(child)) {
     RefundUnmatchedCommitment(child);
-    child.player_to_act = -1;
+    assert(IsValidBettingData(child));
+    return child.street == StreetKind::kRiver
+               ? BettingState(ShowdownState{child})
+               : BettingState(ChanceState{child});
   }
 
-  assert(IsValidBettingState(child));
-  return child;
+  assert(IsValidBettingData(child));
+  return DecisionState{child, opponent};
 }
 
 void AddTransition(SolverTransitions& transitions,
-                   const BettingState& state,
+                   const DecisionState& state,
                    GameAction action) {
   assert(IsLegalAction(state, action));
   transitions.push_back({action, ApplyActionUnchecked(state, action)});
@@ -328,54 +342,34 @@ ExactPublicState MakeInitialState(
     }
   }
 
-  BettingState betting;
+  BettingData betting;
   for (size_t player = 0; player < kPlayerCount; ++player) {
     betting.stack[player] = stacks[player] - blinds[player];
   }
   betting.total_committed = blinds;
   betting.street_committed = blinds;
   betting.last_full_raise = rules.minimum_bet;
-  return ExactPublicState{betting, BoardRunout::Preflop()};
-}
-
-bool IsBettingRoundOver(const BettingState& state) noexcept {
-  if (state.folded_player >= 0) {
-    return true;
-  }
-  const bool commitments_match =
-      state.street_committed[0] == state.street_committed[1];
-  if (state.pending_action_mask == 0 && commitments_match) {
-    return true;
-  }
-  if (!AnyPlayerAllIn(state)) {
-    return false;
-  }
-  if (state.stack[0] == 0 && state.stack[1] == 0) {
-    return true;
-  }
-  const int live_player = state.stack[0] > 0 ? 0 : 1;
-  return ToCall(state, live_player) == 0;
+  return ExactPublicState{DecisionState{betting, Player::kA},
+                          BoardRunout::Preflop()};
 }
 
 bool IsTerminal(const ExactPublicState& state) {
-  if (state.betting.folded_player >= 0) {
+  if (std::holds_alternative<FoldTerminalState>(state.betting)) {
     return true;
   }
-  return state.betting.street == StreetKind::kRiver &&
-         state.board.count() == kMaxBoardCards &&
-         IsBettingRoundOver(state.betting);
+  return std::holds_alternative<ShowdownState>(state.betting) &&
+         state.board.count() == kMaxBoardCards;
 }
 
 SolverTransitions GenerateTransitions(const SolverConfig& config,
-                                      const BettingState& state) {
-  const int player = state.player_to_act;
-  if (!IsPlayer(player) || state.folded_player >= 0 ||
-      state.stack[player] <= 0) {
+                                      const DecisionState& state) {
+  const BettingData& data = state.data;
+  if (data.stack[Index(state.actor)] <= 0) {
     throw std::logic_error("GenerateTransitions requires a decision state");
   }
 
   SolverTransitions transitions;
-  const ActionLimits limits = LimitsFor(state, player);
+  const ActionLimits limits = LimitsFor(state);
   const Chips outstanding_call = limits.highest - limits.current;
   if (outstanding_call > 0) {
     AddTransition(transitions, state, {ActionKind::kFold, 0});
@@ -389,9 +383,9 @@ SolverTransitions GenerateTransitions(const SolverConfig& config,
       limits.wager_open ? ActionKind::kRaise : ActionKind::kBet;
   absl::InlinedVector<GameAction, 8> sized_actions;
   const auto& bet_sizes =
-      config.bet_sizes[static_cast<size_t>(state.street)];
+      config.bet_sizes[static_cast<size_t>(data.street)];
   for (double bet_size : bet_sizes) {
-    const Chips bet = ConcreteBetAmount(state, bet_size);
+    const Chips bet = ConcreteBetAmount(data, bet_size);
     const Chips target = limits.highest + bet;
     if (target >= limits.minimum_aggressive_target &&
         target < limits.maximum_target) {
@@ -418,7 +412,7 @@ SolverTransitions GenerateTransitions(const SolverConfig& config,
   return transitions;
 }
 
-absl::StatusOr<BettingState> TryApplyAction(const BettingState& state,
+absl::StatusOr<BettingState> TryApplyAction(const DecisionState& state,
                                             const GameAction& action) {
   if (!IsLegalAction(state, action)) {
     return absl::InvalidArgumentError("illegal poker action");
@@ -426,27 +420,29 @@ absl::StatusOr<BettingState> TryApplyAction(const BettingState& state,
   return ApplyActionUnchecked(state, action);
 }
 
-BettingState AdvanceBettingStreet(const BettingState& state,
+BettingState AdvanceBettingStreet(const ChanceState& state,
                                   const BettingRules& rules) {
   if (rules.minimum_bet <= 0) {
     throw std::invalid_argument("minimum bet must be positive");
   }
-  if (!IsBettingRoundOver(state) || state.player_to_act != -1 ||
-      state.street == StreetKind::kRiver) {
+  if (state.data.street == StreetKind::kRiver) {
     throw std::invalid_argument("betting state is not a chance node");
   }
 
-  BettingState child = state;
-  child.street = static_cast<StreetKind>(static_cast<int>(state.street) + 1);
+  BettingData child = state.data;
+  child.street = static_cast<StreetKind>(
+      static_cast<int>(state.data.street) + 1);
   child.street_committed = {0, 0};
   child.last_full_raise = rules.minimum_bet;
   child.pending_action_mask = kAllPlayersMask;
-  child.player_to_act = FirstPlayerForStreet(child.street);
   if (IsBettingRoundOver(child)) {
-    child.player_to_act = -1;
+    assert(IsValidBettingData(child));
+    return child.street == StreetKind::kRiver
+               ? BettingState(ShowdownState{child})
+               : BettingState(ChanceState{child});
   }
-  assert(IsValidBettingState(child));
-  return child;
+  assert(IsValidBettingData(child));
+  return DecisionState{child, FirstPlayerForStreet(child.street)};
 }
 
 ExactPublicState ApplyChance(const ExactPublicState& state,
@@ -455,19 +451,18 @@ ExactPublicState ApplyChance(const ExactPublicState& state,
   if (rules.minimum_bet <= 0) {
     throw std::invalid_argument("minimum bet must be positive");
   }
-  if (IsTerminal(state) ||
-      !IsBettingRoundOver(state.betting) ||
-      state.betting.player_to_act != -1) {
+  const auto* chance = std::get_if<ChanceState>(&state.betting);
+  if (chance == nullptr) {
     throw std::invalid_argument("State is not a chance node");
   }
   if (cards.size() !=
-      static_cast<size_t>(CardsForNextStreet(state.betting.street))) {
+      static_cast<size_t>(CardsForNextStreet(chance->data.street))) {
     throw std::invalid_argument("Incorrect number of chance cards");
   }
 
-  ExactPublicState child{AdvanceBettingStreet(state.betting, rules),
+  ExactPublicState child{AdvanceBettingStreet(*chance, rules),
                          state.board};
-  DealNextStreet(child.board, state.betting.street, cards);
+  DealNextStreet(child.board, chance->data.street, cards);
   return child;
 }
 
@@ -478,24 +473,26 @@ double TerminalUtility(const ExactPublicState& state,
     throw std::invalid_argument("TerminalUtility requires a terminal state");
   }
 
-  const double player0_committed = state.betting.total_committed[0];
+  const BettingData& data = Data(state.betting);
+  const double player0_committed = data.total_committed[0];
 
-  if (state.betting.folded_player >= 0) {
-    if (state.betting.folded_player == 0) {
+  if (const auto* fold =
+          std::get_if<FoldTerminalState>(&state.betting)) {
+    if (fold->folded == Player::kA) {
       return -player0_committed;
     }
-    return Pot(state.betting) - player0_committed;
+    return Pot(data) - player0_committed;
   }
 
   const int comparison = CompareHands(player0_hand, player1_hand,
                                       state.board);
   if (comparison > 0) {
-    return Pot(state.betting) - player0_committed;
+    return Pot(data) - player0_committed;
   }
   if (comparison < 0) {
     return -player0_committed;
   }
-  return (Pot(state.betting) / 2.0) - player0_committed;
+  return (Pot(data) / 2.0) - player0_committed;
 }
 
 }  // namespace poker

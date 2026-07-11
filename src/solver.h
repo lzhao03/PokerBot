@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <random>
 #include <string_view>
 #include <utility>
@@ -185,7 +186,7 @@ class CFRSolver {
   struct TraversalContext {
     const Deal& deal;
     TraversalMode mode = TraversalMode::kTrain;
-    int update_player = -1;
+    std::optional<Player> update_player;
     uint64_t iteration = 0;
   };
 

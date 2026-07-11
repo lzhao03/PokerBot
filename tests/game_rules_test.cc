@@ -20,6 +20,17 @@ using S = SuitKind;
 
 Card C(int rank, S suit) { return MakeCardId(rank, suit); }
 
+BettingData& B(BettingState& state) {
+  return std::visit([](auto& phase) -> BettingData& { return phase.data; },
+                    state);
+}
+
+const BettingData& B(const BettingState& state) { return Data(state); }
+BettingData& B(ExactPublicState& state) { return B(state.betting); }
+const BettingData& B(const ExactPublicState& state) {
+  return Data(state.betting);
+}
+
 ComboId H(int first_rank,
           S first_suit,
           int second_rank,
@@ -29,7 +40,11 @@ ComboId H(int first_rank,
 }
 
 BettingState Apply(const BettingState& state, GameAction action) {
-  const auto child = TryApplyAction(state, action);
+  const auto* decision = std::get_if<DecisionState>(&state);
+  if (decision == nullptr) {
+    throw std::invalid_argument("expected decision state");
+  }
+  const auto child = TryApplyAction(*decision, action);
   if (!child.ok()) {
     throw std::invalid_argument(std::string(child.status().message()));
   }
@@ -46,12 +61,16 @@ std::array<Card, 3> Flop() {
 
 std::vector<GameAction> ActionsFor(const BettingState& state,
                                    absl::Span<const double> sizes) {
+  const auto* decision = std::get_if<DecisionState>(&state);
+  if (decision == nullptr) {
+    throw std::invalid_argument("expected decision state");
+  }
   SolverConfig config;
-  config.bet_sizes[static_cast<size_t>(state.street)].assign(
+  config.bet_sizes[static_cast<size_t>(decision->data.street)].assign(
       sizes.begin(), sizes.end());
   std::vector<GameAction> actions;
   for (const SolverTransition& transition :
-       GenerateTransitions(config, state)) {
+       GenerateTransitions(config, *decision)) {
     actions.push_back(transition.action);
   }
   return actions;
@@ -59,13 +78,16 @@ std::vector<GameAction> ActionsFor(const BettingState& state,
 
 ExactPublicState ClosedState(StreetKind street) {
   ExactPublicState state;
-  state.betting.stack = {10, 10};
-  state.betting.total_committed = {10, 10};
-  state.betting.street_committed = {0, 0};
-  state.betting.last_full_raise = 2;
-  state.betting.street = street;
-  state.betting.player_to_act = -1;
-  state.betting.pending_action_mask = 0;
+  BettingData data;
+  data.stack = {10, 10};
+  data.total_committed = {10, 10};
+  data.street_committed = {0, 0};
+  data.last_full_raise = 2;
+  data.street = street;
+  data.pending_action_mask = 0;
+  state.betting = street == StreetKind::kRiver
+                      ? BettingState(ShowdownState{data})
+                      : BettingState(ChanceState{data});
 
   if (street == StreetKind::kPreflop) {
     return state;
@@ -109,16 +131,24 @@ void CheckExactState(const char* label,
                      const BoardRunout& expected_board,
                      StatePhase expected_phase) {
   CAPTURE(label);
+  BettingData expected_data;
+  expected_data.stack = stack;
+  expected_data.total_committed = total;
+  expected_data.street_committed = street_committed;
+  expected_data.last_full_raise = last_full_raise;
+  expected_data.street = street;
+  expected_data.pending_action_mask = pending_action_mask;
   BettingState expected_betting;
-  expected_betting.stack = stack;
-  expected_betting.total_committed = total;
-  expected_betting.street_committed = street_committed;
-  expected_betting.last_full_raise = last_full_raise;
-  expected_betting.street = street;
-  expected_betting.player_to_act = static_cast<int8_t>(player_to_act);
-  expected_betting.pending_action_mask = pending_action_mask;
+  if (expected_phase == StatePhase::kDecision) {
+    expected_betting = DecisionState{
+        expected_data, static_cast<Player>(player_to_act)};
+  } else if (expected_phase == StatePhase::kChance) {
+    expected_betting = ChanceState{expected_data};
+  } else {
+    expected_betting = ShowdownState{expected_data};
+  }
   CHECK(actual.betting == expected_betting);
-  CHECK(Pot(actual.betting) == Pot(expected_betting));
+  CHECK(Pot(B(actual)) == Pot(Data(expected_betting)));
   CHECK(actual.board == expected_board);
 
   if (expected_phase == StatePhase::kTerminal) {
@@ -127,30 +157,28 @@ void CheckExactState(const char* label,
   }
   CHECK_FALSE(IsTerminal(actual));
   if (expected_phase == StatePhase::kChance) {
-    CHECK(IsBettingRoundOver(actual.betting));
-    CHECK(actual.betting.player_to_act == -1);
+    CHECK(std::holds_alternative<ChanceState>(actual.betting));
     return;
   }
-  CHECK_FALSE(IsBettingRoundOver(actual.betting));
-  CHECK(IsPlayer(actual.betting.player_to_act));
+  CHECK(std::holds_alternative<DecisionState>(actual.betting));
 }
 
 void CheckGeneralInvariants(
     const ExactPublicState& state,
     const std::array<Chips, kPlayerCount>& initial_chips) {
-  CHECK(IsValidBettingState(state.betting));
+  const BettingData& betting = B(state);
+  CHECK(IsValidBettingData(betting));
   for (size_t player = 0; player < kPlayerCount; ++player) {
-    CHECK(state.betting.stack[player] >= 0);
-    CHECK(state.betting.total_committed[player] >= 0);
-    CHECK(state.betting.street_committed[player] >= 0);
-    CHECK(state.betting.street_committed[player] <=
-          state.betting.total_committed[player]);
-    CHECK(state.betting.stack[player] +
-              state.betting.total_committed[player] ==
+    CHECK(betting.stack[player] >= 0);
+    CHECK(betting.total_committed[player] >= 0);
+    CHECK(betting.street_committed[player] >= 0);
+    CHECK(betting.street_committed[player] <=
+          betting.total_committed[player]);
+    CHECK(betting.stack[player] + betting.total_committed[player] ==
           initial_chips[player]);
   }
-  CHECK(Pot(state.betting) == state.betting.total_committed[0] +
-                                  state.betting.total_committed[1]);
+  CHECK(Pot(betting) ==
+        betting.total_committed[0] + betting.total_committed[1]);
 
   CardMask seen = 0;
   for (Card card : state.board.cards()) {
@@ -159,19 +187,11 @@ void CheckGeneralInvariants(
   }
   CHECK(seen == state.board.mask());
   CHECK(std::popcount(state.board.mask()) == state.board.count());
-  CHECK(BoardCardsForStreet(state.betting.street) == state.board.count());
+  CHECK(BoardCardsForStreet(B(state).street) == state.board.count());
 
-  if (IsBettingRoundOver(state.betting)) {
-    CHECK(state.betting.player_to_act == -1);
-    if (state.betting.folded_player < 0) {
-      CHECK(state.betting.street_committed[0] ==
-            state.betting.street_committed[1]);
-    }
-  } else {
-    CHECK(IsPlayer(state.betting.player_to_act));
-  }
-  if (IsTerminal(state)) {
-    CHECK(state.betting.player_to_act == -1);
+  if (!std::holds_alternative<DecisionState>(state.betting) &&
+      !std::holds_alternative<FoldTerminalState>(state.betting)) {
+    CHECK(betting.street_committed[0] == betting.street_committed[1]);
   }
 }
 
@@ -188,7 +208,7 @@ void CheckGeneratedRollout(uint32_t seed) {
 
   CheckGeneralInvariants(state, initial_chips);
   for (int step = 0; step < 64 && !IsTerminal(state); ++step) {
-    if (IsPlayer(state.betting.player_to_act)) {
+    if (std::holds_alternative<DecisionState>(state.betting)) {
       const std::vector<GameAction> menu = ActionsFor(state.betting, sizes);
       const std::vector<GameAction> canonical =
           ActionsFor(state.betting, sorted_sizes);
@@ -214,7 +234,7 @@ void CheckGeneratedRollout(uint32_t seed) {
         cards.push_back(card);
       }
       if (cards.size() ==
-          static_cast<size_t>(CardsForNextStreet(state.betting.street))) {
+          static_cast<size_t>(CardsForNextStreet(B(state).street))) {
         break;
       }
     }
@@ -222,8 +242,8 @@ void CheckGeneratedRollout(uint32_t seed) {
     const CardMask board_before = state.board.mask();
     state = ApplyChance(state, cards, kRules);
     CheckGeneralInvariants(state, initial_chips);
-    CHECK(state.betting.stack == before.stack);
-    CHECK(state.betting.total_committed == before.total_committed);
+    CHECK(B(state).stack == B(before).stack);
+    CHECK(B(state).total_committed == B(before).total_committed);
     CHECK((state.board.mask() & board_before) == board_before);
   }
   CHECK(IsTerminal(state));
@@ -240,13 +260,12 @@ BettingState State(std::array<Chips, kPlayerCount> stack,
                    std::array<Chips, kPlayerCount> street,
                    int player,
                    Chips last_full_raise) {
-  BettingState state;
-  state.stack = stack;
-  state.total_committed = total;
-  state.street_committed = street;
-  state.player_to_act = static_cast<int8_t>(player);
-  state.last_full_raise = last_full_raise;
-  return state;
+  BettingData data;
+  data.stack = stack;
+  data.total_committed = total;
+  data.street_committed = street;
+  data.last_full_raise = last_full_raise;
+  return DecisionState{data, static_cast<Player>(player)};
 }
 
 bool HasAction(const std::vector<GameAction>& menu, GameAction expected) {
@@ -268,50 +287,49 @@ void CheckMenu(const BettingState& state,
 
 TEST_CASE("check-check completes a betting round") {
   ExactPublicState state = test::InitialHeadsUpState(20, 20, 2, 2);
-  state.betting.street = StreetKind::kFlop;
-  state.betting.player_to_act = 1;
-  state.betting.street_committed = {0, 0};
+  B(state).street = StreetKind::kFlop;
+  state.betting = DecisionState{B(state), Player::kB};
+  B(state).street_committed = {0, 0};
   state.board.deal_flop(Flop());
 
   state.betting = Apply(state.betting, {ActionKind::kCheck});
-  CHECK_FALSE(IsBettingRoundOver(state.betting));
+  CHECK(std::holds_alternative<DecisionState>(state.betting));
   state.betting = Apply(state.betting, {ActionKind::kCheck});
 
-  CHECK(IsBettingRoundOver(state.betting));
-  CHECK(state.betting.player_to_act == -1);
+  CHECK(std::holds_alternative<ChanceState>(state.betting));
   CHECK_FALSE(IsTerminal(state));
 }
 
 TEST_CASE("commitments update and reset across streets") {
   ExactPublicState state = test::InitialHeadsUpState(20, 20, 1, 2);
   const std::array<Chips, kPlayerCount> chips = {
-      state.betting.stack[0] + state.betting.total_committed[0],
-      state.betting.stack[1] + state.betting.total_committed[1],
+      B(state).stack[0] + B(state).total_committed[0],
+      B(state).stack[1] + B(state).total_committed[1],
   };
 
   state.betting = Apply(state.betting, {ActionKind::kCall, 2});
-  CHECK(state.betting.stack[0] == 18);
-  CHECK(state.betting.total_committed[0] == 2);
-  CHECK(state.betting.street_committed[0] == 2);
-  CHECK(Pot(state.betting) == 4);
+  CHECK(B(state).stack[0] == 18);
+  CHECK(B(state).total_committed[0] == 2);
+  CHECK(B(state).street_committed[0] == 2);
+  CHECK(Pot(B(state)) == 4);
   state.betting = Apply(state.betting, {ActionKind::kCheck});
   state = ApplyChance(state, Flop(), kRules);
 
-  CHECK(state.betting.total_committed ==
+  CHECK(B(state).total_committed ==
         std::array<Chips, kPlayerCount>{2, 2});
-  CHECK(state.betting.street_committed ==
+  CHECK(B(state).street_committed ==
         std::array<Chips, kPlayerCount>{0, 0});
-  CHECK(state.betting.last_full_raise == kRules.minimum_bet);
+  CHECK(B(state).last_full_raise == kRules.minimum_bet);
 
   state.betting = Apply(state.betting, {ActionKind::kBet, 4});
-  CHECK(state.betting.stack[1] == 14);
-  CHECK(state.betting.total_committed[1] == 6);
-  CHECK(state.betting.street_committed[1] == 4);
-  CHECK(state.betting.last_full_raise == 4);
-  CHECK(Pot(state.betting) == 8);
+  CHECK(B(state).stack[1] == 14);
+  CHECK(B(state).total_committed[1] == 6);
+  CHECK(B(state).street_committed[1] == 4);
+  CHECK(B(state).last_full_raise == 4);
+  CHECK(Pot(B(state)) == 8);
   for (size_t player = 0; player < kPlayerCount; ++player) {
-    CHECK(state.betting.stack[player] +
-              state.betting.total_committed[player] ==
+    CHECK(B(state).stack[player] +
+              B(state).total_committed[player] ==
           chips[player]);
   }
 }
@@ -321,26 +339,26 @@ TEST_CASE("chip actions use final street commitments") {
     ExactPublicState state = test::InitialHeadsUpState(20, 20, 1, 2);
     state.betting = Apply(state.betting, {ActionKind::kRaise, 5});
 
-    CHECK(state.betting.stack ==
+    CHECK(B(state).stack ==
           std::array<Chips, kPlayerCount>{15, 18});
-    CHECK(state.betting.total_committed ==
+    CHECK(B(state).total_committed ==
           std::array<Chips, kPlayerCount>{5, 2});
-    CHECK(state.betting.street_committed ==
+    CHECK(B(state).street_committed ==
           std::array<Chips, kPlayerCount>{5, 2});
-    CHECK(Pot(state.betting) == 7);
+    CHECK(Pot(B(state)) == 7);
   }
 
   SUBCASE("all-in") {
     ExactPublicState state = test::InitialHeadsUpState(20, 20, 1, 2);
     state.betting = Apply(state.betting, {ActionKind::kAllIn, 20});
 
-    CHECK(state.betting.stack ==
+    CHECK(B(state).stack ==
           std::array<Chips, kPlayerCount>{0, 18});
-    CHECK(state.betting.total_committed ==
+    CHECK(B(state).total_committed ==
           std::array<Chips, kPlayerCount>{20, 2});
-    CHECK(state.betting.street_committed ==
+    CHECK(B(state).street_committed ==
           std::array<Chips, kPlayerCount>{20, 2});
-    CHECK(Pot(state.betting) == 22);
+    CHECK(Pot(B(state)) == 22);
   }
 }
 
@@ -404,8 +422,8 @@ TEST_CASE("effective stacks and short all-ins bound aggression") {
         State({7, 20}, {8, 10}, {8, 10}, 0, 4);
     const BettingState child =
         Apply(state, {ActionKind::kAllIn, 15});
-    CHECK(child.street_committed[0] == 15);
-    CHECK(child.last_full_raise == 5);
+    CHECK(B(child).street_committed[0] == 15);
+    CHECK(B(child).last_full_raise == 5);
   }
 
   SUBCASE("short all-in raise") {
@@ -419,8 +437,8 @@ TEST_CASE("effective stacks and short all-ins bound aggression") {
 
     const BettingState child =
         Apply(state, {ActionKind::kAllIn, 11});
-    CHECK(child.last_full_raise == 5);
-    CHECK(child.pending_action_mask == PlayerBit(1));
+    CHECK(B(child).last_full_raise == 5);
+    CHECK(B(child).pending_action_mask == PlayerBit(1));
     CheckMenu(state, sizes);
   }
 
@@ -436,7 +454,7 @@ TEST_CASE("effective stacks and short all-ins bound aggression") {
 
     const BettingState child =
         Apply(state, {ActionKind::kAllIn, 20});
-    CHECK(child.stack[0] == 80);
+    CHECK(B(child).stack[0] == 80);
     CheckMenu(state, sizes);
   }
 }
@@ -458,8 +476,7 @@ TEST_CASE("an all-in opponent cannot face new aggression") {
 
   const BettingState called =
       Apply(facing_bet, {ActionKind::kCall, 10});
-  CHECK(IsBettingRoundOver(called));
-  CHECK(called.player_to_act == -1);
+  CHECK(std::holds_alternative<ChanceState>(called));
   CheckMenu(facing_bet, sizes);
 }
 
@@ -467,54 +484,53 @@ TEST_CASE("preflop all-in runout skips later decisions") {
   ExactPublicState state = test::InitialHeadsUpState(4, 20, 1, 2);
   state.betting = Apply(state.betting, {ActionKind::kAllIn, 4});
   state.betting = Apply(state.betting, {ActionKind::kCall, 4});
-  REQUIRE(state.betting.player_to_act == -1);
+  REQUIRE(std::holds_alternative<ChanceState>(state.betting));
 
   state = ApplyChance(state, Flop(), kRules);
-  CHECK(state.betting.player_to_act == -1);
+  CHECK(std::holds_alternative<ChanceState>(state.betting));
   CHECK_FALSE(IsTerminal(state));
 
   const std::array<Card, 1> turn = {
       MakeCardId(9, SuitKind::kSpades),
   };
   state = ApplyChance(state, turn, kRules);
-  CHECK(state.betting.player_to_act == -1);
+  CHECK(std::holds_alternative<ChanceState>(state.betting));
   CHECK_FALSE(IsTerminal(state));
 
   const std::array<Card, 1> river = {
       MakeCardId(3, SuitKind::kHearts),
   };
   state = ApplyChance(state, river, kRules);
-  CHECK(state.betting.player_to_act == -1);
+  CHECK(std::holds_alternative<ShowdownState>(state.betting));
   CHECK(IsTerminal(state));
 }
 
 TEST_CASE("short all-in calls refund unmatched chips") {
   ExactPublicState state = test::InitialHeadsUpState(4, 20, 1, 2);
-  state.betting.stack = {3, 12};
-  state.betting.total_committed = {1, 8};
-  state.betting.street_committed = {1, 8};
+  B(state).stack = {3, 12};
+  B(state).total_committed = {1, 8};
+  B(state).street_committed = {1, 8};
 
   state.betting = Apply(state.betting, {ActionKind::kCall, 4});
 
-  CHECK(state.betting.total_committed ==
+  CHECK(B(state).total_committed ==
         std::array<Chips, kPlayerCount>{4, 4});
-  CHECK(state.betting.street_committed ==
+  CHECK(B(state).street_committed ==
         std::array<Chips, kPlayerCount>{4, 4});
-  CHECK(state.betting.stack ==
+  CHECK(B(state).stack ==
         std::array<Chips, kPlayerCount>{0, 16});
-  CHECK(IsValidBettingState(state.betting));
+  CHECK(IsValidBettingData(B(state)));
 }
 
 TEST_CASE("fold completes the hand") {
   ExactPublicState state = test::InitialHeadsUpState(20, 20, 1, 2);
   state.betting = Apply(state.betting, {ActionKind::kFold});
 
-  CHECK(IsBettingRoundOver(state.betting));
+  CHECK(std::holds_alternative<FoldTerminalState>(state.betting));
   CHECK(IsTerminal(state));
-  CHECK(state.betting.total_committed[0] !=
-        state.betting.total_committed[1]);
-  CHECK(state.betting.folded_player == 0);
-  CHECK(state.betting.player_to_act == -1);
+  CHECK(B(state).total_committed[0] !=
+        B(state).total_committed[1]);
+  CHECK(std::get<FoldTerminalState>(state.betting).folded == Player::kA);
 }
 
 TEST_CASE("folds are terminal on every street") {
@@ -529,7 +545,7 @@ TEST_CASE("folds are terminal on every street") {
 
   for (StreetKind street : streets) {
     ExactPublicState state = ClosedState(street);
-    state.betting.folded_player = 0;
+    state.betting = FoldTerminalState{B(state), Player::kA};
     CHECK(IsTerminal(state));
     CHECK(TerminalUtility(state, player0, player1) ==
           doctest::Approx(-10.0));
@@ -549,8 +565,8 @@ TEST_CASE("terminal utility rejects nonterminal states") {
   }
 
   ExactPublicState river = ClosedState(StreetKind::kRiver);
-  river.betting.player_to_act = 0;
-  river.betting.pending_action_mask = kAllPlayersMask;
+  river.betting = DecisionState{B(river), Player::kA};
+  B(river).pending_action_mask = kAllPlayersMask;
   CHECK_FALSE(IsTerminal(river));
   CHECK_THROWS_AS(TerminalUtility(river, player0, player1),
                   std::invalid_argument);
@@ -566,8 +582,8 @@ TEST_CASE("river terminal utility handles win, loss, and tie") {
       C(2, S::kClubs),
       C(3, S::kDiamonds),
   });
-  REQUIRE(win.betting.total_committed[0] ==
-          win.betting.total_committed[1]);
+  REQUIRE(B(win).total_committed[0] ==
+          B(win).total_committed[1]);
   const double win_utility = TerminalUtility(win, player0, player1);
   const double loss_utility = TerminalUtility(win, player1, player0);
   CHECK(win_utility == doctest::Approx(10.0));
@@ -581,8 +597,8 @@ TEST_CASE("river terminal utility handles win, loss, and tie") {
       C(5, S::kSpades),
       C(6, S::kHearts),
   });
-  REQUIRE(tie.betting.total_committed[0] ==
-          tie.betting.total_committed[1]);
+  REQUIRE(B(tie).total_committed[0] ==
+          B(tie).total_committed[1]);
   CHECK(TerminalUtility(
             tie, H(14, S::kClubs, 13, S::kDiamonds),
             H(12, S::kClubs, 11, S::kDiamonds)) == doctest::Approx(0.0));

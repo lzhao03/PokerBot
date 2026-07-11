@@ -8,6 +8,7 @@
 #include <optional>
 #include <random>
 #include <stdexcept>
+#include <variant>
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
@@ -229,14 +230,6 @@ inline int EncodedCard(Card card) {
   return RankFromCardId(card) * 8 + 1 + SuitIndex(SuitFromCardId(card));
 }
 
-inline bool IsPlayer(int player) {
-  return player == 0 || player == 1;
-}
-
-inline int Opponent(int player) {
-  return 1 - player;
-}
-
 struct BettingRules {
   Chips minimum_bet = 0;
 };
@@ -248,18 +241,53 @@ constexpr uint8_t PlayerBit(int player) {
 constexpr uint8_t kAllPlayersMask =
     static_cast<uint8_t>((1u << kPlayerCount) - 1u);
 
-struct BettingState {
+struct BettingData {
   std::array<Chips, kPlayerCount> stack = {0, 0};
   std::array<Chips, kPlayerCount> total_committed = {0, 0};
   std::array<Chips, kPlayerCount> street_committed = {0, 0};
   Chips last_full_raise = 0;
   StreetKind street = StreetKind::kPreflop;
-  int8_t player_to_act = 0;
-  int8_t folded_player = -1;
   uint8_t pending_action_mask = kAllPlayersMask;
 
-  friend bool operator==(const BettingState&, const BettingState&) = default;
+  friend bool operator==(const BettingData&, const BettingData&) = default;
 };
+
+struct DecisionState {
+  BettingData data;
+  Player actor = Player::kA;
+
+  friend bool operator==(const DecisionState&, const DecisionState&) = default;
+};
+
+struct ChanceState {
+  BettingData data;
+
+  friend bool operator==(const ChanceState&, const ChanceState&) = default;
+};
+
+struct FoldTerminalState {
+  BettingData data;
+  Player folded = Player::kA;
+
+  friend bool operator==(const FoldTerminalState&,
+                         const FoldTerminalState&) = default;
+};
+
+struct ShowdownState {
+  BettingData data;
+
+  friend bool operator==(const ShowdownState&,
+                         const ShowdownState&) = default;
+};
+
+using BettingState = std::variant<DecisionState, ChanceState,
+                                  FoldTerminalState, ShowdownState>;
+
+inline const BettingData& Data(const BettingState& state) noexcept {
+  return std::visit([](const auto& phase) -> const BettingData& {
+    return phase.data;
+  }, state);
+}
 
 class BoardRunout {
  public:
@@ -337,31 +365,29 @@ struct ExactPublicState {
   BoardRunout board = BoardRunout::Preflop();
 };
 
-inline Chips Pot(const BettingState& state) noexcept {
+inline Chips Pot(const BettingData& state) noexcept {
   return state.total_committed[0] + state.total_committed[1];
 }
 
-inline Chips HighestStreetCommitment(const BettingState& state) noexcept {
+inline Chips HighestStreetCommitment(const BettingData& state) noexcept {
   return std::max(state.street_committed[0], state.street_committed[1]);
 }
 
-inline Chips ToCall(const BettingState& state, int player) noexcept {
-  return HighestStreetCommitment(state) - state.street_committed[player];
+inline Chips ToCall(const BettingData& state, Player player) noexcept {
+  return HighestStreetCommitment(state) - state.street_committed[Index(player)];
 }
 
-inline Chips MaxContestableAdditional(const BettingState& state,
-                                      int player) noexcept {
-  return std::min(state.stack[player],
-                  ToCall(state, player) + state.stack[Opponent(player)]);
+inline Chips MaxContestableAdditional(const BettingData& state,
+                                      Player player) noexcept {
+  return std::min(state.stack[Index(player)],
+                  ToCall(state, player) + state.stack[Index(Opponent(player))]);
 }
 
-inline bool AnyPlayerAllIn(const BettingState& state) noexcept {
+inline bool AnyPlayerAllIn(const BettingData& state) noexcept {
   return state.stack[0] == 0 || state.stack[1] == 0;
 }
 
-inline bool IsValidBettingState(const BettingState& state) noexcept {
-  const bool completed_non_fold =
-      state.folded_player < 0 && state.player_to_act == -1;
+inline bool IsValidBettingData(const BettingData& state) noexcept {
   return state.stack[0] >= 0 && state.stack[1] >= 0 &&
          state.total_committed[0] >= 0 &&
          state.total_committed[1] >= 0 &&
@@ -370,11 +396,7 @@ inline bool IsValidBettingState(const BettingState& state) noexcept {
          state.street_committed[0] <= state.total_committed[0] &&
          state.street_committed[1] <= state.total_committed[1] &&
          state.last_full_raise > 0 &&
-         (state.pending_action_mask & ~kAllPlayersMask) == 0 &&
-         state.folded_player >= -1 && state.folded_player < kPlayerCount &&
-         state.player_to_act >= -1 && state.player_to_act < kPlayerCount &&
-         (!completed_non_fold ||
-          state.street_committed[0] == state.street_committed[1]);
+         (state.pending_action_mask & ~kAllPlayersMask) == 0;
 }
 
 struct SolverTransition {
@@ -402,10 +424,10 @@ ExactPublicState MakeInitialState(
     std::array<Chips, kPlayerCount> stacks,
     std::array<Chips, kPlayerCount> blinds);
 SolverTransitions GenerateTransitions(const SolverConfig& config,
-                                      const BettingState& state);
-absl::StatusOr<BettingState> TryApplyAction(const BettingState& state,
+                                      const DecisionState& state);
+absl::StatusOr<BettingState> TryApplyAction(const DecisionState& state,
                                             const GameAction& action);
-BettingState AdvanceBettingStreet(const BettingState& state,
+BettingState AdvanceBettingStreet(const ChanceState& state,
                                   const BettingRules& rules);
 ExactPublicState ApplyChance(const ExactPublicState& state,
                              absl::Span<const Card> cards,
@@ -414,6 +436,5 @@ double TerminalUtility(const ExactPublicState& state,
                        ComboId player0_hand,
                        ComboId player1_hand);
 bool IsTerminal(const ExactPublicState& state);
-bool IsBettingRoundOver(const BettingState& state) noexcept;
 
 }  // namespace poker

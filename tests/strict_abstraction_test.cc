@@ -15,7 +15,11 @@ namespace {
 #endif
 
 BettingState Apply(const BettingState& state, GameAction action) {
-  const auto child = TryApplyAction(state, action);
+  const auto* decision = std::get_if<DecisionState>(&state);
+  if (decision == nullptr) {
+    throw std::invalid_argument("expected decision state");
+  }
+  const auto child = TryApplyAction(*decision, action);
   if (!child.ok()) {
     throw std::invalid_argument(std::string(child.status().message()));
   }
