@@ -181,7 +181,9 @@ HistoryId AppendHistory(HistoryTree& tree,
                                                                *decision);
     assert(transitions.size() <= std::numeric_limits<uint8_t>::max());
     const uint32_t begin = static_cast<uint32_t>(tree.edges.size());
-    tree.edges.resize(tree.edges.size() + transitions.size());
+    for (const SolverTransition& transition : transitions) {
+      tree.edges.push_back({transition.action, kInvalidHistoryId});
+    }
     tree.nodes.push_back(
         DecisionNode{*decision, {begin, static_cast<uint8_t>(transitions.size())}});
     for (size_t action = 0; action < transitions.size(); ++action) {

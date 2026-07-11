@@ -128,8 +128,6 @@ bool IsLegalAction(const DecisionState& state, const GameAction& action) {
     case ActionKind::kAllIn:
       return limits.maximum_target > limits.call_target &&
              target == limits.maximum_target;
-    case ActionKind::kNoAction:
-      return false;
   }
 }
 
@@ -170,8 +168,6 @@ BettingState ApplyActionUnchecked(const DecisionState& state,
     case ActionKind::kRaise:
     case ActionKind::kAllIn:
       CommitChips(child, player, delta);
-      break;
-    case ActionKind::kNoAction:
       break;
   }
 

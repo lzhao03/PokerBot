@@ -166,17 +166,16 @@ enum class StreetKind : uint8_t {
 };
 
 enum class ActionKind : uint8_t {
-  kNoAction = 0,
-  kBet = 1,
-  kFold = 2,
-  kCall = 3,
-  kRaise = 4,
-  kCheck = 5,
-  kAllIn = 6,
+  kBet,
+  kFold,
+  kCall,
+  kRaise,
+  kCheck,
+  kAllIn,
 };
 
 struct GameAction {
-  ActionKind kind = ActionKind::kNoAction;
+  ActionKind kind;
   Chips target_street_commitment = 0;
 
   friend bool operator==(const GameAction&, const GameAction&) = default;
