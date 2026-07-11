@@ -203,6 +203,9 @@ TEST_CASE("solver configuration rejects invalid boundary values") {
   options.bet_abstraction.pot_fractions[0] = {-0.5};
   CHECK_FALSE(SolverConfig::Create(options).ok());
 
+  options.bet_abstraction.pot_fractions[0] = {0.0};
+  CHECK_FALSE(SolverConfig::Create(options).ok());
+
   options.bet_abstraction.pot_fractions[0] = {1.0, 0.25, 0.5, 0.5};
   const auto normalized = SolverConfig::Create(options);
   REQUIRE(normalized.ok());
