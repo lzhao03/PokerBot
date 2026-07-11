@@ -301,6 +301,22 @@ TEST_CASE("equity models preserve cutoffs and bucket boundaries") {
   CHECK_FALSE(ValidateEquityBucketModel(changed).ok());
 }
 
+TEST_CASE("checked-in equity model is valid and reproducible") {
+  const char* test_srcdir = std::getenv("TEST_SRCDIR");
+  const char* test_workspace = std::getenv("TEST_WORKSPACE");
+  REQUIRE(test_srcdir != nullptr);
+  REQUIRE(test_workspace != nullptr);
+  const std::filesystem::path path =
+      std::filesystem::path(test_srcdir) / test_workspace / "models" /
+      "equity_32_32_64_v1.bin";
+  const auto model = LoadEquityBucketModel(path);
+  REQUIRE(model.ok());
+  CHECK(model->training_samples == 100000);
+  CHECK(model->opponent_samples == 16);
+  CHECK(model->runout_samples == 8);
+  CHECK(ValidateEquityBucketModel(*model).ok());
+}
+
 TEST_CASE("equity features are deterministic under suit renaming") {
   const EquityBucketModel model = TestEquityModel();
   const Board board = B({C(2, S::kHearts), C(7, S::kHearts),
