@@ -9,7 +9,9 @@
 #include <cmath>
 #include <fstream>
 #include <limits>
+#include <locale>
 #include <optional>
+#include <sstream>
 #include <type_traits>
 #include <vector>
 
@@ -357,6 +359,13 @@ class ByteReader {
       byte = static_cast<std::byte>(bytes_[offset_++]);
     }
     return fingerprint;
+  }
+
+  std::optional<absl::Span<const uint8_t>> read_bytes(size_t count) {
+    if (remaining() < count) return std::nullopt;
+    const auto result = bytes_.subspan(offset_, count);
+    offset_ += count;
+    return result;
   }
 
   size_t remaining() const { return bytes_.size() - offset_; }
@@ -915,6 +924,205 @@ absl::StatusOr<Policy> LoadPolicy(const std::filesystem::path& path) {
   return policy;
 }
 
+namespace {
+
+SerializedRngState SerializeRng(const std::mt19937& rng) {
+  std::ostringstream output;
+  output.imbue(std::locale::classic());
+  output << rng;
+  return {output.str()};
+}
+
+absl::StatusOr<std::mt19937> DeserializeRng(
+    const SerializedRngState& serialized) {
+  std::istringstream input(serialized.text);
+  input.imbue(std::locale::classic());
+  std::mt19937 rng;
+  input >> rng;
+  if (!input) {
+    return absl::DataLossError("invalid RNG state");
+  }
+  input >> std::ws;
+  if (!input.eof()) {
+    return absl::DataLossError("trailing RNG state data");
+  }
+  return rng;
+}
+
+absl::Status ValidateCheckpointState(const CfrState& state) {
+  if (!std::isfinite(state.cumulative_root_utility)) {
+    return absl::DataLossError("nonfinite cumulative utility");
+  }
+  for (float value : state.regret_sum) {
+    if (!std::isfinite(value)) {
+      return absl::DataLossError("nonfinite regret value");
+    }
+  }
+  for (float value : state.strategy_sum) {
+    if (!std::isfinite(value)) {
+      return absl::DataLossError("nonfinite strategy value");
+    }
+  }
+  if (!state.strategy_sum.empty() &&
+      state.strategy_sum.size() != state.regret_sum.size()) {
+    return absl::DataLossError("CFR arrays have different sizes");
+  }
+
+  std::vector<size_t> offsets;
+  offsets.reserve(state.rows.size());
+  for (const auto& [key, row] : state.rows) {
+    (void)key;
+    offsets.push_back(row.action_offset);
+  }
+  std::sort(offsets.begin(), offsets.end());
+  if (offsets.empty()) {
+    return state.regret_sum.empty()
+               ? absl::OkStatus()
+               : absl::DataLossError("CFR arrays have no rows");
+  }
+  if (offsets.front() != 0 || offsets.back() >= state.regret_sum.size()) {
+    return absl::DataLossError("invalid CFR row offsets");
+  }
+  for (size_t index = 1; index < offsets.size(); ++index) {
+    if (offsets[index] <= offsets[index - 1]) {
+      return absl::DataLossError("duplicate CFR row offsets");
+    }
+  }
+  return absl::OkStatus();
+}
+
+constexpr std::array<uint8_t, 8> kCheckpointMagic = {
+    'P', 'K', 'C', 'H', 'E', 'C', 'K', '1'};
+
+}  // namespace
+
+absl::Status SaveCheckpoint(const SolverCheckpoint& checkpoint,
+                            const std::filesystem::path& path) {
+  if (checkpoint.format_version != 1) {
+    return absl::InvalidArgumentError("unsupported checkpoint version");
+  }
+  const absl::Status valid = ValidateCheckpointState(checkpoint.state);
+  if (!valid.ok()) return valid;
+  if (!DeserializeRng(checkpoint.rng).ok()) {
+    return absl::InvalidArgumentError("invalid checkpoint RNG state");
+  }
+
+  std::vector<std::pair<InfoSetKey, InfoSetRow>> rows(
+      checkpoint.state.rows.begin(), checkpoint.state.rows.end());
+  std::sort(rows.begin(), rows.end(), [](const auto& left, const auto& right) {
+    return KeyLess(left.first, right.first);
+  });
+
+  Bytes bytes;
+  bytes.insert(bytes.end(), kCheckpointMagic.begin(),
+               kCheckpointMagic.end());
+  AppendU32(bytes, checkpoint.format_version);
+  AppendFingerprint(bytes, checkpoint.model);
+  AppendU64(bytes, checkpoint.state.iterations);
+  AppendU64(bytes, std::bit_cast<uint64_t>(
+                       checkpoint.state.cumulative_root_utility));
+  AppendU64(bytes, checkpoint.rng.text.size());
+  AppendU64(bytes, rows.size());
+  AppendU64(bytes, checkpoint.state.regret_sum.size());
+  AppendU64(bytes, checkpoint.state.strategy_sum.size());
+  bytes.insert(bytes.end(), checkpoint.rng.text.begin(),
+               checkpoint.rng.text.end());
+  for (const auto& [key, row] : rows) {
+    AppendU32(bytes, key.history.value());
+    AppendU64(bytes, key.public_observation.value());
+    AppendU64(bytes, key.private_observation.value());
+    AppendU64(bytes, row.action_offset);
+  }
+  for (float value : checkpoint.state.regret_sum) {
+    AppendU32(bytes, std::bit_cast<uint32_t>(value));
+  }
+  for (float value : checkpoint.state.strategy_sum) {
+    AppendU32(bytes, std::bit_cast<uint32_t>(value));
+  }
+  return WriteBytes(path, bytes);
+}
+
+absl::StatusOr<SolverCheckpoint> LoadCheckpoint(
+    const std::filesystem::path& path) {
+  const auto file = ReadBytes(path);
+  if (!file.ok()) return file.status();
+  ByteReader reader(*file);
+  for (uint8_t expected : kCheckpointMagic) {
+    const auto actual = reader.read_u8();
+    if (!actual || *actual != expected) {
+      return absl::DataLossError("invalid checkpoint file magic");
+    }
+  }
+  const auto version = reader.read_u32();
+  const auto model = reader.read_fingerprint();
+  const auto iterations = reader.read_u64();
+  const auto utility = reader.read_u64();
+  const auto rng_size = reader.read_u64();
+  const auto row_count = reader.read_u64();
+  const auto regret_count = reader.read_u64();
+  const auto strategy_count = reader.read_u64();
+  if (!version || *version != 1 || !model || !iterations || !utility ||
+      !rng_size || !row_count || !regret_count || !strategy_count ||
+      *rng_size > reader.remaining() || *row_count > reader.remaining() / 28 ||
+      *regret_count > reader.remaining() / sizeof(float) ||
+      *strategy_count > reader.remaining() / sizeof(float)) {
+    return absl::DataLossError("invalid checkpoint file header");
+  }
+  const auto rng_bytes = reader.read_bytes(static_cast<size_t>(*rng_size));
+  if (!rng_bytes) {
+    return absl::DataLossError("truncated checkpoint RNG state");
+  }
+
+  SolverCheckpoint checkpoint;
+  checkpoint.format_version = *version;
+  checkpoint.model = *model;
+  checkpoint.state.iterations = *iterations;
+  checkpoint.state.cumulative_root_utility =
+      std::bit_cast<double>(*utility);
+  checkpoint.rng.text.assign(
+      reinterpret_cast<const char*>(rng_bytes->data()), rng_bytes->size());
+  checkpoint.state.rows.reserve(static_cast<size_t>(*row_count));
+  for (uint64_t index = 0; index < *row_count; ++index) {
+    const auto history = reader.read_u32();
+    const auto public_observation = reader.read_u64();
+    const auto private_observation = reader.read_u64();
+    const auto offset = reader.read_u64();
+    if (!history || !public_observation || !private_observation || !offset ||
+        *offset > std::numeric_limits<size_t>::max()) {
+      return absl::DataLossError("truncated checkpoint row");
+    }
+    const InfoSetKey key{HistoryId(*history),
+                         PublicObservationId(*public_observation),
+                         PrivateObservationId(*private_observation)};
+    if (!checkpoint.state.rows
+             .emplace(key, InfoSetRow{static_cast<size_t>(*offset)})
+             .second) {
+      return absl::DataLossError("duplicate checkpoint row");
+    }
+  }
+  checkpoint.state.regret_sum.resize(static_cast<size_t>(*regret_count));
+  for (float& value : checkpoint.state.regret_sum) {
+    const auto bits = reader.read_u32();
+    if (!bits) return absl::DataLossError("truncated checkpoint regrets");
+    value = std::bit_cast<float>(*bits);
+  }
+  checkpoint.state.strategy_sum.resize(static_cast<size_t>(*strategy_count));
+  for (float& value : checkpoint.state.strategy_sum) {
+    const auto bits = reader.read_u32();
+    if (!bits) return absl::DataLossError("truncated checkpoint strategies");
+    value = std::bit_cast<float>(*bits);
+  }
+  if (reader.remaining() != 0) {
+    return absl::DataLossError("trailing checkpoint data");
+  }
+  const absl::Status valid = ValidateCheckpointState(checkpoint.state);
+  if (!valid.ok()) return valid;
+  if (!DeserializeRng(checkpoint.rng).ok()) {
+    return absl::DataLossError("invalid checkpoint RNG state");
+  }
+  return checkpoint;
+}
+
 absl::StatusOr<SolverConfig> SolverConfig::Create(
     SolverConfigOptions options) {
   if (options.starting_stack <= 0 || options.small_blind <= 0 ||
@@ -1400,6 +1608,84 @@ absl::StatusOr<PolicyEvaluationResult> CFRSolver::evaluate_policy(
   }
   result.value /= samples;
   return result;
+}
+
+SolverCheckpoint CFRSolver::checkpoint() const {
+  return {1, model_, state_, SerializeRng(rng_)};
+}
+
+absl::Status CFRSolver::restore(SolverCheckpoint checkpoint) {
+  if (checkpoint.format_version != 1) {
+    return absl::InvalidArgumentError("unsupported checkpoint version");
+  }
+  if (checkpoint.model != model_) {
+    return absl::FailedPreconditionError(
+        "checkpoint model does not match solver");
+  }
+  const absl::Status valid = ValidateCheckpointState(checkpoint.state);
+  if (!valid.ok()) return valid;
+  if (checkpoint.state.rows.size() >
+      static_cast<size_t>(spec_.config.max_info_sets())) {
+    return absl::ResourceExhaustedError(
+        "checkpoint exceeds the infoset limit");
+  }
+  if (spec_.config.accumulate_average_strategy()) {
+    if (checkpoint.state.strategy_sum.size() !=
+        checkpoint.state.regret_sum.size()) {
+      return absl::DataLossError("checkpoint has no average strategy");
+    }
+  } else if (!checkpoint.state.strategy_sum.empty()) {
+    return absl::DataLossError("checkpoint has unexpected strategy values");
+  }
+
+  std::vector<std::pair<size_t, uint8_t>> spans;
+  spans.reserve(checkpoint.state.rows.size());
+  for (const auto& [key, row] : checkpoint.state.rows) {
+    if (key.history.index() >= history_.nodes.size()) {
+      return absl::DataLossError("checkpoint references invalid history");
+    }
+    const auto* node =
+        std::get_if<DecisionNode>(&history_.nodes[key.history.index()]);
+    if (node == nullptr) {
+      return absl::DataLossError("checkpoint row is not a decision");
+    }
+    if (row.action_offset > checkpoint.state.regret_sum.size() ||
+        node->edges.count >
+            checkpoint.state.regret_sum.size() - row.action_offset) {
+      return absl::DataLossError("checkpoint row exceeds CFR arrays");
+    }
+    spans.push_back({row.action_offset, node->edges.count});
+  }
+  std::sort(spans.begin(), spans.end());
+  size_t offset = 0;
+  for (const auto& [row_offset, count] : spans) {
+    if (row_offset != offset) {
+      return absl::DataLossError("checkpoint rows are not contiguous");
+    }
+    offset += count;
+  }
+  if (offset != checkpoint.state.regret_sum.size()) {
+    return absl::DataLossError("checkpoint CFR array size is invalid");
+  }
+
+  auto rng = DeserializeRng(checkpoint.rng);
+  if (!rng.ok()) return rng.status();
+  state_ = std::move(checkpoint.state);
+  rng_ = *rng;
+  stats_ = {};
+
+  const size_t rows = static_cast<size_t>(spec_.config.max_info_sets());
+  size_t max_actions = 3;
+  for (const auto& fractions :
+       spec_.config.bet_abstraction().pot_fractions) {
+    max_actions = std::max(max_actions, fractions.size() + 3);
+  }
+  state_.rows.reserve(rows);
+  state_.regret_sum.reserve(rows * max_actions);
+  if (spec_.config.accumulate_average_strategy()) {
+    state_.strategy_sum.reserve(rows * max_actions);
+  }
+  return absl::OkStatus();
 }
 
 double CFRSolver::get_expected_value(Player player) const {

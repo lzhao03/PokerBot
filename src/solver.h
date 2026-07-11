@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -202,6 +203,25 @@ absl::Status SavePolicy(const Policy& policy,
                         const std::filesystem::path& path);
 absl::StatusOr<Policy> LoadPolicy(const std::filesystem::path& path);
 
+struct SerializedRngState {
+  std::string text;
+
+  friend bool operator==(const SerializedRngState&,
+                         const SerializedRngState&) = default;
+};
+
+struct SolverCheckpoint {
+  uint32_t format_version = 1;
+  ModelFingerprint model;
+  CfrState state;
+  SerializedRngState rng;
+};
+
+absl::Status SaveCheckpoint(const SolverCheckpoint& checkpoint,
+                            const std::filesystem::path& path);
+absl::StatusOr<SolverCheckpoint> LoadCheckpoint(
+    const std::filesystem::path& path);
+
 struct SolverStats {
   uint64_t decision_visits = 0;
   uint64_t chance_samples = 0;
@@ -272,6 +292,8 @@ class CFRSolver {
   absl::StatusOr<PolicyEvaluationResult> evaluate_policy(
       const Policy& policy,
       int samples);
+  SolverCheckpoint checkpoint() const;
+  absl::Status restore(SolverCheckpoint checkpoint);
 
   double get_expected_value(Player player) const;
   uint64_t get_iterations_run() const { return state_.iterations; }

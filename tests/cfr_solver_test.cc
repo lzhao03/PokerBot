@@ -119,6 +119,14 @@ std::string Hex(ModelFingerprint fingerprint) {
   return text;
 }
 
+void CheckSameState(const CfrState& left, const CfrState& right) {
+  CHECK(left.rows == right.rows);
+  CHECK(left.regret_sum == right.regret_sum);
+  CHECK(left.strategy_sum == right.strategy_sum);
+  CHECK(left.iterations == right.iterations);
+  CHECK(left.cumulative_root_utility == right.cumulative_root_utility);
+}
+
 TEST_CASE("solver configuration rejects invalid boundary values") {
   SolverConfigOptions options;
   options.max_info_sets = 0;
@@ -367,6 +375,59 @@ TEST_CASE("zero average mass extracts as uniform policy") {
       CHECK(probability == doctest::Approx(1.0 / row.action_count));
     }
   }
+}
+
+TEST_CASE("checkpoints resume training bit for bit") {
+  const SolverConfig config = Config();
+  auto uninterrupted = MakeSolver(config, R(kA), R(kB));
+  uninterrupted->run(6);
+
+  auto split = MakeSolver(config, R(kA), R(kB));
+  split->run(3);
+  const SolverCheckpoint saved = split->checkpoint();
+
+  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
+  REQUIRE(test_tmpdir != nullptr);
+  const std::filesystem::path path =
+      std::filesystem::path(test_tmpdir) / "resume.checkpoint";
+  REQUIRE(SaveCheckpoint(saved, path).ok());
+  const auto loaded = LoadCheckpoint(path);
+  REQUIRE(loaded.ok());
+  CHECK(loaded->format_version == saved.format_version);
+  CHECK(loaded->model == saved.model);
+  CHECK(loaded->rng == saved.rng);
+  CheckSameState(loaded->state, saved.state);
+
+  auto resumed = MakeSolver(config, R(kA), R(kB));
+  REQUIRE(resumed->restore(*loaded).ok());
+  resumed->run(3);
+  CheckSameState(CFRSolverTestAccess::state(*uninterrupted),
+                 CFRSolverTestAccess::state(*resumed));
+  CHECK(uninterrupted->checkpoint().rng == resumed->checkpoint().rng);
+}
+
+TEST_CASE("checkpoint restore rejects mismatched and corrupt state") {
+  auto solver = MakeSolver(Config(), R(kA), R(kB));
+  solver->run(2);
+  const SolverCheckpoint valid = solver->checkpoint();
+
+  auto different = MakeSolver(Config(), R(kB), R(kA));
+  CHECK_FALSE(different->restore(valid).ok());
+
+  SolverCheckpoint bad_offset = valid;
+  REQUIRE_FALSE(bad_offset.state.rows.empty());
+  ++bad_offset.state.rows.begin()->second.action_offset;
+  CHECK_FALSE(solver->restore(std::move(bad_offset)).ok());
+
+  SolverCheckpoint bad_size = valid;
+  REQUIRE_FALSE(bad_size.state.regret_sum.empty());
+  bad_size.state.regret_sum.pop_back();
+  CHECK_FALSE(solver->restore(std::move(bad_size)).ok());
+
+  SolverCheckpoint bad_value = valid;
+  bad_value.state.regret_sum[0] =
+      std::numeric_limits<float>::infinity();
+  CHECK_FALSE(SaveCheckpoint(bad_value, "invalid.checkpoint").ok());
 }
 
 }  // namespace
