@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <utility>
 
 namespace poker {
 
@@ -29,8 +30,7 @@ AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
 
   const ActionKind kind =
       highest_to > 0 ? ActionKind::kRaise : ActionKind::kBet;
-  const auto& fractions =
-      config.pot_fractions[static_cast<size_t>(data.street)];
+  const auto& fractions = config.pot_fractions[std::to_underlying(data.street)];
   const Chips pot_after_call = Pot(data) + to_call;
   for (double fraction : fractions) {
     const Chips raise_by = std::max(

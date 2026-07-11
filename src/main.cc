@@ -86,7 +86,7 @@ absl::Status OverridePotFractions(poker::SolverConfigOptions& config,
     if (!fractions.ok()) {
       return fractions.status();
     }
-    config.bet_abstraction.pot_fractions[static_cast<size_t>(street)] =
+    config.bet_abstraction.pot_fractions[std::to_underlying(street)] =
         *fractions;
   }
   return absl::OkStatus();
