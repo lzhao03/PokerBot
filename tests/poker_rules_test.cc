@@ -92,8 +92,8 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   CHECK(B(short_call).stack[1] == 16);
 
   BetAbstractionConfig config;
-  config.bet_sizes[static_cast<size_t>(StreetKind::kPreflop)] = {0.5};
-  config.bet_sizes[static_cast<size_t>(StreetKind::kFlop)] = {1.0};
+  config.pot_fractions[static_cast<size_t>(StreetKind::kPreflop)] = {0.5};
+  config.pot_fractions[static_cast<size_t>(StreetKind::kFlop)] = {1.0};
   BettingData flop_data;
   flop_data.stack = {98, 98};
   flop_data.total_committed = {2, 2};

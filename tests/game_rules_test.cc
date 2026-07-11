@@ -89,7 +89,7 @@ std::vector<GameAction> ActionsFor(const BettingState& state,
     throw std::invalid_argument("expected decision state");
   }
   BetAbstractionConfig config;
-  config.bet_sizes[static_cast<size_t>(decision->data.street)].assign(
+  config.pot_fractions[static_cast<size_t>(decision->data.street)].assign(
       sizes.begin(), sizes.end());
   std::vector<GameAction> actions;
   const LegalActionSpace legal = LegalActions(*decision);
@@ -307,6 +307,34 @@ void CheckMenu(const BettingState& state,
   for (const GameAction& action : menu) {
     CHECK_NOTHROW(Apply(state, action));
   }
+}
+
+TEST_CASE("pot fractions use the pot after calling") {
+  const std::array<double, 2> half_and_pot = {0.5, 1.0};
+  const BettingState unopened =
+      State({200, 200}, {50, 50}, {0, 0}, 0, 2);
+  const std::vector<GameAction> bets = ActionsFor(unopened, half_and_pot);
+  CHECK(HasAction(bets, {ActionKind::kBet, 50}));
+  CHECK(HasAction(bets, {ActionKind::kBet, 100}));
+
+  const std::array<double, 1> pot = {1.0};
+  const BettingState facing =
+      State({200, 200}, {37, 63}, {0, 25}, 0, 25);
+  const std::vector<GameAction> raises = ActionsFor(facing, pot);
+  CHECK(HasAction(raises, {ActionKind::kRaise, 150}));
+
+  const BettingState big_blind =
+      State({98, 98}, {2, 2}, {2, 2}, 1, 2);
+  const std::vector<GameAction> options = ActionsFor(big_blind, pot);
+  CHECK(HasAction(options, {ActionKind::kRaise, 6}));
+  CHECK_FALSE(HasAction(options, {ActionKind::kBet, 6}));
+
+  const BettingState capped =
+      State({50, 50}, {50, 50}, {0, 0}, 0, 2);
+  const std::vector<GameAction> capped_actions =
+      ActionsFor(capped, half_and_pot);
+  CHECK_FALSE(HasAction(capped_actions, {ActionKind::kBet, 50}));
+  CHECK(HasAction(capped_actions, {ActionKind::kAllIn, 50}));
 }
 
 TEST_CASE("check-check completes a betting round") {
@@ -783,7 +811,7 @@ TEST_CASE("effective stacks leave unmatched chips uncommitted") {
                   StatePhase::kChance);
 }
 
-TEST_CASE("solver action count follows configured bet sizes") {
+TEST_CASE("solver action count follows configured pot fractions") {
   const BettingState state =
       State({1000, 1000}, {100, 100}, {0, 0}, 0, 2);
   const std::array<double, 9> sizes = {

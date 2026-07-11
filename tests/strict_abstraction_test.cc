@@ -51,8 +51,8 @@ TEST_CASE("mixed abstractions support history traversal") {
   options.starting_stack = 8;
   options.small_blind = 1;
   options.big_blind = 2;
-  for (auto& sizes : options.bet_abstraction.bet_sizes) {
-    sizes = {1.0};
+  for (auto& fractions : options.bet_abstraction.pot_fractions) {
+    fractions = {1.0};
   }
   options.max_info_sets = 500000;
   options.accumulate_average_strategy = false;

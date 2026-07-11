@@ -63,8 +63,8 @@ TEST_CASE("range syntax expands to exact combo weights") {
 TEST_CASE("deal sampling rejects incompatible ranges") {
   SolverConfigOptions options;
   options.starting_stack = 8;
-  for (auto& sizes : options.bet_abstraction.bet_sizes) {
-    sizes = {1.0};
+  for (auto& fractions : options.bet_abstraction.pot_fractions) {
+    fractions = {1.0};
   }
   const auto config_result = SolverConfig::Create(std::move(options));
   REQUIRE(config_result.ok());

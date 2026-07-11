@@ -9,7 +9,7 @@
 namespace poker {
 
 struct BetAbstractionConfig {
-  std::array<std::vector<double>, 4> bet_sizes = {{
+  std::array<std::vector<double>, 4> pot_fractions = {{
       {0.25, 0.5, 1.0},
       {0.25, 0.5, 1.0},
       {0.25, 0.5, 1.0},

@@ -75,8 +75,8 @@ SolverConfig Config(bool accumulate_average = true,
   options.starting_stack = 8;
   options.small_blind = 1;
   options.big_blind = 2;
-  for (auto& sizes : options.bet_abstraction.bet_sizes) {
-    sizes = {0.5, 1.0};
+  for (auto& fractions : options.bet_abstraction.pot_fractions) {
+    fractions = {0.5, 1.0};
   }
   options.chance_samples = 1;
   options.max_info_sets = max_info_sets;
@@ -94,7 +94,7 @@ TEST_CASE("solver configuration rejects invalid boundary values") {
   CHECK_FALSE(SolverConfig::Create(options).ok());
 
   options.max_info_sets = 10;
-  options.bet_abstraction.bet_sizes[0] = {-0.5};
+  options.bet_abstraction.pot_fractions[0] = {-0.5};
   CHECK_FALSE(SolverConfig::Create(options).ok());
 }
 
@@ -105,10 +105,10 @@ TEST_CASE("small exact solver baseline is deterministic") {
   CFRSolver solver(Config());
   solver.run(10, Deals(UniformComboRange(), UniformComboRange()));
 
-  CHECK(solver.get_history_count() == 517);
-  CHECK(solver.get_info_set_count() == 900);
-  CHECK(solver.get_cfr_update_count() == 1800);
-  CHECK(solver.get_expected_value(Player::kA) == doctest::Approx(-0.0529552));
+  CHECK(solver.get_history_count() == 417);
+  CHECK(solver.get_info_set_count() == 720);
+  CHECK(solver.get_cfr_update_count() == 1440);
+  CHECK(solver.get_expected_value(Player::kA) == doctest::Approx(-0.980685));
 }
 
 TEST_CASE("history tree stores direct rule transitions") {

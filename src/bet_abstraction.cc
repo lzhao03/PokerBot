@@ -2,14 +2,20 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 
 namespace poker {
 namespace {
 
-Chips ConcreteBetAmount(const BettingData& state, double size) {
-  return std::max(
+Chips PotFractionRaiseTo(const BettingData& state,
+                         const LegalActionSpace& legal,
+                         double fraction) {
+  assert(std::isfinite(fraction) && fraction > 0.0);
+  const Chips pot_after_call = Pot(state) + legal.to_call();
+  const Chips raise_increment = std::max(
       Chips{1},
-      static_cast<Chips>(std::max(Chips{1}, Pot(state)) * size));
+      static_cast<Chips>(std::llround(fraction * pot_after_call)));
+  return legal.highest_to + raise_increment;
 }
 
 }  // namespace
@@ -27,11 +33,10 @@ AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
 
   const ActionKind kind =
       legal.wager_open() ? ActionKind::kRaise : ActionKind::kBet;
-  const auto& sizes =
-      config.bet_sizes[static_cast<size_t>(state.data.street)];
-  for (double size : sizes) {
-    const Chips target =
-        legal.highest_to + ConcreteBetAmount(state.data, size);
+  const auto& fractions =
+      config.pot_fractions[static_cast<size_t>(state.data.street)];
+  for (double fraction : fractions) {
+    const Chips target = PotFractionRaiseTo(state.data, legal, fraction);
     if (target >= legal.min_full_raise_to && target < legal.all_in_to) {
       actions.push_back({kind, target});
     }

@@ -29,17 +29,17 @@ ABSL_FLAG(int64_t, max_memory_mb, 4096,
 ABSL_FLAG(bool, accumulate_average_strategy, true,
           "store the average strategy");
 ABSL_FLAG(bool, log, false, "show INFO logs and VLOG(1) progress");
-ABSL_FLAG(std::vector<std::string>, bet_sizes,
+ABSL_FLAG(std::vector<std::string>, pot_fractions,
           std::vector<std::string>({"0.25", "0.5", "1.0"}),
-          "comma-separated bet sizes for every street");
-ABSL_FLAG(std::vector<std::string>, preflop_bet_sizes, {},
-          "comma-separated preflop bet sizes");
-ABSL_FLAG(std::vector<std::string>, flop_bet_sizes, {},
-          "comma-separated flop bet sizes");
-ABSL_FLAG(std::vector<std::string>, turn_bet_sizes, {},
-          "comma-separated turn bet sizes");
-ABSL_FLAG(std::vector<std::string>, river_bet_sizes, {},
-          "comma-separated river bet sizes");
+          "pot fractions after calling for every street");
+ABSL_FLAG(std::vector<std::string>, preflop_pot_fractions, {},
+          "preflop pot fractions after calling");
+ABSL_FLAG(std::vector<std::string>, flop_pot_fractions, {},
+          "flop pot fractions after calling");
+ABSL_FLAG(std::vector<std::string>, turn_pot_fractions, {},
+          "turn pot fractions after calling");
+ABSL_FLAG(std::vector<std::string>, river_pot_fractions, {},
+          "river pot fractions after calling");
 
 namespace {
 
@@ -57,29 +57,30 @@ void SetMemoryLimit(int64_t megabytes) {
   }
 }
 
-absl::StatusOr<std::vector<double>> ParseBetSizes(
+absl::StatusOr<std::vector<double>> ParsePotFractions(
     const std::vector<std::string>& values) {
   std::vector<double> sizes;
   sizes.reserve(values.size());
   for (const std::string& value : values) {
     double size = 0.0;
     if (!absl::SimpleAtod(value, &size)) {
-      return absl::InvalidArgumentError("invalid bet size: " + value);
+      return absl::InvalidArgumentError("invalid pot fraction: " + value);
     }
     sizes.push_back(size);
   }
   return sizes;
 }
 
-absl::Status OverrideBetSizes(poker::SolverConfigOptions& config,
-                              poker::StreetKind street,
-                              const std::vector<std::string>& values) {
+absl::Status OverridePotFractions(poker::SolverConfigOptions& config,
+                                  poker::StreetKind street,
+                                  const std::vector<std::string>& values) {
   if (!values.empty()) {
-    const auto sizes = ParseBetSizes(values);
-    if (!sizes.ok()) {
-      return sizes.status();
+    const auto fractions = ParsePotFractions(values);
+    if (!fractions.ok()) {
+      return fractions.status();
     }
-    config.bet_abstraction.bet_sizes[static_cast<size_t>(street)] = *sizes;
+    config.bet_abstraction.pot_fractions[static_cast<size_t>(street)] =
+        *fractions;
   }
   return absl::OkStatus();
 }
@@ -94,22 +95,23 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
   config.accumulate_average_strategy =
       absl::GetFlag(FLAGS_accumulate_average_strategy);
 
-  const auto sizes = ParseBetSizes(absl::GetFlag(FLAGS_bet_sizes));
-  if (!sizes.ok()) {
-    return sizes.status();
+  const auto fractions =
+      ParsePotFractions(absl::GetFlag(FLAGS_pot_fractions));
+  if (!fractions.ok()) {
+    return fractions.status();
   }
-  config.bet_abstraction.bet_sizes.fill(*sizes);
+  config.bet_abstraction.pot_fractions.fill(*fractions);
   for (const auto& [street, values] : {
            std::pair{poker::StreetKind::kPreflop,
-                     absl::GetFlag(FLAGS_preflop_bet_sizes)},
+                     absl::GetFlag(FLAGS_preflop_pot_fractions)},
            std::pair{poker::StreetKind::kFlop,
-                     absl::GetFlag(FLAGS_flop_bet_sizes)},
+                     absl::GetFlag(FLAGS_flop_pot_fractions)},
            std::pair{poker::StreetKind::kTurn,
-                     absl::GetFlag(FLAGS_turn_bet_sizes)},
+                     absl::GetFlag(FLAGS_turn_pot_fractions)},
            std::pair{poker::StreetKind::kRiver,
-                     absl::GetFlag(FLAGS_river_bet_sizes)},
+                     absl::GetFlag(FLAGS_river_pot_fractions)},
        }) {
-    const absl::Status status = OverrideBetSizes(config, street, values);
+    const absl::Status status = OverridePotFractions(config, street, values);
     if (!status.ok()) {
       return status;
     }

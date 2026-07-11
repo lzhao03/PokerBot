@@ -389,15 +389,15 @@ absl::StatusOr<SolverConfig> SolverConfig::Create(
   if (options.max_info_sets <= 0) {
     return absl::InvalidArgumentError("max_info_sets must be positive");
   }
-  for (const auto& street_sizes : options.bet_abstraction.bet_sizes) {
-    if (street_sizes.size() >
+  for (const auto& fractions : options.bet_abstraction.pot_fractions) {
+    if (fractions.size() >
         std::numeric_limits<uint8_t>::max() - size_t{3}) {
-      return absl::InvalidArgumentError("too many bet sizes");
+      return absl::InvalidArgumentError("too many pot fractions");
     }
-    for (double size : street_sizes) {
-      if (!std::isfinite(size) || size <= 0.0) {
+    for (double fraction : fractions) {
+      if (!std::isfinite(fraction) || fraction <= 0.0) {
         return absl::InvalidArgumentError(
-            "bet sizes must be finite and positive");
+            "pot fractions must be finite and positive");
       }
     }
   }
@@ -489,7 +489,7 @@ CFRSolver::CFRSolver(const SolverConfig& config,
   size_t max_actions = 3;
   for (StreetKind street : {StreetKind::kPreflop, StreetKind::kFlop,
                             StreetKind::kTurn, StreetKind::kRiver}) {
-    const auto& sizes = config_.bet_abstraction().bet_sizes;
+    const auto& sizes = config_.bet_abstraction().pot_fractions;
     max_actions = std::max(
         max_actions, sizes[static_cast<size_t>(street)].size() + 3);
   }
