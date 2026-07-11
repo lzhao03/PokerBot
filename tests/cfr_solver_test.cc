@@ -34,6 +34,10 @@ ComboId H(int r0, S s0, int r1, S s1) {
                         Card(static_cast<Rank>(r1 - 2), s1));
 }
 
+Card C(int rank, S suit) {
+  return Card(static_cast<Rank>(rank - 2), suit);
+}
+
 ComboRange R(ComboId hand) {
   return SingleComboRange(hand);
 }
@@ -95,6 +99,22 @@ ExactPublicState Root(const SolverConfig& config) {
                           {config.small_blind(), config.big_blind()});
 }
 
+ExactPublicState WinningRiverRoot() {
+  BettingData data;
+  data.stack = {4, 4};
+  data.total_committed = {4, 4};
+  data.street_committed = {0, 0};
+  data.last_full_raise = 2;
+  data.street = StreetKind::kRiver;
+  data.pending_action_mask = kAllPlayersMask;
+  const FlopBoard flop = DealFlop(
+      PreflopBoard{}, {C(2, S::kClubs), C(7, S::kDiamonds),
+                      C(9, S::kHearts)});
+  return {DecisionState{data, Player::kA},
+          DealRiver(DealTurn(flop, C(11, S::kSpades)),
+                    C(12, S::kClubs))};
+}
+
 std::unique_ptr<CFRSolver> MakeSolver(
     const SolverConfig& config,
     const ComboRange& a,
@@ -145,6 +165,40 @@ TEST_CASE("solver configuration rejects invalid boundary values") {
 const ComboId kA = H(14, S::kHearts, 14, S::kSpades);
 const ComboId kB = H(13, S::kClubs, 13, S::kDiamonds);
 const ComboId kC = H(12, S::kClubs, 12, S::kDiamonds);
+
+Policy PassiveCallingPolicy(const CFRSolver& game, ComboId hand) {
+  Policy policy;
+  policy.model = game.model_fingerprint();
+  const PublicPosition position = PublicPosition::Root(
+      game.solve_spec().config.card_abstraction(), StreetKind::kRiver,
+      game.solve_spec().root.board);
+  const PrivateObservationId private_observation = ObservePrivate(
+      game.solve_spec().config.card_abstraction(), hand, position);
+  for (size_t history = 0; history < game.history_tree().nodes.size();
+       ++history) {
+    const auto* node =
+        std::get_if<DecisionNode>(&game.history_tree().nodes[history]);
+    if (node == nullptr || node->state.actor != Player::kB) continue;
+    const size_t offset = policy.probabilities.size();
+    policy.probabilities.resize(offset + node->edges.count, 0.0f);
+    bool selected = false;
+    for (uint8_t action = 0; action < node->edges.count; ++action) {
+      const ActionKind kind = game.history_tree()
+                                  .edges[node->edges.begin + action]
+                                  .action.kind;
+      if (kind == ActionKind::kCall || kind == ActionKind::kCheck) {
+        policy.probabilities[offset + action] = 1.0f;
+        selected = true;
+      }
+    }
+    REQUIRE(selected);
+    policy.rows.emplace(
+        InfoSetKey{HistoryId(static_cast<uint32_t>(history)),
+                   position.observation(), private_observation},
+        PolicyRow{offset, node->edges.count});
+  }
+  return policy;
+}
 
 TEST_CASE("small exact solver baseline is deterministic") {
   auto solver = MakeSolver(
@@ -488,6 +542,69 @@ TEST_CASE("approximate response reports infoset capacity") {
   CHECK(response->stop_reason == TrainingStopReason::kInfoSetLimit);
   CHECK(response->training_iterations_completed == 1);
   CHECK(response->response_policy.rows.size() == 1);
+}
+
+TEST_CASE("approximate response learns a profitable shared action") {
+  auto game = MakeSolver(Config(), R(kA), R(kB), WinningRiverRoot());
+  const Policy opponent = PassiveCallingPolicy(*game, kB);
+  Policy uniform;
+  uniform.model = game->model_fingerprint();
+  const auto baseline = EstimateExpectedValue(
+      *game, uniform, opponent, 1, 11);
+  const auto response = TrainApproximateBestResponse(
+      *game, Player::kA, opponent, BestResponseConfig{100, 1, 11});
+  REQUIRE(baseline.ok());
+  REQUIRE(response.ok());
+  CHECK(response->value >= baseline->mean);
+  CHECK(response->value > 7.5);
+
+  const PublicPosition position = PublicPosition::Root(
+      game->solve_spec().config.card_abstraction(), StreetKind::kRiver,
+      game->solve_spec().root.board);
+  const InfoSetKey root_key{
+      game->history_tree().root, position.observation(),
+      ObservePrivate(game->solve_spec().config.card_abstraction(), kA,
+                     position)};
+  const PolicyRow root_row = response->response_policy.rows.at(root_key);
+  for (uint8_t action = 0; action < root_row.action_count; ++action) {
+    const GameAction game_action = game->history_tree()
+        .edges[std::get<DecisionNode>(game->history_tree().nodes[0])
+                   .edges.begin + action]
+        .action;
+    if (game_action.kind == ActionKind::kAllIn) {
+      CHECK(response->response_policy.probabilities[
+                root_row.action_offset + action] > 0.95f);
+    }
+  }
+}
+
+TEST_CASE("exploitability reports both responder perspectives") {
+  auto game = MakeSolver(Config(), R(kA), R(kB), WinningRiverRoot());
+  const auto initial_policy = game->extract_average_policy();
+  REQUIRE(initial_policy.ok());
+  const auto initial = EstimateExploitability(
+      *game, *initial_policy, BestResponseConfig{200, 2, 23});
+  REQUIRE(initial.ok());
+
+  game->run(200);
+  const auto policy = game->extract_average_policy();
+  REQUIRE(policy.ok());
+  const auto estimate = EstimateExploitability(
+      *game, *policy, BestResponseConfig{200, 2, 23});
+  REQUIRE(estimate.ok());
+  CHECK(estimate->player_a_response.responder == Player::kA);
+  CHECK(estimate->player_b_response.responder == Player::kB);
+  CHECK(estimate->nash_conv == doctest::Approx(
+      estimate->player_a_response.value +
+      estimate->player_b_response.value));
+  CHECK(estimate->exploitability ==
+        doctest::Approx(0.5 * estimate->nash_conv));
+  const double sampling_tolerance = 3.0 * (
+      estimate->player_a_response.standard_error +
+      estimate->player_b_response.standard_error);
+  CHECK(estimate->nash_conv >= -sampling_tolerance);
+  CHECK(estimate->exploitability < 0.1);
+  CHECK(estimate->exploitability < initial->exploitability);
 }
 
 }  // namespace

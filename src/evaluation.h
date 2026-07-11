@@ -32,6 +32,13 @@ struct BestResponseResult {
   uint64_t missing_opponent_lookups = 0;
 };
 
+struct ExploitabilityEstimate {
+  BestResponseResult player_a_response;
+  BestResponseResult player_b_response;
+  double nash_conv = 0.0;
+  double exploitability = 0.0;
+};
+
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const CFRSolver& game,
     const Policy& player_a,
@@ -43,6 +50,11 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     const CFRSolver& game,
     Player responder,
     const Policy& opponent,
+    const BestResponseConfig& config);
+
+absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
+    const CFRSolver& game,
+    const Policy& policy,
     const BestResponseConfig& config);
 
 }  // namespace poker

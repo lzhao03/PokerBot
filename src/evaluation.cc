@@ -424,4 +424,27 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
   return result;
 }
 
+absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
+    const CFRSolver& game,
+    const Policy& policy,
+    const BestResponseConfig& config) {
+  auto player_a = TrainApproximateBestResponse(
+      game, Player::kA, policy, config);
+  if (!player_a.ok()) return player_a.status();
+
+  BestResponseConfig player_b_config = config;
+  player_b_config.seed ^= 0xd1b54a32d192ed03ULL;
+  auto player_b = TrainApproximateBestResponse(
+      game, Player::kB, policy, player_b_config);
+  if (!player_b.ok()) return player_b.status();
+
+  ExploitabilityEstimate result;
+  result.player_a_response = std::move(*player_a);
+  result.player_b_response = std::move(*player_b);
+  result.nash_conv =
+      result.player_a_response.value + result.player_b_response.value;
+  result.exploitability = 0.5 * result.nash_conv;
+  return result;
+}
+
 }  // namespace poker
