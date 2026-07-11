@@ -128,19 +128,15 @@ bool IsLegalAction(const BettingState& state, const GameAction& action) {
   }
 }
 
-void AddAction(ActionMenu& menu,
+void AddAction(SolverActions& actions,
                const BettingState& state,
                ActionKind kind,
                Chips target_street_commitment) {
-  if (menu.count >= kMaxActionsPerNode) {
-    throw std::logic_error("Legal action table exceeded kMaxActionsPerNode");
-  }
   const GameAction action{kind, target_street_commitment};
   if (!IsLegalAction(state, action)) {
     throw std::logic_error("Generated an illegal poker action");
   }
-  menu.actions[static_cast<size_t>(menu.count)] = action;
-  ++menu.count;
+  actions.push_back(action);
 }
 
 BettingState ApplyActionUnchecked(const BettingState& state,
@@ -251,27 +247,29 @@ bool IsTerminal(const ExactPublicState& state) {
          IsBettingRoundOver(state.betting);
 }
 
-ActionMenu LegalActions(const BettingState& state,
-                        absl::Span<const double> bet_sizes) {
+SolverActions GetSolverActions(const SolverConfig& config,
+                               const BettingState& state) {
   const int player = state.player_to_act;
   if (!IsPlayer(player) || state.folded_player >= 0 ||
       state.stack[player] <= 0) {
-    throw std::logic_error("LegalActions requires a decision state");
+    throw std::logic_error("GetSolverActions requires a decision state");
   }
 
-  ActionMenu menu;
+  SolverActions actions;
   const ActionLimits limits = LimitsFor(state, player);
   const Chips outstanding_call = limits.highest - limits.current;
   if (outstanding_call > 0) {
-    AddAction(menu, state, ActionKind::kFold, 0);
-    AddAction(menu, state, ActionKind::kCall, limits.call_target);
+    AddAction(actions, state, ActionKind::kFold, 0);
+    AddAction(actions, state, ActionKind::kCall, limits.call_target);
   } else {
-    AddAction(menu, state, ActionKind::kCheck, 0);
+    AddAction(actions, state, ActionKind::kCheck, 0);
   }
 
   const ActionKind sized_kind =
       limits.wager_open ? ActionKind::kRaise : ActionKind::kBet;
-  absl::InlinedVector<GameAction, kMaxActionsPerNode> sized_actions;
+  SolverActions sized_actions;
+  const auto& bet_sizes =
+      config.bet_sizes[static_cast<size_t>(state.street)];
   for (double bet_size : bet_sizes) {
     const Chips bet = ConcreteBetAmount(state, bet_size);
     const Chips target = limits.highest + bet;
@@ -290,14 +288,14 @@ ActionMenu LegalActions(const BettingState& state,
   sized_actions.erase(unique_end, sized_actions.end());
 
   for (const GameAction& action : sized_actions) {
-    AddAction(menu, state, action.kind,
+    AddAction(actions, state, action.kind,
               action.target_street_commitment);
   }
 
   if (limits.maximum_target > limits.call_target) {
-    AddAction(menu, state, ActionKind::kAllIn, limits.maximum_target);
+    AddAction(actions, state, ActionKind::kAllIn, limits.maximum_target);
   }
-  return menu;
+  return actions;
 }
 
 BettingState ApplyAction(const BettingState& state,

@@ -56,15 +56,14 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   flop.street = StreetKind::kFlop;
   flop.player_to_act = 1;
   flop.folded_player = -1;
-  const ActionMenu menu = LegalActions(
-      flop, config.bet_sizes[static_cast<size_t>(StreetKind::kFlop)]);
+  const SolverActions actions = GetSolverActions(config, flop);
   bool bet_four = false;
   bool bet_two = false;
   bool all_in = false;
-  for (uint8_t i = 0; i < menu.count; ++i) {
-    bet_four |= menu.actions[i] == GameAction{ActionKind::kBet, 4};
-    bet_two |= menu.actions[i] == GameAction{ActionKind::kBet, 2};
-    all_in |= menu.actions[i] == GameAction{ActionKind::kAllIn, 98};
+  for (const GameAction& action : actions) {
+    bet_four |= action == GameAction{ActionKind::kBet, 4};
+    bet_two |= action == GameAction{ActionKind::kBet, 2};
+    all_in |= action == GameAction{ActionKind::kAllIn, 98};
   }
   CHECK(bet_four);
   CHECK_FALSE(bet_two);

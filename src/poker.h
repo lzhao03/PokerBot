@@ -57,11 +57,6 @@ struct GameAction {
   friend bool operator==(const GameAction&, const GameAction&) = default;
 };
 
-// Maximum number of legal actions at any decision node.
-// With 3 bet sizes: fold/call + 3 raises + all-in = 6 (facing bet),
-// or check + 3 bets + all-in = 5 (no bet). 8 gives headroom.
-inline constexpr int kMaxActionsPerNode = 8;
-
 struct SolverConfig {
   std::array<std::vector<double>, 4> bet_sizes = {{
       {0.25, 0.5, 1.0},

@@ -2,23 +2,21 @@
 
 #include <array>
 
+#include "absl/container/inlined_vector.h"
 #include "absl/types/span.h"
 #include "src/combo.h"
 #include "src/game_state.h"
 
 namespace poker {
 
-struct ActionMenu {
-  uint8_t count = 0;
-  std::array<GameAction, kMaxActionsPerNode> actions = {};
-};
+using SolverActions = absl::InlinedVector<GameAction, 8>;
 
 ExactPublicState MakeInitialState(
     const BettingRules& rules,
     std::array<Chips, kPlayerCount> stacks,
     std::array<Chips, kPlayerCount> blinds);
-ActionMenu LegalActions(const BettingState& state,
-                        absl::Span<const double> bet_sizes);
+SolverActions GetSolverActions(const SolverConfig& config,
+                               const BettingState& state);
 BettingState ApplyAction(const BettingState& state,
                          const GameAction& action);
 BettingState AdvanceBettingStreet(const BettingState& state,

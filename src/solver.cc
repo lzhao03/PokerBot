@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "absl/container/inlined_vector.h"
 #include "absl/log/log.h"
 #include "absl/types/span.h"
 #include "src/card_utils.h"
@@ -61,12 +62,6 @@ HistoryNodeKind KindFor(const BettingState& state) {
                                    : HistoryNodeKind::kDecision;
 }
 
-ActionMenu ActionsForBettingNode(const SolverConfig& config,
-                                 const BettingState& state) {
-  const size_t street = static_cast<size_t>(state.street);
-  return LegalActions(state, config.bet_sizes[street]);
-}
-
 HistoryId AppendHistory(HistoryTree& tree,
                         const BettingState& state,
                         const BettingRules& rules,
@@ -77,14 +72,17 @@ HistoryId AppendHistory(HistoryTree& tree,
 
   const HistoryNodeKind kind = tree.nodes[id].kind;
   if (kind == HistoryNodeKind::kDecision) {
-    const ActionMenu menu = ActionsForBettingNode(config, state);
+    const SolverActions actions = GetSolverActions(config, state);
+    if (actions.size() > std::numeric_limits<uint8_t>::max()) {
+      throw std::invalid_argument("too many configured solver actions");
+    }
     const uint32_t begin = static_cast<uint32_t>(tree.edges.size());
-    tree.edges.resize(tree.edges.size() + menu.count);
+    tree.edges.resize(tree.edges.size() + actions.size());
     tree.nodes[id].action_begin = begin;
-    tree.nodes[id].action_count = menu.count;
+    tree.nodes[id].action_count = static_cast<uint8_t>(actions.size());
 
-    for (uint8_t action = 0; action < menu.count; ++action) {
-      const GameAction edge_action = menu.actions[action];
+    for (size_t action = 0; action < actions.size(); ++action) {
+      const GameAction edge_action = actions[action];
       const BettingState child_state = ApplyAction(state, edge_action);
       const HistoryId child =
           AppendHistory(tree, child_state, rules, config);
@@ -513,11 +511,11 @@ double CFRSolver::traverse(Position position,
   const InfoSetRow* strategy_row =
       updates || row.action_count != 0 ? &row : nullptr;
 
-  std::array<double, kMaxActionsPerNode> probability_storage{};
-  std::array<double, kMaxActionsPerNode> value_storage{};
+  absl::InlinedVector<double, 8> probability_storage(node.action_count, 0.0);
+  absl::InlinedVector<double, 8> value_storage(node.action_count, 0.0);
   absl::Span<double> probabilities(probability_storage.data(),
-                                   node.action_count);
-  absl::Span<double> values(value_storage.data(), node.action_count);
+                                   probability_storage.size());
+  absl::Span<double> values(value_storage.data(), value_storage.size());
   if (context.mode == TraversalMode::kEvaluateAverage) {
     AverageStrategy(state_, strategy_row, probabilities);
   } else {
