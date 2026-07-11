@@ -88,6 +88,15 @@ ModelFingerprint FingerprintModel(const SolveSpec& spec,
   hash.add_u8(static_cast<uint8_t>(config.card_abstraction().public_mode));
   hash.add_u8(static_cast<uint8_t>(config.card_abstraction().private_kind));
   hash.add_u8(static_cast<uint8_t>(config.card_abstraction().recall_mode));
+  if (config.card_abstraction().equity_model.has_value()) {
+    hash.add_u8(1);
+    for (std::byte byte :
+         config.card_abstraction().equity_model->fingerprint.bytes) {
+      hash.add_u8(std::to_integer<uint8_t>(byte));
+    }
+  } else {
+    hash.add_u8(0);
+  }
   for (const auto& fractions :
        config.bet_abstraction().pot_fractions) {
     hash.add_u32(static_cast<uint32_t>(fractions.size()));
@@ -983,6 +992,8 @@ absl::StatusOr<SolverConfig> SolverConfig::Create(
       }
     }
   }
+  auto abstraction = CardAbstraction::Create(options.card_abstraction);
+  if (!abstraction.ok()) return abstraction.status();
   return SolverConfig(std::move(options));
 }
 
@@ -1056,10 +1067,13 @@ ComboRange SingleComboRange(ComboId combo, float weight) {
   return range;
 }
 
-CFRSolver::CFRSolver(SolveSpec spec, DealDistribution deals)
+CFRSolver::CFRSolver(SolveSpec spec,
+                     DealDistribution deals,
+                     CardAbstraction card_abstraction)
     : spec_(std::move(spec)),
       betting_rules_{spec_.config.big_blind()},
       deals_(std::move(deals)),
+      card_abstraction_(std::move(card_abstraction)),
       rng_(12345) {
   history_ = BuildHistoryTree(
       spec_.root.betting, betting_rules_, spec_.config);
@@ -1089,13 +1103,16 @@ absl::StatusOr<std::unique_ptr<CFRSolver>> CFRSolver::Create(
   if (!deals.ok()) {
     return deals.status();
   }
+  auto abstraction = CardAbstraction::Create(spec.config.card_abstraction());
+  if (!abstraction.ok()) return abstraction.status();
   return std::unique_ptr<CFRSolver>(
-      new CFRSolver(std::move(spec), std::move(*deals)));
+      new CFRSolver(std::move(spec), std::move(*deals),
+                    std::move(*abstraction)));
 }
 
 Position CFRSolver::root_position() const {
   return {history_.root,
-          PublicPosition::Root(spec_.config.card_abstraction(),
+          PublicPosition::Root(card_abstraction_,
                                Data(spec_.root.betting).street,
                                spec_.root.board)};
 }
@@ -1127,8 +1144,7 @@ Position CFRSolver::sample_chance_child(Position position,
       node->state, position.public_state.board(), *sampled, betting_rules_);
   position.history = node->child;
   position.public_state = position.public_state.after_chance(
-      spec_.config.card_abstraction(), Data(child.betting).street,
-      child.board);
+      card_abstraction_, Data(child.betting).street, child.board);
   return position;
 }
 
@@ -1139,8 +1155,8 @@ CFRSolver::private_observations_for_position(
   std::array<PrivateObservationId, kPlayerCount> observations;
   for (size_t player = 0; player < kPlayerCount; ++player) {
     const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
-    observations[player] = ObservePrivate(
-        spec_.config.card_abstraction(), hand, position.public_state);
+    observations[player] =
+        ObservePrivate(card_abstraction_, hand, position.public_state);
   }
   return observations;
 }
@@ -1151,9 +1167,8 @@ void CFRSolver::advance_private_observations(
     const Position& child) const {
   for (size_t player = 0; player < kPlayerCount; ++player) {
     const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
-    frame.private_observations[player] = AdvancePrivateObservation(
-        spec_.config.card_abstraction(), frame.private_observations[player],
-        hand, child.public_state);
+    frame.private_observations[player] =
+        ObservePrivate(card_abstraction_, hand, child.public_state);
   }
 }
 

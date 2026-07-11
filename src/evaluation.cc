@@ -41,7 +41,7 @@ std::mt19937 MakeEvaluationRng(uint64_t seed) {
 Position RootPosition(const CFRSolver& game) {
   const SolveSpec& spec = game.solve_spec();
   return {game.history_tree().root,
-          PublicPosition::Root(spec.config.card_abstraction(),
+          PublicPosition::Root(game.card_abstraction(),
                                Data(spec.root.betting).street,
                                spec.root.board)};
 }
@@ -75,7 +75,7 @@ Position ChanceChild(const CFRSolver& game,
       BettingRules{config.big_blind()});
   position.history = node->child;
   position.public_state = position.public_state.after_chance(
-      config.card_abstraction(), Data(child.betting).street, child.board);
+      game.card_abstraction(), Data(child.betting).street, child.board);
   return position;
 }
 
@@ -83,12 +83,10 @@ EvaluationFrame InitialFrame(const CFRSolver& game,
                              const Position& position,
                              const Deal& deal) {
   EvaluationFrame frame;
-  const CardAbstractionConfig& config =
-      game.solve_spec().config.card_abstraction();
   for (size_t player = 0; player < kPlayerCount; ++player) {
     const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
     frame.private_observations[player] =
-        ObservePrivate(config, hand, position.public_state);
+        ObservePrivate(game.card_abstraction(), hand, position.public_state);
   }
   return frame;
 }
@@ -97,13 +95,10 @@ void AdvancePrivateObservations(const CFRSolver& game,
                                 EvaluationFrame& frame,
                                 const Position& child,
                                 const Deal& deal) {
-  const CardAbstractionConfig& config =
-      game.solve_spec().config.card_abstraction();
   for (size_t player = 0; player < kPlayerCount; ++player) {
     const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
-    frame.private_observations[player] = AdvancePrivateObservation(
-        config, frame.private_observations[player], hand,
-        child.public_state);
+    frame.private_observations[player] = ObservePrivate(
+        game.card_abstraction(), hand, child.public_state);
   }
 }
 

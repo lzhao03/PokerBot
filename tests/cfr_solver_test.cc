@@ -93,6 +93,52 @@ SolverConfig Config(bool accumulate_average = true,
   return *config;
 }
 
+EquityBucketModel EquityModel(uint64_t seed) {
+  EquityBucketModel model;
+  model.rollout_seed = seed;
+  model.fit_seed = 3;
+  model.training_samples = 100;
+  model.opponent_samples = 16;
+  model.runout_samples = 8;
+  for (StreetKind street : {StreetKind::kFlop, StreetKind::kTurn}) {
+    auto& cutoffs = model.ehs2_cutoffs[static_cast<size_t>(street)];
+    for (int index = 1; index < 16; ++index) {
+      cutoffs.push_back(static_cast<float>(index) / 16.0f);
+    }
+    model.ehs_medians[static_cast<size_t>(street)].assign(16, 0.5f);
+  }
+  for (int index = 1; index < 64; ++index) {
+    model.river_equity_cutoffs.push_back(
+        static_cast<float>(index) / 64.0f);
+  }
+  const auto finalized = FinalizeEquityBucketModel(std::move(model));
+  if (!finalized.ok()) {
+    throw std::invalid_argument(std::string(finalized.status().message()));
+  }
+  return *finalized;
+}
+
+SolverConfig EquityConfig(uint64_t seed) {
+  SolverConfigOptions options;
+  options.starting_stack = 8;
+  options.small_blind = 1;
+  options.big_blind = 2;
+  options.card_abstraction = {
+      PublicCardMode::kTexture,
+      PrivateAbstractionKind::kEquityPotential,
+      RecallMode::kCurrentBucketOnly,
+      EquityModel(seed),
+  };
+  for (auto& fractions : options.bet_abstraction.pot_fractions) {
+    fractions = {0.5, 1.0};
+  }
+  const auto config = SolverConfig::Create(std::move(options));
+  if (!config.ok()) {
+    throw std::invalid_argument(std::string(config.status().message()));
+  }
+  return *config;
+}
+
 ExactPublicState Root(const SolverConfig& config) {
   const Chips stack = config.starting_stack();
   return MakeInitialState(BettingRules{config.big_blind()}, {stack, stack},
@@ -173,10 +219,10 @@ Policy PassiveCallingPolicy(const CFRSolver& game, ComboId hand) {
   Policy policy;
   policy.model = game.model_fingerprint();
   const PublicPosition position = PublicPosition::Root(
-      game.solve_spec().config.card_abstraction(), StreetKind::kRiver,
+      game.card_abstraction(), StreetKind::kRiver,
       game.solve_spec().root.board);
   const PrivateObservationId private_observation = ObservePrivate(
-      game.solve_spec().config.card_abstraction(), hand, position);
+      game.card_abstraction(), hand, position);
   for (size_t history = 0; history < game.history_tree().nodes.size();
        ++history) {
     const auto* node =
@@ -222,8 +268,36 @@ TEST_CASE("model fingerprints are stable and cover solve ranges") {
   CHECK(first->model_fingerprint() == second->model_fingerprint());
   CHECK(first->model_fingerprint() != changed->model_fingerprint());
   CHECK(Hex(first->model_fingerprint()) ==
-        "74b58f995bc3a0f3742ee113c7636e62"
-        "055ac6b4239a62acfe8e52e76f56b7da");
+        "d888124d143d268d139afce227d10e26"
+        "624b3c05912c12885f0d8b7696b14041");
+}
+
+TEST_CASE("equity model identity protects policies and checkpoints") {
+  auto first = MakeSolver(EquityConfig(7), R(kA), R(kB),
+                          WinningRiverRoot());
+  auto changed = MakeSolver(EquityConfig(8), R(kA), R(kB),
+                            WinningRiverRoot());
+  first->run(2);
+  const auto policy = first->extract_average_policy();
+  REQUIRE(policy.ok());
+  CHECK(first->model_fingerprint() != changed->model_fingerprint());
+  CHECK_FALSE(EstimateExpectedValue(
+      *changed, *policy, *policy, 1, 5).ok());
+  CHECK_FALSE(changed->restore(first->checkpoint()).ok());
+}
+
+TEST_CASE("private abstraction cannot change terminal utility") {
+  ExactPublicState terminal = WinningRiverRoot();
+  BettingData data = Data(terminal.betting);
+  data.pending_action_mask = 0;
+  terminal.betting = ShowdownState{data};
+  auto handcrafted = MakeSolver(Config(), R(kA), R(kB), terminal);
+  auto equity = MakeSolver(EquityConfig(7), R(kA), R(kB), terminal);
+  const double expected = handcrafted->evaluate_current(
+      HoleCards(kA), HoleCards(kB));
+  CHECK(expected == doctest::Approx(4.0));
+  CHECK(equity->evaluate_current(HoleCards(kA), HoleCards(kB)) ==
+        expected);
 }
 
 TEST_CASE("history tree stores direct rule transitions") {
@@ -341,9 +415,9 @@ TEST_CASE("postflop roots use full observation identity") {
       std::get<DecisionNode>(tree.nodes[tree.root.index()]).state.actor;
   const ComboId hand = player == Player::kA ? kA : kB;
   const PublicPosition public_state = PublicPosition::Root(
-      config.card_abstraction(), Data(root.betting).street, root.board);
+      solver->card_abstraction(), Data(root.betting).street, root.board);
   const PrivateObservationId private_id = ObservePrivate(
-      config.card_abstraction(), hand, public_state);
+      solver->card_abstraction(), hand, public_state);
   CHECK(CFRSolverTestAccess::state(*solver).rows.contains(
       {tree.root, public_state.observation(), private_id}));
 }
@@ -562,12 +636,11 @@ TEST_CASE("approximate response learns a profitable shared action") {
   CHECK(response->value > 7.5);
 
   const PublicPosition position = PublicPosition::Root(
-      game->solve_spec().config.card_abstraction(), StreetKind::kRiver,
+      game->card_abstraction(), StreetKind::kRiver,
       game->solve_spec().root.board);
   const InfoSetKey root_key{
       game->history_tree().root, position.observation(),
-      ObservePrivate(game->solve_spec().config.card_abstraction(), kA,
-                     position)};
+      ObservePrivate(game->card_abstraction(), kA, position)};
   const PolicyRow root_row = response->response_policy.rows.at(root_key);
   for (uint8_t action = 0; action < root_row.action_count; ++action) {
     const GameAction game_action = game->history_tree()

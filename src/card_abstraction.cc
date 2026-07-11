@@ -17,14 +17,11 @@
 namespace poker {
 namespace {
 
-inline constexpr int kPrivateObservationBitsPerStreet = 6;
 inline constexpr int kPublicObservationBitsPerStreet = 7;
 inline constexpr int kSuitBuckets = 4;
 inline constexpr int kStraightBuckets = 3;
 inline constexpr int kHighBuckets = 3;
 
-static_assert(kCoarsePrivateStreetObservationCount <
-              (uint32_t{1} << kPrivateObservationBitsPerStreet));
 static_assert(kCoarsePublicStreetObservationCount <
               (uint32_t{1} << kPublicObservationBitsPerStreet));
 
@@ -163,25 +160,6 @@ PublicObservationId ObserveCoarsePublic(StreetKind street,
   return AdvanceCoarsePublic(
       observation, StreetKind::kRiver,
       BoardTextureBucket(StreetKind::kRiver, BoardFeaturesFor(Board{river})));
-}
-
-PrivateObservationId AdvanceCoarsePrivate(
-    PrivateObservationId previous,
-    ComboId hand,
-    const PublicPosition& child) noexcept {
-  const StreetKind street = child.street();
-  assert(street != StreetKind::kPreflop);
-  const PrivateBucketId bucket =
-      CoarsePrivateBucket(hand, street, child.features());
-  assert(bucket < kCoarsePrivateStreetObservationCount);
-  const int shift = static_cast<int>(street) *
-                    kPrivateObservationBitsPerStreet;
-  constexpr uint64_t kSlotMask =
-      (uint64_t{1} << kPrivateObservationBitsPerStreet) - 1;
-  const uint64_t slot_mask = kSlotMask << shift;
-  assert((previous.value() & slot_mask) == 0);
-  return PrivateObservationId(
-      previous.value() | ((static_cast<uint64_t>(bucket) + 1) << shift));
 }
 
 using Bytes = std::vector<uint8_t>;
@@ -662,10 +640,140 @@ PrivateBucketId CoarsePrivateBucket(
       HoleStrengthBucket(high, low, pair, suited));
 }
 
-PublicObservationId ObservePublic(const CardAbstractionConfig& config,
+namespace {
+
+PrivateBucketId PreflopHandClass(ComboId hand) noexcept {
+  const ComboInfo& combo = GetComboInfo(hand);
+  int first = static_cast<int>(combo.card0.rank());
+  int second = static_cast<int>(combo.card1.rank());
+  if (first < second) std::swap(first, second);
+  if (first == second) return static_cast<PrivateBucketId>(first);
+  const int offset = first * (first - 1) / 2 + second;
+  const bool suited = combo.card0.suit() == combo.card1.suit();
+  return static_cast<PrivateBucketId>((suited ? 13 : 91) + offset);
+}
+
+PrivateObservationId HandcraftedObservation(
+    const CardAbstractionConfig& config,
+    ComboId hand,
+    const PublicPosition& position) noexcept {
+  const PrivateBucketId current = CoarsePrivateBucket(
+      hand, position.street(), position.features());
+  if (config.recall_mode == RecallMode::kCurrentBucketOnly) {
+    return PrivateObservationId(static_cast<uint64_t>(current) + 1);
+  }
+
+  uint64_t observation = static_cast<uint64_t>(CoarsePrivateBucket(
+      hand, StreetKind::kPreflop, BoardFeatures{})) + 1;
+  if (position.street() == StreetKind::kPreflop) {
+    return PrivateObservationId(observation);
+  }
+  const auto cards = BoardCards(position.board());
+  const FlopBoard flop =
+      DealFlop(PreflopBoard{}, {cards[0], cards[1], cards[2]});
+  observation |=
+      (static_cast<uint64_t>(CoarsePrivateBucket(
+           hand, StreetKind::kFlop, BoardFeaturesFor(Board{flop}))) + 1)
+      << 6;
+  if (position.street() == StreetKind::kFlop) {
+    return PrivateObservationId(observation);
+  }
+  const TurnBoard turn = DealTurn(flop, cards[3]);
+  observation |=
+      (static_cast<uint64_t>(CoarsePrivateBucket(
+           hand, StreetKind::kTurn, BoardFeaturesFor(Board{turn}))) + 1)
+      << 12;
+  if (position.street() == StreetKind::kTurn) {
+    return PrivateObservationId(observation);
+  }
+  const RiverBoard river = DealRiver(turn, cards[4]);
+  observation |=
+      (static_cast<uint64_t>(CoarsePrivateBucket(
+           hand, StreetKind::kRiver, BoardFeaturesFor(Board{river}))) + 1)
+      << 18;
+  return PrivateObservationId(observation);
+}
+
+PrivateObservationId EquityObservation(
+    const CardAbstraction& abstraction,
+    ComboId hand,
+    const PublicPosition& position) noexcept {
+  const uint64_t preflop =
+      static_cast<uint64_t>(PreflopHandClass(hand)) + 1;
+  if (position.street() == StreetKind::kPreflop) {
+    return PrivateObservationId(preflop);
+  }
+  const PrivateBucketId current =
+      abstraction.equity_bucket(hand, position.board());
+  if (abstraction.config().recall_mode == RecallMode::kCurrentBucketOnly) {
+    return PrivateObservationId(static_cast<uint64_t>(current) + 1);
+  }
+
+  const auto cards = BoardCards(position.board());
+  const FlopBoard flop =
+      DealFlop(PreflopBoard{}, {cards[0], cards[1], cards[2]});
+  uint64_t observation = preflop;
+  observation |=
+      (static_cast<uint64_t>(abstraction.equity_bucket(hand, Board{flop})) + 1)
+      << 8;
+  if (position.street() == StreetKind::kFlop) {
+    return PrivateObservationId(observation);
+  }
+  const TurnBoard turn = DealTurn(flop, cards[3]);
+  observation |=
+      (static_cast<uint64_t>(abstraction.equity_bucket(hand, Board{turn})) + 1)
+      << 14;
+  if (position.street() == StreetKind::kTurn) {
+    return PrivateObservationId(observation);
+  }
+  const RiverBoard river = DealRiver(turn, cards[4]);
+  observation |=
+      (static_cast<uint64_t>(abstraction.equity_bucket(hand, Board{river})) + 1)
+      << 20;
+  return PrivateObservationId(observation);
+}
+
+}  // namespace
+
+absl::StatusOr<CardAbstraction> CardAbstraction::Create(
+    CardAbstractionConfig config) {
+  if (config.private_kind == PrivateAbstractionKind::kEquityPotential) {
+    if (!config.equity_model.has_value()) {
+      return absl::InvalidArgumentError(
+          "equity private abstraction requires a model");
+    }
+    const absl::Status valid =
+        ValidateEquityBucketModel(*config.equity_model);
+    if (!valid.ok()) return valid;
+  } else if (config.equity_model.has_value()) {
+    return absl::InvalidArgumentError(
+        "equity model provided for a non-equity abstraction");
+  }
+  return CardAbstraction(std::move(config));
+}
+
+PrivateBucketId CardAbstraction::equity_bucket(
+    ComboId hand,
+    const Board& board) const noexcept {
+  assert(config_.equity_model.has_value());
+  const CanonicalCardObservation canonical =
+      CanonicalizeObservation(hand, board);
+  const CacheKey key{canonical.public_observation,
+                     canonical.private_observation};
+  const auto found = equity_cache_.find(key);
+  if (found != equity_cache_.end()) return found->second;
+  const PrivateBucketId bucket = EquityBucket(
+      static_cast<StreetKind>(BoardCount(board) - 2),
+      EvaluateEquityFeatures(hand, board, *config_.equity_model),
+      *config_.equity_model);
+  equity_cache_.emplace(key, bucket);
+  return bucket;
+}
+
+PublicObservationId ObservePublic(const CardAbstraction& abstraction,
                                   StreetKind street,
                                   const Board& board) noexcept {
-  switch (config.public_mode) {
+  switch (abstraction.config().public_mode) {
     case PublicCardMode::kExactCanonical:
       return CanonicalPublicObservation(board);
     case PublicCardMode::kTexture:
@@ -673,88 +781,36 @@ PublicObservationId ObservePublic(const CardAbstractionConfig& config,
   }
 }
 
-PrivateObservationId ObservePrivate(const CardAbstractionConfig& config,
+PrivateObservationId ObservePrivate(const CardAbstraction& abstraction,
                                     ComboId hand,
                                     const PublicPosition& position) noexcept {
-  if (config.private_kind == PrivateAbstractionKind::kExactCanonical) {
-    return CanonicalizeObservation(hand, position.board()).private_observation;
+  switch (abstraction.config().private_kind) {
+    case PrivateAbstractionKind::kExactCanonical:
+      return CanonicalizeObservation(hand, position.board())
+          .private_observation;
+    case PrivateAbstractionKind::kHandcrafted36:
+      return HandcraftedObservation(abstraction.config(), hand, position);
+    case PrivateAbstractionKind::kEquityPotential:
+      return EquityObservation(abstraction, hand, position);
   }
-
-  if (config.recall_mode == RecallMode::kCurrentBucketOnly) {
-    const PrivateBucketId bucket = CoarsePrivateBucket(
-        hand, position.street(), position.features());
-    return PrivateObservationId(static_cast<uint64_t>(bucket) + 1);
-  }
-
-  PrivateObservationId observation = InitialPrivateObservation(config, hand);
-  if (position.street() == StreetKind::kPreflop) {
-    return observation;
-  }
-  const auto cards = BoardCards(position.board());
-  const FlopBoard flop =
-      DealFlop(PreflopBoard{}, {cards[0], cards[1], cards[2]});
-  observation = AdvanceCoarsePrivate(
-      observation, hand,
-      PublicPosition::Root(config, StreetKind::kFlop, Board{flop}));
-  if (position.street() == StreetKind::kFlop) {
-    return observation;
-  }
-  const TurnBoard turn = DealTurn(flop, cards[3]);
-  observation = AdvanceCoarsePrivate(
-      observation, hand,
-      PublicPosition::Root(config, StreetKind::kTurn, Board{turn}));
-  if (position.street() == StreetKind::kTurn) {
-    return observation;
-  }
-  const RiverBoard river = DealRiver(turn, cards[4]);
-  return AdvanceCoarsePrivate(
-      observation, hand,
-      PublicPosition::Root(config, StreetKind::kRiver, Board{river}));
 }
 
-PrivateObservationId InitialPrivateObservation(
-    const CardAbstractionConfig& config,
-    ComboId hand) noexcept {
-  if (config.private_kind == PrivateAbstractionKind::kExactCanonical) {
-    return CanonicalizeObservation(hand, Board{PreflopBoard{}})
-        .private_observation;
-  }
-  const PrivateBucketId bucket = CoarsePrivateBucket(
-      hand, StreetKind::kPreflop, BoardFeatures{});
-  return PrivateObservationId(static_cast<uint64_t>(bucket) + 1);
-}
-
-PrivateObservationId AdvancePrivateObservation(
-    const CardAbstractionConfig& config,
-    PrivateObservationId previous,
-    ComboId hand,
-    const PublicPosition& child) noexcept {
-  if (config.private_kind == PrivateAbstractionKind::kExactCanonical) {
-    return CanonicalizeObservation(hand, child.board()).private_observation;
-  }
-  if (config.recall_mode == RecallMode::kCurrentBucketOnly) {
-    const PrivateBucketId bucket = CoarsePrivateBucket(
-        hand, child.street(), child.features());
-    return PrivateObservationId(static_cast<uint64_t>(bucket) + 1);
-  }
-  return AdvanceCoarsePrivate(previous, hand, child);
-}
-
-PublicPosition PublicPosition::Root(const CardAbstractionConfig& config,
+PublicPosition PublicPosition::Root(const CardAbstraction& abstraction,
                                     StreetKind street,
                                     Board board) {
   const BoardFeatures features = BoardFeaturesFor(board);
-  const PublicObservationId observation = ObservePublic(config, street, board);
+  const PublicObservationId observation =
+      ObservePublic(abstraction, street, board);
   return PublicPosition(street, std::move(board), observation, features);
 }
 
 PublicPosition PublicPosition::after_chance(
-    const CardAbstractionConfig& config,
+    const CardAbstraction& abstraction,
     StreetKind street,
     Board board) const {
   const BoardFeatures features = BoardFeaturesFor(board);
   PublicObservationId observation;
-  if (config.public_mode == PublicCardMode::kExactCanonical) {
+  if (abstraction.config().public_mode == PublicCardMode::kExactCanonical) {
     observation = CanonicalPublicObservation(board);
   } else {
     observation = AdvanceCoarsePublic(

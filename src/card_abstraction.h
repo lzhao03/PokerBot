@@ -3,9 +3,11 @@
 #include <array>
 #include <filesystem>
 #include <cstdint>
+#include <optional>
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "src/card_canonicalization.h"
@@ -27,18 +29,12 @@ enum class PublicCardMode : uint8_t {
 enum class PrivateAbstractionKind : uint8_t {
   kExactCanonical,
   kHandcrafted36,
+  kEquityPotential,
 };
 
 enum class RecallMode : uint8_t {
   kCurrentBucketOnly,
   kBucketHistory,
-};
-
-struct CardAbstractionConfig {
-  PublicCardMode public_mode = PublicCardMode::kTexture;
-  PrivateAbstractionKind private_kind =
-      PrivateAbstractionKind::kHandcrafted36;
-  RecallMode recall_mode = RecallMode::kBucketHistory;
 };
 
 struct BoardFeatures {
@@ -78,6 +74,14 @@ struct EquityBucketModel {
                          const EquityBucketModel&) = default;
 };
 
+struct CardAbstractionConfig {
+  PublicCardMode public_mode = PublicCardMode::kTexture;
+  PrivateAbstractionKind private_kind =
+      PrivateAbstractionKind::kHandcrafted36;
+  RecallMode recall_mode = RecallMode::kBucketHistory;
+  std::optional<EquityBucketModel> equity_model;
+};
+
 absl::Status ValidateEquityBucketModel(const EquityBucketModel& model);
 absl::StatusOr<EquityBucketModel> FinalizeEquityBucketModel(
     EquityBucketModel model);
@@ -94,13 +98,15 @@ EquityFeatures EvaluateEquityFeatures(
     const Board& board,
     const EquityBucketModel& model) noexcept;
 
+class CardAbstraction;
+
 class PublicPosition {
  public:
-  static PublicPosition Root(const CardAbstractionConfig& config,
+  static PublicPosition Root(const CardAbstraction& abstraction,
                              StreetKind street,
                              Board board);
 
-  PublicPosition after_chance(const CardAbstractionConfig& config,
+  PublicPosition after_chance(const CardAbstraction& abstraction,
                               StreetKind street,
                               Board board) const;
 
@@ -125,6 +131,42 @@ class PublicPosition {
   BoardFeatures features_;
 };
 
+class CardAbstraction {
+ public:
+  static absl::StatusOr<CardAbstraction> Create(
+      CardAbstractionConfig config);
+
+  const CardAbstractionConfig& config() const noexcept { return config_; }
+  size_t cache_size() const noexcept { return equity_cache_.size(); }
+  PrivateBucketId equity_bucket(ComboId hand,
+                                const Board& board) const noexcept;
+
+ private:
+  struct CacheKey {
+    PublicObservationId public_observation;
+    PrivateObservationId private_observation;
+
+    friend bool operator==(const CacheKey&, const CacheKey&) = default;
+
+    template <typename H>
+    friend H AbslHashValue(H hash, const CacheKey& key) {
+      return H::combine(std::move(hash), key.public_observation.value(),
+                        key.private_observation.value());
+    }
+  };
+
+  explicit CardAbstraction(CardAbstractionConfig config)
+      : config_(std::move(config)) {}
+
+  CardAbstractionConfig config_;
+  mutable absl::flat_hash_map<CacheKey, PrivateBucketId> equity_cache_;
+
+  friend PublicObservationId ObservePublic(
+      const CardAbstraction&, StreetKind, const Board&) noexcept;
+  friend PrivateObservationId ObservePrivate(
+      const CardAbstraction&, ComboId, const PublicPosition&) noexcept;
+};
+
 BoardFeatures BoardFeaturesFor(const Board& board) noexcept;
 BoardBucketId BoardTextureBucket(StreetKind street,
                                  const BoardFeatures& features) noexcept;
@@ -132,20 +174,11 @@ PrivateBucketId CoarsePrivateBucket(ComboId hand,
                                     StreetKind street,
                                     const BoardFeatures& features) noexcept;
 
-PublicObservationId ObservePublic(const CardAbstractionConfig& config,
+PublicObservationId ObservePublic(const CardAbstraction& abstraction,
                                   StreetKind street,
                                   const Board& board) noexcept;
-PrivateObservationId ObservePrivate(const CardAbstractionConfig& config,
+PrivateObservationId ObservePrivate(const CardAbstraction& abstraction,
                                     ComboId hand,
                                     const PublicPosition& position) noexcept;
-
-PrivateObservationId InitialPrivateObservation(
-    const CardAbstractionConfig& config,
-    ComboId hand) noexcept;
-PrivateObservationId AdvancePrivateObservation(
-    const CardAbstractionConfig& config,
-    PrivateObservationId previous,
-    ComboId hand,
-    const PublicPosition& child) noexcept;
 
 }  // namespace poker

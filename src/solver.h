@@ -301,13 +301,18 @@ class CFRSolver {
   const DealDistribution& deal_distribution() const noexcept {
     return deals_;
   }
+  const CardAbstraction& card_abstraction() const noexcept {
+    return card_abstraction_;
+  }
   SolverStats get_stats() const { return stats_; }
   void reset_stats() { stats_ = {}; }
 
  private:
   friend struct CFRSolverTestAccess;
 
-  CFRSolver(SolveSpec spec, DealDistribution deals);
+  CFRSolver(SolveSpec spec,
+            DealDistribution deals,
+            CardAbstraction card_abstraction);
 
   struct TraversalFrame {
     std::array<double, kPlayerCount> reach = {1.0, 1.0};
@@ -350,6 +355,7 @@ class CFRSolver {
   SolveSpec spec_;
   BettingRules betting_rules_;
   DealDistribution deals_;
+  CardAbstraction card_abstraction_;
   std::mt19937 rng_;
   HistoryTree history_;
   ModelFingerprint model_;
