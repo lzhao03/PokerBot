@@ -180,7 +180,7 @@ HistoryId AppendHistory(HistoryTree& tree,
     assert(transitions.size() <= std::numeric_limits<uint8_t>::max());
     const uint32_t begin = static_cast<uint32_t>(tree.edges.size());
     for (const SolverTransition& transition : transitions) {
-      tree.edges.push_back({transition.action, kInvalidHistoryId});
+      tree.edges.push_back({transition.action, id});
     }
     tree.nodes.push_back(
         DecisionNode{*decision, {begin, static_cast<uint8_t>(transitions.size())}});
@@ -194,7 +194,7 @@ HistoryId AppendHistory(HistoryTree& tree,
   }
 
   if (const auto* chance = std::get_if<ChanceState>(&state)) {
-    tree.nodes.push_back(ChanceNode{*chance});
+    tree.nodes.push_back(ChanceNode{*chance, id});
     const BettingState child_state = AdvanceBettingStreet(*chance, rules);
     const HistoryId child = AppendHistory(tree, child_state, rules, config);
     auto* node = std::get_if<ChanceNode>(&tree.nodes[id.index()]);
@@ -466,14 +466,14 @@ Position CFRSolver::root_position() const {
                                initial_state_.board)};
 }
 
-Position CFRSolver::action_child(Position position, int action_index) const {
+Position CFRSolver::action_child(Position position,
+                                 uint8_t action_index) const {
   assert(position.history.index() < history_.nodes.size());
   const auto* node =
       std::get_if<DecisionNode>(&history_.nodes[position.history.index()]);
-  assert(node != nullptr && action_index >= 0 &&
-         action_index < node->edges.count);
+  assert(node != nullptr && action_index < node->edges.count);
   position.history = history_.edges[
-      node->edges.begin + static_cast<uint32_t>(action_index)].child;
+      node->edges.begin + action_index].child;
   return position;
 }
 
@@ -482,7 +482,7 @@ Position CFRSolver::sample_chance_child(Position position,
   assert(position.history.index() < history_.nodes.size());
   const auto* node =
       std::get_if<ChanceNode>(&history_.nodes[position.history.index()]);
-  assert(node != nullptr && node->child != kInvalidHistoryId);
+  assert(node != nullptr);
 
   const BettingData& data = node->state.data;
   const auto sampled = SampleStreetCards(data.street,

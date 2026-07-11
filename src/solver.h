@@ -3,7 +3,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <optional>
 #include <random>
 #include <string_view>
@@ -46,18 +45,16 @@ class HistoryId {
 
   constexpr size_t index() const noexcept { return value_; }
   constexpr uint32_t value() const noexcept { return value_; }
-  friend constexpr auto operator<=>(const HistoryId&,
+ friend constexpr auto operator<=>(const HistoryId&,
                                     const HistoryId&) = default;
 
  private:
-  uint32_t value_ = std::numeric_limits<uint32_t>::max();
+  uint32_t value_ = 0;
 };
-
-inline constexpr HistoryId kInvalidHistoryId;
 
 struct HistoryEdge {
   GameAction action;
-  HistoryId child = kInvalidHistoryId;
+  HistoryId child;
 };
 
 struct EdgeRange {
@@ -72,7 +69,7 @@ struct DecisionNode {
 
 struct ChanceNode {
   ChanceState state;
-  HistoryId child = kInvalidHistoryId;
+  HistoryId child;
 };
 
 struct FoldTerminalNode {
@@ -87,19 +84,19 @@ using HistoryNode = std::variant<DecisionNode, ChanceNode,
                                  FoldTerminalNode, ShowdownNode>;
 
 struct HistoryTree {
-  HistoryId root = kInvalidHistoryId;
+  HistoryId root;
   std::vector<HistoryNode> nodes;
   std::vector<HistoryEdge> edges;
 };
 
 struct Position {
-  HistoryId history = kInvalidHistoryId;
+  HistoryId history;
   PublicPosition public_state =
       PublicPosition::Root(StreetKind::kPreflop, PreflopBoard{});
 };
 
 struct InfoSetKey {
-  HistoryId history = kInvalidHistoryId;
+  HistoryId history;
   PublicObservationId public_observation;
   PrivateObservationId private_observation;
 
@@ -232,7 +229,7 @@ class CFRSolver {
   };
 
   Position root_position() const;
-  Position action_child(Position position, int action_index) const;
+  Position action_child(Position position, uint8_t action_index) const;
   Position sample_chance_child(Position position, const Deal& deal);
   std::array<PrivateObservationId, kPlayerCount>
   private_observations_for_position(const Deal& deal,
