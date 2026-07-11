@@ -10,7 +10,6 @@ namespace {
 Chips PotFractionRaiseTo(const BettingData& state,
                          const LegalActionSpace& legal,
                          double fraction) {
-  assert(std::isfinite(fraction) && fraction > 0.0);
   const Chips pot_after_call = Pot(state) + legal.to_call();
   const Chips raise_increment = std::max(
       Chips{1},
