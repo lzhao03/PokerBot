@@ -90,7 +90,8 @@ TEST_CASE("training mutates only CFR state") {
 
   const CfrState before = CFRSolverTestAccess::state(solver);
   const int64_t updates = solver.get_cfr_update_count();
-  CHECK(std::isfinite(solver.evaluate_strategy(kA, kB)));
+  CHECK(std::isfinite(
+      solver.evaluate_strategy(kA, kB, StrategySource::kAverage)));
   CHECK(solver.get_history_count() == history_count);
   CHECK(solver.get_cfr_update_count() == updates);
   CHECK(CFRSolverTestAccess::state(solver).rows == before.rows);

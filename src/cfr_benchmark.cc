@@ -119,7 +119,9 @@ int main(int argc, char** argv) {
 
     solver->reset_traversal_stats();
     Measure("evaluate_range", [&] {
-      return solver->evaluate_strategy(options.eval_samples, a_range, b_range);
+      return solver->evaluate_strategy(
+          options.eval_samples, a_range, b_range,
+          poker::StrategySource::kAverage);
     });
   } catch (const std::exception& error) {
     std::cerr << "Error: " << error.what() << '\n';

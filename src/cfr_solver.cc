@@ -121,7 +121,6 @@ void RegretMatch(const CfrState& state,
 
 void AverageStrategy(const CfrState& state,
                      const InfoSetRow* row,
-                     bool regret_only,
                      absl::Span<double> probabilities,
                      TraversalStats& stats) {
   if (row == nullptr) {
@@ -133,8 +132,7 @@ void AverageStrategy(const CfrState& state,
   for (size_t action = 0; action < probabilities.size(); ++action) {
     stats.record_action_entries();
     const size_t index = static_cast<size_t>(row->action_offset) + action;
-    const float value = regret_only ? state.regret_sum[index]
-                                    : state.strategy_sum[index];
+    const float value = state.strategy_sum[index];
     probabilities[action] = std::max(0.0, static_cast<double>(value));
     sum += probabilities[action];
   }
@@ -286,10 +284,9 @@ InfoSetRow CFRSolver::find_or_create_row(InfoSetKey key,
 }
 
 double CFRSolver::traverse(Position position,
-                           const Deal& deal,
                            TraversalFrame frame,
-                           int update_player,
-                           uint64_t iteration) {
+                           TraversalContext& context) {
+  const Deal& deal = context.deal;
   if (position.history >= history_.nodes.size()) {
     throw std::logic_error("traversal history is invalid");
   }
@@ -307,7 +304,7 @@ double CFRSolver::traverse(Position position,
       const Position child = sample_chance_child(position, deal);
       TraversalFrame child_frame = frame;
       advance_private_observations(child_frame, deal, child);
-      value += traverse(child, deal, child_frame, update_player, iteration);
+      value += traverse(child, child_frame, context);
     }
     return value / samples;
   }
@@ -320,7 +317,8 @@ double CFRSolver::traverse(Position position,
                        frame.private_observations[player]};
   assert(key.private_observation == private_observation_for_runout(
       deal.hand(player), position.board, position.public_observation));
-  const bool updates = player == update_player;
+  const bool training = context.mode == TraversalMode::kTrain;
+  const bool updates = training && player == context.update_player;
   InfoSetRow row;
   if (updates) {
     row = find_or_create_row(key, node.action_count);
@@ -335,20 +333,26 @@ double CFRSolver::traverse(Position position,
   absl::Span<double> probabilities(probability_storage.data(),
                                    node.action_count);
   absl::Span<double> values(value_storage.data(), node.action_count);
-  RegretMatch(state_, strategy_row, probabilities, traversal_stats_);
+  if (context.mode == TraversalMode::kEvaluateAverage) {
+    AverageStrategy(state_, strategy_row, probabilities, traversal_stats_);
+  } else {
+    RegretMatch(state_, strategy_row, probabilities, traversal_stats_);
+  }
 
   double node_value = 0.0;
   for (uint8_t action = 0; action < node.action_count; ++action) {
     TraversalFrame child_frame = frame;
     child_frame.reach[player] *= probabilities[action];
-    ++child_frame.decision_depth;
-    values[action] = traverse(action_child(position, action), deal,
-                              child_frame, update_player, iteration);
+    values[action] =
+        traverse(action_child(position, action), child_frame, context);
     node_value += probabilities[action] * values[action];
   }
 
+  if (!training) {
+    return node_value;
+  }
   ++cfr_update_count_;
-  traversal_stats_.record_decision(node.state.street, frame.decision_depth);
+  traversal_stats_.record_decision(node.state.street);
   if (!updates) {
     return node_value;
   }
@@ -364,7 +368,8 @@ double CFRSolver::traverse(Position position,
   }
 
   if (!config_.regret_only_training) {
-    const double weight = frame.reach[player] * static_cast<double>(iteration + 1);
+    const double weight =
+        frame.reach[player] * static_cast<double>(context.iteration + 1);
     for (uint8_t action = 0; action < node.action_count; ++action) {
       const size_t index = static_cast<size_t>(row.action_offset) + action;
       state_.strategy_sum[index] +=
@@ -373,49 +378,6 @@ double CFRSolver::traverse(Position position,
     }
   }
   return node_value;
-}
-
-double CFRSolver::evaluate_position(Position position,
-                                    const Deal& deal,
-                                    TraversalFrame frame) {
-  if (position.history >= history_.nodes.size()) {
-    throw std::logic_error("evaluation history is invalid");
-  }
-  const HistoryNode& node = history_.nodes[position.history];
-  if (node.kind == HistoryNodeKind::kTerminal) {
-    traversal_stats_.record_terminal(node.state.folded_player < 0);
-    return TerminalUtility({node.state, position.board}, deal.hand(0),
-                           deal.hand(1));
-  }
-  if (node.kind == HistoryNodeKind::kChance) {
-    const int samples = std::max(1, config_.chance_samples);
-    traversal_stats_.record_chance_samples(samples);
-    double value = 0.0;
-    for (int sample = 0; sample < samples; ++sample) {
-      const Position child = sample_chance_child(position, deal);
-      TraversalFrame child_frame = frame;
-      advance_private_observations(child_frame, deal, child);
-      value += evaluate_position(child, deal, child_frame);
-    }
-    return value / samples;
-  }
-
-  const int player = node.state.player_to_act;
-  const InfoSetKey key{position.history, position.public_observation,
-                       frame.private_observations[player]};
-  std::array<double, kMaxActionsPerNode> probability_storage{};
-  absl::Span<double> probabilities(probability_storage.data(),
-                                   node.action_count);
-  AverageStrategy(state_, find_row(key, node.action_count),
-                  config_.regret_only_training, probabilities,
-                  traversal_stats_);
-
-  double value = 0.0;
-  for (uint8_t action = 0; action < node.action_count; ++action) {
-    value += probabilities[action] *
-             evaluate_position(action_child(position, action), deal, frame);
-  }
-  return value;
 }
 
 void CFRSolver::run(int iterations,
@@ -441,8 +403,10 @@ void CFRSolver::run(int iterations,
     TraversalFrame frame;
     frame.private_observations = private_observations_for_position(deal, root);
     const int update_player = static_cast<int>(state_.iterations % kPlayerCount);
+    TraversalContext context{
+        deal, TraversalMode::kTrain, update_player, state_.iterations};
     state_.cumulative_root_utility +=
-        traverse(root, deal, frame, update_player, state_.iterations);
+        traverse(root, frame, context);
     ++state_.iterations;
   }
 
@@ -460,18 +424,24 @@ void CFRSolver::run(int iterations,
 }
 
 double CFRSolver::evaluate_strategy(ComboId player_a_hand,
-                                    ComboId player_b_hand) {
+                                    ComboId player_b_hand,
+                                    StrategySource source) {
   const Position root = root_position();
   const Deal deal{{player_a_hand, player_b_hand},
                   ComboMask(player_a_hand) | ComboMask(player_b_hand)};
   TraversalFrame frame;
   frame.private_observations = private_observations_for_position(deal, root);
-  return evaluate_position(root, deal, frame);
+  const TraversalMode mode = source == StrategySource::kCurrent
+                                 ? TraversalMode::kEvaluateCurrent
+                                 : TraversalMode::kEvaluateAverage;
+  TraversalContext context{deal, mode};
+  return traverse(root, frame, context);
 }
 
 double CFRSolver::evaluate_strategy(int samples,
                                     const HandRange& player_a_range,
-                                    const HandRange& player_b_range) {
+                                    const HandRange& player_b_range,
+                                    StrategySource source) {
   if (samples <= 0) {
     return 0.0;
   }
@@ -479,13 +449,17 @@ double CFRSolver::evaluate_strategy(int samples,
   const TrainingRange b_range = BuildTrainingRange(player_b_range);
   RangeSampler sampler(a_range, b_range);
   const Position root = root_position();
+  const TraversalMode mode = source == StrategySource::kCurrent
+                                 ? TraversalMode::kEvaluateCurrent
+                                 : TraversalMode::kEvaluateAverage;
 
   double value = 0.0;
   for (int sample = 0; sample < samples; ++sample) {
     const Deal deal = traversal_deal(sampler.sample(rng_));
     TraversalFrame frame;
     frame.private_observations = private_observations_for_position(deal, root);
-    value += evaluate_position(root, deal, frame);
+    TraversalContext context{deal, mode};
+    value += traverse(root, frame, context);
   }
   return value / samples;
 }

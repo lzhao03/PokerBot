@@ -83,6 +83,11 @@ struct CfrState {
   double cumulative_root_utility = 0.0;
 };
 
+enum class StrategySource : uint8_t {
+  kCurrent,
+  kAverage,
+};
+
 struct CFRSolverTestAccess;
 
 class CFRSolver {
@@ -97,9 +102,12 @@ class CFRSolver {
   void run(int iterations, const HandRange& player_a_range,
            const HandRange& player_b_range);
 
-  double evaluate_strategy(ComboId player_a_hand, ComboId player_b_hand);
+  double evaluate_strategy(ComboId player_a_hand,
+                           ComboId player_b_hand,
+                           StrategySource source);
   double evaluate_strategy(int samples, const HandRange& player_a_range,
-                           const HandRange& player_b_range);
+                           const HandRange& player_b_range,
+                           StrategySource source);
 
   double get_expected_value(int player_id) const;
   uint64_t get_iterations_run() const { return state_.iterations; }
@@ -128,7 +136,19 @@ class CFRSolver {
   struct TraversalFrame {
     std::array<double, kPlayerCount> reach = {1.0, 1.0};
     std::array<PrivateObservationId, kPlayerCount> private_observations = {};
-    uint16_t decision_depth = 0;
+  };
+
+  enum class TraversalMode : uint8_t {
+    kTrain,
+    kEvaluateCurrent,
+    kEvaluateAverage,
+  };
+
+  struct TraversalContext {
+    const Deal& deal;
+    TraversalMode mode = TraversalMode::kTrain;
+    int update_player = -1;
+    uint64_t iteration = 0;
   };
 
   Deal traversal_deal(RangeDeal deal) const;
@@ -142,13 +162,8 @@ class CFRSolver {
                                     const Deal& deal,
                                     const Position& child) const;
   double traverse(Position position,
-                  const Deal& deal,
                   TraversalFrame frame,
-                  int update_player,
-                  uint64_t iteration);
-  double evaluate_position(Position position,
-                           const Deal& deal,
-                           TraversalFrame frame);
+                  TraversalContext& context);
   InfoSetRow find_or_create_row(InfoSetKey key, uint8_t action_count);
   const InfoSetRow* find_row(InfoSetKey key, uint8_t action_count) const;
   void log_training_summary() const;

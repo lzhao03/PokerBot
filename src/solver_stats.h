@@ -14,7 +14,6 @@ struct TraversalStats {
   int64_t flop_updates = 0;
   int64_t turn_updates = 0;
   int64_t river_updates = 0;
-  int max_decision_depth = 0;
   int64_t chance_samples = 0;
   int64_t terminal_utility_calls = 0;
   int64_t fold_utility_calls = 0;
@@ -32,8 +31,6 @@ struct TraversalStats {
     fold_utility_calls += other.fold_utility_calls;
     showdown_utility_calls += other.showdown_utility_calls;
     action_entry_touches += other.action_entry_touches;
-    max_decision_depth =
-        std::max(max_decision_depth, other.max_decision_depth);
   }
 
   void record_action_entries(int64_t count = 1) {
@@ -42,10 +39,9 @@ struct TraversalStats {
     }
   }
 
-  void record_decision(StreetKind street, int depth) {
+  void record_decision(StreetKind street) {
     if constexpr (kTraversalStatsEnabled) {
       ++cfr_updates;
-      max_decision_depth = std::max(max_decision_depth, depth);
       switch (street) {
         case StreetKind::kPreflop:
           ++preflop_updates;
