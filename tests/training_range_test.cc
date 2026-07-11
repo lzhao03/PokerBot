@@ -58,7 +58,7 @@ TEST_CASE("deal sampling rejects incompatible ranges") {
   const ComboRange compatible =
       SingleComboRange(H(12, S::kClubs, 12, S::kDiamonds));
   solver.run(1, a, compatible);
-  CHECK(std::isfinite(solver.get_expected_value(0)));
+  CHECK(std::isfinite(solver.get_expected_value(Player::kA)));
 }
 
 }  // namespace

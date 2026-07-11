@@ -63,7 +63,7 @@ TEST_CASE("small exact solver baseline is deterministic") {
   CHECK(solver.get_history_count() == 517);
   CHECK(solver.get_info_set_count() == 900);
   CHECK(solver.get_cfr_update_count() == 1800);
-  CHECK(solver.get_expected_value(0) == doctest::Approx(-0.180899));
+  CHECK(solver.get_expected_value(Player::kA) == doctest::Approx(-0.180899));
 }
 
 TEST_CASE("history tree stores direct rule transitions") {
@@ -101,7 +101,7 @@ TEST_CASE("training mutates only CFR state") {
   CHECK(solver.get_iterations_run() == 4);
   CHECK(solver.get_info_set_count() > 0);
   CHECK(solver.get_cfr_update_count() > 0);
-  CHECK(std::isfinite(solver.get_expected_value(0)));
+  CHECK(std::isfinite(solver.get_expected_value(Player::kA)));
   CHECK(solver.get_history_count() == history_count);
 
   const CfrState before = CFRSolverTestAccess::state(solver);

@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
     });
     const double training_seconds = Measure("train_range", [&] {
       solver->run(absl::GetFlag(FLAGS_iterations), a_range, b_range);
-      return solver->get_expected_value(0);
+      return solver->get_expected_value(poker::Player::kA);
     });
     const auto training = solver->get_stats();
     std::cout << "iterations\t" << solver->get_iterations_run() << '\n'

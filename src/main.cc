@@ -138,7 +138,8 @@ void PrintRunSummary(const poker::CFRSolver& solver,
   std::cout << "max_info_sets=" << config.max_info_sets << "\n";
   std::cout << "info_set_cap_hit=" << CapHit(info_sets, config.max_info_sets)
             << "\n";
-  std::cout << "player_a_ev=" << solver.get_expected_value(0) << "\n";
+  std::cout << "player_a_ev=" << solver.get_expected_value(poker::Player::kA)
+            << "\n";
   std::cout << "seconds=" << seconds << "\n";
   std::cout << "history_nodes=" << history_nodes << "\n";
   std::cout << "decision_visits=" << visits << "\n";

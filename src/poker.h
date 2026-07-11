@@ -30,8 +30,12 @@ enum class Player : uint8_t {
   kB = 1,
 };
 
-inline int PlayerIndex(Player player) {
-  return static_cast<int>(player);
+constexpr size_t Index(Player player) noexcept {
+  return static_cast<size_t>(player);
+}
+
+constexpr Player Opponent(Player player) noexcept {
+  return player == Player::kA ? Player::kB : Player::kA;
 }
 
 enum class SuitKind : uint8_t {

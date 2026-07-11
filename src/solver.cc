@@ -750,13 +750,13 @@ double CFRSolver::evaluate_strategy(int samples,
   return value / samples;
 }
 
-double CFRSolver::get_expected_value(int player_id) const {
+double CFRSolver::get_expected_value(Player player) const {
   if (state_.iterations == 0) {
     return 0.0;
   }
   const double player_a_ev =
       state_.cumulative_root_utility / state_.iterations;
-  return player_id == 0 ? player_a_ev : -player_a_ev;
+  return player == Player::kA ? player_a_ev : -player_a_ev;
 }
 
 void CFRSolver::log_training_summary() const {
@@ -764,7 +764,7 @@ void CFRSolver::log_training_summary() const {
   LOG(INFO) << "Iterations run: " << state_.iterations;
   LOG(INFO) << "Information sets: " << state_.rows.size();
   LOG(INFO) << "History nodes: " << history_.nodes.size();
-  LOG(INFO) << "Player A average EV: " << get_expected_value(0);
+  LOG(INFO) << "Player A average EV: " << get_expected_value(Player::kA);
 }
 
 }  // namespace poker

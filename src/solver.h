@@ -132,7 +132,7 @@ struct Deal {
   CardMask blocked_mask = 0;
 
   const HoleCards& hand(Player player) const {
-    return hands[static_cast<size_t>(PlayerIndex(player))];
+    return hands[Index(player)];
   }
 };
 
@@ -154,7 +154,7 @@ class CFRSolver {
                            const ComboRange& player_b_range,
                            StrategySource source);
 
-  double get_expected_value(int player_id) const;
+  double get_expected_value(Player player) const;
   uint64_t get_iterations_run() const { return state_.iterations; }
   uint64_t get_cfr_update_count() const { return stats_.decision_visits; }
   size_t get_info_set_count() const { return state_.rows.size(); }
