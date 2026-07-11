@@ -47,6 +47,16 @@ SolverConfig Config() {
 const ComboId kA = H(14, S::kHearts, 14, S::kSpades);
 const ComboId kB = H(13, S::kClubs, 13, S::kDiamonds);
 
+TEST_CASE("small exact solver baseline is deterministic") {
+  CFRSolver solver(Config());
+  solver.run(10, UniformRange(), UniformRange());
+
+  CHECK(solver.get_history_count() == 517);
+  CHECK(solver.get_info_set_count() == 900);
+  CHECK(solver.get_cfr_update_count() == 1800);
+  CHECK(solver.get_expected_value(0) == doctest::Approx(-0.180899));
+}
+
 TEST_CASE("history tree stores direct rule transitions") {
   CFRSolver solver(Config());
   const HistoryTree& tree = CFRSolverTestAccess::history(solver);
