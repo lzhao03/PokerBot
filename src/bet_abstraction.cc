@@ -33,17 +33,12 @@ AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
         Chips{1},
         static_cast<Chips>(std::llround(fraction * pot_after_call)));
     const Chips target = highest_to + raise_by;
-    if (target >= min_full_raise_to && target < all_in_to) {
+    if (target >= min_full_raise_to && target < all_in_to &&
+        actions.back().target_street_commitment != target) {
       actions.emplace_back(kind, target);
     }
   }
 
-  std::sort(actions.begin() + (to_call > 0 ? 2 : 1), actions.end(),
-            [](const GameAction& left, const GameAction& right) {
-              return left.target_street_commitment <
-                     right.target_street_commitment;
-            });
-  actions.erase(std::unique(actions.begin(), actions.end()), actions.end());
   if (all_in_to > call_to) {
     actions.emplace_back(ActionKind::AllIn, all_in_to);
   }

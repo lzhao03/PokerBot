@@ -979,16 +979,19 @@ absl::StatusOr<SolverConfig> SolverConfig::Create(
   if (options.max_info_sets <= 0) {
     return absl::InvalidArgumentError("max_info_sets must be positive");
   }
-  for (const auto& fractions : options.bet_abstraction.pot_fractions) {
-    if (fractions.size() >
-        std::numeric_limits<uint8_t>::max() - size_t{3}) {
-      return absl::InvalidArgumentError("too many pot fractions");
-    }
+  for (auto& fractions : options.bet_abstraction.pot_fractions) {
     for (double fraction : fractions) {
       if (!std::isfinite(fraction) || fraction <= 0.0) {
         return absl::InvalidArgumentError(
             "pot fractions must be finite and positive");
       }
+    }
+    std::sort(fractions.begin(), fractions.end());
+    fractions.erase(std::unique(fractions.begin(), fractions.end()),
+                    fractions.end());
+    if (fractions.size() >
+        std::numeric_limits<uint8_t>::max() - size_t{3}) {
+      return absl::InvalidArgumentError("too many pot fractions");
     }
   }
   auto abstraction = CardAbstraction::Create(options.card_abstraction);
