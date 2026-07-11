@@ -44,6 +44,12 @@ BettingState Apply(const BettingState& state, GameAction action) {
   return *child;
 }
 
+BettingState NodeState(const HistoryNode& node) {
+  return std::visit([](const auto& value) -> BettingState {
+    return value.state;
+  }, node);
+}
+
 SolverConfig Config() {
   SolverConfig config;
   config.starting_stack = 8;
@@ -77,26 +83,27 @@ TEST_CASE("history tree stores direct rule transitions") {
 
   for (size_t id = 0; id < tree.nodes.size(); ++id) {
     const HistoryNode& node = tree.nodes[id];
-    if (node.kind == HistoryNodeKind::kDecision) {
-      REQUIRE(node.action_count > 0);
-      for (uint8_t action = 0; action < node.action_count; ++action) {
-        const HistoryEdge& edge = tree.edges[node.action_begin + action];
+    if (const auto* decision = std::get_if<DecisionNode>(&node)) {
+      REQUIRE(decision->edges.count > 0);
+      for (uint8_t action = 0; action < decision->edges.count; ++action) {
+        const HistoryEdge& edge =
+            tree.edges[decision->edges.begin + action];
         REQUIRE(edge.child.index() < tree.nodes.size());
-        CHECK(tree.nodes[edge.child.index()].state ==
-              Apply(node.state, edge.action));
+        CHECK(NodeState(tree.nodes[edge.child.index()]) ==
+              Apply(decision->state, edge.action));
       }
-    } else if (node.kind == HistoryNodeKind::kChance) {
-      REQUIRE(node.chance_child.index() < tree.nodes.size());
-      CHECK(tree.nodes[node.chance_child.index()].state ==
-            AdvanceBettingStreet(std::get<ChanceState>(node.state),
-                                 BettingRules{2}));
+    } else if (const auto* chance = std::get_if<ChanceNode>(&node)) {
+      REQUIRE(chance->child.index() < tree.nodes.size());
+      CHECK(NodeState(tree.nodes[chance->child.index()]) ==
+            AdvanceBettingStreet(chance->state, BettingRules{2}));
     }
   }
 
-  const HistoryNode& root = tree.nodes[tree.root.index()];
-  REQUIRE(root.action_count >= 2);
-  CHECK(tree.edges[root.action_begin].child !=
-        tree.edges[root.action_begin + 1].child);
+  const DecisionNode& root =
+      std::get<DecisionNode>(tree.nodes[tree.root.index()]);
+  REQUIRE(root.edges.count >= 2);
+  CHECK(tree.edges[root.edges.begin].child !=
+        tree.edges[root.edges.begin + 1].child);
 }
 
 TEST_CASE("training mutates only CFR state") {
@@ -158,7 +165,7 @@ TEST_CASE("postflop roots use full observation identity") {
   solver.run(2, R(kA), R(kB));
   const HistoryTree& tree = CFRSolverTestAccess::history(solver);
   const Player player =
-      std::get<DecisionState>(tree.nodes[tree.root.index()].state).actor;
+      std::get<DecisionNode>(tree.nodes[tree.root.index()]).state.actor;
   const ComboId hand = player == Player::kA ? kA : kB;
   const PublicPosition public_state =
       PublicPosition::Root(Data(root.betting).street, root.board);

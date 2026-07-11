@@ -56,24 +56,36 @@ class HistoryId {
 
 inline constexpr HistoryId kInvalidHistoryId;
 
-enum class HistoryNodeKind : uint8_t {
-  kDecision,
-  kChance,
-  kTerminal,
-};
-
 struct HistoryEdge {
   GameAction action;
   HistoryId child = kInvalidHistoryId;
 };
 
-struct HistoryNode {
-  BettingState state;
-  uint32_t action_begin = 0;
-  uint8_t action_count = 0;
-  HistoryId chance_child = kInvalidHistoryId;
-  HistoryNodeKind kind = HistoryNodeKind::kDecision;
+struct EdgeRange {
+  uint32_t begin = 0;
+  uint8_t count = 0;
 };
+
+struct DecisionNode {
+  DecisionState state;
+  EdgeRange edges;
+};
+
+struct ChanceNode {
+  ChanceState state;
+  HistoryId child = kInvalidHistoryId;
+};
+
+struct FoldTerminalNode {
+  FoldTerminalState state;
+};
+
+struct ShowdownNode {
+  ShowdownState state;
+};
+
+using HistoryNode = std::variant<DecisionNode, ChanceNode,
+                                 FoldTerminalNode, ShowdownNode>;
 
 struct HistoryTree {
   HistoryId root = kInvalidHistoryId;
