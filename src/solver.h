@@ -11,10 +11,45 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/statusor.h"
+#include "src/bet_abstraction.h"
 #include "src/card_abstraction.h"
 #include "src/poker.h"
 
 namespace poker {
+
+struct SolverConfigOptions {
+  BetAbstractionConfig bet_abstraction;
+  Chips starting_stack = 100;
+  Chips small_blind = 1;
+  Chips big_blind = 2;
+  int chance_samples = 1;
+  bool accumulate_average_strategy = true;
+  int max_info_sets = 500000;
+};
+
+class SolverConfig {
+ public:
+  static absl::StatusOr<SolverConfig> Create(SolverConfigOptions options);
+  static SolverConfig Default();
+
+  const BetAbstractionConfig& bet_abstraction() const noexcept {
+    return options_.bet_abstraction;
+  }
+  Chips starting_stack() const noexcept { return options_.starting_stack; }
+  Chips small_blind() const noexcept { return options_.small_blind; }
+  Chips big_blind() const noexcept { return options_.big_blind; }
+  int chance_samples() const noexcept { return options_.chance_samples; }
+  bool accumulate_average_strategy() const noexcept {
+    return options_.accumulate_average_strategy;
+  }
+  int max_info_sets() const noexcept { return options_.max_info_sets; }
+
+ private:
+  explicit SolverConfig(SolverConfigOptions options)
+      : options_(std::move(options)) {}
+
+  SolverConfigOptions options_;
+};
 
 struct ComboRange {
   std::array<float, kComboCount> weights = {};

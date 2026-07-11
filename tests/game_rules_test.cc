@@ -1,6 +1,7 @@
 #include "tests/rules_test_support.h"
 
 #include "doctest/doctest.h"
+#include "src/bet_abstraction.h"
 #include "src/poker.h"
 
 #include <algorithm>
@@ -44,7 +45,7 @@ BettingState Apply(const BettingState& state, GameAction action) {
   if (decision == nullptr) {
     throw std::invalid_argument("expected decision state");
   }
-  const auto child = TryApplyAction(*decision, action);
+  const auto child = ApplyAction(*decision, action);
   if (!child.ok()) {
     throw std::invalid_argument(std::string(child.status().message()));
   }
@@ -87,17 +88,14 @@ std::vector<GameAction> ActionsFor(const BettingState& state,
   if (decision == nullptr) {
     throw std::invalid_argument("expected decision state");
   }
-  SolverConfigOptions options;
-  options.bet_sizes[static_cast<size_t>(decision->data.street)].assign(
+  BetAbstractionConfig config;
+  config.bet_sizes[static_cast<size_t>(decision->data.street)].assign(
       sizes.begin(), sizes.end());
-  const auto config = SolverConfig::Create(std::move(options));
-  if (!config.ok()) {
-    throw std::invalid_argument(std::string(config.status().message()));
-  }
   std::vector<GameAction> actions;
-  for (const SolverTransition& transition :
-       GenerateTransitions(*config, *decision)) {
-    actions.push_back(transition.action);
+  const LegalActionSpace legal = LegalActions(*decision);
+  for (const GameAction& action :
+       SelectAbstractActions(config, *decision, legal)) {
+    actions.push_back(action);
   }
   return actions;
 }

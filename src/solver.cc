@@ -5,6 +5,8 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
+#include <limits>
 #include <optional>
 #include <type_traits>
 #include <vector>
@@ -174,20 +176,21 @@ HistoryId AppendHistory(HistoryTree& tree,
                         const SolverConfig& config) {
   const HistoryId id(static_cast<uint32_t>(tree.nodes.size()));
   if (const auto* decision = std::get_if<DecisionState>(&state)) {
-    const SolverTransitions transitions = GenerateTransitions(config,
-                                                               *decision);
-    assert(transitions.size() <= std::numeric_limits<uint8_t>::max());
+    const LegalActionSpace legal = LegalActions(*decision);
+    const AbstractActions actions = SelectAbstractActions(
+        config.bet_abstraction(), *decision, legal);
+    assert(actions.size() <= std::numeric_limits<uint8_t>::max());
     const uint32_t begin = static_cast<uint32_t>(tree.edges.size());
-    for (const SolverTransition& transition : transitions) {
-      tree.edges.push_back({transition.action, id});
+    for (const GameAction& action : actions) {
+      tree.edges.push_back({action, id});
     }
     tree.nodes.push_back(
-        DecisionNode{*decision, {begin, static_cast<uint8_t>(transitions.size())}});
-    for (size_t action = 0; action < transitions.size(); ++action) {
-      const SolverTransition& transition = transitions[action];
-      const HistoryId child =
-          AppendHistory(tree, transition.child, rules, config);
-      tree.edges[begin + action] = {transition.action, child};
+        DecisionNode{*decision, {begin, static_cast<uint8_t>(actions.size())}});
+    for (size_t index = 0; index < actions.size(); ++index) {
+      const auto child_state = ApplyAction(*decision, actions[index]);
+      assert(child_state.ok());
+      const HistoryId child = AppendHistory(tree, *child_state, rules, config);
+      tree.edges[begin + index] = {actions[index], child};
     }
     return id;
   }
@@ -373,6 +376,40 @@ void AddStrategySum(CfrState& state,
 
 }  // namespace
 
+absl::StatusOr<SolverConfig> SolverConfig::Create(
+    SolverConfigOptions options) {
+  if (options.starting_stack <= 0 || options.small_blind <= 0 ||
+      options.big_blind < options.small_blind ||
+      options.starting_stack < options.big_blind) {
+    return absl::InvalidArgumentError("invalid stack or blind configuration");
+  }
+  if (options.chance_samples <= 0) {
+    return absl::InvalidArgumentError("chance_samples must be positive");
+  }
+  if (options.max_info_sets <= 0) {
+    return absl::InvalidArgumentError("max_info_sets must be positive");
+  }
+  for (const auto& street_sizes : options.bet_abstraction.bet_sizes) {
+    if (street_sizes.size() >
+        std::numeric_limits<uint8_t>::max() - size_t{3}) {
+      return absl::InvalidArgumentError("too many bet sizes");
+    }
+    for (double size : street_sizes) {
+      if (!std::isfinite(size) || size <= 0.0) {
+        return absl::InvalidArgumentError(
+            "bet sizes must be finite and positive");
+      }
+    }
+  }
+  return SolverConfig(std::move(options));
+}
+
+SolverConfig SolverConfig::Default() {
+  auto config = Create(SolverConfigOptions{});
+  assert(config.ok());
+  return *config;
+}
+
 absl::StatusOr<ComboRange> ParseRange(std::string_view text) {
   std::array<bool, kHandTypeCount> seen = {};
   std::vector<int> selected;
@@ -452,7 +489,9 @@ CFRSolver::CFRSolver(const SolverConfig& config,
   size_t max_actions = 3;
   for (StreetKind street : {StreetKind::kPreflop, StreetKind::kFlop,
                             StreetKind::kTurn, StreetKind::kRiver}) {
-    max_actions = std::max(max_actions, config_.bet_sizes(street).size() + 3);
+    const auto& sizes = config_.bet_abstraction().bet_sizes;
+    max_actions = std::max(
+        max_actions, sizes[static_cast<size_t>(street)].size() + 3);
   }
   state_.rows.reserve(rows);
   state_.regret_sum.reserve(rows * max_actions);

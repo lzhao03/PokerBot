@@ -11,6 +11,7 @@ cc_test(
         "rules_test_support.h",
     ],
     deps = [
+        "//src:bet_abstraction",
         "//src:poker",
         "@doctest//:main",
     ],
@@ -25,6 +26,7 @@ cc_test(
         "training_range_test.cc",
     ],
     deps = DOCTEST_DEPS + [
+        "//src:bet_abstraction",
         "//src:solver",
         "//tools:hand_evaluator_table_builder",
     ],

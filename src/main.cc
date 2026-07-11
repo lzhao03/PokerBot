@@ -79,7 +79,7 @@ absl::Status OverrideBetSizes(poker::SolverConfigOptions& config,
     if (!sizes.ok()) {
       return sizes.status();
     }
-    config.bet_sizes[static_cast<size_t>(street)] = *sizes;
+    config.bet_abstraction.bet_sizes[static_cast<size_t>(street)] = *sizes;
   }
   return absl::OkStatus();
 }
@@ -98,7 +98,7 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
   if (!sizes.ok()) {
     return sizes.status();
   }
-  config.bet_sizes.fill(*sizes);
+  config.bet_abstraction.bet_sizes.fill(*sizes);
   for (const auto& [street, values] : {
            std::pair{poker::StreetKind::kPreflop,
                      absl::GetFlag(FLAGS_preflop_bet_sizes)},

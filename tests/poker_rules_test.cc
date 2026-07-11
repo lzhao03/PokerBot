@@ -1,4 +1,5 @@
 #include "src/poker.h"
+#include "src/bet_abstraction.h"
 
 #include "doctest/doctest.h"
 
@@ -25,7 +26,7 @@ BettingState Apply(const BettingState& state, GameAction action) {
   if (decision == nullptr) {
     throw std::invalid_argument("expected decision state");
   }
-  const auto child = TryApplyAction(*decision, action);
+  const auto child = ApplyAction(*decision, action);
   if (!child.ok()) {
     throw std::invalid_argument(std::string(child.status().message()));
   }
@@ -53,18 +54,16 @@ ExactPublicState Root() {
 
 constexpr BettingRules kRules{2};
 
-TEST_CASE("solver configuration rejects invalid boundary values") {
-  SolverConfigOptions options;
-  options.max_info_sets = 0;
-  CHECK_FALSE(SolverConfig::Create(options).ok());
-
-  options.max_info_sets = 10;
-  options.bet_sizes[0] = {-0.5};
-  CHECK_FALSE(SolverConfig::Create(options).ok());
-}
-
 TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   ExactPublicState state = Root();
+  const auto* root_decision = std::get_if<DecisionState>(&state.betting);
+  REQUIRE(root_decision != nullptr);
+  const LegalActionSpace root_legal = LegalActions(*root_decision);
+  CHECK(root_legal.current_to == 1);
+  CHECK(root_legal.highest_to == 2);
+  CHECK(root_legal.call_to == 2);
+  CHECK(root_legal.min_full_raise_to == 4);
+  CHECK(root_legal.all_in_to == 20);
   CHECK_THROWS(Apply(state.betting, {ActionKind::kCheck}));
   CHECK_THROWS(Apply(state.betting, {ActionKind::kRaise, 1}));
   state.betting = Apply(state.betting, {ActionKind::kCall, 2});
@@ -76,6 +75,12 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   B(short_call).stack = {3, 12};
   B(short_call).total_committed = {1, 8};
   B(short_call).street_committed = {1, 8};
+  const auto* short_decision =
+      std::get_if<DecisionState>(&short_call.betting);
+  REQUIRE(short_decision != nullptr);
+  const LegalActionSpace short_legal = LegalActions(*short_decision);
+  CHECK(short_legal.call_to == 4);
+  CHECK_FALSE(short_legal.can_aggress());
   short_call.betting = Apply(short_call.betting,
                                    {ActionKind::kCall, 4});
   CHECK(std::holds_alternative<ChanceState>(short_call.betting));
@@ -86,24 +91,21 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
         std::array<Chips, kPlayerCount>{4, 4});
   CHECK(B(short_call).stack[1] == 16);
 
-  SolverConfigOptions options;
-  options.bet_sizes[static_cast<size_t>(StreetKind::kPreflop)] = {0.5};
-  options.bet_sizes[static_cast<size_t>(StreetKind::kFlop)] = {1.0};
-  const auto config_result = SolverConfig::Create(std::move(options));
-  REQUIRE(config_result.ok());
-  const SolverConfig config = *config_result;
+  BetAbstractionConfig config;
+  config.bet_sizes[static_cast<size_t>(StreetKind::kPreflop)] = {0.5};
+  config.bet_sizes[static_cast<size_t>(StreetKind::kFlop)] = {1.0};
   BettingData flop_data;
   flop_data.stack = {98, 98};
   flop_data.total_committed = {2, 2};
   flop_data.last_full_raise = 2;
   flop_data.street = StreetKind::kFlop;
   const DecisionState flop{flop_data, Player::kB};
-  const SolverTransitions transitions = GenerateTransitions(config, flop);
+  const LegalActionSpace legal = LegalActions(flop);
+  const AbstractActions actions = SelectAbstractActions(config, flop, legal);
   bool bet_four = false;
   bool bet_two = false;
   bool all_in = false;
-  for (const SolverTransition& transition : transitions) {
-    const GameAction action = transition.action;
+  for (const GameAction& action : actions) {
     bet_four |= action == GameAction{ActionKind::kBet, 4};
     bet_two |= action == GameAction{ActionKind::kBet, 2};
     all_in |= action == GameAction{ActionKind::kAllIn, 98};

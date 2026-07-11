@@ -9,7 +9,6 @@
 #include <random>
 #include <utility>
 #include <variant>
-#include <vector>
 
 #include "absl/container/inlined_vector.h"
 #include "absl/status/statusor.h"
@@ -181,43 +180,17 @@ struct GameAction {
   friend bool operator==(const GameAction&, const GameAction&) = default;
 };
 
-struct SolverConfigOptions {
-  std::array<std::vector<double>, 4> bet_sizes = {{
-      {0.25, 0.5, 1.0},
-      {0.25, 0.5, 1.0},
-      {0.25, 0.5, 1.0},
-      {0.25, 0.5, 1.0},
-  }};
-  Chips starting_stack = 100;
-  Chips small_blind = 1;
-  Chips big_blind = 2;
-  int chance_samples = 1;
-  bool accumulate_average_strategy = true;
-  int max_info_sets = 500000;
-};
+struct LegalActionSpace {
+  Chips current_to = 0;
+  Chips highest_to = 0;
+  Chips call_to = 0;
+  Chips min_full_raise_to = 0;
+  Chips all_in_to = 0;
 
-class SolverConfig {
- public:
-  static absl::StatusOr<SolverConfig> Create(SolverConfigOptions options);
-  static SolverConfig Default();
-
-  const std::vector<double>& bet_sizes(StreetKind street) const {
-    return options_.bet_sizes[static_cast<size_t>(street)];
-  }
-  Chips starting_stack() const noexcept { return options_.starting_stack; }
-  Chips small_blind() const noexcept { return options_.small_blind; }
-  Chips big_blind() const noexcept { return options_.big_blind; }
-  int chance_samples() const noexcept { return options_.chance_samples; }
-  bool accumulate_average_strategy() const noexcept {
-    return options_.accumulate_average_strategy;
-  }
-  int max_info_sets() const noexcept { return options_.max_info_sets; }
-
- private:
-  explicit SolverConfig(SolverConfigOptions options)
-      : options_(std::move(options)) {}
-
-  SolverConfigOptions options_;
+  Chips to_call() const noexcept { return highest_to - current_to; }
+  bool facing_action() const noexcept { return to_call() > 0; }
+  bool wager_open() const noexcept { return highest_to > 0; }
+  bool can_aggress() const noexcept { return all_in_to > call_to; }
 };
 
 inline int SuitIndex(Suit suit) {
@@ -414,13 +387,6 @@ inline bool IsValidBettingData(const BettingData& state) noexcept {
          (state.pending_action_mask & ~kAllPlayersMask) == 0;
 }
 
-struct SolverTransition {
-  GameAction action;
-  BettingState child;
-};
-
-using SolverTransitions = absl::InlinedVector<SolverTransition, 8>;
-
 const ComboInfo& GetComboInfo(ComboId combo_id);
 CardMask ComboMask(ComboId combo_id);
 std::optional<ComboId> MaybeCardsToComboId(Card first, Card second);
@@ -439,10 +405,11 @@ ExactPublicState MakeInitialState(
     const BettingRules& rules,
     std::array<Chips, kPlayerCount> stacks,
     std::array<Chips, kPlayerCount> blinds);
-SolverTransitions GenerateTransitions(const SolverConfig& config,
-                                      const DecisionState& state);
-absl::StatusOr<BettingState> TryApplyAction(const DecisionState& state,
-                                            const GameAction& action);
+LegalActionSpace LegalActions(const DecisionState& state) noexcept;
+bool IsLegalAction(const DecisionState& state,
+                   const GameAction& action) noexcept;
+absl::StatusOr<BettingState> ApplyAction(const DecisionState& state,
+                                         const GameAction& action);
 BettingState AdvanceBettingStreet(const ChanceState& state,
                                   const BettingRules& rules);
 ExactPublicState AdvanceChance(const ChanceState& state,

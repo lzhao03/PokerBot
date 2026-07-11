@@ -46,7 +46,7 @@ BettingState Apply(const BettingState& state, GameAction action) {
   if (decision == nullptr) {
     throw std::invalid_argument("expected decision state");
   }
-  const auto child = TryApplyAction(*decision, action);
+  const auto child = ApplyAction(*decision, action);
   if (!child.ok()) {
     throw std::invalid_argument(std::string(child.status().message()));
   }
@@ -75,7 +75,7 @@ SolverConfig Config(bool accumulate_average = true,
   options.starting_stack = 8;
   options.small_blind = 1;
   options.big_blind = 2;
-  for (auto& sizes : options.bet_sizes) {
+  for (auto& sizes : options.bet_abstraction.bet_sizes) {
     sizes = {0.5, 1.0};
   }
   options.chance_samples = 1;
@@ -86,6 +86,16 @@ SolverConfig Config(bool accumulate_average = true,
     throw std::invalid_argument(std::string(config.status().message()));
   }
   return *config;
+}
+
+TEST_CASE("solver configuration rejects invalid boundary values") {
+  SolverConfigOptions options;
+  options.max_info_sets = 0;
+  CHECK_FALSE(SolverConfig::Create(options).ok());
+
+  options.max_info_sets = 10;
+  options.bet_abstraction.bet_sizes[0] = {-0.5};
+  CHECK_FALSE(SolverConfig::Create(options).ok());
 }
 
 const ComboId kA = H(14, S::kHearts, 14, S::kSpades);

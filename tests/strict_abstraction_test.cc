@@ -23,7 +23,7 @@ BettingState Apply(const BettingState& state, GameAction action) {
   if (decision == nullptr) {
     throw std::invalid_argument("expected decision state");
   }
-  const auto child = TryApplyAction(*decision, action);
+  const auto child = ApplyAction(*decision, action);
   if (!child.ok()) {
     throw std::invalid_argument(std::string(child.status().message()));
   }
@@ -51,7 +51,7 @@ TEST_CASE("mixed abstractions support history traversal") {
   options.starting_stack = 8;
   options.small_blind = 1;
   options.big_blind = 2;
-  for (auto& sizes : options.bet_sizes) {
+  for (auto& sizes : options.bet_abstraction.bet_sizes) {
     sizes = {1.0};
   }
   options.max_info_sets = 500000;

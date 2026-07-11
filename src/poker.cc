@@ -3,9 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
-#include <cmath>
 #include <cstddef>
-#include <limits>
 #include <random>
 #include <stdexcept>
 #include <type_traits>
@@ -65,72 +63,6 @@ void RefundUnmatchedCommitment(BettingData& state) {
   state.street_committed[index] -= excess;
   state.total_committed[index] -= excess;
   state.stack[index] += excess;
-}
-
-Chips ConcreteBetAmount(const BettingData& state, double size) {
-  if (size <= 0.0) {
-    return 0;
-  }
-  return std::max(
-      Chips{1},
-      static_cast<Chips>(std::max(Chips{1}, Pot(state)) * size));
-}
-
-struct ActionLimits {
-  Chips current = 0;
-  Chips highest = 0;
-  Chips call_target = 0;
-  Chips maximum_target = 0;
-  Chips minimum_aggressive_target = 0;
-  bool wager_open = false;
-};
-
-ActionLimits LimitsFor(const DecisionState& state) {
-  const BettingData& data = state.data;
-  const Player player = state.actor;
-  const size_t index = Index(player);
-  ActionLimits limits;
-  limits.current = data.street_committed[index];
-  limits.highest = HighestStreetCommitment(data);
-  limits.call_target =
-      std::min(limits.highest, limits.current + data.stack[index]);
-  limits.maximum_target =
-      limits.current + MaxContestableAdditional(data, player);
-  limits.wager_open = limits.highest > 0;
-  limits.minimum_aggressive_target =
-      limits.wager_open ? limits.highest + data.last_full_raise
-                        : limits.current + data.last_full_raise;
-  return limits;
-}
-
-bool IsLegalAction(const DecisionState& state, const GameAction& action) {
-  const BettingData& data = state.data;
-  if (data.stack[Index(state.actor)] <= 0) {
-    return false;
-  }
-
-  const ActionLimits limits = LimitsFor(state);
-  const Chips to_call = limits.highest - limits.current;
-  const Chips target = action.target_street_commitment;
-  switch (action.kind) {
-    case ActionKind::kFold:
-      return to_call > 0 && target == 0;
-    case ActionKind::kCheck:
-      return to_call == 0 && target == 0;
-    case ActionKind::kCall:
-      return to_call > 0 && target == limits.call_target;
-    case ActionKind::kBet:
-      return !limits.wager_open &&
-             target >= limits.minimum_aggressive_target &&
-             target < limits.maximum_target;
-    case ActionKind::kRaise:
-      return limits.wager_open &&
-             target >= limits.minimum_aggressive_target &&
-             target < limits.maximum_target;
-    case ActionKind::kAllIn:
-      return limits.maximum_target > limits.call_target &&
-             target == limits.maximum_target;
-  }
 }
 
 bool IsBettingRoundOver(const BettingData& state) noexcept {
@@ -200,48 +132,7 @@ BettingState ApplyActionUnchecked(const DecisionState& state,
   return DecisionState{child, opponent};
 }
 
-void AddTransition(SolverTransitions& transitions,
-                   const DecisionState& state,
-                   GameAction action) {
-  assert(IsLegalAction(state, action));
-  transitions.push_back({action, ApplyActionUnchecked(state, action)});
-}
-
 }  // namespace
-
-absl::StatusOr<SolverConfig> SolverConfig::Create(
-    SolverConfigOptions options) {
-  if (options.starting_stack <= 0 || options.small_blind <= 0 ||
-      options.big_blind < options.small_blind ||
-      options.starting_stack < options.big_blind) {
-    return absl::InvalidArgumentError("invalid stack or blind configuration");
-  }
-  if (options.chance_samples <= 0) {
-    return absl::InvalidArgumentError("chance_samples must be positive");
-  }
-  if (options.max_info_sets <= 0) {
-    return absl::InvalidArgumentError("max_info_sets must be positive");
-  }
-  for (const auto& street_sizes : options.bet_sizes) {
-    if (street_sizes.size() >
-        std::numeric_limits<uint8_t>::max() - size_t{3}) {
-      return absl::InvalidArgumentError("too many bet sizes");
-    }
-    for (double size : street_sizes) {
-      if (!std::isfinite(size) || size <= 0.0) {
-        return absl::InvalidArgumentError(
-            "bet sizes must be finite and positive");
-      }
-    }
-  }
-  return SolverConfig(std::move(options));
-}
-
-SolverConfig SolverConfig::Default() {
-  auto config = Create(SolverConfigOptions{});
-  assert(config.ok());
-  return *config;
-}
 
 FlopBoard DealFlop(const PreflopBoard&,
                    std::array<Card, 3> cards) noexcept {
@@ -462,56 +353,50 @@ bool IsTerminal(const ExactPublicState& state) {
          BoardCount(state.board) == kMaxBoardCards;
 }
 
-SolverTransitions GenerateTransitions(const SolverConfig& config,
-                                      const DecisionState& state) {
+LegalActionSpace LegalActions(const DecisionState& state) noexcept {
   const BettingData& data = state.data;
-  assert(data.stack[Index(state.actor)] > 0);
-
-  SolverTransitions transitions;
-  const ActionLimits limits = LimitsFor(state);
-  const Chips outstanding_call = limits.highest - limits.current;
-  if (outstanding_call > 0) {
-    AddTransition(transitions, state, {ActionKind::kFold, 0});
-    AddTransition(transitions, state,
-                  {ActionKind::kCall, limits.call_target});
-  } else {
-    AddTransition(transitions, state, {ActionKind::kCheck, 0});
-  }
-
-  const ActionKind sized_kind =
-      limits.wager_open ? ActionKind::kRaise : ActionKind::kBet;
-  absl::InlinedVector<GameAction, 8> sized_actions;
-  const auto& bet_sizes = config.bet_sizes(data.street);
-  for (double bet_size : bet_sizes) {
-    const Chips bet = ConcreteBetAmount(data, bet_size);
-    const Chips target = limits.highest + bet;
-    if (target >= limits.minimum_aggressive_target &&
-        target < limits.maximum_target) {
-      sized_actions.push_back({sized_kind, target});
-    }
-  }
-  std::sort(sized_actions.begin(), sized_actions.end(),
-            [](const GameAction& left, const GameAction& right) {
-              return left.target_street_commitment <
-                     right.target_street_commitment;
-            });
-  const auto unique_end =
-      std::unique(sized_actions.begin(), sized_actions.end());
-  sized_actions.erase(unique_end, sized_actions.end());
-
-  for (const GameAction& action : sized_actions) {
-    AddTransition(transitions, state, action);
-  }
-
-  if (limits.maximum_target > limits.call_target) {
-    AddTransition(transitions, state,
-                  {ActionKind::kAllIn, limits.maximum_target});
-  }
-  return transitions;
+  const size_t player = Index(state.actor);
+  LegalActionSpace legal;
+  legal.current_to = data.street_committed[player];
+  legal.highest_to = HighestStreetCommitment(data);
+  legal.call_to =
+      std::min(legal.highest_to, legal.current_to + data.stack[player]);
+  legal.all_in_to =
+      legal.current_to + MaxContestableAdditional(data, state.actor);
+  legal.min_full_raise_to = legal.wager_open()
+                                ? legal.highest_to + data.last_full_raise
+                                : legal.current_to + data.last_full_raise;
+  return legal;
 }
 
-absl::StatusOr<BettingState> TryApplyAction(const DecisionState& state,
-                                            const GameAction& action) {
+bool IsLegalAction(const DecisionState& state,
+                   const GameAction& action) noexcept {
+  if (state.data.stack[Index(state.actor)] <= 0) {
+    return false;
+  }
+
+  const LegalActionSpace legal = LegalActions(state);
+  const Chips target = action.target_street_commitment;
+  switch (action.kind) {
+    case ActionKind::kFold:
+      return legal.facing_action() && target == 0;
+    case ActionKind::kCheck:
+      return !legal.facing_action() && target == 0;
+    case ActionKind::kCall:
+      return legal.facing_action() && target == legal.call_to;
+    case ActionKind::kBet:
+      return !legal.wager_open() && target >= legal.min_full_raise_to &&
+             target < legal.all_in_to;
+    case ActionKind::kRaise:
+      return legal.wager_open() && target >= legal.min_full_raise_to &&
+             target < legal.all_in_to;
+    case ActionKind::kAllIn:
+      return legal.can_aggress() && target == legal.all_in_to;
+  }
+}
+
+absl::StatusOr<BettingState> ApplyAction(const DecisionState& state,
+                                         const GameAction& action) {
   if (!IsLegalAction(state, action)) {
     return absl::InvalidArgumentError("illegal poker action");
   }

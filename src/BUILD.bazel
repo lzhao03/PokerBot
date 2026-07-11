@@ -29,12 +29,25 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+cc_library(
+    name = "bet_abstraction",
+    srcs = ["bet_abstraction.cc"],
+    hdrs = ["bet_abstraction.h"],
+    copts = CORE_COPTS,
+    deps = [
+        ":poker",
+        "@abseil-cpp//absl/container:inlined_vector",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 SOLVER_SRCS = ["solver.cc"]
 SOLVER_HDRS = [
     "card_abstraction.h",
     "solver.h",
 ]
 SOLVER_DEPS = [
+    ":bet_abstraction",
     ":poker",
     "@abseil-cpp//absl/container:flat_hash_map",
     "@abseil-cpp//absl/container:inlined_vector",
