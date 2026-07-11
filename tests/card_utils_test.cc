@@ -121,7 +121,7 @@ TEST_CASE("hand evaluator matches an independent five-card oracle") {
     const ComboId b = H(deck[2], deck[3]);
     const Board board = B({deck[4], deck[5], deck[6], deck[7], deck[8]});
     CAPTURE(trial);
-    CHECK(CompareHands(a, b, board) ==
+    CHECK(CompareHands(a, b, std::get<RiverBoard>(board)) ==
           ReferenceCompare(a, b, board));
   }
 }

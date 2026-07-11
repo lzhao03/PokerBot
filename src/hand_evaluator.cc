@@ -1,11 +1,9 @@
 #include "src/hand_evaluator.h"
 #include <algorithm>
 #include <bit>
+#include <cassert>
 #include <cstdint>
 #include <limits>
-#include <stdexcept>
-
-#include "absl/types/span.h"
 #include "generated/hand_evaluator_tables.h"
 
 namespace poker {
@@ -19,38 +17,6 @@ HandEvaluation ToHandEvaluation(
   evaluation.kicker_count = score.kicker_count;
   return evaluation;
 }
-
-class SevenCardHand {
- public:
-  static SevenCardHand FromHoleAndBoard(ComboId hole_cards,
-                                        absl::Span<const Card> board_cards) {
-    SevenCardHand hand(hole_cards);
-    for (Card card : board_cards) {
-      hand.append(card);
-    }
-    return hand;
-  }
-
-  absl::Span<const Card> cards() const {
-    return {cards_.data(), count_};
-  }
-
- private:
-  explicit SevenCardHand(ComboId hole_cards) {
-    const ComboInfo& combo = GetComboInfo(hole_cards);
-    cards_[0] = combo.card0;
-    cards_[1] = combo.card1;
-    count_ = 2;
-  }
-
-  void append(Card card) {
-    cards_[count_] = card;
-    ++count_;
-  }
-
-  std::array<Card, 7> cards_ = {};
-  size_t count_ = 0;
-};
 
 int BuildCactusCard(Card card) {
   static constexpr std::array<int, 13> kRankPrimes = {
@@ -83,11 +49,21 @@ uint16_t ProductRank(int product) {
   const auto it = std::lower_bound(
       products.begin(), products.end(), product,
       [](const auto& entry, int value) { return entry.first < value; });
-  if (it == products.end() || it->first != product) {
-    throw std::logic_error("Missing Cactus-Kev product lookup");
-  }
+  assert(it != products.end() && it->first == product);
   return it->second;
 }
+
+consteval bool ProductsAreStrictlySorted() {
+  const auto& products = hand_evaluator_tables::kCactusProducts;
+  for (size_t index = 1; index < products.size(); ++index) {
+    if (products[index - 1].first >= products[index].first) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static_assert(ProductsAreStrictlySorted());
 
 uint16_t EvalFiveCactus(const std::array<int, 5>& cards) {
   const int rank_mask =
@@ -104,30 +80,25 @@ uint16_t EvalFiveCactus(const std::array<int, 5>& cards) {
   return ProductRank(product);
 }
 
-uint16_t EvalBestCactus(absl::Span<const Card> cards) {
-  if (cards.size() < 5) {
-    throw std::invalid_argument("Need at least 5 cards to find best hand");
-  }
-  if (cards.size() > 7) {
-    throw std::invalid_argument("Cannot evaluate more than seven cards");
-  }
-
+template <size_t N>
+  requires(N >= 5 && N <= 7)
+uint16_t EvalBestCactus(const std::array<Card, N>& cards) noexcept {
   std::array<int, 7> cactus_cards = {};
-  for (size_t i = 0; i < cards.size(); ++i) {
+  for (size_t i = 0; i < N; ++i) {
     cactus_cards[i] = CactusCard(cards[i]);
   }
 
   uint16_t best = std::numeric_limits<uint16_t>::max();
   std::array<int, 5> combo;
-  for (size_t a = 0; a + 4 < cards.size(); ++a) {
+  for (size_t a = 0; a + 4 < N; ++a) {
     combo[0] = cactus_cards[a];
-    for (size_t b = a + 1; b + 3 < cards.size(); ++b) {
+    for (size_t b = a + 1; b + 3 < N; ++b) {
       combo[1] = cactus_cards[b];
-      for (size_t c = b + 1; c + 2 < cards.size(); ++c) {
+      for (size_t c = b + 1; c + 2 < N; ++c) {
         combo[2] = cactus_cards[c];
-        for (size_t d = c + 1; d + 1 < cards.size(); ++d) {
+        for (size_t d = c + 1; d + 1 < N; ++d) {
           combo[3] = cactus_cards[d];
-          for (size_t e = d + 1; e < cards.size(); ++e) {
+          for (size_t e = d + 1; e < N; ++e) {
             combo[4] = cactus_cards[e];
             best = std::min(best, EvalFiveCactus(combo));
           }
@@ -148,26 +119,30 @@ int CompareCactusValues(uint16_t first, uint16_t second) {
   return 0;
 }
 
-uint16_t HandValue(ComboId hand, const Board& board) {
-  const SevenCardHand cards =
-      SevenCardHand::FromHoleAndBoard(hand, BoardCards(board));
-  return EvalBestCactus(cards.cards());
+uint16_t HandValue(ComboId hand, const RiverBoard& board) noexcept {
+  std::array<Card, 7> cards;
+  const ComboInfo& combo = GetComboInfo(hand);
+  cards[0] = combo.card0;
+  cards[1] = combo.card1;
+  std::copy(board.cards().begin(), board.cards().end(), cards.begin() + 2);
+  return EvalBestCactus(cards);
 }
 
+template <size_t N>
 const hand_evaluator_tables::ScoreRecord& ScoreForCards(
-    absl::Span<const Card> cards) {
+    const std::array<Card, N>& cards) {
   return hand_evaluator_tables::kCactusScores[EvalBestCactus(cards)];
 }
 
 }  // namespace
 
 HandEvaluation EvaluateFiveCards(const std::array<Card, 5>& cards) {
-  return ToHandEvaluation(ScoreForCards(absl::MakeConstSpan(cards)));
+  return ToHandEvaluation(ScoreForCards(cards));
 }
 
 int CompareHands(ComboId first,
                  ComboId second,
-                 const Board& board) {
+                 const RiverBoard& board) {
   return CompareCactusValues(HandValue(first, board),
                              HandValue(second, board));
 }

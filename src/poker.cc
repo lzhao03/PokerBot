@@ -566,8 +566,8 @@ double TerminalUtility(const ExactPublicState& state,
     return Pot(data) - player0_committed;
   }
 
-  const int comparison = CompareHands(player0_hand, player1_hand,
-                                      state.board);
+  const int comparison = CompareHands(
+      player0_hand, player1_hand, std::get<RiverBoard>(state.board));
   if (comparison > 0) {
     return Pot(data) - player0_committed;
   }
