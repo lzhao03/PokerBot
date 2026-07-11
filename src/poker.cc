@@ -353,7 +353,7 @@ int BoardCardsForStreet(StreetKind street) {
   }
 }
 
-absl::InlinedVector<Card, 5> SampleStreetCards(
+absl::StatusOr<absl::InlinedVector<Card, 5>> SampleStreetCards(
     StreetKind street,
     const Board& board,
     CardMask known_private_cards,
@@ -361,7 +361,7 @@ absl::InlinedVector<Card, 5> SampleStreetCards(
   const int open_slots = std::max(0, kMaxBoardCards - BoardCount(board));
   const int count = std::min(CardsForNextStreet(street), open_slots);
   if (count <= 0) {
-    return {};
+    return absl::InlinedVector<Card, 5>{};
   }
 
   const CardMask blocked = known_private_cards | BoardMask(board);
@@ -370,7 +370,7 @@ absl::InlinedVector<Card, 5> SampleStreetCards(
     for (int attempt = 0; attempt < kDeckCardCount; ++attempt) {
       const Card candidate = kDeck[static_cast<size_t>(card_dist(rng))];
       if ((blocked & CardBit(candidate)) == 0) {
-        return {candidate};
+        return absl::InlinedVector<Card, 5>{candidate};
       }
     }
   }
@@ -383,7 +383,7 @@ absl::InlinedVector<Card, 5> SampleStreetCards(
     }
   }
   if (candidate_count < count) {
-    throw std::runtime_error("Not enough cards to sample next street");
+    return absl::InvalidArgumentError("not enough unblocked cards");
   }
 
   absl::InlinedVector<Card, 5> sampled;
@@ -399,15 +399,11 @@ absl::InlinedVector<Card, 5> SampleStreetCards(
 
 ExactPublicState MakeInitialState(
     const BettingRules& rules,
-    std::array<Chips, kPlayerCount> stacks,
-    std::array<Chips, kPlayerCount> blinds) {
-  if (rules.minimum_bet <= 0) {
-    throw std::invalid_argument("minimum bet must be positive");
-  }
+  std::array<Chips, kPlayerCount> stacks,
+  std::array<Chips, kPlayerCount> blinds) {
+  assert(rules.minimum_bet > 0);
   for (size_t player = 0; player < kPlayerCount; ++player) {
-    if (blinds[player] < 0 || stacks[player] < blinds[player]) {
-      throw std::invalid_argument("stacks must cover posted blinds");
-    }
+    assert(blinds[player] >= 0 && stacks[player] >= blinds[player]);
   }
 
   BettingData betting;
@@ -432,9 +428,7 @@ bool IsTerminal(const ExactPublicState& state) {
 SolverTransitions GenerateTransitions(const SolverConfig& config,
                                       const DecisionState& state) {
   const BettingData& data = state.data;
-  if (data.stack[Index(state.actor)] <= 0) {
-    throw std::logic_error("GenerateTransitions requires a decision state");
-  }
+  assert(data.stack[Index(state.actor)] > 0);
 
   SolverTransitions transitions;
   const ActionLimits limits = LimitsFor(state);
@@ -490,12 +484,8 @@ absl::StatusOr<BettingState> TryApplyAction(const DecisionState& state,
 
 BettingState AdvanceBettingStreet(const ChanceState& state,
                                   const BettingRules& rules) {
-  if (rules.minimum_bet <= 0) {
-    throw std::invalid_argument("minimum bet must be positive");
-  }
-  if (state.data.street == StreetKind::kRiver) {
-    throw std::invalid_argument("betting state is not a chance node");
-  }
+  assert(rules.minimum_bet > 0);
+  assert(state.data.street != StreetKind::kRiver);
 
   BettingData child = state.data;
   child.street = static_cast<StreetKind>(
@@ -513,41 +503,62 @@ BettingState AdvanceBettingStreet(const ChanceState& state,
   return DecisionState{child, FirstPlayerForStreet(child.street)};
 }
 
-ExactPublicState ApplyChance(const ExactPublicState& state,
-                             absl::Span<const Card> cards,
-                             const BettingRules& rules) {
-  if (rules.minimum_bet <= 0) {
-    throw std::invalid_argument("minimum bet must be positive");
-  }
-  const auto* chance = std::get_if<ChanceState>(&state.betting);
-  if (chance == nullptr) {
-    throw std::invalid_argument("State is not a chance node");
-  }
-  if (cards.size() !=
-      static_cast<size_t>(CardsForNextStreet(chance->data.street))) {
-    throw std::invalid_argument("Incorrect number of chance cards");
-  }
-
+ExactPublicState AdvanceChance(const ChanceState& state,
+                               const Board& board,
+                               absl::Span<const Card> cards,
+                               const BettingRules& rules) noexcept {
+  assert(rules.minimum_bet > 0);
+  assert(cards.size() ==
+         static_cast<size_t>(CardsForNextStreet(state.data.street)));
   Board child_board;
-  switch (chance->data.street) {
+  switch (state.data.street) {
     case StreetKind::kPreflop: {
       std::array<Card, 3> flop;
       std::copy_n(cards.begin(), 3, flop.begin());
-      child_board = DealFlop(std::get<PreflopBoard>(state.board), flop);
+      const auto* preflop = std::get_if<PreflopBoard>(&board);
+      assert(preflop != nullptr);
+      child_board = DealFlop(*preflop, flop);
       break;
     }
-    case StreetKind::kFlop:
-      child_board = DealTurn(std::get<FlopBoard>(state.board), cards[0]);
+    case StreetKind::kFlop: {
+      const auto* flop = std::get_if<FlopBoard>(&board);
+      assert(flop != nullptr);
+      child_board = DealTurn(*flop, cards[0]);
       break;
-    case StreetKind::kTurn:
-      child_board = DealRiver(std::get<TurnBoard>(state.board), cards[0]);
+    }
+    case StreetKind::kTurn: {
+      const auto* turn = std::get_if<TurnBoard>(&board);
+      assert(turn != nullptr);
+      child_board = DealRiver(*turn, cards[0]);
       break;
+    }
     case StreetKind::kRiver:
-      child_board = state.board;
+      child_board = board;
       break;
   }
-  ExactPublicState child{AdvanceBettingStreet(*chance, rules), child_board};
-  return child;
+  return {AdvanceBettingStreet(state, rules), child_board};
+}
+
+absl::StatusOr<ExactPublicState> TryApplyChance(
+    const ExactPublicState& state,
+    absl::Span<const Card> cards,
+    const BettingRules& rules) {
+  const auto* chance = std::get_if<ChanceState>(&state.betting);
+  if (chance == nullptr) {
+    return absl::InvalidArgumentError("state is not a chance node");
+  }
+  if (rules.minimum_bet <= 0 || cards.size() !=
+      static_cast<size_t>(CardsForNextStreet(chance->data.street))) {
+    return absl::InvalidArgumentError("invalid chance transition");
+  }
+  CardMask mask = BoardMask(state.board);
+  for (Card card : cards) {
+    if ((mask & CardBit(card)) != 0) {
+      return absl::InvalidArgumentError("duplicate board card");
+    }
+    mask |= CardBit(card);
+  }
+  return AdvanceChance(*chance, state.board, cards, rules);
 }
 
 double TerminalUtility(const FoldTerminalState& state,

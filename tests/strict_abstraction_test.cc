@@ -30,6 +30,16 @@ BettingState Apply(const BettingState& state, GameAction action) {
   return *child;
 }
 
+ExactPublicState DealChance(const ExactPublicState& state,
+                            absl::Span<const Card> cards,
+                            const BettingRules& rules) {
+  const auto child = TryApplyChance(state, cards, rules);
+  if (!child.ok()) {
+    throw std::invalid_argument(std::string(child.status().message()));
+  }
+  return *child;
+}
+
 ComboRange Range(int first_rank, int second_rank, Suit suit) {
   const ComboId combo = CardsToComboId(
       C(first_rank, suit), C(second_rank, suit));
@@ -57,7 +67,7 @@ TEST_CASE("mixed abstractions support history traversal") {
       C(2, Suit::kDiamonds), C(7, Suit::kSpades),
       C(9, Suit::kDiamonds),
   };
-  state = ApplyChance(state, flop, rules);
+  state = DealChance(state, flop, rules);
 
   CFRSolver solver(config, state);
   solver.run(2, Range(14, 13, Suit::kHearts),

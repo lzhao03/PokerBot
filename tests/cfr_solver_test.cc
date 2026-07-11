@@ -45,6 +45,16 @@ BettingState Apply(const BettingState& state, GameAction action) {
   return *child;
 }
 
+ExactPublicState DealChance(const ExactPublicState& state,
+                            absl::Span<const Card> cards,
+                            const BettingRules& rules) {
+  const auto child = TryApplyChance(state, cards, rules);
+  if (!child.ok()) {
+    throw std::invalid_argument(std::string(child.status().message()));
+  }
+  return *child;
+}
+
 BettingState NodeState(const HistoryNode& node) {
   return std::visit([](const auto& value) -> BettingState {
     return value.state;
@@ -160,7 +170,7 @@ TEST_CASE("postflop roots use full observation identity") {
   const std::array<Card, 3> flop = {
       Card(Rank::kTwo, S::kHearts), Card(Rank::kSeven, S::kDiamonds),
       Card(Rank::kQueen, S::kClubs)};
-  root = ApplyChance(root, flop, rules);
+  root = DealChance(root, flop, rules);
 
   CFRSolver solver(config, root);
   solver.run(2, R(kA), R(kB));

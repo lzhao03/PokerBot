@@ -165,7 +165,10 @@ TEST_CASE("sampling and card abstractions preserve identity") {
     CHECK(board_texture_bucket(street, features) ==
           board_texture_bucket(street, board_features(renamed_board)));
 
-    const auto sampled = SampleStreetCards(street, board, ComboMask(hand), rng);
+    const auto sampled_result =
+        SampleStreetCards(street, board, ComboMask(hand), rng);
+    REQUIRE(sampled_result.ok());
+    const auto& sampled = *sampled_result;
     CHECK(sampled.size() == static_cast<size_t>(CardsForNextStreet(street)));
     CardMask blocked = BoardMask(board) | ComboMask(hand);
     for (Card card : sampled) {
@@ -177,9 +180,8 @@ TEST_CASE("sampling and card abstractions preserve identity") {
   CardMask blocked = 0;
   for (int i = 0; i < kDeckCardCount - 2; ++i)
     blocked |= CardBit(kDeck[static_cast<size_t>(i)]);
-  CHECK_THROWS_AS(SampleStreetCards(StreetKind::kPreflop,
-                                    Board{PreflopBoard{}}, blocked, rng),
-                  std::runtime_error);
+  CHECK_FALSE(SampleStreetCards(StreetKind::kPreflop,
+                                Board{PreflopBoard{}}, blocked, rng).ok());
 }
 
 }  // namespace

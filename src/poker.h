@@ -405,7 +405,7 @@ absl::StatusOr<HoleCards> MakeHoleCards(Card first, Card second);
 
 int CardsForNextStreet(StreetKind street);
 int BoardCardsForStreet(StreetKind street);
-absl::InlinedVector<Card, 5> SampleStreetCards(
+absl::StatusOr<absl::InlinedVector<Card, 5>> SampleStreetCards(
     StreetKind street,
     const Board& board,
     CardMask known_private_cards,
@@ -421,9 +421,14 @@ absl::StatusOr<BettingState> TryApplyAction(const DecisionState& state,
                                             const GameAction& action);
 BettingState AdvanceBettingStreet(const ChanceState& state,
                                   const BettingRules& rules);
-ExactPublicState ApplyChance(const ExactPublicState& state,
-                             absl::Span<const Card> cards,
-                             const BettingRules& rules);
+ExactPublicState AdvanceChance(const ChanceState& state,
+                               const Board& board,
+                               absl::Span<const Card> cards,
+                               const BettingRules& rules) noexcept;
+absl::StatusOr<ExactPublicState> TryApplyChance(
+    const ExactPublicState& state,
+    absl::Span<const Card> cards,
+    const BettingRules& rules);
 double TerminalUtility(const FoldTerminalState& state,
                        Player evaluated_player) noexcept;
 double TerminalUtility(const ShowdownState& state,

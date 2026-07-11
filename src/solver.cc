@@ -516,12 +516,12 @@ Position CFRSolver::sample_chance_child(Position position,
   }
 
   const BettingData& data = node->state.data;
-  const auto cards = SampleStreetCards(data.street,
-                                       position.public_state.board(),
-                                       deal.blocked_mask, rng_);
-  const ExactPublicState child =
-      ApplyChance({node->state, position.public_state.board()}, cards,
-                  betting_rules_);
+  const auto sampled = SampleStreetCards(data.street,
+                                         position.public_state.board(),
+                                         deal.blocked_mask, rng_);
+  assert(sampled.ok());
+  const ExactPublicState child = AdvanceChance(
+      node->state, position.public_state.board(), *sampled, betting_rules_);
   position.history = node->child;
   position.public_state = position.public_state.after_chance(
       Data(child.betting).street, child.board);

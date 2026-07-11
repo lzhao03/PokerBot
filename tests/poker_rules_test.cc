@@ -32,6 +32,16 @@ BettingState Apply(const BettingState& state, GameAction action) {
   return *child;
 }
 
+ExactPublicState DealChance(const ExactPublicState& state,
+                            absl::Span<const Card> cards,
+                            const BettingRules& rules) {
+  const auto child = TryApplyChance(state, cards, rules);
+  if (!child.ok()) {
+    throw std::invalid_argument(std::string(child.status().message()));
+  }
+  return *child;
+}
+
 ExactPublicState Root() {
   ExactPublicState state;
   B(state).stack = {19, 18};
@@ -49,7 +59,7 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   CHECK_THROWS(Apply(state.betting, {ActionKind::kRaise, 1}));
   state.betting = Apply(state.betting, {ActionKind::kCall, 2});
   state.betting = Apply(state.betting, {ActionKind::kCheck});
-  CHECK_THROWS_AS(ApplyChance(state, {C(14, S::kSpades)}, kRules),
+  CHECK_THROWS_AS(DealChance(state, {C(14, S::kSpades)}, kRules),
                   std::invalid_argument);
 
   ExactPublicState short_call = Root();

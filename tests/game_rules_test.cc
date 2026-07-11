@@ -51,6 +51,16 @@ BettingState Apply(const BettingState& state, GameAction action) {
   return *child;
 }
 
+ExactPublicState DealChance(const ExactPublicState& state,
+                            absl::Span<const Card> cards,
+                            const BettingRules& rules) {
+  const auto child = TryApplyChance(state, cards, rules);
+  if (!child.ok()) {
+    throw std::invalid_argument(std::string(child.status().message()));
+  }
+  return *child;
+}
+
 std::array<Card, 3> Flop() {
   return {
       C(2, Suit::kHearts), C(7, Suit::kDiamonds),
@@ -252,7 +262,7 @@ void CheckGeneratedRollout(uint32_t seed) {
     }
     const BettingState before = state.betting;
     const CardMask board_before = BoardMask(state.board);
-    state = ApplyChance(state, cards, kRules);
+    state = DealChance(state, cards, kRules);
     CheckGeneralInvariants(state, initial_chips);
     CHECK(B(state).stack == B(before).stack);
     CHECK(B(state).total_committed == B(before).total_committed);
@@ -325,7 +335,7 @@ TEST_CASE("commitments update and reset across streets") {
   CHECK(B(state).street_committed[0] == 2);
   CHECK(Pot(B(state)) == 4);
   state.betting = Apply(state.betting, {ActionKind::kCheck});
-  state = ApplyChance(state, Flop(), kRules);
+  state = DealChance(state, Flop(), kRules);
 
   CHECK(B(state).total_committed ==
         std::array<Chips, kPlayerCount>{2, 2});
@@ -498,21 +508,21 @@ TEST_CASE("preflop all-in runout skips later decisions") {
   state.betting = Apply(state.betting, {ActionKind::kCall, 4});
   REQUIRE(std::holds_alternative<ChanceState>(state.betting));
 
-  state = ApplyChance(state, Flop(), kRules);
+  state = DealChance(state, Flop(), kRules);
   CHECK(std::holds_alternative<ChanceState>(state.betting));
   CHECK_FALSE(IsTerminal(state));
 
   const std::array<Card, 1> turn = {
       C(9, Suit::kSpades),
   };
-  state = ApplyChance(state, turn, kRules);
+  state = DealChance(state, turn, kRules);
   CHECK(std::holds_alternative<ChanceState>(state.betting));
   CHECK_FALSE(IsTerminal(state));
 
   const std::array<Card, 1> river = {
       C(3, Suit::kHearts),
   };
-  state = ApplyChance(state, river, kRules);
+  state = DealChance(state, river, kRules);
   CHECK(std::holds_alternative<ShowdownState>(state.betting));
   CHECK(IsTerminal(state));
 }
@@ -619,7 +629,7 @@ TEST_CASE("a complete normal hand preserves exact state") {
                   {2, 2}, 2, StreetKind::kPreflop, -1, 0, board,
                   StatePhase::kChance);
 
-  state = ApplyChance(state, Flop(), kRules);
+  state = DealChance(state, Flop(), kRules);
   AddFlop(board, Flop());
   CheckExactState("flop", state, {18, 18}, {2, 2}, {0, 0}, 2,
                   StreetKind::kFlop, 1, kAllPlayersMask, board,
@@ -641,7 +651,7 @@ TEST_CASE("a complete normal hand preserves exact state") {
                   StatePhase::kChance);
 
   const std::array<Card, 1> turn = {C(9, S::kSpades)};
-  state = ApplyChance(state, turn, kRules);
+  state = DealChance(state, turn, kRules);
   AddTurn(board, turn[0]);
   CheckExactState("turn", state, {16, 16}, {4, 4}, {0, 0}, 2,
                   StreetKind::kTurn, 1, kAllPlayersMask, board,
@@ -658,7 +668,7 @@ TEST_CASE("a complete normal hand preserves exact state") {
                   StatePhase::kChance);
 
   const std::array<Card, 1> river = {C(3, S::kHearts)};
-  state = ApplyChance(state, river, kRules);
+  state = DealChance(state, river, kRules);
   AddRiver(board, river[0]);
   CheckExactState("river", state, {16, 16}, {4, 4}, {0, 0}, 2,
                   StreetKind::kRiver, 1, kAllPlayersMask, board,
@@ -708,7 +718,7 @@ TEST_CASE("a short all-in raise preserves the full-raise increment") {
 
   state.betting = Apply(state.betting, {ActionKind::kCall, 2});
   state.betting = Apply(state.betting, {ActionKind::kCheck});
-  state = ApplyChance(state, Flop(), kRules);
+  state = DealChance(state, Flop(), kRules);
   AddFlop(board, Flop());
   CheckExactState("short stack reaches flop", state, {18, 3}, {2, 2},
                   {0, 0}, 2, StreetKind::kFlop, 1, kAllPlayersMask,
@@ -731,14 +741,14 @@ TEST_CASE("a short all-in raise preserves the full-raise increment") {
                   StatePhase::kChance);
 
   const std::array<Card, 1> turn = {C(9, S::kSpades)};
-  state = ApplyChance(state, turn, kRules);
+  state = DealChance(state, turn, kRules);
   AddTurn(board, turn[0]);
   CheckExactState("automatic turn", state, {15, 0}, {5, 5}, {0, 0}, 2,
                   StreetKind::kTurn, -1, kAllPlayersMask, board,
                   StatePhase::kChance);
 
   const std::array<Card, 1> river = {C(3, S::kHearts)};
-  state = ApplyChance(state, river, kRules);
+  state = DealChance(state, river, kRules);
   AddRiver(board, river[0]);
   CheckExactState("automatic river", state, {15, 0}, {5, 5}, {0, 0}, 2,
                   StreetKind::kRiver, -1, kAllPlayersMask, board,
@@ -750,7 +760,7 @@ TEST_CASE("effective stacks leave unmatched chips uncommitted") {
   Board board = PreflopBoard{};
   state.betting = Apply(state.betting, {ActionKind::kCall, 2});
   state.betting = Apply(state.betting, {ActionKind::kCheck});
-  state = ApplyChance(state, Flop(), kRules);
+  state = DealChance(state, Flop(), kRules);
   AddFlop(board, Flop());
   state.betting = Apply(state.betting, {ActionKind::kCheck});
 
