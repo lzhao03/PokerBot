@@ -153,19 +153,26 @@ TEST_CASE("infoset action rows are contiguous") {
   solver.run(4, Deals(R(kA), R(kB)));
   const CfrState& state = CFRSolverTestAccess::state(solver);
 
-  std::vector<InfoSetRow> rows;
+  struct RowSize {
+    InfoSetRow row;
+    uint8_t action_count;
+  };
+  std::vector<RowSize> rows;
   rows.reserve(state.rows.size());
   for (const auto& entry : state.rows) {
-    rows.push_back(entry.second);
+    const HistoryNode& node = CFRSolverTestAccess::history(solver)
+                                  .nodes[entry.first.history.index()];
+    rows.push_back({entry.second,
+                    std::get<DecisionNode>(node).edges.count});
   }
-  std::sort(rows.begin(), rows.end(), [](InfoSetRow left, InfoSetRow right) {
-    return left.action_offset < right.action_offset;
+  std::sort(rows.begin(), rows.end(), [](RowSize left, RowSize right) {
+    return left.row.action_offset < right.row.action_offset;
   });
 
   size_t offset = 0;
-  for (const InfoSetRow row : rows) {
-    CHECK(row.action_offset == offset);
-    offset += row.action_count;
+  for (const RowSize& item : rows) {
+    CHECK(item.row.action_offset == offset);
+    offset += item.action_count;
   }
   CHECK(offset == state.regret_sum.size());
   CHECK(state.strategy_sum.size() == state.regret_sum.size());

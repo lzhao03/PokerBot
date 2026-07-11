@@ -116,7 +116,6 @@ struct InfoSetKey {
 
 struct InfoSetRow {
   size_t action_offset = 0;
-  uint8_t action_count = 0;
 
   friend bool operator==(const InfoSetRow&, const InfoSetRow&) = default;
 };
@@ -251,7 +250,7 @@ class CFRSolver {
                         TraversalMode mode);
   std::optional<InfoSetRow> find_or_create_row(InfoSetKey key,
                                                 uint8_t action_count);
-  const InfoSetRow* find_row(InfoSetKey key, uint8_t action_count) const;
+  std::optional<InfoSetRow> find_row(InfoSetKey key) const;
   void log_training_summary() const;
 
   SolverConfig config_;

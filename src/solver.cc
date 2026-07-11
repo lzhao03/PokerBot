@@ -545,21 +545,19 @@ void CFRSolver::advance_private_observations(
   }
 }
 
-const InfoSetRow* CFRSolver::find_row(InfoSetKey key,
-                                     uint8_t action_count) const {
+std::optional<InfoSetRow> CFRSolver::find_row(InfoSetKey key) const {
   const auto row = state_.rows.find(key);
   if (row == state_.rows.end()) {
-    return nullptr;
+    return std::nullopt;
   }
-  assert(row->second.action_count == action_count);
-  return &row->second;
+  return row->second;
 }
 
 std::optional<InfoSetRow> CFRSolver::find_or_create_row(
     InfoSetKey key,
     uint8_t action_count) {
-  if (const InfoSetRow* row = find_row(key, action_count)) {
-    return *row;
+  if (const auto row = find_row(key)) {
+    return row;
   }
   if (state_.rows.size() >= static_cast<size_t>(config_.max_info_sets)) {
     return std::nullopt;
@@ -570,7 +568,7 @@ std::optional<InfoSetRow> CFRSolver::find_or_create_row(
   if (config_.accumulate_average_strategy) {
     state_.strategy_sum.resize(offset + action_count, 0.0f);
   }
-  const InfoSetRow row{offset, action_count};
+  const InfoSetRow row{offset};
   return state_.rows.emplace(key, row).first->second;
 }
 
@@ -615,19 +613,16 @@ double CFRSolver::traverse(Position position,
              private_observation_for_runout(hand, position.public_state));
       const bool training = context.mode == TraversalMode::kTrain;
       const bool updates = training && context.update_player == player;
-      InfoSetRow row;
+      std::optional<InfoSetRow> row;
       if (updates) {
-        const auto created = find_or_create_row(key, action_count);
-        if (created.has_value()) {
-          row = *created;
-        } else {
+        row = find_or_create_row(key, action_count);
+        if (!row.has_value()) {
           context.info_set_limit_reached = true;
         }
-      } else if (const InfoSetRow* existing = find_row(key, action_count)) {
-        row = *existing;
+      } else {
+        row = find_row(key);
       }
-      const InfoSetRow* strategy_row =
-          updates || row.action_count != 0 ? &row : nullptr;
+      const InfoSetRow* strategy_row = row ? &*row : nullptr;
 
       absl::InlinedVector<double, 8> probabilities(action_count, 0.0);
       absl::InlinedVector<double, 8> values(action_count, 0.0);
@@ -649,7 +644,7 @@ double CFRSolver::traverse(Position position,
         return node_value;
       }
       ++stats_.decision_visits;
-      if (!updates || row.action_count == 0) {
+      if (!updates || !row.has_value()) {
         return node_value;
       }
 
@@ -658,12 +653,13 @@ double CFRSolver::traverse(Position position,
       for (uint8_t action = 0; action < action_count; ++action) {
         const double regret =
             opponent_reach * sign * (values[action] - node_value);
-        AddCfrPlusRegret(state_, row, action, static_cast<float>(regret));
+        AddCfrPlusRegret(state_, *row, action, static_cast<float>(regret));
       }
       if (config_.accumulate_average_strategy) {
         const double weight = frame.reach[player_index] *
                               static_cast<double>(context.iteration + 1);
-        AddStrategySum(state_, row, absl::MakeConstSpan(probabilities), weight);
+        AddStrategySum(state_, *row, absl::MakeConstSpan(probabilities),
+                       weight);
       }
       return node_value;
     }
