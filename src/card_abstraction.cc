@@ -1,5 +1,7 @@
 #include "src/card_abstraction.h"
 
+#include "src/hand_evaluator.h"
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -245,6 +247,12 @@ absl::Status ValidateEquityModelShape(const EquityBucketModel& model) {
       model.runout_samples == 0) {
     return absl::InvalidArgumentError("equity model sampling is empty");
   }
+  if (model.opponent_samples > 4096 || model.runout_samples > 4096 ||
+      static_cast<uint64_t>(model.opponent_samples) *
+              model.runout_samples >
+          1'000'000) {
+    return absl::InvalidArgumentError("equity model sampling is too large");
+  }
   for (StreetKind street : {StreetKind::kPreflop, StreetKind::kRiver}) {
     const size_t index = static_cast<size_t>(street);
     if (!model.ehs2_cutoffs[index].empty() ||
@@ -353,6 +361,84 @@ absl::StatusOr<Bytes> ReadBytes(const std::filesystem::path& path) {
   input.read(reinterpret_cast<char*>(bytes.data()), end);
   if (!input) return absl::DataLossError("could not read model file");
   return bytes;
+}
+
+uint64_t Mix64(uint64_t value) noexcept {
+  value += 0x9e3779b97f4a7c15ULL;
+  value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+  return value ^ (value >> 31);
+}
+
+uint64_t SampleSeed(const EquityBucketModel& model,
+                    const CanonicalCardObservation& observation,
+                    uint64_t runout,
+                    uint64_t opponent) noexcept {
+  uint64_t seed = Mix64(model.rollout_seed);
+  seed = Mix64(seed ^ observation.public_observation.value());
+  seed = Mix64(seed ^ observation.private_observation.value());
+  seed = Mix64(seed ^ runout);
+  return Mix64(seed ^ opponent);
+}
+
+size_t BoundedIndex(uint64_t& state, size_t bound) noexcept {
+  assert(bound > 0);
+  const uint64_t unsigned_bound = static_cast<uint64_t>(bound);
+  const uint64_t threshold = -unsigned_bound % unsigned_bound;
+  uint64_t value;
+  do {
+    state = Mix64(state);
+    value = state;
+  } while (value < threshold);
+  return static_cast<size_t>(value % unsigned_bound);
+}
+
+std::array<Card, 2> SampleUnblocked(CardMask blocked,
+                                    size_t count,
+                                    uint64_t seed) noexcept {
+  assert(count <= 2);
+  std::array<Card, kDeckCardCount> available = {};
+  size_t available_count = 0;
+  for (Card card : kDeck) {
+    if ((blocked & CardBit(card)) == 0) available[available_count++] = card;
+  }
+  assert(available_count >= count);
+  std::array<Card, 2> sampled = {};
+  for (size_t index = 0; index < count; ++index) {
+    const size_t chosen = index + BoundedIndex(seed, available_count - index);
+    std::swap(available[index], available[chosen]);
+    sampled[index] = available[index];
+  }
+  return sampled;
+}
+
+RiverBoard CompleteBoard(const Board& board,
+                         const std::array<Card, 2>& cards) noexcept {
+  if (const auto* flop = std::get_if<FlopBoard>(&board)) {
+    return DealRiver(DealTurn(*flop, cards[0]), cards[1]);
+  }
+  const auto* turn = std::get_if<TurnBoard>(&board);
+  assert(turn != nullptr);
+  return DealRiver(*turn, cards[0]);
+}
+
+float EstimateShowdownEquity(
+    ComboId hand,
+    const RiverBoard& board,
+    uint32_t samples,
+    const EquityBucketModel& model,
+    const CanonicalCardObservation& observation,
+    uint64_t runout) noexcept {
+  const CardMask blocked = ComboMask(hand) | board.mask();
+  double value = 0.0;
+  for (uint32_t sample = 0; sample < samples; ++sample) {
+    const auto cards = SampleUnblocked(
+        blocked, 2, SampleSeed(model, observation, runout, sample));
+    const ComboId opponent = CardsToComboId(cards[0], cards[1]);
+    const int comparison = CompareHands(hand, opponent, board);
+    value += comparison > 0 ? 1.0 : (comparison == 0 ? 0.5 : 0.0);
+  }
+  return static_cast<float>(value / samples);
 }
 
 }  // namespace
@@ -471,6 +557,45 @@ PrivateBucketId EquityBucket(StreetKind street,
       features.ehs2) - model.ehs2_cutoffs[index].begin());
   return static_cast<PrivateBucketId>(
       2 * outer + (features.ehs >= model.ehs_medians[index][outer] ? 1 : 0));
+}
+
+EquityFeatures EvaluateEquityFeatures(
+    ComboId hand,
+    const Board& board,
+    const EquityBucketModel& model) noexcept {
+  assert(BoardCount(board) >= 3);
+  const CanonicalCardState canonical = CanonicalizeCardState(hand, board);
+  assert((ComboMask(canonical.hand) & BoardMask(canonical.board)) == 0);
+
+  if (const auto* river = std::get_if<RiverBoard>(&canonical.board)) {
+    const uint32_t samples = model.runout_samples * model.opponent_samples;
+    const float equity = EstimateShowdownEquity(
+        canonical.hand, *river, samples, model, canonical.observation, 0);
+    return {equity, equity * equity};
+  }
+
+  const size_t cards_needed =
+      std::holds_alternative<FlopBoard>(canonical.board) ? 2 : 1;
+  const CardMask blocked =
+      ComboMask(canonical.hand) | BoardMask(canonical.board);
+  double ehs = 0.0;
+  double ehs2 = 0.0;
+  for (uint32_t runout = 0; runout < model.runout_samples; ++runout) {
+    const auto cards = SampleUnblocked(
+        blocked, cards_needed,
+        SampleSeed(model, canonical.observation, runout,
+                   std::numeric_limits<uint64_t>::max()));
+    const RiverBoard river = CompleteBoard(canonical.board, cards);
+    const float equity = EstimateShowdownEquity(
+        canonical.hand, river, model.opponent_samples, model,
+        canonical.observation, runout);
+    ehs += equity;
+    ehs2 += static_cast<double>(equity) * equity;
+  }
+  return {
+      static_cast<float>(ehs / model.runout_samples),
+      static_cast<float>(ehs2 / model.runout_samples),
+  };
 }
 
 BoardFeatures BoardFeaturesFor(const Board& board) noexcept {

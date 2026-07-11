@@ -78,20 +78,34 @@ PublicObservationId CanonicalPublicObservation(const Board& board) noexcept {
 CanonicalCardObservation CanonicalizeObservation(
     ComboId hand,
     const Board& board) noexcept {
+  return CanonicalizeCardState(hand, board).observation;
+}
+
+CanonicalCardState CanonicalizeCardState(
+    ComboId hand,
+    const Board& board) noexcept {
   uint64_t best_board = std::numeric_limits<uint64_t>::max();
   uint16_t best_hand = std::numeric_limits<uint16_t>::max();
+  Board canonical_board = PreflopBoard{};
+  ComboId canonical_hand;
   for (const SuitPermutation& permutation : kSuitPermutations) {
-    const uint64_t board_id = EncodeBoard(PermuteBoard(board, permutation));
-    const uint16_t hand_id =
-        static_cast<uint16_t>(PermuteCombo(hand, permutation).index());
-    if (board_id < best_board) {
+    Board mapped_board = PermuteBoard(board, permutation);
+    const uint64_t board_id = EncodeBoard(mapped_board);
+    const ComboId mapped_hand = PermuteCombo(hand, permutation);
+    const uint16_t hand_id = static_cast<uint16_t>(mapped_hand.index());
+    if (board_id < best_board ||
+        (board_id == best_board && hand_id < best_hand)) {
       best_board = board_id;
       best_hand = hand_id;
-    } else if (board_id == best_board) {
-      best_hand = std::min(best_hand, hand_id);
+      canonical_board = std::move(mapped_board);
+      canonical_hand = mapped_hand;
     }
   }
-  return {PublicObservationId(best_board), PrivateObservationId(best_hand)};
+  return {
+      canonical_hand,
+      std::move(canonical_board),
+      {PublicObservationId(best_board), PrivateObservationId(best_hand)},
+  };
 }
 
 }  // namespace poker

@@ -289,6 +289,25 @@ TEST_CASE("equity models preserve cutoffs and bucket boundaries") {
   CHECK_FALSE(ValidateEquityBucketModel(changed).ok());
 }
 
+TEST_CASE("equity features are deterministic under suit renaming") {
+  const EquityBucketModel model = TestEquityModel();
+  const Board board = B({C(2, S::kHearts), C(7, S::kHearts),
+                         C(12, S::kClubs), C(9, S::kDiamonds)});
+  const ComboId hand = H(C(14, S::kHearts), C(13, S::kSpades));
+  const EquityFeatures first = EvaluateEquityFeatures(hand, board, model);
+  CHECK(EvaluateEquityFeatures(hand, board, model) == first);
+
+  const std::array<S, 4> suits = {
+      S::kClubs, S::kSpades, S::kHearts, S::kDiamonds};
+  const EquityFeatures renamed = EvaluateEquityFeatures(
+      Rename(hand, suits), Rename(board, suits), model);
+  CHECK(renamed == first);
+  const PrivateBucketId bucket =
+      EquityBucket(StreetKind::kTurn, first, model);
+  CHECK(bucket < 32);
+  CHECK(EquityBucket(StreetKind::kTurn, renamed, model) == bucket);
+}
+
 TEST_CASE("canonical observations preserve card relationships and order") {
   const Board monotone = B({C(14, S::kHearts), C(13, S::kHearts),
                             C(12, S::kHearts)});

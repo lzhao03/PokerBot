@@ -89,6 +89,10 @@ absl::StatusOr<EquityBucketModel> LoadEquityBucketModel(
 PrivateBucketId EquityBucket(StreetKind street,
                              EquityFeatures features,
                              const EquityBucketModel& model) noexcept;
+EquityFeatures EvaluateEquityFeatures(
+    ComboId hand,
+    const Board& board,
+    const EquityBucketModel& model) noexcept;
 
 class PublicPosition {
  public:

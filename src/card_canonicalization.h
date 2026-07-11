@@ -12,7 +12,15 @@ struct CanonicalCardObservation {
                          const CanonicalCardObservation&) = default;
 };
 
+struct CanonicalCardState {
+  ComboId hand;
+  Board board;
+  CanonicalCardObservation observation;
+};
+
 PublicObservationId CanonicalPublicObservation(const Board& board) noexcept;
+CanonicalCardState CanonicalizeCardState(ComboId hand,
+                                         const Board& board) noexcept;
 CanonicalCardObservation CanonicalizeObservation(ComboId hand,
                                                  const Board& board) noexcept;
 
