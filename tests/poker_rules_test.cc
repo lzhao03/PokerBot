@@ -53,6 +53,16 @@ ExactPublicState Root() {
 
 constexpr BettingRules kRules{2};
 
+TEST_CASE("solver configuration rejects invalid boundary values") {
+  SolverConfigOptions options;
+  options.max_info_sets = 0;
+  CHECK_FALSE(SolverConfig::Create(options).ok());
+
+  options.max_info_sets = 10;
+  options.bet_sizes[0] = {-0.5};
+  CHECK_FALSE(SolverConfig::Create(options).ok());
+}
+
 TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   ExactPublicState state = Root();
   CHECK_THROWS(Apply(state.betting, {ActionKind::kCheck}));
@@ -76,9 +86,12 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
         std::array<Chips, kPlayerCount>{4, 4});
   CHECK(B(short_call).stack[1] == 16);
 
-  SolverConfig config;
-  config.bet_sizes[static_cast<size_t>(StreetKind::kPreflop)] = {0.5};
-  config.bet_sizes[static_cast<size_t>(StreetKind::kFlop)] = {1.0};
+  SolverConfigOptions options;
+  options.bet_sizes[static_cast<size_t>(StreetKind::kPreflop)] = {0.5};
+  options.bet_sizes[static_cast<size_t>(StreetKind::kFlop)] = {1.0};
+  const auto config_result = SolverConfig::Create(std::move(options));
+  REQUIRE(config_result.ok());
+  const SolverConfig config = *config_result;
   BettingData flop_data;
   flop_data.stack = {98, 98};
   flop_data.total_committed = {2, 2};

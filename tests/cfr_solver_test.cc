@@ -69,17 +69,23 @@ BettingState NodeState(const HistoryNode& node) {
   }, node);
 }
 
-SolverConfig Config() {
-  SolverConfig config;
-  config.starting_stack = 8;
-  config.small_blind = 1;
-  config.big_blind = 2;
-  for (auto& sizes : config.bet_sizes) {
+SolverConfig Config(bool accumulate_average = true,
+                    int max_info_sets = 500000) {
+  SolverConfigOptions options;
+  options.starting_stack = 8;
+  options.small_blind = 1;
+  options.big_blind = 2;
+  for (auto& sizes : options.bet_sizes) {
     sizes = {0.5, 1.0};
   }
-  config.chance_samples = 1;
-  config.max_info_sets = 500000;
-  return config;
+  options.chance_samples = 1;
+  options.max_info_sets = max_info_sets;
+  options.accumulate_average_strategy = accumulate_average;
+  const auto config = SolverConfig::Create(std::move(options));
+  if (!config.ok()) {
+    throw std::invalid_argument(std::string(config.status().message()));
+  }
+  return *config;
 }
 
 const ComboId kA = H(14, S::kHearts, 14, S::kSpades);
@@ -180,7 +186,7 @@ TEST_CASE("infoset action rows are contiguous") {
 
 TEST_CASE("postflop roots use full observation identity") {
   SolverConfig config = Config();
-  const BettingRules rules{config.big_blind};
+  const BettingRules rules{config.big_blind()};
   ExactPublicState root = MakeInitialState(rules, {8, 8}, {1, 2});
   root.betting = Apply(root.betting, {ActionKind::kCall, 2});
   root.betting = Apply(root.betting, {ActionKind::kCheck, 0});
@@ -204,9 +210,7 @@ TEST_CASE("postflop roots use full observation identity") {
 }
 
 TEST_CASE("infoset caps stop after completing the current iteration") {
-  SolverConfig capped = Config();
-  capped.max_info_sets = 1;
-  CFRSolver solver(capped);
+  CFRSolver solver(Config(true, 1));
   const TrainingResult result = solver.run(2, Deals(R(kA), R(kB)));
   CHECK(result.iterations_completed == 1);
   CHECK(result.stop_reason == TrainingStopReason::kInfoSetLimit);
@@ -214,8 +218,7 @@ TEST_CASE("infoset caps stop after completing the current iteration") {
 }
 
 TEST_CASE("average strategy storage is optional") {
-  SolverConfig config = Config();
-  config.accumulate_average_strategy = false;
+  const SolverConfig config = Config(false);
   CFRSolver solver(config);
   solver.run(2, Deals(R(kA), R(kB)));
 

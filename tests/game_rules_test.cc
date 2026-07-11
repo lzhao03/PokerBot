@@ -87,12 +87,16 @@ std::vector<GameAction> ActionsFor(const BettingState& state,
   if (decision == nullptr) {
     throw std::invalid_argument("expected decision state");
   }
-  SolverConfig config;
-  config.bet_sizes[static_cast<size_t>(decision->data.street)].assign(
+  SolverConfigOptions options;
+  options.bet_sizes[static_cast<size_t>(decision->data.street)].assign(
       sizes.begin(), sizes.end());
+  const auto config = SolverConfig::Create(std::move(options));
+  if (!config.ok()) {
+    throw std::invalid_argument(std::string(config.status().message()));
+  }
   std::vector<GameAction> actions;
   for (const SolverTransition& transition :
-       GenerateTransitions(config, *decision)) {
+       GenerateTransitions(*config, *decision)) {
     actions.push_back(transition.action);
   }
   return actions;

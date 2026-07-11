@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <random>
-#include <stdexcept>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -181,7 +181,7 @@ struct GameAction {
   friend bool operator==(const GameAction&, const GameAction&) = default;
 };
 
-struct SolverConfig {
+struct SolverConfigOptions {
   std::array<std::vector<double>, 4> bet_sizes = {{
       {0.25, 0.5, 1.0},
       {0.25, 0.5, 1.0},
@@ -194,6 +194,30 @@ struct SolverConfig {
   int chance_samples = 1;
   bool accumulate_average_strategy = true;
   int max_info_sets = 500000;
+};
+
+class SolverConfig {
+ public:
+  static absl::StatusOr<SolverConfig> Create(SolverConfigOptions options);
+  static SolverConfig Default();
+
+  const std::vector<double>& bet_sizes(StreetKind street) const {
+    return options_.bet_sizes[static_cast<size_t>(street)];
+  }
+  Chips starting_stack() const noexcept { return options_.starting_stack; }
+  Chips small_blind() const noexcept { return options_.small_blind; }
+  Chips big_blind() const noexcept { return options_.big_blind; }
+  int chance_samples() const noexcept { return options_.chance_samples; }
+  bool accumulate_average_strategy() const noexcept {
+    return options_.accumulate_average_strategy;
+  }
+  int max_info_sets() const noexcept { return options_.max_info_sets; }
+
+ private:
+  explicit SolverConfig(SolverConfigOptions options)
+      : options_(std::move(options)) {}
+
+  SolverConfigOptions options_;
 };
 
 inline int SuitIndex(Suit suit) {

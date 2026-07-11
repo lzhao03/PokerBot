@@ -43,11 +43,14 @@ TEST_CASE("range syntax expands to exact combo weights") {
 }
 
 TEST_CASE("deal sampling rejects incompatible ranges") {
-  SolverConfig config;
-  config.starting_stack = 8;
-  for (auto& sizes : config.bet_sizes) {
+  SolverConfigOptions options;
+  options.starting_stack = 8;
+  for (auto& sizes : options.bet_sizes) {
     sizes = {1.0};
   }
+  const auto config_result = SolverConfig::Create(std::move(options));
+  REQUIRE(config_result.ok());
+  const SolverConfig config = *config_result;
 
   const ComboRange a = SingleComboRange(CardsToComboId(kDeck[0], kDeck[1]));
   ComboRange b;

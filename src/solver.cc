@@ -3,11 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <stdexcept>
 #include <type_traits>
 #include <vector>
 
@@ -164,9 +162,9 @@ ComboRange ExpandSelected(const std::vector<int>& selected) {
 }
 
 ExactPublicState DefaultInitialState(const SolverConfig& config) {
-  const Chips small_blind = config.small_blind > 0 ? config.small_blind : 1;
-  const Chips big_blind = config.big_blind > 0 ? config.big_blind : 2;
-  const Chips stack = config.starting_stack;
+  const Chips small_blind = config.small_blind();
+  const Chips big_blind = config.big_blind();
+  const Chips stack = config.starting_stack();
   return MakeInitialState(BettingRules{big_blind}, {stack, stack},
                           {small_blind, big_blind});
 }
@@ -424,29 +422,6 @@ absl::StatusOr<ComboRange> ParseRange(std::string_view text) {
   return ExpandSelected(selected);
 }
 
-absl::Status ValidateSolverConfig(const SolverConfig& config) {
-  if (config.starting_stack <= 0 || config.small_blind <= 0 ||
-      config.big_blind < config.small_blind ||
-      config.starting_stack < config.big_blind) {
-    return absl::InvalidArgumentError("invalid stack or blind configuration");
-  }
-  if (config.chance_samples <= 0) {
-    return absl::InvalidArgumentError("chance_samples must be positive");
-  }
-  if (config.max_info_sets <= 0) {
-    return absl::InvalidArgumentError("max_info_sets must be positive");
-  }
-  for (const auto& street_sizes : config.bet_sizes) {
-    for (double size : street_sizes) {
-      if (!std::isfinite(size) || size <= 0.0) {
-        return absl::InvalidArgumentError(
-            "bet sizes must be finite and positive");
-      }
-    }
-  }
-  return absl::OkStatus();
-}
-
 ComboRange UniformRange() {
   std::vector<int> selected(kHandTypeCount);
   for (int index = 0; index < kHandTypeCount; ++index) {
@@ -467,18 +442,16 @@ CFRSolver::CFRSolver(const SolverConfig& config)
 CFRSolver::CFRSolver(const SolverConfig& config,
                      const ExactPublicState& initial_state)
     : config_(config),
-      betting_rules_{config_.big_blind > 0 ? config_.big_blind : 2},
+      betting_rules_{config_.big_blind()},
       initial_state_(initial_state),
       rng_(12345) {
   assert(IsValidBettingData(Data(initial_state_.betting)));
   history_ = BuildHistoryTree(initial_state_.betting, betting_rules_, config_);
-  if (config_.max_info_sets > 0) {
-    const size_t rows = static_cast<size_t>(config_.max_info_sets);
-    state_.rows.reserve(rows);
-    state_.regret_sum.reserve(rows * 4);
-    if (config_.accumulate_average_strategy) {
-      state_.strategy_sum.reserve(rows * 4);
-    }
+  const size_t rows = static_cast<size_t>(config_.max_info_sets());
+  state_.rows.reserve(rows);
+  state_.regret_sum.reserve(rows * 4);
+  if (config_.accumulate_average_strategy()) {
+    state_.strategy_sum.reserve(rows * 4);
   }
 }
 
@@ -559,13 +532,13 @@ std::optional<InfoSetRow> CFRSolver::find_or_create_row(
   if (const auto row = find_row(key)) {
     return row;
   }
-  if (state_.rows.size() >= static_cast<size_t>(config_.max_info_sets)) {
+  if (state_.rows.size() >= static_cast<size_t>(config_.max_info_sets())) {
     return std::nullopt;
   }
 
   const size_t offset = state_.regret_sum.size();
   state_.regret_sum.resize(offset + action_count, 0.0f);
-  if (config_.accumulate_average_strategy) {
+  if (config_.accumulate_average_strategy()) {
     state_.strategy_sum.resize(offset + action_count, 0.0f);
   }
   const InfoSetRow row{offset};
@@ -590,7 +563,7 @@ double CFRSolver::traverse(Position position,
       return TerminalUtility(node.state, *board, deal.hand(Player::kA),
                              deal.hand(Player::kB));
     } else if constexpr (std::is_same_v<Node, ChanceNode>) {
-      const int samples = std::max(1, config_.chance_samples);
+      const int samples = config_.chance_samples();
       stats_.chance_samples += static_cast<uint64_t>(samples);
       double value = 0.0;
       for (int sample = 0; sample < samples; ++sample) {
@@ -655,7 +628,7 @@ double CFRSolver::traverse(Position position,
             opponent_reach * sign * (values[action] - node_value);
         AddCfrPlusRegret(state_, *row, action, static_cast<float>(regret));
       }
-      if (config_.accumulate_average_strategy) {
+      if (config_.accumulate_average_strategy()) {
         const double weight = frame.reach[player_index] *
                               static_cast<double>(context.iteration + 1);
         AddStrategySum(state_, *row, absl::MakeConstSpan(probabilities),
@@ -732,7 +705,7 @@ double CFRSolver::evaluate_current(int samples,
 absl::StatusOr<double> CFRSolver::evaluate_average(
     HoleCards player_a,
     HoleCards player_b) {
-  if (!config_.accumulate_average_strategy) {
+  if (!config_.accumulate_average_strategy()) {
     return absl::FailedPreconditionError(
         "average strategy accumulation is disabled");
   }
@@ -744,7 +717,7 @@ absl::StatusOr<double> CFRSolver::evaluate_average(
 absl::StatusOr<double> CFRSolver::evaluate_average(
     int samples,
     const DealDistribution& deals) {
-  if (!config_.accumulate_average_strategy) {
+  if (!config_.accumulate_average_strategy()) {
     return absl::FailedPreconditionError(
         "average strategy accumulation is disabled");
   }

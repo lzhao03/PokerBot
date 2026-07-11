@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
   absl::SetProgramUsageMessage("Benchmark the heads-up poker CFR solver.");
   absl::ParseCommandLine(argc, argv);
   absl::InitializeLog();
-  poker::SolverConfig config;
+  const poker::SolverConfig config = poker::SolverConfig::Default();
 
   const std::string range = absl::GetFlag(FLAGS_range);
   const auto parsed_range = BenchmarkRange(range);
@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
 
   solver->reset_stats();
   Measure("evaluate_range", [&] {
-    if (!config.accumulate_average_strategy) {
+    if (!config.accumulate_average_strategy()) {
       return solver->evaluate_current(
           absl::GetFlag(FLAGS_eval_samples), *deals);
     }

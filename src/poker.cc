@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <random>
 #include <stdexcept>
@@ -206,6 +207,36 @@ void AddTransition(SolverTransitions& transitions,
 }
 
 }  // namespace
+
+absl::StatusOr<SolverConfig> SolverConfig::Create(
+    SolverConfigOptions options) {
+  if (options.starting_stack <= 0 || options.small_blind <= 0 ||
+      options.big_blind < options.small_blind ||
+      options.starting_stack < options.big_blind) {
+    return absl::InvalidArgumentError("invalid stack or blind configuration");
+  }
+  if (options.chance_samples <= 0) {
+    return absl::InvalidArgumentError("chance_samples must be positive");
+  }
+  if (options.max_info_sets <= 0) {
+    return absl::InvalidArgumentError("max_info_sets must be positive");
+  }
+  for (const auto& street_sizes : options.bet_sizes) {
+    for (double size : street_sizes) {
+      if (!std::isfinite(size) || size <= 0.0) {
+        return absl::InvalidArgumentError(
+            "bet sizes must be finite and positive");
+      }
+    }
+  }
+  return SolverConfig(std::move(options));
+}
+
+SolverConfig SolverConfig::Default() {
+  auto config = Create(SolverConfigOptions{});
+  assert(config.ok());
+  return *config;
+}
 
 FlopBoard DealFlop(const PreflopBoard&,
                    std::array<Card, 3> cards) noexcept {
@@ -445,8 +476,7 @@ SolverTransitions GenerateTransitions(const SolverConfig& config,
   const ActionKind sized_kind =
       limits.wager_open ? ActionKind::kRaise : ActionKind::kBet;
   absl::InlinedVector<GameAction, 8> sized_actions;
-  const auto& bet_sizes =
-      config.bet_sizes[static_cast<size_t>(data.street)];
+  const auto& bet_sizes = config.bet_sizes(data.street);
   for (double bet_size : bet_sizes) {
     const Chips bet = ConcreteBetAmount(data, bet_size);
     const Chips target = limits.highest + bet;

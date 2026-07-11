@@ -71,7 +71,7 @@ absl::StatusOr<std::vector<double>> ParseBetSizes(
   return sizes;
 }
 
-absl::Status OverrideBetSizes(poker::SolverConfig& config,
+absl::Status OverrideBetSizes(poker::SolverConfigOptions& config,
                               poker::StreetKind street,
                               const std::vector<std::string>& values) {
   if (!values.empty()) {
@@ -85,7 +85,7 @@ absl::Status OverrideBetSizes(poker::SolverConfig& config,
 }
 
 absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
-  poker::SolverConfig config;
+  poker::SolverConfigOptions config;
   config.starting_stack = absl::GetFlag(FLAGS_starting_stack);
   config.small_blind = absl::GetFlag(FLAGS_small_blind);
   config.big_blind = absl::GetFlag(FLAGS_big_blind);
@@ -114,11 +114,7 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
       return status;
     }
   }
-  const absl::Status status = poker::ValidateSolverConfig(config);
-  if (!status.ok()) {
-    return status;
-  }
-  return config;
+  return poker::SolverConfig::Create(std::move(config));
 }
 
 bool CapHit(size_t count, int cap) {
@@ -134,8 +130,8 @@ void PrintRunSummary(const poker::CFRSolver& solver,
 
   std::cout << "iterations=" << solver.get_iterations_run() << "\n";
   std::cout << "info_sets=" << info_sets << "\n";
-  std::cout << "max_info_sets=" << config.max_info_sets << "\n";
-  std::cout << "info_set_cap_hit=" << CapHit(info_sets, config.max_info_sets)
+  std::cout << "max_info_sets=" << config.max_info_sets() << "\n";
+  std::cout << "info_set_cap_hit=" << CapHit(info_sets, config.max_info_sets())
             << "\n";
   std::cout << "player_a_ev=" << solver.get_expected_value(poker::Player::kA)
             << "\n";

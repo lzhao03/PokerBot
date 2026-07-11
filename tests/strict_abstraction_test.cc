@@ -47,17 +47,20 @@ ComboRange Range(int first_rank, int second_rank, Suit suit) {
 }
 
 TEST_CASE("mixed abstractions support history traversal") {
-  SolverConfig config;
-  config.starting_stack = 8;
-  config.small_blind = 1;
-  config.big_blind = 2;
-  for (auto& sizes : config.bet_sizes) {
+  SolverConfigOptions options;
+  options.starting_stack = 8;
+  options.small_blind = 1;
+  options.big_blind = 2;
+  for (auto& sizes : options.bet_sizes) {
     sizes = {1.0};
   }
-  config.max_info_sets = 500000;
-  config.accumulate_average_strategy = false;
+  options.max_info_sets = 500000;
+  options.accumulate_average_strategy = false;
+  const auto config_result = SolverConfig::Create(std::move(options));
+  REQUIRE(config_result.ok());
+  const SolverConfig config = *config_result;
 
-  const BettingRules rules{config.big_blind};
+  const BettingRules rules{config.big_blind()};
   ExactPublicState state = MakeInitialState(rules, {8, 8}, {1, 2});
   state.betting = Apply(
       state.betting, {ActionKind::kCall, 2});

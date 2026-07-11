@@ -36,7 +36,6 @@ struct ComboRange {
 };
 
 absl::StatusOr<ComboRange> ParseRange(std::string_view text);
-absl::Status ValidateSolverConfig(const SolverConfig& config);
 ComboRange UniformRange();
 ComboRange SingleComboRange(ComboId combo, float weight = 1.0f);
 
