@@ -15,15 +15,11 @@ struct TraversalStats {
   int64_t turn_updates = 0;
   int64_t river_updates = 0;
   int max_decision_depth = 0;
-  int64_t child_nodes_created = 0;
   int64_t chance_samples = 0;
   int64_t terminal_utility_calls = 0;
   int64_t fold_utility_calls = 0;
   int64_t showdown_utility_calls = 0;
   int64_t action_entry_touches = 0;
-  int64_t atomic_regret_update_retries = 0;
-  int64_t transition_hits = 0;
-  int64_t transition_misses = 0;
 
   void add(const TraversalStats& other) {
     cfr_updates += other.cfr_updates;
@@ -31,15 +27,11 @@ struct TraversalStats {
     flop_updates += other.flop_updates;
     turn_updates += other.turn_updates;
     river_updates += other.river_updates;
-    child_nodes_created += other.child_nodes_created;
     chance_samples += other.chance_samples;
     terminal_utility_calls += other.terminal_utility_calls;
     fold_utility_calls += other.fold_utility_calls;
     showdown_utility_calls += other.showdown_utility_calls;
     action_entry_touches += other.action_entry_touches;
-    atomic_regret_update_retries += other.atomic_regret_update_retries;
-    transition_hits += other.transition_hits;
-    transition_misses += other.transition_misses;
     max_decision_depth =
         std::max(max_decision_depth, other.max_decision_depth);
   }
@@ -88,53 +80,14 @@ struct TraversalStats {
     }
   }
 
-  void record_child_node_created() {
-    if constexpr (kTraversalStatsEnabled) {
-      ++child_nodes_created;
-    }
-  }
-
-  void record_transition_hit() {
-    if constexpr (kTraversalStatsEnabled) {
-      ++transition_hits;
-    }
-  }
-
-  void record_transition_miss() {
-    if constexpr (kTraversalStatsEnabled) {
-      ++transition_misses;
-    }
-  }
-
-  void record_atomic_retries(int64_t count) {
-    if constexpr (kCasRetryStatsEnabled) {
-      atomic_regret_update_retries += count;
-    }
-  }
 };
 
 struct TrainingRunStats {
-  bool public_state_prebuild_complete = false;
-  bool action_transition_prebuild_complete = false;
-  bool chance_transition_prebuild_complete = false;
-  bool info_set_prebuild_complete = false;
-  bool frozen_info_set_lookup_prebuild_complete = false;
-  int64_t prebuild_public_states = 0;
-  int64_t prebuild_action_transitions = 0;
-  int64_t missing_action_transitions = 0;
-  int64_t prebuild_chance_transitions = 0;
-  int64_t missing_chance_transitions = 0;
-  int64_t prebuild_info_sets = 0;
-  int64_t prebuild_action_entries = 0;
-  int64_t prebuild_frozen_info_set_lookup_rows = 0;
-  double prebuild_seconds = 0.0;
-  double info_set_prebuild_seconds = 0.0;
-  int warmup_iterations = 0;
-  int frozen_iterations = 0;
-  double warmup_seconds = 0.0;
-  double frozen_seconds = 0.0;
-  int64_t warmup_cfr_updates = 0;
-  int64_t frozen_cfr_updates = 0;
+  uint64_t iterations = 0;
+  int64_t decision_visits = 0;
+  int64_t chance_samples = 0;
+  int64_t terminal_visits = 0;
+  double seconds = 0.0;
 };
 
 }  // namespace poker

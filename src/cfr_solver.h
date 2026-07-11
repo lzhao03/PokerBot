@@ -3,25 +3,85 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
+#include <limits>
 #include <random>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
-#include "absl/types/span.h"
+#include "absl/container/flat_hash_map.h"
 #include "src/betting_abstraction.h"
 #include "src/card_abstraction.h"
 #include "src/game_state.h"
-#include "src/graph_builder.h"
 #include "src/hand_range.h"
 #include "src/poker_types.h"
 #include "src/solver_stats.h"
-#include "src/strategy_store.h"
-#include "src/strategy_tables.h"
 #include "src/training_range.h"
 
 namespace poker {
+
+using HistoryId = uint32_t;
+inline constexpr HistoryId kInvalidHistoryId =
+    std::numeric_limits<HistoryId>::max();
+
+enum class HistoryNodeKind : uint8_t {
+  kDecision,
+  kChance,
+  kTerminal,
+};
+
+struct HistoryEdge {
+  GameAction action;
+  HistoryId child = kInvalidHistoryId;
+};
+
+struct HistoryNode {
+  BettingState state;
+  uint32_t action_begin = 0;
+  uint8_t action_count = 0;
+  HistoryId chance_child = kInvalidHistoryId;
+  HistoryNodeKind kind = HistoryNodeKind::kDecision;
+};
+
+struct HistoryTree {
+  HistoryId root = kInvalidHistoryId;
+  std::vector<HistoryNode> nodes;
+  std::vector<HistoryEdge> edges;
+};
+
+struct Position {
+  HistoryId history = kInvalidHistoryId;
+  BoardRunout board = BoardRunout::Preflop();
+  PublicObservationId public_observation = initial_public_observation();
+};
+
+struct InfoSetKey {
+  HistoryId history = kInvalidHistoryId;
+  PublicObservationId public_observation = 0;
+  PrivateObservationId private_observation = 0;
+
+  friend bool operator==(const InfoSetKey&, const InfoSetKey&) = default;
+
+  template <typename H>
+  friend H AbslHashValue(H h, const InfoSetKey& key) {
+    return H::combine(std::move(h), key.history, key.public_observation,
+                      key.private_observation);
+  }
+};
+
+struct InfoSetRow {
+  uint32_t action_offset = 0;
+  uint8_t action_count = 0;
+
+  friend bool operator==(const InfoSetRow&, const InfoSetRow&) = default;
+};
+
+struct CfrState {
+  absl::flat_hash_map<InfoSetKey, InfoSetRow> rows;
+  std::vector<float> regret_sum;
+  std::vector<float> strategy_sum;
+  uint64_t iterations = 0;
+  double cumulative_root_utility = 0.0;
+};
 
 struct CFRSolverTestAccess;
 
@@ -30,7 +90,7 @@ class CFRSolver {
   using TraversalStats = poker::TraversalStats;
   using TrainingRunStats = poker::TrainingRunStats;
 
-  CFRSolver(const SolverConfig& config);
+  explicit CFRSolver(const SolverConfig& config);
   CFRSolver(const SolverConfig& config,
             const ExactPublicState& initial_state);
 
@@ -42,14 +102,10 @@ class CFRSolver {
                            const HandRange& player_b_range);
 
   double get_expected_value(int player_id) const;
-  uint64_t get_iterations_run() const { return cfr_state().iterations; }
+  uint64_t get_iterations_run() const { return state_.iterations; }
   int64_t get_cfr_update_count() const { return cfr_update_count_; }
-  size_t get_info_set_count() const {
-    return tables().info_set_count;
-  }
-  size_t get_public_state_count() const {
-    return nodes().size();
-  }
+  size_t get_info_set_count() const { return state_.rows.size(); }
+  size_t get_history_count() const { return history_.nodes.size(); }
   TraversalStats get_traversal_stats() const { return traversal_stats_; }
   void reset_traversal_stats() { traversal_stats_ = {}; }
   TrainingRunStats get_last_training_run_stats() const {
@@ -60,25 +116,6 @@ class CFRSolver {
  private:
   friend struct CFRSolverTestAccess;
 
-  const StrategyTables& tables() const {
-    return storage_.frozen_ref();
-  }
-  StrategyTables& mtables() {
-    return strategy_store_.mutable_tables();
-  }
-  CfrState& cfr_state() {
-    return storage_.cfr_state_ref();
-  }
-  const CfrState& cfr_state() const {
-    return storage_.cfr_state_ref();
-  }
-  const std::vector<PublicGraph::PublicNode>& nodes() const {
-    return tables().graph.nodes;
-  }
-
-  using InfoSetKey = StrategyTables::InfoSetKey;
-  using Node = PublicGraph::PublicNode;
-
   struct Deal {
     std::array<ComboId, kPlayerCount> hands = {};
     CardMask blocked_mask = 0;
@@ -86,200 +123,46 @@ class CFRSolver {
     ComboId hand(int player) const {
       return hands[static_cast<size_t>(player)];
     }
-
-    CardMask known_private_cards() const {
-      return blocked_mask;
-    }
-  };
-
-  struct TraversalOptions {
-    int update_player = 0;
-    uint64_t iteration = 0;
-    int max_depth = 0;
-    RegretLoadMode regret_load_mode = RegretLoadMode::kAtomic;
-    RegretUpdateMode regret_update_mode = RegretUpdateMode::kAtomic;
-    bool write_average_strategy = true;
-    bool use_fixed_infoset_lookup = false;
-    bool record_atomic_retry_stats = false;
-  };
-
-  struct Position {
-    NodeId node = kInvalidNodeId;
-    BoardRunout exact_board = BoardRunout::Preflop();
-  };
-
-  class MutableTraversalGraph {
-   public:
-    explicit MutableTraversalGraph(CFRSolver& solver);
-
-    std::optional<Position> action_child(
-        Position parent,
-        int action_index);
-    std::optional<Position> sample_chance_child(
-        Position parent,
-        CardMask known_private_cards);
-
-   private:
-    CFRSolver& solver_;
-  };
-
-  class FrozenTraversalGraph {
-   public:
-    explicit FrozenTraversalGraph(CFRSolver& solver);
-
-    Position action_child(Position parent, int action_index) const;
-    Position sample_chance_child(Position parent,
-                                CardMask known_private_cards);
-
-   private:
-    NodeId required_action_child_id(NodeId parent_node_id,
-                                    int action_index) const;
-    NodeId required_chance_child_id(
-        NodeId parent_node_id,
-        const ExactPublicState& child_state) const;
-
-    CFRSolver& solver_;
-  };
-
-  struct RangeScratchFrame {
-    std::array<TrainingRangeView, kPlayerCount> filtered_ranges;
-    std::array<TrainingRangeView, kMaxActionsPerNode> conditioned_ranges;
-  };
-
-  struct TraversalScratch {
-    explicit TraversalScratch(size_t depth_count);
-    RangeScratchFrame& frame(size_t depth);
-
-    std::vector<RangeScratchFrame> frames;
-  };
-
-  struct TraversalRun {
-    Deal deal;
-    TraversalOptions options;
-    TraversalScratch* scratch = nullptr;
   };
 
   struct TraversalFrame {
     std::array<double, kPlayerCount> reach = {1.0, 1.0};
-    std::array<const TrainingRangeView*, kPlayerCount> ranges = {
-        nullptr, nullptr};
     std::array<PrivateObservationId, kPlayerCount> private_observations = {};
     uint16_t decision_depth = 0;
-    uint16_t scratch_depth = 0;
   };
 
-  template <typename Graph>
-  class CfrTraversal {
-   public:
-    CfrTraversal(CFRSolver& solver,
-                 TraversalRun& run,
-                 Graph& graph)
-        : solver_(solver), run_(run), graph_(graph) {}
-
-    double value(Position position, const TraversalFrame& frame);
-
-   private:
-    double terminal(Position position, const Node& node);
-    double chance(Position position, const TraversalFrame& frame);
-    double decision(Position position,
-                    const Node& node,
-                    const TraversalFrame& frame);
-
-    CFRSolver& solver_;
-    TraversalRun& run_;
-    Graph& graph_;
-  };
-
-  bool prepare_prebuilt_training(
-      NodeId root_id,
-      int max_depth,
-      const TrainingRangeView& a_view,
-      const TrainingRangeView& b_view);
-  void run_growing_iterations(
-      int iterations,
-      NodeId root_id,
-      RangeSampler& sampler,
-      const TrainingRangeView& a_view,
-      const TrainingRangeView& b_view,
-      int max_depth);
-  void run_fixed_storage_iterations(
-      int iterations,
-      int num_threads,
-      NodeId root_id,
-      const BoardRunout& root_board,
-      const RangeSampler& sampler,
-      const TrainingRange& a_range,
-      const TrainingRange& b_range);
   Deal traversal_deal(RangeDeal deal) const;
-  TraversalOptions traversal_options(uint64_t iteration,
-                                     int max_depth) const;
-  void log_training_summary() const;
-  template <typename WorkerFn, typename AccumulateFn>
-  void run_sharded(int work_count,
-                   int worker_count,
-                   uint64_t first_index,
-                   WorkerFn&& worker_fn,
-                   AccumulateFn&& accumulate_fn);
-  template <typename Graph>
-  double cfr(Position position,
-             TraversalRun& run,
-             const TraversalFrame& frame,
-             Graph& graph);
-  template <typename Graph, typename EvalChild>
-  double sample_chance_children(int samples,
-                                Position position,
-                                CardMask known_private_cards,
-                                Graph& graph,
-                                EvalChild&& eval_child);
-
-  bool prebuild_info_set_rows(const TrainingRangeView& a_view,
-                              const TrainingRangeView& b_view,
-                              absl::Span<const std::optional<BoardRunout>> node_boards);
-  absl::Span<TrainingRangeView> condition_ranges_for_actions(
-      const TrainingRangeView& range,
-      const BoardRunout& board,
-      NodeId node_id,
-      size_t action_count,
-      RangeScratchFrame& scratch_frame);
-  double nonterminal_leaf_value() const noexcept;
+  Position root_position() const;
+  Position action_child(Position position, int action_index) const;
+  Position sample_chance_child(Position position, const Deal& deal);
   std::array<PrivateObservationId, kPlayerCount>
   private_observations_for_position(const Deal& deal,
-                                    Position position) const;
-  std::array<PrivateObservationId, kPlayerCount>
-  private_observations_after_chance(
-      const std::array<PrivateObservationId, kPlayerCount>& previous,
-      const Deal& deal,
-      Position child) const;
-  double evaluate_strategy_node(Position position,
-                                const Deal& deal,
-                                const TraversalFrame& frame,
-                                MutableTraversalGraph& graph);
-  double evaluate_strategy_node(Position position,
-                                const Deal& deal,
-                                const TraversalFrame& frame,
-                                FrozenTraversalGraph& graph);
-  template <typename Graph>
-  double evaluate_strategy_node_impl(Position position,
-                                     const Deal& deal,
-                                     const TraversalFrame& frame,
-                                     Graph& graph);
-  double evaluate_strategy_samples(
-      int samples,
-      NodeId root_id,
-      const BoardRunout& root_board,
-      const RangeSampler& sampler,
-      bool allow_parallel);
+                                    const Position& position) const;
+  void advance_private_observations(TraversalFrame& frame,
+                                    const Deal& deal,
+                                    const Position& child) const;
+  double traverse(Position position,
+                  const Deal& deal,
+                  TraversalFrame frame,
+                  int update_player,
+                  uint64_t iteration);
+  double evaluate_position(Position position,
+                           const Deal& deal,
+                           TraversalFrame frame);
+  InfoSetRow find_or_create_row(InfoSetKey key, uint8_t action_count);
+  const InfoSetRow* find_row(InfoSetKey key, uint8_t action_count) const;
+  void log_training_summary() const;
+
   SolverConfig config_;
   BettingRules betting_rules_;
   ExactPublicState initial_state_;
   std::mt19937 rng_;
+  BettingAbstraction betting_abstraction_;
+  HistoryTree history_;
+  CfrState state_;
   int64_t cfr_update_count_ = 0;
   TraversalStats traversal_stats_;
   TrainingRunStats last_training_run_stats_;
-  BettingAbstraction betting_abstraction_;
-  SolverStorage storage_;
-  StrategyStore strategy_store_;
-  GraphBuilder graph_builder_;
 };
 
 }  // namespace poker

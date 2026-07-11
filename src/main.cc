@@ -33,7 +33,6 @@ void SetMemoryLimit(int64_t megabytes) {
 }
 
 constexpr int64_t kDefaultMaxInfoSets = 500000;
-constexpr int64_t kDefaultMaxPublicStates = 200000;
 
 void PrintUsage(const char* program) {
   std::cerr
@@ -53,7 +52,7 @@ void PrintRunSummary(const poker::CFRSolver& solver,
                      const poker::SolverConfig& config,
                      double seconds) {
   const size_t info_sets = solver.get_info_set_count();
-  const size_t public_states = solver.get_public_state_count();
+  const size_t history_nodes = solver.get_history_count();
   const int64_t touches = solver.get_traversal_stats().action_entry_touches;
 
   std::cout << "iterations=" << solver.get_iterations_run() << "\n";
@@ -63,10 +62,7 @@ void PrintRunSummary(const poker::CFRSolver& solver,
             << "\n";
   std::cout << "player_a_ev=" << solver.get_expected_value(0) << "\n";
   std::cout << "seconds=" << seconds << "\n";
-  std::cout << "public_states=" << public_states << "\n";
-  std::cout << "max_public_states=" << config.max_public_states << "\n";
-  std::cout << "public_state_cap_hit="
-            << CapHit(public_states, config.max_public_states) << "\n";
+  std::cout << "history_nodes=" << history_nodes << "\n";
   std::cout << "action_entry_touches=" << touches << "\n";
   if (seconds > 0.0) {
     std::cout << "action_entry_touches_per_second="
@@ -111,10 +107,6 @@ int main(int argc, char** argv) {
     if (!option_state.saw_max_info_sets) {
       config.set_max_info_sets(kDefaultMaxInfoSets);
     }
-    if (!option_state.saw_max_public_states) {
-      config.set_max_public_states(kDefaultMaxPublicStates);
-    }
-
     poker::HandRange a_range;
     poker::HandRange b_range;
     a_range.set_uniform_range();

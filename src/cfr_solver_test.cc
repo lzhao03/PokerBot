@@ -1,20 +1,21 @@
 #include "src/cfr_solver.h"
-#include "src/combo.h"
-#include "src/strategy_store.h"
 
-#include "doctest/doctest.h"
-
-#include <algorithm>
 #include <array>
 #include <cmath>
-#include <optional>
 #include <stdexcept>
+
+#include "doctest/doctest.h"
+#include "src/combo.h"
+#include "src/game_rules.h"
 
 namespace poker {
 
 struct CFRSolverTestAccess {
-  static const StrategyTables& tables(const CFRSolver& solver) {
-    return solver.tables();
+  static const HistoryTree& history(const CFRSolver& solver) {
+    return solver.history_;
+  }
+  static const CfrState& state(const CFRSolver& solver) {
+    return solver.state_;
   }
 };
 
@@ -34,14 +35,12 @@ HandRange R(ComboId hand) {
 
 SolverConfig Config() {
   SolverConfig config;
-  config.starting_stack_size = 12;
+  config.starting_stack_size = 8;
   config.small_blind = 1;
   config.big_blind = 2;
-  config.bet_sizes = {1.0};
+  config.bet_sizes = {0.5, 1.0};
   config.chance_samples = 1;
-  config.max_depth = 2;
   config.max_info_sets = 500000;
-  config.max_public_states = 200000;
   config.num_training_threads = 1;
   return config;
 }
@@ -49,174 +48,87 @@ SolverConfig Config() {
 const ComboId kA = H(14, S::kHearts, 14, S::kSpades);
 const ComboId kB = H(13, S::kClubs, 13, S::kDiamonds);
 
-TEST_CASE("solver lifecycle respects training, limits, and root contracts") {
-  SUBCASE("evaluation does not update training state") {
-    SolverConfig config = Config();
-    config.regret_only_training = false;
-    CFRSolver solver(config);
-    solver.run(4, R(kA), R(kB));
-    const auto run = solver.get_last_training_run_stats();
-    CHECK(solver.get_iterations_run() == 4);
-    CHECK(run.warmup_iterations + run.frozen_iterations == 4);
-    CHECK(std::isfinite(solver.get_expected_value(0)));
-    CHECK(solver.get_cfr_update_count() > 0);
-    CHECK(solver.get_traversal_stats().max_decision_depth <= config.max_depth);
+TEST_CASE("history tree stores direct rule transitions") {
+  CFRSolver solver(Config());
+  const HistoryTree& tree = CFRSolverTestAccess::history(solver);
+  REQUIRE(tree.root < tree.nodes.size());
 
-    const int iterations = solver.get_iterations_run();
-    const size_t info_sets = solver.get_info_set_count();
-    const int64_t updates = solver.get_cfr_update_count();
-    CHECK(std::isfinite(solver.evaluate_strategy(kA, kB)));
-    CHECK(solver.get_iterations_run() == iterations);
-    CHECK(solver.get_info_set_count() == info_sets);
-    CHECK(solver.get_cfr_update_count() == updates);
+  for (HistoryId id = 0; id < tree.nodes.size(); ++id) {
+    const HistoryNode& node = tree.nodes[id];
+    if (node.kind == HistoryNodeKind::kDecision) {
+      REQUIRE(node.action_count > 0);
+      for (uint8_t action = 0; action < node.action_count; ++action) {
+        const HistoryEdge& edge = tree.edges[node.action_begin + action];
+        REQUIRE(edge.child < tree.nodes.size());
+        CHECK(tree.nodes[edge.child].state ==
+              ApplyAction(node.state, edge.action));
+      }
+    } else if (node.kind == HistoryNodeKind::kChance) {
+      REQUIRE(node.chance_child < tree.nodes.size());
+      CHECK(tree.nodes[node.chance_child].state ==
+            AdvanceBettingStreet(node.state, BettingRules{2}));
+    }
   }
 
-  SUBCASE("public-state cap forces mutable warmup") {
-    SolverConfig config = Config();
-    config.max_public_states = 1;
-    config.regret_only_training = true;
-    CFRSolver solver(config);
-    solver.run(3, R(kA), R(kB));
-    const auto run = solver.get_last_training_run_stats();
-    CHECK_FALSE(run.public_state_prebuild_complete);
-    CHECK(run.warmup_iterations == 3);
-    CHECK(run.frozen_iterations == 0);
-    CHECK(solver.get_public_state_count() <= 1);
-  }
-
-  SUBCASE("terminal and invalid roots") {
-    SolverConfig config = Config();
-    ExactPublicState terminal;
-    terminal.betting.stack = {0, 0};
-    terminal.betting.total_committed = {5, 5};
-    terminal.betting.street_committed = {5, 5};
-    terminal.betting.last_full_raise = config.big_blind;
-    terminal.betting.street = StreetKind::kRiver;
-    terminal.betting.player_to_act = -1;
-    terminal.betting.folded_player = 1;
-    CFRSolver solver(config, terminal);
-    solver.run(1, R(kA), R(kB));
-    CHECK(solver.get_iterations_run() == 1);
-    CHECK(solver.get_expected_value(0) == doctest::Approx(5.0));
-
-    ExactPublicState invalid;
-    invalid.betting.stack[0] = -1;
-    CHECK_THROWS_AS(CFRSolver(config, invalid), std::invalid_argument);
-  }
+  const HistoryNode& root = tree.nodes[tree.root];
+  REQUIRE(root.action_count >= 2);
+  CHECK(tree.edges[root.action_begin].child !=
+        tree.edges[root.action_begin + 1].child);
 }
 
-TEST_CASE("postflop roots use full private observation history") {
+TEST_CASE("training mutates only CFR state") {
+  CFRSolver solver(Config());
+  const size_t history_count = solver.get_history_count();
+  solver.run(4, R(kA), R(kB));
+  CHECK(solver.get_iterations_run() == 4);
+  CHECK(solver.get_info_set_count() > 0);
+  CHECK(solver.get_cfr_update_count() > 0);
+  CHECK(std::isfinite(solver.get_expected_value(0)));
+  CHECK(solver.get_history_count() == history_count);
+
+  const CfrState before = CFRSolverTestAccess::state(solver);
+  const int64_t updates = solver.get_cfr_update_count();
+  CHECK(std::isfinite(solver.evaluate_strategy(kA, kB)));
+  CHECK(solver.get_history_count() == history_count);
+  CHECK(solver.get_cfr_update_count() == updates);
+  CHECK(CFRSolverTestAccess::state(solver).rows == before.rows);
+  CHECK(CFRSolverTestAccess::state(solver).regret_sum == before.regret_sum);
+  CHECK(CFRSolverTestAccess::state(solver).strategy_sum == before.strategy_sum);
+}
+
+TEST_CASE("postflop roots use full observation identity") {
   SolverConfig config = Config();
   const BettingRules rules{config.big_blind};
-  ExactPublicState state = MakeInitialState(rules, {12, 12}, {1, 2});
-  state.betting = ApplyAction(
-      state.betting, {ActionKind::kCall, 2});
-  state.betting = ApplyAction(
-      state.betting, {ActionKind::kCheck, 0});
+  ExactPublicState root = MakeInitialState(rules, {8, 8}, {1, 2});
+  root.betting = ApplyAction(root.betting, {ActionKind::kCall, 2});
+  root.betting = ApplyAction(root.betting, {ActionKind::kCheck, 0});
   const std::array<CardId, 3> flop = {
-      MakeCardId(2, S::kHearts),
-      MakeCardId(7, S::kDiamonds),
-      MakeCardId(12, S::kClubs),
-  };
-  state = ApplyChance(state, flop, rules);
+      MakeCardId(2, S::kHearts), MakeCardId(7, S::kDiamonds),
+      MakeCardId(12, S::kClubs)};
+  root = ApplyChance(root, flop, rules);
 
-  CFRSolver solver(config, state);
+  CFRSolver solver(config, root);
   solver.run(2, R(kA), R(kB));
-  const StrategyTables& tables = CFRSolverTestAccess::tables(solver);
-  const PublicGraph& graph = tables.graph;
-  const NodeId root_id = graph.root;
-  REQUIRE(root_id < graph.nodes.size());
-  const auto& root = graph.nodes[root_id];
-  REQUIRE(root.betting_node_id < graph.betting_nodes.size());
-  const int player =
-      graph.betting_nodes[root.betting_node_id].state.player_to_act;
-  REQUIRE(IsPlayer(player));
-  REQUIRE(root_id < tables.growing_info_sets.size());
-  REQUIRE(tables.growing_info_sets[root_id] != nullptr);
+  const HistoryTree& tree = CFRSolverTestAccess::history(solver);
+  const int player = tree.nodes[tree.root].state.player_to_act;
   const ComboId hand = player == 0 ? kA : kB;
-  const PrivateObservationId expected = private_observation_for_runout(
-      hand, state.board, root.public_observation);
-  CHECK(tables.growing_info_sets[root_id]->rows.contains(expected));
-  CHECK(std::isfinite(solver.evaluate_strategy(kA, kB)));
+  const PublicObservationId public_id =
+      public_observation_id(root.betting.street, root.board);
+  const PrivateObservationId private_id =
+      private_observation_for_runout(hand, root.board, public_id);
+  CHECK(CFRSolverTestAccess::state(solver).rows.contains(
+      {tree.root, public_id, private_id}));
 }
 
-TEST_CASE("strategy storage performs regret matching, averaging, and freezing") {
-  SolverConfig config;
-  SolverStorage storage;
-  TraversalStats stats;
-  storage.mutable_tables->graph.nodes.resize(1);
-  storage.mutable_tables->graph.betting_nodes.resize(1);
-  storage.mutable_tables->graph.nodes[0].betting_node_id = 0;
-  auto& node = storage.mutable_tables->graph.betting_nodes[0];
-  node.kind = PublicGraph::NodeKind::kDecision;
-  node.state.player_to_act = 0;
-  node.state.last_full_raise = 1;
-  node.action_count = 3;
-  StrategyStore store(config, storage, &stats);
+TEST_CASE("unsupported execution modes and caps fail explicitly") {
+  SolverConfig parallel = Config();
+  parallel.num_training_threads = 2;
+  CHECK_THROWS_AS(CFRSolver{parallel}, std::invalid_argument);
 
-  double probabilities[3] = {};
-  store.regret_matching_or_uniform(std::nullopt, 3, RegretLoadMode::kPlain,
-                                   absl::Span<double>(probabilities));
-  for (double probability : probabilities)
-    CHECK(probability == doctest::Approx(1.0 / 3.0));
-
-  const ComboId exact_hand = H(14, S::kHearts, 13, S::kHearts);
-  const StrategyTables::InfoSetKey base_key{
-      0, initial_private_observation(exact_hand)};
-  const auto created = store.get_or_create(base_key, 3);
-  REQUIRE(created.has_value());
-  CHECK(store.get_or_create(base_key, 3).has_value());
-  CHECK(storage.mutable_tables->info_set_count == 1);
-  CHECK_FALSE(store.get_or_create(base_key, 2).has_value());
-  ActionBlock block = *created;
-  const RegretUpdateOptions plain{RegretUpdateMode::kPlain, false};
-  block.add_cfr_plus_regret(0, 1.0f, plain);
-  block.add_cfr_plus_regret(0, -2.0f, plain);
-  block.add_cfr_plus_regret(1, 2.0f, plain);
-  block.add_cfr_plus_regret(2, 6.0f, plain);
-  block.regret_matching(RegretLoadMode::kPlain,
-                        absl::Span<double>(probabilities));
-  CHECK(probabilities[0] == doctest::Approx(0.0));
-  CHECK(probabilities[1] == doctest::Approx(0.25));
-  CHECK(probabilities[2] == doctest::Approx(0.75));
-
-  const double strategy[3] = {0.2, 0.3, 0.5};
-  block.add_average_strategy(absl::Span<const double>(strategy), 2.0,
-                             RegretUpdateMode::kPlain);
-  block.average_strategy(false, 0.5, absl::Span<double>(probabilities));
-  CHECK(probabilities[0] == doctest::Approx(0.2));
-  CHECK(probabilities[1] == doctest::Approx(0.3));
-  CHECK(probabilities[2] == doctest::Approx(0.5));
-
-  const PrivateObservationId history_a =
-      (PrivateObservationId{5} << 6) | 1;
-  const PrivateObservationId history_b =
-      (PrivateObservationId{5} << 6) | 2;
-  const PrivateObservationId high_id =
-      (PrivateObservationId{1} << 40) | 7;
-  CHECK(store.get_or_create({0, history_b}, 3).has_value());
-  CHECK(store.get_or_create({0, high_id}, 3).has_value());
-  CHECK(store.get_or_create({0, history_a}, 3).has_value());
-  CHECK(storage.mutable_tables->info_set_count == 4);
-
-  REQUIRE(store.build_frozen_info_set_index());
-  const auto& entries = storage.mutable_tables->frozen_info_set_entries;
-  CHECK(std::is_sorted(
-      entries.begin(), entries.end(), [](const auto& a, const auto& b) {
-        return a.private_observation < b.private_observation;
-      }));
-  storage.freeze();
-  const auto frozen = store.find_frozen(base_key, 3);
-  REQUIRE(frozen.has_value());
-  CHECK(store.find_frozen({0, high_id}, 3).has_value());
-  CHECK_FALSE(store.find_frozen({0, high_id + 1}, 3).has_value());
-  CHECK(store.find(base_key, 3).has_value());
-  double frozen_probabilities[3] = {};
-  frozen->regret_matching(RegretLoadMode::kPlain,
-                          absl::Span<double>(frozen_probabilities));
-  for (int i = 0; i < 3; ++i)
-    CHECK(frozen_probabilities[i] == doctest::Approx(
-          i == 0 ? 0.0 : i == 1 ? 0.25 : 0.75));
+  SolverConfig capped = Config();
+  capped.max_info_sets = 1;
+  CFRSolver solver(capped);
+  CHECK_THROWS_AS(solver.run(2, R(kA), R(kB)), std::runtime_error);
 }
 
 }  // namespace
