@@ -1,6 +1,4 @@
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
-
-DOCTEST_DEPS = ["@doctest//:main"]
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 
 cc_library(
     name = "poker",
@@ -69,44 +67,6 @@ cc_library(
     copts = ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
     deps = SOLVER_DEPS,
     visibility = ["//tests:__pkg__"],
-)
-
-cc_test(
-    name = "poker_test",
-    srcs = [
-        "card_utils_test.cc",
-        "cfr_solver_test.cc",
-        "game_rules_test.cc",
-        "training_range_test.cc",
-    ],
-    deps = DOCTEST_DEPS + [
-        ":solver",
-        "//tools:hand_evaluator_table_builder",
-    ],
-)
-
-cc_test(
-    name = "unsupported_coarse_abstraction_test",
-    srcs = ["unsupported_abstraction_test.cc"],
-    copts = [
-        "-DPOKER_COARSE_PRIVATE_BUCKETS=1",
-        "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
-    ],
-    deps = DOCTEST_DEPS + [":solver_coarse_buckets"],
-)
-
-cc_test(
-    name = "strict_abstraction_coarse_private_test",
-    srcs = ["strict_abstraction_test.cc"],
-    copts = ["-DPOKER_COARSE_PRIVATE_BUCKETS=1"],
-    deps = DOCTEST_DEPS + [":solver_coarse_private"],
-)
-
-cc_test(
-    name = "strict_abstraction_coarse_public_test",
-    srcs = ["strict_abstraction_test.cc"],
-    copts = ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
-    deps = DOCTEST_DEPS + [":solver_coarse_public"],
 )
 
 cc_binary(
