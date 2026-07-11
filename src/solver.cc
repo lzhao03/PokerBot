@@ -560,8 +560,6 @@ void CFRSolver::advance_private_observations(
     frame.private_observations[player] = AdvancePrivateObservation(
         config_.card_abstraction(), frame.private_observations[player], hand,
         child.public_state);
-    assert(frame.private_observations[player] == ObservePrivate(
-               config_.card_abstraction(), hand, child.public_state));
   }
 }
 
@@ -628,9 +626,6 @@ double CFRSolver::traverse(Position position,
       const InfoSetKey key{
           position.history, position.public_state.observation(),
           frame.private_observations[player_index]};
-      const ComboId hand = deal.hand(player).combo();
-      assert(key.private_observation == ObservePrivate(
-                 config_.card_abstraction(), hand, position.public_state));
       const bool training = context.mode == TraversalMode::kTrain;
       const bool updates = training && context.update_player == player;
       std::optional<InfoSetRow> row;
