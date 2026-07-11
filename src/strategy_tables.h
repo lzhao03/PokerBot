@@ -129,15 +129,15 @@ class StrategyTables {
 
   struct InfoSetKey {
     NodeId node_id = 0;
-    PrivateObservationId private_observation = 0;
+    PrivateInfoSetId private_id = 0;
   };
 
   struct GrowingPublicInfoSets {
-    absl::flat_hash_map<PrivateObservationId, InfoSetRow> rows;
+    absl::flat_hash_map<PrivateInfoSetId, InfoSetRow> rows;
   };
 
   struct FrozenInfoSetEntry {
-    PrivateObservationId private_observation = 0;
+    PrivateInfoSetId private_id = 0;
     uint32_t action_offset = kInvalidActionOffset;
   };
 

@@ -390,18 +390,18 @@ bool StrategyStore::build_frozen_info_set_index() {
     FrozenPublicInfoSetRange& range =
         tables.frozen_info_set_ranges[node_id];
     range.begin = static_cast<uint32_t>(tables.frozen_info_set_entries.size());
-    for (const auto& [private_observation, row] : rows->rows) {
+    for (const auto& [private_id, row] : rows->rows) {
       if (row.action_count != action_count) {
         return false;
       }
       tables.frozen_info_set_entries.push_back(
-          {private_observation, row.action_offset});
+          {private_id, row.action_offset});
     }
     auto first = tables.frozen_info_set_entries.begin() + range.begin;
     std::sort(first, tables.frozen_info_set_entries.end(),
               [](const FrozenInfoSetEntry& a,
                  const FrozenInfoSetEntry& b) {
-                return a.private_observation < b.private_observation;
+                return a.private_id < b.private_id;
               });
     range.count = static_cast<uint32_t>(rows->rows.size());
   }
@@ -437,7 +437,7 @@ const StrategyStore::InfoSetRow* StrategyStore::find_growing_row(
   if (rows == nullptr) {
     return nullptr;
   }
-  const auto row = rows->rows.find(key.private_observation);
+  const auto row = rows->rows.find(key.private_id);
   return row == rows->rows.end() ? nullptr : &row->second;
 }
 
@@ -456,13 +456,13 @@ const StrategyStore::FrozenInfoSetEntry* StrategyStore::find_frozen_entry(
   const auto first = tables.frozen_info_set_entries.begin() + range.begin;
   const auto last = tables.frozen_info_set_entries.begin() + end;
   const auto entry = std::lower_bound(
-      first, last, key.private_observation,
+      first, last, key.private_id,
       [](const FrozenInfoSetEntry& candidate,
-         PrivateObservationId observation) {
-        return candidate.private_observation < observation;
+         PrivateInfoSetId private_id) {
+        return candidate.private_id < private_id;
       });
   if (entry == last ||
-      entry->private_observation != key.private_observation) {
+      entry->private_id != key.private_id) {
     return nullptr;
   }
   return &*entry;
@@ -485,7 +485,7 @@ const StrategyStore::InfoSetRow* StrategyStore::get_or_create_info_set_row(
   InfoSetRow row = append_info_set_actions(action_count);
   GrowingPublicInfoSets& rows = get_or_create_growing_rows(key.node_id);
   const auto [entry, inserted] =
-      rows.rows.try_emplace(key.private_observation, row);
+      rows.rows.try_emplace(key.private_id, row);
   if (!inserted) {
     return &entry->second;
   }

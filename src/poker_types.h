@@ -11,6 +11,7 @@ using CardMask = uint64_t;
 using BoardBucketId = uint64_t;
 using PublicObservationId = uint64_t;
 using PrivateObservationId = uint64_t;
+using PrivateInfoSetId = uint64_t;
 using Chips = int32_t;
 
 constexpr int kDeckCardCount = 52;
@@ -50,6 +51,17 @@ enum class ActionKind : uint8_t {
   kAllIn = 6,
 };
 
+enum class RecallPolicy : uint8_t {
+  kRequirePerfectRecall,
+  kAllowLegacyImperfectRecall,
+};
+
+inline const char* RecallPolicyName(RecallPolicy policy) {
+  return policy == RecallPolicy::kAllowLegacyImperfectRecall
+             ? "legacy_imperfect"
+             : "perfect";
+}
+
 struct GameAction {
   ActionKind kind = ActionKind::kNoAction;
   Chips target_street_commitment = 0;
@@ -75,6 +87,7 @@ struct SolverConfig {
   std::vector<double> turn_bet_sizes;
   std::vector<double> river_bet_sizes;
   bool regret_only_training = false;
+  RecallPolicy recall_policy = RecallPolicy::kRequirePerfectRecall;
   // Maximum number of info sets to allocate. 0 means unlimited.
   // Once this limit is reached, new (combo, node) pairs fall back to
   // uniform strategy rather than allocating new entries. Controls peak memory.

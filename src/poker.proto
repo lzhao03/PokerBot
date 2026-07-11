@@ -4,6 +4,11 @@ syntax = "proto3";
 package poker;
 
 message PokerConfig {
+  enum RecallPolicy {
+    REQUIRE_PERFECT_RECALL = 0;
+    ALLOW_LEGACY_IMPERFECT_RECALL = 1;
+  }
+
   repeated double bet_sizes = 1;
   int32 starting_stack_size = 2;
   int32 max_depth = 3;
@@ -26,6 +31,7 @@ message PokerConfig {
   reserved "warmup_iterations";
   // Maximum number of compact public-state rows to allocate. 0 means unlimited.
   int64 max_public_states = 17;
+  RecallPolicy recall_policy = 18;
 }
 
 enum Street {

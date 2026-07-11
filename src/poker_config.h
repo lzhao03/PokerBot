@@ -43,6 +43,11 @@ inline SolverConfig SolverConfigFromProto(const PokerConfig& config) {
   native.river_bet_sizes.assign(config.river_bet_sizes().begin(),
                                 config.river_bet_sizes().end());
   native.regret_only_training = config.regret_only_training();
+  native.recall_policy =
+      config.recall_policy() ==
+              PokerConfig::ALLOW_LEGACY_IMPERFECT_RECALL
+          ? RecallPolicy::kAllowLegacyImperfectRecall
+          : RecallPolicy::kRequirePerfectRecall;
   native.max_info_sets = static_cast<int>(config.max_info_sets());
   native.max_public_states = static_cast<int>(config.max_public_states());
   native.num_training_threads = config.num_training_threads();
@@ -128,6 +133,11 @@ inline bool ApplySolverOption(std::string_view argument,
                               CommonOptionState& state) {
   if (argument == "--regret-only") {
     config.set_regret_only_training(true);
+    return true;
+  }
+  if (argument == "--allow-legacy-imperfect-recall") {
+    config.set_recall_policy(
+        PokerConfig::ALLOW_LEGACY_IMPERFECT_RECALL);
     return true;
   }
   if (argument.starts_with("--config=")) {
@@ -217,6 +227,7 @@ inline constexpr std::string_view kCommonSolverOptionUsage =
     "  --max-public-states=N          solver config override\n"
     "  --threads=N                    solver config override\n"
     "  --regret-only                  solver config override\n"
+    "  --allow-legacy-imperfect-recall allow coarse/coarse legacy mode\n"
     "  --bet-size=X                   replace/append global bet sizes\n"
     "  --preflop-bet-size=X           solver config override\n"
     "  --flop-bet-size=X              solver config override\n"

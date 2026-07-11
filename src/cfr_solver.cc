@@ -79,6 +79,13 @@ CFRSolver::CFRSolver(const SolverConfig& config,
       strategy_store_(config_, storage_, &traversal_stats_),
       graph_builder_(config_, betting_rules_, storage_, betting_abstraction_,
                      traversal_stats_) {
+  if constexpr (kCoarsePublicBuckets && kCoarsePrivateBuckets) {
+    if (config_.recall_policy == RecallPolicy::kRequirePerfectRecall) {
+      throw std::invalid_argument(
+          "coarse public + coarse private abstraction does not provide "
+          "exhaustive history-aware private observation support");
+    }
+  }
   if (!IsValidBettingState(initial_state_.betting)) {
     throw std::invalid_argument("initial betting state is invalid");
   }
@@ -118,6 +125,9 @@ std::array<PrivateObservationId, kPlayerCount>
 CFRSolver::private_observations_for_position(
     const Deal& deal,
     Position position) const {
+  if (uses_legacy_imperfect_recall()) {
+    return {};
+  }
   if (position.node >= nodes().size()) {
     throw std::logic_error("private observation node is invalid");
   }
@@ -136,6 +146,9 @@ CFRSolver::private_observations_after_chance(
     const std::array<PrivateObservationId, kPlayerCount>& previous,
     const Deal& deal,
     Position child) const {
+  if (uses_legacy_imperfect_recall()) {
+    return previous;
+  }
   if (child.node >= nodes().size()) {
     throw std::logic_error("private observation child node is invalid");
   }
@@ -154,6 +167,53 @@ CFRSolver::private_observations_after_chance(
         deal.hand(player), child.exact_board, node.public_observation));
   }
   return observations;
+}
+
+bool CFRSolver::uses_legacy_imperfect_recall() const noexcept {
+  return kCoarsePublicBuckets && kCoarsePrivateBuckets &&
+         config_.recall_policy == RecallPolicy::kAllowLegacyImperfectRecall;
+}
+
+PrivateInfoSetId CFRSolver::private_info_set_id(
+    ComboId hand,
+    Position position,
+    PrivateObservationId observation) const {
+  if (uses_legacy_imperfect_recall()) {
+    if (position.node >= nodes().size()) {
+      throw std::logic_error("private infoset node is invalid");
+    }
+    const Node& node = nodes()[position.node];
+    if (node.betting_node_id >= tables().betting_nodes.size()) {
+      throw std::logic_error("private infoset betting node is invalid");
+    }
+    const StreetKind street =
+        tables().betting_nodes[node.betting_node_id].state.street;
+    return observe_private_street(hand, street, position.exact_board).value;
+  }
+  assert(observation == private_observation_for_runout(
+      hand, position.exact_board,
+      nodes()[position.node].public_observation));
+  return observation;
+}
+
+PrivateInfoSetId CFRSolver::private_info_set_id_for_runout(
+    ComboId hand,
+    const BoardRunout& board,
+    NodeId node_id) const {
+  if (node_id >= nodes().size()) {
+    throw std::logic_error("private infoset node is invalid");
+  }
+  const Node& node = nodes()[node_id];
+  if (uses_legacy_imperfect_recall()) {
+    if (node.betting_node_id >= tables().betting_nodes.size()) {
+      throw std::logic_error("private infoset betting node is invalid");
+    }
+    const StreetKind street =
+        tables().betting_nodes[node.betting_node_id].state.street;
+    return observe_private_street(hand, street, board).value;
+  }
+  return private_observation_for_runout(
+      hand, board, node.public_observation);
 }
 
 CFRSolver::TraversalOptions CFRSolver::traversal_options(
@@ -341,7 +401,7 @@ bool CFRSolver::prebuild_info_set_rows(
     return true;
   }
 
-  absl::flat_hash_set<PrivateObservationId> seen_observations;
+  absl::flat_hash_set<PrivateInfoSetId> seen_private_ids;
 
   for (NodeId node_id = 0; node_id < nodes().size(); ++node_id) {
     if (node_id >= node_boards.size() || !node_boards[node_id].has_value()) {
@@ -365,25 +425,39 @@ bool CFRSolver::prebuild_info_set_rows(
       continue;
     }
 
+    if (uses_legacy_imperfect_recall()) {
+      for (PrivateInfoSetId private_id = 0;
+           private_id < kCoarsePrivateStreetObservationCount;
+           ++private_id) {
+        if (!strategy_store_
+                 .get_or_create({node_id, private_id},
+                                betting_node.action_count)
+                 .has_value()) {
+          return false;
+        }
+      }
+      continue;
+    }
+
     const BoardRunout& board = *node_boards[node_id];
-    seen_observations.clear();
+    seen_private_ids.clear();
     const CardMask board_mask = board.mask();
     for (size_t i = 0; i < range.size(); ++i) {
       if (range.weight(i) <= 0.0f) {
         continue;
       }
       const ComboId combo_id = range.combo(i);
-      if ((ComboMask(combo_id) & board_mask) != 0) {
+      if (!kCoarsePublicBuckets &&
+          (ComboMask(combo_id) & board_mask) != 0) {
         continue;
       }
-      const PrivateObservationId observation =
-          private_observation_for_runout(
-              combo_id, board, graph_node.public_observation);
-      if (!seen_observations.insert(observation).second) {
+      const PrivateInfoSetId private_id =
+          private_info_set_id_for_runout(combo_id, board, node_id);
+      if (!seen_private_ids.insert(private_id).second) {
         continue;
       }
       if (!strategy_store_
-               .get_or_create({node_id, observation},
+               .get_or_create({node_id, private_id},
                               betting_node.action_count)
                .has_value()) {
         return false;
@@ -400,6 +474,9 @@ void CFRSolver::run(int iterations,
   last_training_run_stats_ = {};
   if (iterations <= 0) {
     return;
+  }
+  if (uses_legacy_imperfect_recall()) {
+    LOG(WARNING) << "Using legacy imperfect-recall private buckets";
   }
 
   const auto a_range = BuildTrainingRange(a_range_spec);
@@ -453,10 +530,6 @@ bool CFRSolver::prepare_prebuilt_training(
   if (storage_.is_frozen()) {
     return true;
   }
-  if constexpr (kCoarsePrivateBuckets) {
-    return false;
-  }
-
   auto record_public_counts = [&] {
     const int64_t public_states = static_cast<int64_t>(get_public_state_count());
     stats.prebuild_public_states = public_states;
@@ -826,11 +899,10 @@ double CFRSolver::CfrTraversal<Graph>::decision(
 
   const bool update_player = player == run_.options.update_player;
   const size_t action_count = betting_node.action_count;
-  const PrivateObservationId observation =
-      frame.private_observations[static_cast<size_t>(player)];
-  assert(observation == private_observation_for_runout(
-      hand, position.exact_board, node.public_observation));
-  const InfoSetKey infoset{node_id, observation};
+  const PrivateInfoSetId private_id = solver_.private_info_set_id(
+      hand, position,
+      frame.private_observations[static_cast<size_t>(player)]);
+  const InfoSetKey infoset{node_id, private_id};
   std::optional<ActionBlock> actions;
   if (run_.options.use_fixed_infoset_lookup) {
     actions = solver_.strategy_store_.find_frozen(infoset, action_count);
@@ -994,8 +1066,6 @@ absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
   }
 
   const CardMask board_mask = board.mask();
-  const PublicObservationId public_observation =
-      nodes()[node_id].public_observation;
   std::array<double, kMaxActionsPerNode> action_probabilities_storage{};
   absl::Span<double> action_probabilities(
       action_probabilities_storage.data(), action_count);
@@ -1006,11 +1076,10 @@ absl::Span<TrainingRangeView> CFRSolver::condition_ranges_for_actions(
       continue;
     }
 
-    const PrivateObservationId observation =
-        private_observation_for_runout(
-            combo_id, board, public_observation);
+    const PrivateInfoSetId private_id =
+        private_info_set_id_for_runout(combo_id, board, node_id);
     strategy_store_.regret_matching_for_observation(
-        {node_id, observation}, action_count, action_probabilities);
+        {node_id, private_id}, action_count, action_probabilities);
 
     for (size_t action_index = 0; action_index < action_count; ++action_index) {
       const double probability = action_probabilities[action_index];
@@ -1203,12 +1272,11 @@ double CFRSolver::evaluate_strategy_node_impl(
   std::array<double, kMaxActionsPerNode> probabilities_storage{};
   absl::Span<double> probabilities(
       probabilities_storage.data(), betting_node.action_count);
-  const PrivateObservationId observation =
-      frame.private_observations[static_cast<size_t>(player)];
-  assert(observation == private_observation_for_runout(
-      deal.hand(player), position.exact_board, node.public_observation));
+  const PrivateInfoSetId private_id = private_info_set_id(
+      deal.hand(player), position,
+      frame.private_observations[static_cast<size_t>(player)]);
   strategy_store_.average_strategy(
-      {node_id, observation}, betting_node.action_count,
+      {node_id, private_id}, betting_node.action_count,
       config_.regret_only_training, probabilities);
 
   double value = 0.0;

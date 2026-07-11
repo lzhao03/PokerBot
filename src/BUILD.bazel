@@ -365,6 +365,42 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "cfr_solver_coarse_private",
+    srcs = [
+        "cfr_solver.cc",
+        "graph_builder.cc",
+    ],
+    hdrs = [
+        "coarse_chance_transitions.h",
+        "cfr_solver.h",
+        "graph_builder.h",
+    ],
+    copts = ["-DPOKER_COARSE_PRIVATE_BUCKETS=1"],
+    deps = CFR_SOLVER_DEPS + [
+        ":betting_abstraction",
+        ":strategy_store",
+    ],
+)
+
+cc_library(
+    name = "cfr_solver_coarse_public",
+    srcs = [
+        "cfr_solver.cc",
+        "graph_builder.cc",
+    ],
+    hdrs = [
+        "coarse_chance_transitions.h",
+        "cfr_solver.h",
+        "graph_builder.h",
+    ],
+    copts = ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
+    deps = CFR_SOLVER_DEPS + [
+        ":betting_abstraction",
+        ":strategy_store",
+    ],
+)
+
 cc_test(
     name = "poker_test",
     srcs = [
@@ -383,6 +419,7 @@ cc_test(
         ":hand_evaluator",
         ":hand_evaluator_table_builder",
         ":hand_range",
+        ":poker_config",
         ":strategy_store",
         ":training_range",
     ],
@@ -398,6 +435,30 @@ cc_test(
     deps = DOCTEST_DEPS + [
         ":combo",
         ":cfr_solver_coarse_buckets_no_stats",
+        ":hand_range",
+    ],
+)
+
+cc_test(
+    name = "recall_policy_coarse_private_test",
+    srcs = ["recall_policy_test.cc"],
+    copts = ["-DPOKER_COARSE_PRIVATE_BUCKETS=1"],
+    deps = DOCTEST_DEPS + [
+        ":cfr_solver_coarse_private",
+        ":combo",
+        ":game_rules",
+        ":hand_range",
+    ],
+)
+
+cc_test(
+    name = "recall_policy_coarse_public_test",
+    srcs = ["recall_policy_test.cc"],
+    copts = ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
+    deps = DOCTEST_DEPS + [
+        ":cfr_solver_coarse_public",
+        ":combo",
+        ":game_rules",
         ":hand_range",
     ],
 )
