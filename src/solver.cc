@@ -252,7 +252,8 @@ ModelFingerprint FingerprintModel(const SolveSpec& spec,
   hash.add_i32(config.max_info_sets());
   hash.add_u8(config.accumulate_average_strategy() ? 1 : 0);
   hash.add_u8(static_cast<uint8_t>(config.card_abstraction().public_mode));
-  hash.add_u8(static_cast<uint8_t>(config.card_abstraction().private_mode));
+  hash.add_u8(static_cast<uint8_t>(config.card_abstraction().private_kind));
+  hash.add_u8(static_cast<uint8_t>(config.card_abstraction().recall_mode));
   for (const auto& fractions :
        config.bet_abstraction().pot_fractions) {
     hash.add_u32(static_cast<uint32_t>(fractions.size()));

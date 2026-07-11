@@ -256,12 +256,17 @@ PublicObservationId ObservePublic(const CardAbstractionConfig& config,
 PrivateObservationId ObservePrivate(const CardAbstractionConfig& config,
                                     ComboId hand,
                                     const PublicPosition& position) noexcept {
-  if (config.private_mode == PrivateCardMode::kExactCanonical) {
+  if (config.private_kind == PrivateAbstractionKind::kExactCanonical) {
     return CanonicalizeObservation(hand, position.board()).private_observation;
   }
 
-  PrivateObservationId observation =
-      InitialPrivateObservation(config, hand);
+  if (config.recall_mode == RecallMode::kCurrentBucketOnly) {
+    const PrivateBucketId bucket = CoarsePrivateBucket(
+        hand, position.street(), position.features());
+    return PrivateObservationId(static_cast<uint64_t>(bucket) + 1);
+  }
+
+  PrivateObservationId observation = InitialPrivateObservation(config, hand);
   if (position.street() == StreetKind::kPreflop) {
     return observation;
   }
@@ -290,7 +295,7 @@ PrivateObservationId ObservePrivate(const CardAbstractionConfig& config,
 PrivateObservationId InitialPrivateObservation(
     const CardAbstractionConfig& config,
     ComboId hand) noexcept {
-  if (config.private_mode == PrivateCardMode::kExactCanonical) {
+  if (config.private_kind == PrivateAbstractionKind::kExactCanonical) {
     return CanonicalizeObservation(hand, Board{PreflopBoard{}})
         .private_observation;
   }
@@ -304,8 +309,13 @@ PrivateObservationId AdvancePrivateObservation(
     PrivateObservationId previous,
     ComboId hand,
     const PublicPosition& child) noexcept {
-  if (config.private_mode == PrivateCardMode::kExactCanonical) {
+  if (config.private_kind == PrivateAbstractionKind::kExactCanonical) {
     return CanonicalizeObservation(hand, child.board()).private_observation;
+  }
+  if (config.recall_mode == RecallMode::kCurrentBucketOnly) {
+    const PrivateBucketId bucket = CoarsePrivateBucket(
+        hand, child.street(), child.features());
+    return PrivateObservationId(static_cast<uint64_t>(bucket) + 1);
   }
   return AdvanceCoarsePrivate(previous, hand, child);
 }

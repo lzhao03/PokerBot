@@ -19,14 +19,21 @@ enum class PublicCardMode : uint8_t {
   kTexture,
 };
 
-enum class PrivateCardMode : uint8_t {
+enum class PrivateAbstractionKind : uint8_t {
   kExactCanonical,
-  kCoarse,
+  kHandcrafted36,
+};
+
+enum class RecallMode : uint8_t {
+  kCurrentBucketOnly,
+  kBucketHistory,
 };
 
 struct CardAbstractionConfig {
   PublicCardMode public_mode = PublicCardMode::kTexture;
-  PrivateCardMode private_mode = PrivateCardMode::kCoarse;
+  PrivateAbstractionKind private_kind =
+      PrivateAbstractionKind::kHandcrafted36;
+  RecallMode recall_mode = RecallMode::kBucketHistory;
 };
 
 struct BoardFeatures {

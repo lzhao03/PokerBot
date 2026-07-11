@@ -212,6 +212,32 @@ TEST_CASE("exact card observations are invariant under suit renaming") {
         expected.public_observation);
 }
 
+TEST_CASE("handcrafted 36 mappings remain stable") {
+  CHECK(CoarsePrivateBucket(
+            H(C(14, S::kHearts), C(14, S::kSpades)),
+            StreetKind::kPreflop, BoardFeatures{}) == 0);
+  CHECK(CoarsePrivateBucket(
+            H(C(14, S::kHearts), C(13, S::kHearts)),
+            StreetKind::kPreflop, BoardFeatures{}) == 12);
+  CHECK(CoarsePrivateBucket(
+            H(C(7, S::kHearts), C(2, S::kSpades)),
+            StreetKind::kPreflop, BoardFeatures{}) == 35);
+
+  const Board flop = B({C(2, S::kHearts), C(7, S::kHearts),
+                        C(12, S::kHearts)});
+  const ComboId hand = H(C(14, S::kHearts), C(13, S::kSpades));
+  CHECK(CoarsePrivateBucket(hand, StreetKind::kFlop,
+                            BoardFeaturesFor(flop)) == 6);
+
+  const CardAbstractionConfig current{
+      PublicCardMode::kTexture,
+      PrivateAbstractionKind::kHandcrafted36,
+      RecallMode::kCurrentBucketOnly};
+  const PublicPosition position =
+      PublicPosition::Root(current, StreetKind::kFlop, flop);
+  CHECK(ObservePrivate(current, hand, position) == PrivateObservationId(7));
+}
+
 TEST_CASE("canonical observations preserve card relationships and order") {
   const Board monotone = B({C(14, S::kHearts), C(13, S::kHearts),
                             C(12, S::kHearts)});
@@ -267,10 +293,14 @@ TEST_CASE("canonical observation counts match holdem suit isomorphisms") {
 
 TEST_CASE("all abstraction modes preserve observation history") {
   const std::array<CardAbstractionConfig, 4> configs = {{
-      {PublicCardMode::kExactCanonical, PrivateCardMode::kExactCanonical},
-      {PublicCardMode::kExactCanonical, PrivateCardMode::kCoarse},
-      {PublicCardMode::kTexture, PrivateCardMode::kExactCanonical},
-      {PublicCardMode::kTexture, PrivateCardMode::kCoarse},
+      {PublicCardMode::kExactCanonical,
+       PrivateAbstractionKind::kExactCanonical},
+      {PublicCardMode::kExactCanonical,
+       PrivateAbstractionKind::kHandcrafted36},
+      {PublicCardMode::kTexture,
+       PrivateAbstractionKind::kExactCanonical},
+      {PublicCardMode::kTexture,
+       PrivateAbstractionKind::kHandcrafted36},
   }};
   const ComboId hand = H(C(14, S::kHearts), C(13, S::kSpades));
   const FlopBoard flop = DealFlop(
@@ -281,7 +311,7 @@ TEST_CASE("all abstraction modes preserve observation history") {
 
   for (const CardAbstractionConfig& config : configs) {
     CAPTURE(static_cast<int>(config.public_mode));
-    CAPTURE(static_cast<int>(config.private_mode));
+    CAPTURE(static_cast<int>(config.private_kind));
     PublicPosition position = PublicPosition::Root(
         config, StreetKind::kPreflop, Board{PreflopBoard{}});
     PrivateObservationId private_id =
@@ -312,7 +342,8 @@ TEST_CASE("all abstraction modes preserve observation history") {
 
 TEST_CASE("coarse public exact private keeps relative flush information") {
   const CardAbstractionConfig config{
-      PublicCardMode::kTexture, PrivateCardMode::kExactCanonical};
+      PublicCardMode::kTexture,
+      PrivateAbstractionKind::kExactCanonical};
   const Board board = B({C(2, S::kHearts), C(7, S::kHearts),
                          C(12, S::kClubs)});
   const ComboId hand = H(C(14, S::kHearts), C(13, S::kSpades));

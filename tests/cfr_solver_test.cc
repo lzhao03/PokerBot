@@ -78,7 +78,7 @@ SolverConfig Config(bool accumulate_average = true,
   options.big_blind = 2;
   options.card_abstraction = {
       PublicCardMode::kExactCanonical,
-      PrivateCardMode::kExactCanonical,
+      PrivateAbstractionKind::kExactCanonical,
   };
   for (auto& fractions : options.bet_abstraction.pot_fractions) {
     fractions = {0.5, 1.0};
@@ -159,7 +159,10 @@ TEST_CASE("solver configuration rejects invalid boundary values") {
 
   const SolverConfig defaults = SolverConfig::Default();
   CHECK(defaults.card_abstraction().public_mode == PublicCardMode::kTexture);
-  CHECK(defaults.card_abstraction().private_mode == PrivateCardMode::kCoarse);
+  CHECK(defaults.card_abstraction().private_kind ==
+        PrivateAbstractionKind::kHandcrafted36);
+  CHECK(defaults.card_abstraction().recall_mode ==
+        RecallMode::kBucketHistory);
 }
 
 const ComboId kA = H(14, S::kHearts, 14, S::kSpades);
@@ -219,8 +222,8 @@ TEST_CASE("model fingerprints are stable and cover solve ranges") {
   CHECK(first->model_fingerprint() == second->model_fingerprint());
   CHECK(first->model_fingerprint() != changed->model_fingerprint());
   CHECK(Hex(first->model_fingerprint()) ==
-        "dbe9ae604cee3b303179e731f35dfbae"
-        "478988c4fa4633fa5ba3b92c256af99c");
+        "74b58f995bc3a0f3742ee113c7636e62"
+        "055ac6b4239a62acfe8e52e76f56b7da");
 }
 
 TEST_CASE("history tree stores direct rule transitions") {

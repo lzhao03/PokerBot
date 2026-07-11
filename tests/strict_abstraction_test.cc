@@ -44,14 +44,18 @@ ComboRange Range(int first_rank, int second_rank, Suit suit) {
 
 TEST_CASE("all card abstraction combinations support history traversal") {
   const std::array<CardAbstractionConfig, 4> abstractions = {{
-      {PublicCardMode::kExactCanonical, PrivateCardMode::kExactCanonical},
-      {PublicCardMode::kExactCanonical, PrivateCardMode::kCoarse},
-      {PublicCardMode::kTexture, PrivateCardMode::kExactCanonical},
-      {PublicCardMode::kTexture, PrivateCardMode::kCoarse},
+      {PublicCardMode::kExactCanonical,
+       PrivateAbstractionKind::kExactCanonical},
+      {PublicCardMode::kExactCanonical,
+       PrivateAbstractionKind::kHandcrafted36},
+      {PublicCardMode::kTexture,
+       PrivateAbstractionKind::kExactCanonical},
+      {PublicCardMode::kTexture,
+       PrivateAbstractionKind::kHandcrafted36},
   }};
   for (const CardAbstractionConfig& abstraction : abstractions) {
     CAPTURE(static_cast<int>(abstraction.public_mode));
-    CAPTURE(static_cast<int>(abstraction.private_mode));
+    CAPTURE(static_cast<int>(abstraction.private_kind));
     SolverConfigOptions options;
     options.card_abstraction = abstraction;
     options.starting_stack = 8;
