@@ -435,11 +435,6 @@ CFRSolver::CFRSolver(const SolverConfig& config,
       betting_rules_{config_.big_blind > 0 ? config_.big_blind : 2},
       initial_state_(initial_state),
       rng_(12345) {
-  if constexpr (kCoarsePublicBuckets && kCoarsePrivateBuckets) {
-    throw std::invalid_argument(
-        "coarse public + coarse private abstraction does not provide "
-        "exhaustive history-aware private observation support");
-  }
   if (!IsValidBettingState(initial_state_.betting)) {
     throw std::invalid_argument("initial betting state is invalid");
   }

@@ -40,18 +40,6 @@ cc_library(
 )
 
 cc_library(
-    name = "solver_coarse_buckets",
-    srcs = SOLVER_SRCS,
-    hdrs = SOLVER_HDRS,
-    copts = [
-        "-DPOKER_COARSE_PRIVATE_BUCKETS=1",
-        "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
-    ],
-    deps = SOLVER_DEPS,
-    visibility = ["//tests:__pkg__"],
-)
-
-cc_library(
     name = "solver_coarse_private",
     srcs = SOLVER_SRCS,
     hdrs = SOLVER_HDRS,

@@ -22,12 +22,20 @@ inline constexpr bool kCoarsePublicBuckets =
 inline constexpr bool kCoarsePrivateBuckets =
     POKER_COARSE_PRIVATE_BUCKETS != 0;
 
+static_assert(!(kCoarsePublicBuckets && kCoarsePrivateBuckets),
+              "coarse public and private abstractions are incompatible");
+
 using PrivateBucketId = uint16_t;
 
 inline constexpr uint32_t kCoarsePrivateStreetObservationCount = 36;
 inline constexpr uint32_t kCoarsePublicStreetObservationCount = 108;
 inline constexpr int kPrivateObservationBitsPerStreet = 6;
 inline constexpr int kPublicObservationBitsPerStreet = 7;
+
+static_assert(kCoarsePrivateStreetObservationCount <
+              (uint32_t{1} << kPrivateObservationBitsPerStreet));
+static_assert(kCoarsePublicStreetObservationCount <
+              (uint32_t{1} << kPublicObservationBitsPerStreet));
 
 struct ExactChanceObservation {
   std::array<CardId, 3> cards = {};
