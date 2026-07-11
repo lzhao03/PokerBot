@@ -5,19 +5,6 @@
 #include <cmath>
 
 namespace poker {
-namespace {
-
-Chips PotFractionRaiseTo(const BettingData& state,
-                         const LegalActionSpace& legal,
-                         double fraction) {
-  const Chips pot_after_call = Pot(state) + legal.to_call();
-  const Chips raise_increment = std::max(
-      Chips{1},
-      static_cast<Chips>(std::llround(fraction * pot_after_call)));
-  return legal.highest_to + raise_increment;
-}
-
-}  // namespace
 
 AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
                                       const DecisionState& state,
@@ -34,8 +21,12 @@ AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
       legal.wager_open() ? ActionKind::kRaise : ActionKind::kBet;
   const auto& fractions =
       config.pot_fractions[static_cast<size_t>(state.data.street)];
+  const Chips pot_after_call = Pot(state.data) + legal.to_call();
   for (double fraction : fractions) {
-    const Chips target = PotFractionRaiseTo(state.data, legal, fraction);
+    const Chips raise_by = std::max(
+        Chips{1},
+        static_cast<Chips>(std::llround(fraction * pot_after_call)));
+    const Chips target = legal.highest_to + raise_by;
     if (target >= legal.min_full_raise_to && target < legal.all_in_to) {
       actions.push_back({kind, target});
     }
