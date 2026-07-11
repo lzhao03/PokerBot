@@ -22,6 +22,9 @@ cc_binary(
     srcs = ["cfr_benchmark.cc"],
     deps = [
         "//src:solver",
+        "@abseil-cpp//absl/flags:flag",
+        "@abseil-cpp//absl/flags:parse",
+        "@abseil-cpp//absl/flags:usage",
         "@abseil-cpp//absl/log:initialize",
     ],
 )
@@ -32,6 +35,9 @@ cc_binary(
     copts = ["-DPOKER_BENCHMARK_PROD_DEFAULTS=1"],
     deps = [
         "//src:solver",
+        "@abseil-cpp//absl/flags:flag",
+        "@abseil-cpp//absl/flags:parse",
+        "@abseil-cpp//absl/flags:usage",
         "@abseil-cpp//absl/log:initialize",
     ],
 )

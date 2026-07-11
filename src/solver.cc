@@ -3,14 +3,10 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
-#include <charconv>
-#include <cerrno>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <optional>
 #include <stdexcept>
-#include <string>
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
@@ -19,30 +15,6 @@
 
 namespace poker {
 namespace {
-
-template <typename Number>
-Number ParseNumber(std::string_view value, std::string_view option) {
-  Number parsed = 0;
-  const char* begin = value.data();
-  const char* end = begin + value.size();
-  const auto result = std::from_chars(begin, end, parsed);
-  if (result.ec != std::errc() || result.ptr != end) {
-    throw std::invalid_argument("invalid value for " + std::string(option));
-  }
-  return parsed;
-}
-
-double ParseDoubleOption(std::string_view value,
-                         std::string_view option) {
-  const std::string text(value);
-  char* end = nullptr;
-  errno = 0;
-  const double parsed = std::strtod(text.c_str(), &end);
-  if (errno != 0 || end != text.c_str() + text.size()) {
-    throw std::invalid_argument("invalid value for " + std::string(option));
-  }
-  return parsed;
-}
 
 constexpr int kHandTypeCount = 169;
 
@@ -452,82 +424,6 @@ ComboRange SingleComboRange(ComboId combo, float weight) {
   ComboRange range;
   range.add(combo, weight);
   return range;
-}
-
-int ParseIntOption(std::string_view value, std::string_view option) {
-  return ParseNumber<int>(value, option);
-}
-
-int64_t ParseInt64Option(std::string_view value,
-                         std::string_view option) {
-  return ParseNumber<int64_t>(value, option);
-}
-
-bool ApplySolverOption(std::string_view argument,
-                       SolverConfig& config,
-                       SolverOptionState& state) {
-  if (argument == "--no-average-strategy") {
-    config.accumulate_average_strategy = false;
-    return true;
-  }
-
-  struct IntOption {
-    std::string_view prefix;
-    int* value;
-  };
-  const std::array<IntOption, 4> integers = {{
-      {"--starting-stack=", &config.starting_stack},
-      {"--small-blind=", &config.small_blind},
-      {"--big-blind=", &config.big_blind},
-      {"--chance-samples=", &config.chance_samples},
-  }};
-  for (const IntOption& option : integers) {
-    if (argument.starts_with(option.prefix)) {
-      *option.value = ParseIntOption(
-          argument.substr(option.prefix.size()), option.prefix);
-      return true;
-    }
-  }
-  if (argument.starts_with("--max-info-sets=")) {
-    config.max_info_sets = ParseIntOption(
-        argument.substr(sizeof("--max-info-sets=") - 1),
-        "--max-info-sets");
-    state.saw_max_info_sets = true;
-    return true;
-  }
-  if (argument.starts_with("--bet-size=")) {
-    if (!state.saw_global_bet_size) {
-      for (auto& sizes : config.bet_sizes) {
-        sizes.clear();
-      }
-      state.saw_global_bet_size = true;
-      state.saw_street_bet_size.fill(false);
-    }
-    const double size = ParseDoubleOption(
-        argument.substr(sizeof("--bet-size=") - 1), "--bet-size");
-    for (auto& sizes : config.bet_sizes) {
-      sizes.push_back(size);
-    }
-    return true;
-  }
-
-  constexpr std::array<std::string_view, 4> prefixes = {
-      "--preflop-bet-size=", "--flop-bet-size=",
-      "--turn-bet-size=", "--river-bet-size="};
-  for (size_t street = 0; street < prefixes.size(); ++street) {
-    const std::string_view prefix = prefixes[street];
-    if (!argument.starts_with(prefix)) {
-      continue;
-    }
-    if (!state.saw_street_bet_size[street]) {
-      config.bet_sizes[street].clear();
-      state.saw_street_bet_size[street] = true;
-    }
-    config.bet_sizes[street].push_back(ParseDoubleOption(
-        argument.substr(prefix.size()), prefix));
-    return true;
-  }
-  return false;
 }
 
 CFRSolver::CFRSolver(const SolverConfig& config)

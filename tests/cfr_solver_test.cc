@@ -164,23 +164,5 @@ TEST_CASE("average strategy storage is optional") {
       std::logic_error);
 }
 
-TEST_CASE("solver options update the plain config") {
-  SolverConfig config;
-  SolverOptionState state;
-  CHECK(ApplySolverOption("--bet-size=0.5", config, state));
-  CHECK(ApplySolverOption("--flop-bet-size=1.0", config, state));
-  CHECK(ApplySolverOption("--no-average-strategy", config, state));
-  for (size_t street = 0; street < config.bet_sizes.size(); ++street) {
-    const double expected = street == static_cast<size_t>(StreetKind::kFlop)
-                                ? 1.0
-                                : 0.5;
-    CHECK(config.bet_sizes[street] == std::vector<double>{expected});
-  }
-  CHECK_FALSE(config.accumulate_average_strategy);
-  CHECK_FALSE(ApplySolverOption("--threads=2", config, state));
-  CHECK_THROWS_AS(ParseIntOption("invalid", "--iterations"),
-                  std::invalid_argument);
-}
-
 }  // namespace
 }  // namespace poker
