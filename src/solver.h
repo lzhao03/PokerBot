@@ -35,7 +35,7 @@ struct ComboRange {
 };
 
 absl::StatusOr<ComboRange> ParseRange(std::string_view text);
-ComboRange UniformRange();
+ComboRange UniformComboRange();
 ComboRange SingleComboRange(ComboId combo, float weight = 1.0f);
 
 class HistoryId {

@@ -165,8 +165,8 @@ int main(int argc, char** argv) {
     std::cerr << "Error: " << config.status() << "\n";
     return 1;
   }
-  const poker::ComboRange a_range = poker::UniformRange();
-  const poker::ComboRange b_range = poker::UniformRange();
+  const poker::ComboRange a_range = poker::UniformComboRange();
+  const poker::ComboRange b_range = poker::UniformComboRange();
   const auto deals = poker::DealDistribution::Create(a_range, b_range);
   if (!deals.ok()) {
     std::cerr << "Error: " << deals.status() << "\n";

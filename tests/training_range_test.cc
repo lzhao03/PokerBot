@@ -34,8 +34,26 @@ TEST_CASE("range syntax expands to exact combo weights") {
   REQUIRE(parsed_aces.ok());
   const ComboRange aces = *parsed_aces;
   const ComboId hand = H(14, S::kSpades, 14, S::kHearts);
-  CHECK(aces.weight(hand) == doctest::Approx(1.0f / 6.0f));
-  CHECK(UniformRange().count() == kComboCount);
+  CHECK(aces.weight(hand) == 1.0f);
+
+  const ComboRange uniform = UniformComboRange();
+  CHECK(uniform.count() == kComboCount);
+  for (ComboId combo : uniform.active) {
+    CHECK(uniform.weight(combo) == 1.0f);
+  }
+
+  const auto suited = ParseRange("AKs");
+  const auto offsuit = ParseRange("AKo");
+  const auto any = ParseRange("AK");
+  const auto split = ParseRange("AKs,AKo");
+  REQUIRE(suited.ok());
+  REQUIRE(offsuit.ok());
+  REQUIRE(any.ok());
+  REQUIRE(split.ok());
+  CHECK(suited->count() == 4);
+  CHECK(offsuit->count() == 12);
+  CHECK(any->count() == 16);
+  CHECK(split->weights == any->weights);
   CHECK(SingleComboRange(hand, 2.0f).weight(hand) == 2.0f);
   CHECK_FALSE(ParseRange("89s+").ok());
   CHECK_FALSE(ParseRange("AA,,KK").ok());

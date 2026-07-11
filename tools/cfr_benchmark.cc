@@ -34,7 +34,7 @@ absl::StatusOr<poker::ComboRange> BenchmarkRange(std::string_view text) {
     return poker::ParseRange("AA,KK,QQ,JJ,AKs,AQs,AKo");
   }
   if (text == "all") {
-    return poker::UniformRange();
+    return poker::UniformComboRange();
   }
   return poker::ParseRange(text);
 }

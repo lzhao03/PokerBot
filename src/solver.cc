@@ -149,13 +149,12 @@ std::string_view Trim(std::string_view text) {
   return text.substr(first, last - first + 1);
 }
 
-ComboRange ExpandSelected(const std::vector<int>& selected) {
+ComboRange ExpandSelectedCombos(const std::vector<int>& selected) {
   ComboRange range;
   for (int index : selected) {
     const auto combos = Expand(*DecodeHandType(index));
-    const float weight = 1.0f / combos.size();
     for (ComboId combo : combos) {
-      range.add(combo, weight);
+      range.add(combo, 1.0f);
     }
   }
   return range;
@@ -419,15 +418,17 @@ absl::StatusOr<ComboRange> ParseRange(std::string_view text) {
   if (selected.empty()) {
     return absl::InvalidArgumentError("range is empty");
   }
-  return ExpandSelected(selected);
+  return ExpandSelectedCombos(selected);
 }
 
-ComboRange UniformRange() {
-  std::vector<int> selected(kHandTypeCount);
-  for (int index = 0; index < kHandTypeCount; ++index) {
-    selected[static_cast<size_t>(index)] = index;
+ComboRange UniformComboRange() {
+  ComboRange range;
+  for (size_t first = 0; first < kDeck.size(); ++first) {
+    for (size_t second = first + 1; second < kDeck.size(); ++second) {
+      range.add(CardsToComboId(kDeck[first], kDeck[second]));
+    }
   }
-  return ExpandSelected(selected);
+  return range;
 }
 
 ComboRange SingleComboRange(ComboId combo, float weight) {
