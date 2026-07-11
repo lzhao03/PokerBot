@@ -464,7 +464,7 @@ TEST_CASE("effective stacks and short all-ins bound aggression") {
     const BettingState child =
         Apply(state, {ActionKind::kAllIn, 11});
     CHECK(B(child).last_full_raise == 5);
-    CHECK(B(child).pending_action_mask == PlayerBit(1));
+    CHECK(B(child).pending_action_mask == PlayerBit(Player::kB));
     CheckMenu(state, sizes);
   }
 
@@ -625,7 +625,7 @@ TEST_CASE("a complete normal hand preserves exact state") {
 
   state.betting = Apply(state.betting, {ActionKind::kCall, 2});
   CheckExactState("small blind calls", state, {18, 18}, {2, 2},
-                  {2, 2}, 2, StreetKind::kPreflop, 1, PlayerBit(1),
+                  {2, 2}, 2, StreetKind::kPreflop, 1, PlayerBit(Player::kB),
                   board, StatePhase::kDecision);
 
   state.betting = Apply(state.betting, {ActionKind::kCheck});
@@ -641,12 +641,12 @@ TEST_CASE("a complete normal hand preserves exact state") {
 
   state.betting = Apply(state.betting, {ActionKind::kCheck});
   CheckExactState("flop check", state, {18, 18}, {2, 2}, {0, 0}, 2,
-                  StreetKind::kFlop, 0, PlayerBit(0), board,
+                  StreetKind::kFlop, 0, PlayerBit(Player::kA), board,
                   StatePhase::kDecision);
 
   state.betting = Apply(state.betting, {ActionKind::kBet, 2});
   CheckExactState("flop bet", state, {16, 18}, {4, 2}, {2, 0}, 2,
-                  StreetKind::kFlop, 1, PlayerBit(1), board,
+                  StreetKind::kFlop, 1, PlayerBit(Player::kB), board,
                   StatePhase::kDecision);
 
   state.betting = Apply(state.betting, {ActionKind::kCall, 2});
@@ -663,7 +663,7 @@ TEST_CASE("a complete normal hand preserves exact state") {
 
   state.betting = Apply(state.betting, {ActionKind::kCheck});
   CheckExactState("turn first check", state, {16, 16}, {4, 4},
-                  {0, 0}, 2, StreetKind::kTurn, 0, PlayerBit(0), board,
+                  {0, 0}, 2, StreetKind::kTurn, 0, PlayerBit(Player::kA), board,
                   StatePhase::kDecision);
 
   state.betting = Apply(state.betting, {ActionKind::kCheck});
@@ -680,7 +680,7 @@ TEST_CASE("a complete normal hand preserves exact state") {
 
   state.betting = Apply(state.betting, {ActionKind::kBet, 2});
   CheckExactState("river bet", state, {16, 14}, {4, 6}, {0, 2}, 2,
-                  StreetKind::kRiver, 0, PlayerBit(0), board,
+                  StreetKind::kRiver, 0, PlayerBit(Player::kA), board,
                   StatePhase::kDecision);
 
   state.betting = Apply(state.betting, {ActionKind::kCall, 2});
@@ -702,12 +702,12 @@ TEST_CASE("full raises update the minimum re-raise increment") {
 
   state.betting = Apply(state.betting, {ActionKind::kRaise, 4});
   CheckExactState("minimum raise", state, {16, 18}, {4, 2}, {4, 2}, 2,
-                  StreetKind::kPreflop, 1, PlayerBit(1), board,
+                  StreetKind::kPreflop, 1, PlayerBit(Player::kB), board,
                   StatePhase::kDecision);
 
   state.betting = Apply(state.betting, {ActionKind::kRaise, 8});
   CheckExactState("full re-raise", state, {16, 12}, {4, 8}, {4, 8}, 4,
-                  StreetKind::kPreflop, 0, PlayerBit(0), board,
+                  StreetKind::kPreflop, 0, PlayerBit(Player::kA), board,
                   StatePhase::kDecision);
 
   state.betting = Apply(state.betting, {ActionKind::kCall, 8});
@@ -731,12 +731,12 @@ TEST_CASE("a short all-in raise preserves the full-raise increment") {
   state.betting = Apply(state.betting, {ActionKind::kCheck});
   state.betting = Apply(state.betting, {ActionKind::kBet, 2});
   CheckExactState("player zero bets", state, {16, 3}, {4, 2}, {2, 0}, 2,
-                  StreetKind::kFlop, 1, PlayerBit(1), board,
+                  StreetKind::kFlop, 1, PlayerBit(Player::kB), board,
                   StatePhase::kDecision);
 
   state.betting = Apply(state.betting, {ActionKind::kAllIn, 3});
   CheckExactState("subminimum all-in raise", state, {16, 0}, {4, 5},
-                  {2, 3}, 2, StreetKind::kFlop, 0, PlayerBit(0), board,
+                  {2, 3}, 2, StreetKind::kFlop, 0, PlayerBit(Player::kA), board,
                   StatePhase::kDecision);
 
   state.betting = Apply(state.betting, {ActionKind::kCall, 3});
@@ -776,7 +776,7 @@ TEST_CASE("effective stacks leave unmatched chips uncommitted") {
 
   state.betting = Apply(state.betting, {ActionKind::kAllIn, 18});
   CheckExactState("effective all-in", state, {80, 18}, {20, 2}, {18, 0},
-                  18, StreetKind::kFlop, 1, PlayerBit(1), board,
+                  18, StreetKind::kFlop, 1, PlayerBit(Player::kB), board,
                   StatePhase::kDecision);
 
   state.betting = Apply(state.betting, {ActionKind::kCall, 18});

@@ -183,10 +183,10 @@ BettingState ApplyActionUnchecked(const DecisionState& state,
     }
   }
   if (aggressive) {
-    child.pending_action_mask = PlayerBit(static_cast<int>(opponent));
+    child.pending_action_mask = PlayerBit(opponent);
   } else {
     child.pending_action_mask &=
-        static_cast<uint8_t>(~PlayerBit(static_cast<int>(player)));
+        static_cast<uint8_t>(~PlayerBit(player));
   }
   if (IsBettingRoundOver(child)) {
     RefundUnmatchedCommitment(child);

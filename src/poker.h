@@ -244,8 +244,8 @@ struct BettingRules {
   Chips minimum_bet = 0;
 };
 
-constexpr uint8_t PlayerBit(int player) {
-  return static_cast<uint8_t>(1u << player);
+constexpr uint8_t PlayerBit(Player player) noexcept {
+  return static_cast<uint8_t>(1u << Index(player));
 }
 
 constexpr uint8_t kAllPlayersMask =
