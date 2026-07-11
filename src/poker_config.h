@@ -41,7 +41,7 @@ inline SolverConfig SolverConfigFromProto(const PokerConfig& config) {
                                config.turn_bet_sizes().end());
   native.river_bet_sizes.assign(config.river_bet_sizes().begin(),
                                 config.river_bet_sizes().end());
-  native.regret_only_training = config.regret_only_training();
+  native.accumulate_average_strategy = !config.regret_only_training();
   native.max_info_sets = static_cast<int>(config.max_info_sets());
   native.num_training_threads = config.num_training_threads();
   return native;

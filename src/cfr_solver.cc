@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -95,8 +94,7 @@ void FillUniform(absl::Span<double> probabilities) {
 
 void RegretMatch(const CfrState& state,
                  const InfoSetRow* row,
-                 absl::Span<double> probabilities,
-                 TraversalStats& stats) {
+                 absl::Span<double> probabilities) {
   if (row == nullptr) {
     FillUniform(probabilities);
     return;
@@ -104,7 +102,6 @@ void RegretMatch(const CfrState& state,
 
   double sum = 0.0;
   for (size_t action = 0; action < probabilities.size(); ++action) {
-    stats.record_action_entries();
     const size_t index = static_cast<size_t>(row->action_offset) + action;
     const double regret = std::max(0.0, static_cast<double>(state.regret_sum[index]));
     probabilities[action] = regret;
@@ -121,8 +118,7 @@ void RegretMatch(const CfrState& state,
 
 void AverageStrategy(const CfrState& state,
                      const InfoSetRow* row,
-                     absl::Span<double> probabilities,
-                     TraversalStats& stats) {
+                     absl::Span<double> probabilities) {
   if (row == nullptr) {
     FillUniform(probabilities);
     return;
@@ -130,7 +126,6 @@ void AverageStrategy(const CfrState& state,
 
   double sum = 0.0;
   for (size_t action = 0; action < probabilities.size(); ++action) {
-    stats.record_action_entries();
     const size_t index = static_cast<size_t>(row->action_offset) + action;
     const float value = state.strategy_sum[index];
     probabilities[action] = std::max(0.0, static_cast<double>(value));
@@ -142,6 +137,25 @@ void AverageStrategy(const CfrState& state,
   }
   for (double& probability : probabilities) {
     probability /= sum;
+  }
+}
+
+void AddCfrPlusRegret(CfrState& state,
+                      InfoSetRow row,
+                      size_t action,
+                      float delta) {
+  const size_t index = static_cast<size_t>(row.action_offset) + action;
+  state.regret_sum[index] = std::max(0.0f, state.regret_sum[index] + delta);
+}
+
+void AddStrategySum(CfrState& state,
+                    InfoSetRow row,
+                    absl::Span<const double> probabilities,
+                    double weight) {
+  for (size_t action = 0; action < probabilities.size(); ++action) {
+    const size_t index = static_cast<size_t>(row.action_offset) + action;
+    state.strategy_sum[index] +=
+        static_cast<float>(weight * probabilities[action]);
   }
 }
 
@@ -171,7 +185,9 @@ CFRSolver::CFRSolver(const SolverConfig& config,
     const size_t rows = static_cast<size_t>(config_.max_info_sets);
     state_.rows.reserve(rows);
     state_.regret_sum.reserve(rows * 4);
-    state_.strategy_sum.reserve(rows * 4);
+    if (config_.accumulate_average_strategy) {
+      state_.strategy_sum.reserve(rows * 4);
+    }
   }
 }
 
@@ -277,8 +293,9 @@ InfoSetRow CFRSolver::find_or_create_row(InfoSetKey key,
     throw std::overflow_error("CFR action table is too large");
   }
   state_.regret_sum.resize(offset + action_count, 0.0f);
-  state_.strategy_sum.resize(offset + action_count, 0.0f);
-  traversal_stats_.record_action_entries(action_count);
+  if (config_.accumulate_average_strategy) {
+    state_.strategy_sum.resize(offset + action_count, 0.0f);
+  }
   const InfoSetRow row{static_cast<uint32_t>(offset), action_count};
   return state_.rows.emplace(key, row).first->second;
 }
@@ -292,13 +309,13 @@ double CFRSolver::traverse(Position position,
   }
   const HistoryNode& node = history_.nodes[position.history];
   if (node.kind == HistoryNodeKind::kTerminal) {
-    traversal_stats_.record_terminal(node.state.folded_player < 0);
+    ++stats_.terminal_visits;
     return TerminalUtility({node.state, position.board}, deal.hand(0),
                            deal.hand(1));
   }
   if (node.kind == HistoryNodeKind::kChance) {
     const int samples = std::max(1, config_.chance_samples);
-    traversal_stats_.record_chance_samples(samples);
+    stats_.chance_samples += samples;
     double value = 0.0;
     for (int sample = 0; sample < samples; ++sample) {
       const Position child = sample_chance_child(position, deal);
@@ -334,9 +351,9 @@ double CFRSolver::traverse(Position position,
                                    node.action_count);
   absl::Span<double> values(value_storage.data(), node.action_count);
   if (context.mode == TraversalMode::kEvaluateAverage) {
-    AverageStrategy(state_, strategy_row, probabilities, traversal_stats_);
+    AverageStrategy(state_, strategy_row, probabilities);
   } else {
-    RegretMatch(state_, strategy_row, probabilities, traversal_stats_);
+    RegretMatch(state_, strategy_row, probabilities);
   }
 
   double node_value = 0.0;
@@ -351,8 +368,7 @@ double CFRSolver::traverse(Position position,
   if (!training) {
     return node_value;
   }
-  ++cfr_update_count_;
-  traversal_stats_.record_decision(node.state.street);
+  ++stats_.decision_visits;
   if (!updates) {
     return node_value;
   }
@@ -360,22 +376,14 @@ double CFRSolver::traverse(Position position,
   const double sign = player == 0 ? 1.0 : -1.0;
   const double opponent_reach = frame.reach[Opponent(player)];
   for (uint8_t action = 0; action < node.action_count; ++action) {
-    const size_t index = static_cast<size_t>(row.action_offset) + action;
     const double regret = opponent_reach * sign * (values[action] - node_value);
-    state_.regret_sum[index] =
-        std::max(0.0f, state_.regret_sum[index] + static_cast<float>(regret));
-    traversal_stats_.record_action_entries(2);
+    AddCfrPlusRegret(state_, row, action, static_cast<float>(regret));
   }
 
-  if (!config_.regret_only_training) {
+  if (config_.accumulate_average_strategy) {
     const double weight =
         frame.reach[player] * static_cast<double>(context.iteration + 1);
-    for (uint8_t action = 0; action < node.action_count; ++action) {
-      const size_t index = static_cast<size_t>(row.action_offset) + action;
-      state_.strategy_sum[index] +=
-          static_cast<float>(weight * probabilities[action]);
-      traversal_stats_.record_action_entries(2);
-    }
+    AddStrategySum(state_, row, probabilities, weight);
   }
   return node_value;
 }
@@ -383,7 +391,6 @@ double CFRSolver::traverse(Position position,
 void CFRSolver::run(int iterations,
                     const HandRange& a_range_spec,
                     const HandRange& b_range_spec) {
-  last_training_run_stats_ = {};
   if (iterations <= 0) {
     return;
   }
@@ -392,12 +399,6 @@ void CFRSolver::run(int iterations,
   const TrainingRange b_range = BuildTrainingRange(b_range_spec);
   RangeSampler sampler(a_range, b_range);
   const Position root = root_position();
-  const auto start = std::chrono::steady_clock::now();
-  const int64_t start_updates = cfr_update_count_;
-  const int64_t start_chance_samples = traversal_stats_.chance_samples;
-  const int64_t start_terminal_visits =
-      traversal_stats_.terminal_utility_calls;
-
   for (int i = 0; i < iterations; ++i) {
     const Deal deal = traversal_deal(sampler.sample(rng_));
     TraversalFrame frame;
@@ -410,22 +411,16 @@ void CFRSolver::run(int iterations,
     ++state_.iterations;
   }
 
-  const auto end = std::chrono::steady_clock::now();
-  last_training_run_stats_.iterations = iterations;
-  last_training_run_stats_.seconds =
-      std::chrono::duration<double>(end - start).count();
-  last_training_run_stats_.decision_visits =
-      cfr_update_count_ - start_updates;
-  last_training_run_stats_.chance_samples =
-      traversal_stats_.chance_samples - start_chance_samples;
-  last_training_run_stats_.terminal_visits =
-      traversal_stats_.terminal_utility_calls - start_terminal_visits;
   log_training_summary();
 }
 
 double CFRSolver::evaluate_strategy(ComboId player_a_hand,
                                     ComboId player_b_hand,
                                     StrategySource source) {
+  if (source == StrategySource::kAverage &&
+      !config_.accumulate_average_strategy) {
+    throw std::logic_error("average strategy accumulation is disabled");
+  }
   const Position root = root_position();
   const Deal deal{{player_a_hand, player_b_hand},
                   ComboMask(player_a_hand) | ComboMask(player_b_hand)};
@@ -444,6 +439,10 @@ double CFRSolver::evaluate_strategy(int samples,
                                     StrategySource source) {
   if (samples <= 0) {
     return 0.0;
+  }
+  if (source == StrategySource::kAverage &&
+      !config_.accumulate_average_strategy) {
+    throw std::logic_error("average strategy accumulation is disabled");
   }
   const TrainingRange a_range = BuildTrainingRange(player_a_range);
   const TrainingRange b_range = BuildTrainingRange(player_b_range);
@@ -479,10 +478,6 @@ void CFRSolver::log_training_summary() const {
   LOG(INFO) << "Information sets: " << state_.rows.size();
   LOG(INFO) << "History nodes: " << history_.nodes.size();
   LOG(INFO) << "Player A average EV: " << get_expected_value(0);
-}
-
-bool CFRSolver::traversal_stats_enabled() {
-  return kTraversalStatsEnabled;
 }
 
 }  // namespace poker

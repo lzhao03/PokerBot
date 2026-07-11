@@ -53,7 +53,7 @@ void PrintRunSummary(const poker::CFRSolver& solver,
                      double seconds) {
   const size_t info_sets = solver.get_info_set_count();
   const size_t history_nodes = solver.get_history_count();
-  const int64_t touches = solver.get_traversal_stats().action_entry_touches;
+  const uint64_t visits = solver.get_stats().decision_visits;
 
   std::cout << "iterations=" << solver.get_iterations_run() << "\n";
   std::cout << "info_sets=" << info_sets << "\n";
@@ -63,10 +63,10 @@ void PrintRunSummary(const poker::CFRSolver& solver,
   std::cout << "player_a_ev=" << solver.get_expected_value(0) << "\n";
   std::cout << "seconds=" << seconds << "\n";
   std::cout << "history_nodes=" << history_nodes << "\n";
-  std::cout << "action_entry_touches=" << touches << "\n";
+  std::cout << "decision_visits=" << visits << "\n";
   if (seconds > 0.0) {
-    std::cout << "action_entry_touches_per_second="
-              << static_cast<double>(touches) / seconds << "\n";
+    std::cout << "decision_visits_per_second="
+              << static_cast<double>(visits) / seconds << "\n";
   }
 }
 

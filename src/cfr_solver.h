@@ -14,7 +14,6 @@
 #include "src/game_state.h"
 #include "src/hand_range.h"
 #include "src/poker_types.h"
-#include "src/solver_stats.h"
 #include "src/training_range.h"
 
 namespace poker {
@@ -83,6 +82,12 @@ struct CfrState {
   double cumulative_root_utility = 0.0;
 };
 
+struct SolverStats {
+  uint64_t decision_visits = 0;
+  uint64_t chance_samples = 0;
+  uint64_t terminal_visits = 0;
+};
+
 enum class StrategySource : uint8_t {
   kCurrent,
   kAverage,
@@ -92,9 +97,6 @@ struct CFRSolverTestAccess;
 
 class CFRSolver {
  public:
-  using TraversalStats = poker::TraversalStats;
-  using TrainingRunStats = poker::TrainingRunStats;
-
   explicit CFRSolver(const SolverConfig& config);
   CFRSolver(const SolverConfig& config,
             const ExactPublicState& initial_state);
@@ -111,15 +113,11 @@ class CFRSolver {
 
   double get_expected_value(int player_id) const;
   uint64_t get_iterations_run() const { return state_.iterations; }
-  int64_t get_cfr_update_count() const { return cfr_update_count_; }
+  uint64_t get_cfr_update_count() const { return stats_.decision_visits; }
   size_t get_info_set_count() const { return state_.rows.size(); }
   size_t get_history_count() const { return history_.nodes.size(); }
-  TraversalStats get_traversal_stats() const { return traversal_stats_; }
-  void reset_traversal_stats() { traversal_stats_ = {}; }
-  TrainingRunStats get_last_training_run_stats() const {
-    return last_training_run_stats_;
-  }
-  static bool traversal_stats_enabled();
+  SolverStats get_stats() const { return stats_; }
+  void reset_stats() { stats_ = {}; }
 
  private:
   friend struct CFRSolverTestAccess;
@@ -175,9 +173,7 @@ class CFRSolver {
   BettingAbstraction betting_abstraction_;
   HistoryTree history_;
   CfrState state_;
-  int64_t cfr_update_count_ = 0;
-  TraversalStats traversal_stats_;
-  TrainingRunStats last_training_run_stats_;
+  SolverStats stats_;
 };
 
 }  // namespace poker

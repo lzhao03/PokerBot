@@ -54,12 +54,13 @@ void PrintUsage(const char* program) {
 }
 
 template <typename Function>
-void Measure(std::string_view name, Function function) {
+double Measure(std::string_view name, Function function) {
   const auto start = std::chrono::steady_clock::now();
   const auto result = function();
   const auto end = std::chrono::steady_clock::now();
   const double seconds = std::chrono::duration<double>(end - start).count();
   std::cout << name << '\t' << seconds << '\t' << result << '\n';
+  return seconds;
 }
 
 }  // namespace
@@ -102,22 +103,22 @@ int main(int argc, char** argv) {
     });
 
     std::unique_ptr<poker::CFRSolver> solver;
-    Measure("train_range", [&] {
+    const double training_seconds = Measure("train_range", [&] {
       solver = std::make_unique<poker::CFRSolver>(config);
       solver->run(options.iterations, a_range, b_range);
       return solver->get_expected_value(0);
     });
-    const auto training = solver->get_last_training_run_stats();
+    const auto training = solver->get_stats();
     std::cout << "iterations\t" << solver->get_iterations_run() << '\n'
               << "decision_visits\t" << training.decision_visits << '\n'
               << "decision_visits_per_second\t"
-              << Rate(training.decision_visits, training.seconds) << '\n'
+              << Rate(training.decision_visits, training_seconds) << '\n'
               << "chance_samples\t" << training.chance_samples << '\n'
               << "terminal_visits\t" << training.terminal_visits << '\n'
               << "infosets\t" << solver->get_info_set_count() << '\n'
               << "history_nodes\t" << solver->get_history_count() << '\n';
 
-    solver->reset_traversal_stats();
+    solver->reset_stats();
     Measure("evaluate_range", [&] {
       return solver->evaluate_strategy(
           options.eval_samples, a_range, b_range,

@@ -188,7 +188,7 @@ CFR_SOLVER_DEPS = [
 cc_library(
     name = "cfr_solver",
     srcs = ["cfr_solver.cc"],
-    hdrs = ["cfr_solver.h", "solver_stats.h"],
+    hdrs = ["cfr_solver.h"],
     deps = CFR_SOLVER_DEPS,
     visibility = ["//visibility:public"],
 )
@@ -196,7 +196,7 @@ cc_library(
 cc_library(
     name = "cfr_solver_no_stats",
     srcs = ["cfr_solver.cc"],
-    hdrs = ["cfr_solver.h", "solver_stats.h"],
+    hdrs = ["cfr_solver.h"],
     copts = ["-DPOKER_ENABLE_TRAVERSAL_STATS=0"],
     deps = CFR_SOLVER_DEPS,
 )
@@ -204,7 +204,7 @@ cc_library(
 cc_library(
     name = "cfr_solver_coarse_buckets",
     srcs = ["cfr_solver.cc"],
-    hdrs = ["cfr_solver.h", "solver_stats.h"],
+    hdrs = ["cfr_solver.h"],
     copts = [
         "-DPOKER_COARSE_PRIVATE_BUCKETS=1",
         "-DPOKER_COARSE_PUBLIC_BUCKETS=1",
@@ -216,7 +216,7 @@ cc_library(
 cc_library(
     name = "cfr_solver_coarse_private",
     srcs = ["cfr_solver.cc"],
-    hdrs = ["cfr_solver.h", "solver_stats.h"],
+    hdrs = ["cfr_solver.h"],
     copts = ["-DPOKER_COARSE_PRIVATE_BUCKETS=1"],
     deps = CFR_SOLVER_DEPS,
     visibility = ["//tests:__pkg__"],
@@ -225,7 +225,7 @@ cc_library(
 cc_library(
     name = "cfr_solver_coarse_public",
     srcs = ["cfr_solver.cc"],
-    hdrs = ["cfr_solver.h", "solver_stats.h"],
+    hdrs = ["cfr_solver.h"],
     copts = ["-DPOKER_COARSE_PUBLIC_BUCKETS=1"],
     deps = CFR_SOLVER_DEPS,
     visibility = ["//tests:__pkg__"],

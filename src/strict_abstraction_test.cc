@@ -32,7 +32,7 @@ TEST_CASE("mixed abstractions support history traversal") {
   config.bet_sizes = {1.0};
   config.max_info_sets = 500000;
   config.num_training_threads = 1;
-  config.regret_only_training = true;
+  config.accumulate_average_strategy = false;
 
   const BettingRules rules{config.big_blind};
   ExactPublicState state = MakeInitialState(rules, {8, 8}, {1, 2});

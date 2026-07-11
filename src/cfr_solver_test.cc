@@ -157,5 +157,19 @@ TEST_CASE("unsupported execution modes and caps fail explicitly") {
   CHECK_THROWS_AS(solver.run(2, R(kA), R(kB)), std::runtime_error);
 }
 
+TEST_CASE("average strategy storage is optional") {
+  SolverConfig config = Config();
+  config.accumulate_average_strategy = false;
+  CFRSolver solver(config);
+  solver.run(2, R(kA), R(kB));
+
+  CHECK(CFRSolverTestAccess::state(solver).strategy_sum.empty());
+  CHECK(std::isfinite(
+      solver.evaluate_strategy(kA, kB, StrategySource::kCurrent)));
+  CHECK_THROWS_AS(
+      solver.evaluate_strategy(kA, kB, StrategySource::kAverage),
+      std::logic_error);
+}
+
 }  // namespace
 }  // namespace poker

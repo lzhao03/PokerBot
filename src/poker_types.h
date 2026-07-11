@@ -73,7 +73,7 @@ struct SolverConfig {
   std::vector<double> flop_bet_sizes;
   std::vector<double> turn_bet_sizes;
   std::vector<double> river_bet_sizes;
-  bool regret_only_training = false;
+  bool accumulate_average_strategy = true;
   // Maximum number of info sets to allocate. 0 means unlimited.
   // Training throws when the limit is reached.
   int max_info_sets = 0;
