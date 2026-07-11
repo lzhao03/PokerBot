@@ -180,19 +180,6 @@ struct GameAction {
   friend bool operator==(const GameAction&, const GameAction&) = default;
 };
 
-struct LegalActionSpace {
-  Chips current_to = 0;
-  Chips highest_to = 0;
-  Chips call_to = 0;
-  Chips min_full_raise_to = 0;
-  Chips all_in_to = 0;
-
-  Chips to_call() const noexcept { return highest_to - current_to; }
-  bool facing_action() const noexcept { return to_call() > 0; }
-  bool wager_open() const noexcept { return highest_to > 0; }
-  bool can_aggress() const noexcept { return all_in_to > call_to; }
-};
-
 inline int SuitIndex(Suit suit) {
   return static_cast<int>(suit);
 }
@@ -405,7 +392,6 @@ ExactPublicState MakeInitialState(
     const BettingRules& rules,
     std::array<Chips, kPlayerCount> stacks,
     std::array<Chips, kPlayerCount> blinds);
-LegalActionSpace LegalActions(const DecisionState& state) noexcept;
 bool IsLegalAction(const DecisionState& state,
                    const GameAction& action) noexcept;
 absl::StatusOr<BettingState> ApplyAction(const DecisionState& state,

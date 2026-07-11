@@ -353,45 +353,39 @@ bool IsTerminal(const ExactPublicState& state) {
          BoardCount(state.board) == kMaxBoardCards;
 }
 
-LegalActionSpace LegalActions(const DecisionState& state) noexcept {
-  const BettingData& data = state.data;
-  const size_t player = Index(state.actor);
-  LegalActionSpace legal;
-  legal.current_to = data.street_committed[player];
-  legal.highest_to = HighestStreetCommitment(data);
-  legal.call_to =
-      std::min(legal.highest_to, legal.current_to + data.stack[player]);
-  legal.all_in_to =
-      legal.current_to + MaxContestableAdditional(data, state.actor);
-  legal.min_full_raise_to = legal.wager_open()
-                                ? legal.highest_to + data.last_full_raise
-                                : legal.current_to + data.last_full_raise;
-  return legal;
-}
-
 bool IsLegalAction(const DecisionState& state,
                    const GameAction& action) noexcept {
-  if (state.data.stack[Index(state.actor)] <= 0) {
+  const BettingData& data = state.data;
+  const size_t player = Index(state.actor);
+  if (data.stack[player] <= 0) {
     return false;
   }
 
-  const LegalActionSpace legal = LegalActions(state);
+  const Chips current_to = data.street_committed[player];
+  const Chips highest_to = HighestStreetCommitment(data);
+  const Chips to_call = highest_to - current_to;
+  const Chips call_to =
+      std::min(highest_to, current_to + data.stack[player]);
+  const Chips all_in_to =
+      current_to + MaxContestableAdditional(data, state.actor);
+  const Chips min_full_raise_to =
+      (highest_to > 0 ? highest_to : current_to) + data.last_full_raise;
   const Chips target = action.target_street_commitment;
   switch (action.kind) {
     case ActionKind::kFold:
-      return legal.facing_action() && target == 0;
+      return to_call > 0 && target == 0;
     case ActionKind::kCheck:
-      return !legal.facing_action() && target == 0;
+      return to_call == 0 && target == 0;
     case ActionKind::kCall:
-      return legal.facing_action() && target == legal.call_to;
+      return to_call > 0 && target == call_to;
     case ActionKind::kBet:
-      return !legal.wager_open() && target >= legal.min_full_raise_to &&
-             target < legal.all_in_to;
+      return highest_to == 0 && target >= min_full_raise_to &&
+             target < all_in_to;
     case ActionKind::kRaise:
-      return legal.wager_open() && target >= legal.min_full_raise_to &&
-             target < legal.all_in_to;
+      return highest_to > 0 && target >= min_full_raise_to &&
+             target < all_in_to;
     case ActionKind::kAllIn:
-      return legal.can_aggress() && target == legal.all_in_to;
+      return all_in_to > call_to && target == all_in_to;
   }
 }
 

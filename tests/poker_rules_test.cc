@@ -58,12 +58,10 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   ExactPublicState state = Root();
   const auto* root_decision = std::get_if<DecisionState>(&state.betting);
   REQUIRE(root_decision != nullptr);
-  const LegalActionSpace root_legal = LegalActions(*root_decision);
-  CHECK(root_legal.current_to == 1);
-  CHECK(root_legal.highest_to == 2);
-  CHECK(root_legal.call_to == 2);
-  CHECK(root_legal.min_full_raise_to == 4);
-  CHECK(root_legal.all_in_to == 20);
+  CHECK(IsLegalAction(*root_decision, {ActionKind::kCall, 2}));
+  CHECK(IsLegalAction(*root_decision, {ActionKind::kRaise, 4}));
+  CHECK(IsLegalAction(*root_decision, {ActionKind::kAllIn, 20}));
+  CHECK_FALSE(IsLegalAction(*root_decision, {ActionKind::kRaise, 3}));
   CHECK_THROWS(Apply(state.betting, {ActionKind::kCheck}));
   CHECK_THROWS(Apply(state.betting, {ActionKind::kRaise, 1}));
   state.betting = Apply(state.betting, {ActionKind::kCall, 2});
@@ -78,9 +76,8 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   const auto* short_decision =
       std::get_if<DecisionState>(&short_call.betting);
   REQUIRE(short_decision != nullptr);
-  const LegalActionSpace short_legal = LegalActions(*short_decision);
-  CHECK(short_legal.call_to == 4);
-  CHECK_FALSE(short_legal.can_aggress());
+  CHECK(IsLegalAction(*short_decision, {ActionKind::kCall, 4}));
+  CHECK_FALSE(IsLegalAction(*short_decision, {ActionKind::kAllIn, 4}));
   short_call.betting = Apply(short_call.betting,
                                    {ActionKind::kCall, 4});
   CHECK(std::holds_alternative<ChanceState>(short_call.betting));
