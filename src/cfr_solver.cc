@@ -73,7 +73,6 @@ CFRSolver::CFRSolver(const SolverConfig& config,
       betting_rules_{config_.big_blind > 0 ? config_.big_blind : 2},
       initial_state_(initial_state),
       rng_(12345),
-      cumulative_root_utility_(0.0),
       betting_abstraction_(config_),
       storage_(),
       strategy_store_(config_, storage_, &traversal_stats_),
@@ -94,8 +93,8 @@ CFRSolver::CFRSolver(const SolverConfig& config,
     constexpr int kAvgActionsPerInfoSet = 4;
     const size_t info_set_cap = static_cast<size_t>(config_.max_info_sets);
     const size_t action_cap = info_set_cap * kAvgActionsPerInfoSet;
-    arrays().cumulative_regrets.reserve(action_cap);
-    arrays().cumulative_strategies.reserve(action_cap);
+    cfr_state().regret_sum.reserve(action_cap);
+    cfr_state().strategy_sum.reserve(action_cap);
   }
   if (config_.max_public_states > 0) {
     const auto node_cap = static_cast<size_t>(config_.max_public_states);
@@ -162,10 +161,10 @@ CFRSolver::private_observations_after_chance(
 }
 
 CFRSolver::TraversalOptions CFRSolver::traversal_options(
-    int iteration,
+    uint64_t iteration,
     int max_depth) const {
   TraversalOptions options;
-  options.update_player = iteration % kPlayerCount;
+  options.update_player = static_cast<int>(iteration % kPlayerCount);
   options.iteration = iteration;
   options.max_depth = max_depth;
   options.write_average_strategy = !config_.regret_only_training;
@@ -174,7 +173,7 @@ CFRSolver::TraversalOptions CFRSolver::traversal_options(
 
 void CFRSolver::log_training_summary() const {
   LOG(INFO) << "CFR iterations completed";
-  LOG(INFO) << "Iterations run: " << iterations_run_;
+  LOG(INFO) << "Iterations run: " << cfr_state().iterations;
   LOG(INFO) << "Information sets: " << get_info_set_count();
   LOG(INFO) << "Graph nodes: " << get_public_state_count();
   LOG(INFO) << "Player A average EV: " << get_expected_value(0);
@@ -464,7 +463,7 @@ bool CFRSolver::prepare_prebuilt_training(
   };
   auto record_action_counts = [&] {
     const int64_t info_sets = static_cast<int64_t>(get_info_set_count());
-    const auto& regrets = arrays().cumulative_regrets;
+    const auto& regrets = cfr_state().regret_sum;
     const int64_t actions = static_cast<int64_t>(regrets.size());
     stats.prebuild_info_sets = info_sets;
     stats.prebuild_action_entries = actions;
@@ -542,7 +541,7 @@ void CFRSolver::run_growing_iterations(
     const Deal deal = traversal_deal(sampled);
 
     VLOG(2) << "Iteration " << i + 1 << "/" << iterations;
-    const int cfr_iteration = iterations_run_;
+    const uint64_t cfr_iteration = cfr_state().iterations;
     TraversalFrame frame;
     frame.private_observations =
         private_observations_for_position(deal, root_node);
@@ -554,8 +553,8 @@ void CFRSolver::run_growing_iterations(
     TraversalRun run{deal, options, &scratch};
     const double dealt_value = cfr(root_node, run, frame, graph);
 
-    cumulative_root_utility_ += dealt_value;
-    ++iterations_run_;
+    cfr_state().cumulative_root_utility += dealt_value;
+    ++cfr_state().iterations;
   }
 
   const auto warmup_end = std::chrono::steady_clock::now();
@@ -569,7 +568,7 @@ void CFRSolver::run_growing_iterations(
 template <typename WorkerFn, typename AccumulateFn>
 void CFRSolver::run_sharded(int work_count,
                             int worker_count,
-                            int first_index,
+                            uint64_t first_index,
                             WorkerFn&& worker_fn,
                             AccumulateFn&& accumulate_fn) {
   if (work_count <= 0 || worker_count <= 0) {
@@ -584,11 +583,11 @@ void CFRSolver::run_sharded(int work_count,
   threads.reserve(shard_count);
 
   int work_remaining = work_count;
-  int next_index = first_index;
+  uint64_t next_index = first_index;
   for (int worker_index = 0; worker_index < shard_count; ++worker_index) {
     const int shard = work_remaining / (shard_count - worker_index);
     work_remaining -= shard;
-    const int begin = next_index;
+    const uint64_t begin = next_index;
     next_index += shard;
     const unsigned int seed = seed_dist(rng_);
     auto worker = worker_fn;
@@ -634,7 +633,7 @@ void CFRSolver::run_fixed_storage_iterations(
   // regret/strategy arrays.
   // Workers use their own RNG and TraversalScratch; no locks needed.
   auto fixed_tables = storage_.frozen_tables;
-  auto cumulative = storage_.cumulative;
+  auto state = storage_.cfr_state;
   const bool depth_zero = config_.max_depth == 0;
   const bool regret_only_config = config_.regret_only_training && depth_zero;
   const bool use_fixed_infoset_lookup =
@@ -650,13 +649,13 @@ void CFRSolver::run_fixed_storage_iterations(
 
   int completed_iterations = 0;
   run_sharded(
-      iterations, num_threads, iterations_run_,
-      [this, root_id, root_board, &sampler, fixed_tables, cumulative,
+      iterations, num_threads, cfr_state().iterations,
+      [this, root_id, root_board, &sampler, fixed_tables, state,
        use_fixed_infoset_lookup, use_atomic_updates, &a_range, &b_range](
-          int iteration_begin, int shard, unsigned int seed) mutable {
+          uint64_t iteration_begin, int shard, unsigned int seed) mutable {
           // Build a lightweight worker that shares frozen tables.
           CFRSolver worker(config_);
-          worker.storage_.bind_frozen(fixed_tables, cumulative);
+          worker.storage_.bind_frozen(fixed_tables, state);
           worker.rng_.seed(seed);
 
           TrainingRangeView a_view;
@@ -683,7 +682,7 @@ void CFRSolver::run_fixed_storage_iterations(
             const RangeDeal sampled = sampler.sample(worker.rng_);
             const Deal deal = worker.traversal_deal(sampled);
 
-            const int cfr_iteration = iteration_begin + i;
+            const uint64_t cfr_iteration = iteration_begin + i;
             TraversalFrame frame;
             frame.private_observations =
                 worker.private_observations_for_position(deal, root_node);
@@ -711,12 +710,12 @@ void CFRSolver::run_fixed_storage_iterations(
                               worker.get_cfr_update_count(), shard};
       },
       [&](const WorkerResult& result) {
-        cumulative_root_utility_ += result.utility;
+        cfr_state().cumulative_root_utility += result.utility;
         traversal_stats_.add(result.traversal_stats);
         cfr_update_count_ += result.cfr_updates;
         completed_iterations += result.iterations;
       });
-  iterations_run_ += completed_iterations;
+  cfr_state().iterations += static_cast<uint64_t>(completed_iterations);
 
   const auto frozen_end = std::chrono::steady_clock::now();
   last_training_run_stats_.frozen_iterations = iterations;
@@ -1080,14 +1079,14 @@ double CFRSolver::evaluate_strategy_samples(
   if (worker_count > 1) {
     SolverConfig config = config_;
     auto frozen_tables = storage_.frozen_tables;
-    std::shared_ptr<MutableCumulativeArrays> cumulative = storage_.cumulative;
+    std::shared_ptr<CfrState> state = storage_.cfr_state;
     double total = 0.0;
     run_sharded(
         samples, worker_count, 0,
-        [config, &sampler, root_id, root_board, frozen_tables, cumulative](
-            int, int shard_samples, unsigned int seed) mutable {
+        [config, &sampler, root_id, root_board, frozen_tables, state](
+            uint64_t, int shard_samples, unsigned int seed) mutable {
           CFRSolver worker(config);
-          worker.storage_.bind_frozen(frozen_tables, cumulative);
+          worker.storage_.bind_frozen(frozen_tables, state);
           worker.rng_.seed(seed);
           const double value = worker.evaluate_strategy_samples(
               shard_samples, root_id, root_board, sampler, false);
@@ -1232,10 +1231,11 @@ double CFRSolver::evaluate_strategy_node_impl(
 }
 
 double CFRSolver::get_expected_value(int player_id) const {
-  if (iterations_run_ == 0) {
+  if (cfr_state().iterations == 0) {
     return 0.0;
   }
-  const double player_a_ev = cumulative_root_utility_ / iterations_run_;
+  const double player_a_ev =
+      cfr_state().cumulative_root_utility / cfr_state().iterations;
   return player_id == 0 ? player_a_ev : -player_a_ev;
 }
 

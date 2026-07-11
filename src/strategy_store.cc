@@ -82,12 +82,12 @@ const StrategyTables& SolverStorage::frozen_ref() const {
   return *frozen_tables;
 }
 
-MutableCumulativeArrays& SolverStorage::cumulative_ref() {
-  return *cumulative;
+CfrState& SolverStorage::cfr_state_ref() {
+  return *cfr_state;
 }
 
-const MutableCumulativeArrays& SolverStorage::cumulative_ref() const {
-  return *cumulative;
+const CfrState& SolverStorage::cfr_state_ref() const {
+  return *cfr_state;
 }
 
 void SolverStorage::freeze() {
@@ -105,10 +105,10 @@ void SolverStorage::freeze() {
 
 void SolverStorage::bind_frozen(
     std::shared_ptr<const StrategyTables> frozen_in,
-    std::shared_ptr<MutableCumulativeArrays> cumulative_in) {
+    std::shared_ptr<CfrState> cfr_state_in) {
   mutable_tables.reset();
   frozen_tables = std::move(frozen_in);
-  cumulative = std::move(cumulative_in);
+  cfr_state = std::move(cfr_state_in);
 }
 
 void ActionBlock::regret_matching(RegretLoadMode mode,
@@ -117,7 +117,7 @@ void ActionBlock::regret_matching(RegretLoadMode mode,
     throw std::logic_error("regret-matching action count mismatch");
   }
 
-  const auto& regrets = store_->cumulative().cumulative_regrets;
+  const auto& regrets = store_->cfr_state().regret_sum;
   double positive_sum = 0.0;
   for (size_t action_index = 0; action_index < out.size(); ++action_index) {
     store_->stats_->record_action_entries();
@@ -148,7 +148,7 @@ void ActionBlock::add_cfr_plus_regret(
   }
 
   const size_t index = static_cast<size_t>(action_offset_) + action_index;
-  auto& regrets = store_->cumulative().cumulative_regrets;
+  auto& regrets = store_->cfr_state().regret_sum;
   if (index >= regrets.size()) {
     throw std::logic_error("regret update table index out of range");
   }
@@ -172,7 +172,7 @@ void ActionBlock::add_average_strategy(absl::Span<const double> probs,
     throw std::logic_error("average-strategy probability span size mismatch");
   }
 
-  auto& strategies = store_->cumulative().cumulative_strategies;
+  auto& strategies = store_->cfr_state().strategy_sum;
   for (size_t action_index = 0; action_index < probs.size(); ++action_index) {
     const size_t index = static_cast<size_t>(action_offset_) + action_index;
     if (index >= strategies.size()) {
@@ -198,9 +198,8 @@ void ActionBlock::average_strategy(bool regret_only_training,
 
   std::fill(out.begin(), out.end(), 0.0);
   double probability_sum = 0.0;
-  const auto& cumulative_regrets = store_->cumulative().cumulative_regrets;
-  const auto& cumulative_strategies =
-      store_->cumulative().cumulative_strategies;
+  const auto& regret_sum = store_->cfr_state().regret_sum;
+  const auto& strategy_sum = store_->cfr_state().strategy_sum;
 
   for (size_t i = 0; i < out.size(); ++i) {
     store_->stats_->record_action_entries();
@@ -209,9 +208,9 @@ void ActionBlock::average_strategy(bool regret_only_training,
         regret_only_training
             ? std::max(0.0,
                        static_cast<double>(AtomicFloatLoad(
-                           &cumulative_regrets[index])))
+                           &regret_sum[index])))
             : static_cast<double>(AtomicFloatLoad(
-                  &cumulative_strategies[index]));
+                  &strategy_sum[index]));
     probability_sum += out[i];
   }
 
@@ -244,12 +243,12 @@ StrategyTables& StrategyStore::tables_for_growth() {
   return storage_.mutable_ref();
 }
 
-MutableCumulativeArrays& StrategyStore::cumulative() {
-  return storage_.cumulative_ref();
+CfrState& StrategyStore::cfr_state() {
+  return storage_.cfr_state_ref();
 }
 
-const MutableCumulativeArrays& StrategyStore::cumulative() const {
-  return storage_.cumulative_ref();
+const CfrState& StrategyStore::cfr_state() const {
+  return storage_.cfr_state_ref();
 }
 
 ActionBlock StrategyStore::block_for_row(const InfoSetRow& row) {
@@ -497,30 +496,30 @@ StrategyStore::InfoSetRow StrategyStore::append_info_set_actions(
     size_t action_count) {
   const size_t padding =
       (kCumulativeActionBlockAlignment -
-       cumulative().cumulative_regrets.size() %
+       cfr_state().regret_sum.size() %
            kCumulativeActionBlockAlignment) %
       kCumulativeActionBlockAlignment;
   InfoSetRow row;
   row.action_offset = static_cast<uint32_t>(
-      cumulative().cumulative_regrets.size() + padding);
+      cfr_state().regret_sum.size() + padding);
   row.action_count = static_cast<uint16_t>(action_count);
   const size_t required_capacity =
-      cumulative().cumulative_regrets.size() + padding + action_count;
-  if (required_capacity > cumulative().cumulative_regrets.capacity()) {
-    const size_t current_capacity = cumulative().cumulative_regrets.capacity();
+      cfr_state().regret_sum.size() + padding + action_count;
+  if (required_capacity > cfr_state().regret_sum.capacity()) {
+    const size_t current_capacity = cfr_state().regret_sum.capacity();
     const size_t grown_capacity = current_capacity == 0 ? 4096
                                                         : current_capacity * 2;
     const size_t new_capacity = std::max(required_capacity, grown_capacity);
-    cumulative().cumulative_regrets.reserve(new_capacity);
-    cumulative().cumulative_strategies.reserve(new_capacity);
+    cfr_state().regret_sum.reserve(new_capacity);
+    cfr_state().strategy_sum.reserve(new_capacity);
   }
   for (size_t i = 0; i < padding; ++i) {
-    cumulative().cumulative_regrets.push_back(0.0f);
-    cumulative().cumulative_strategies.push_back(0.0f);
+    cfr_state().regret_sum.push_back(0.0f);
+    cfr_state().strategy_sum.push_back(0.0f);
   }
   for (size_t action_index = 0; action_index < action_count; ++action_index) {
-    cumulative().cumulative_regrets.push_back(0.0f);
-    cumulative().cumulative_strategies.push_back(0.0f);
+    cfr_state().regret_sum.push_back(0.0f);
+    cfr_state().strategy_sum.push_back(0.0f);
     stats_->record_action_entries();
   }
   return row;

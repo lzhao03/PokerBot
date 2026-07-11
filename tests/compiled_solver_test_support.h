@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <random>
 #include <stdexcept>
@@ -95,7 +96,7 @@ struct SolverSnapshot {
 struct StorageIdentity {
   const StrategyTables* mutable_tables = nullptr;
   const StrategyTables* frozen_tables = nullptr;
-  const MutableCumulativeArrays* cumulative = nullptr;
+  const CfrState* cfr_state = nullptr;
 };
 
 }  // namespace test
@@ -166,15 +167,27 @@ struct CFRSolverTestAccess {
     return {
         solver.storage_.mutable_tables.get(),
         solver.storage_.frozen_tables.get(),
-        solver.storage_.cumulative.get(),
+        solver.storage_.cfr_state.get(),
     };
+  }
+
+  static std::shared_ptr<CfrState> copy_cfr_state(
+      const CFRSolver& solver) {
+    return std::make_shared<CfrState>(*solver.storage_.cfr_state);
+  }
+
+  static void bind_frozen(CFRSolver& target,
+                          const CFRSolver& source,
+                          std::shared_ptr<CfrState> state) {
+    target.storage_.bind_frozen(source.storage_.frozen_tables,
+                                std::move(state));
   }
 
   static test::SolverSnapshot snapshot(const CFRSolver& solver,
                                        ComboId a_hand,
                                        ComboId b_hand) {
     const StrategyTables& tables = solver.tables();
-    const MutableCumulativeArrays& arrays = solver.storage_.cumulative_ref();
+    const CfrState& state = solver.storage_.cfr_state_ref();
     test::SolverSnapshot result;
     result.root_node_id = tables.root_node_id;
     result.node_count = tables.nodes.size();
@@ -184,11 +197,10 @@ struct CFRSolverTestAccess {
         [&](NodeId child) { return child < tables.nodes.size(); });
     result.chance_transition_count = tables.chance_child_entries.size();
     result.info_set_count = tables.info_set_count;
-    result.action_entry_count = arrays.cumulative_regrets.size();
-    result.regrets.assign(arrays.cumulative_regrets.begin(),
-                          arrays.cumulative_regrets.end());
-    result.strategy_sums.assign(arrays.cumulative_strategies.begin(),
-                                arrays.cumulative_strategies.end());
+    result.action_entry_count = state.regret_sum.size();
+    result.regrets.assign(state.regret_sum.begin(), state.regret_sum.end());
+    result.strategy_sums.assign(state.strategy_sum.begin(),
+                                state.strategy_sum.end());
 
     if (tables.root_node_id >= tables.nodes.size()) {
       return result;
@@ -220,7 +232,7 @@ struct CFRSolverTestAccess {
   }
 
   static double cumulative_utility(const CFRSolver& solver) {
-    return solver.cumulative_root_utility_;
+    return solver.cfr_state().cumulative_root_utility;
   }
 
  private:

@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "absl/types/span.h"
+#include "src/cfr_state.h"
 #include "src/poker_types.h"
 #include "src/strategy_tables.h"
 #include "src/solver_stats.h"
@@ -63,17 +64,16 @@ struct SolverStorage {
   std::shared_ptr<StrategyTables> mutable_tables =
       std::make_shared<StrategyTables>();
   std::shared_ptr<const StrategyTables> frozen_tables = mutable_tables;
-  std::shared_ptr<MutableCumulativeArrays> cumulative =
-      std::make_shared<MutableCumulativeArrays>();
+  std::shared_ptr<CfrState> cfr_state = std::make_shared<CfrState>();
 
   bool is_frozen() const noexcept { return mutable_tables == nullptr; }
   StrategyTables& mutable_ref();
   const StrategyTables& frozen_ref() const;
-  MutableCumulativeArrays& cumulative_ref();
-  const MutableCumulativeArrays& cumulative_ref() const;
+  CfrState& cfr_state_ref();
+  const CfrState& cfr_state_ref() const;
   void freeze();
   void bind_frozen(std::shared_ptr<const StrategyTables> frozen_in,
-                   std::shared_ptr<MutableCumulativeArrays> cumulative_in);
+                   std::shared_ptr<CfrState> cfr_state_in);
 };
 
 class StrategyStore {
@@ -118,8 +118,8 @@ class StrategyStore {
 
   const StrategyTables& frozen_tables() const;
   StrategyTables& tables_for_growth();
-  MutableCumulativeArrays& cumulative();
-  const MutableCumulativeArrays& cumulative() const;
+  CfrState& cfr_state();
+  const CfrState& cfr_state() const;
 
   ActionBlock block_for_row(const InfoSetRow& row);
   std::optional<ActionBlock> block_for_row(const InfoSetRow* row,

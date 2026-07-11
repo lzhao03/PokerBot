@@ -187,6 +187,7 @@ cc_library(
     name = "strategy_store",
     srcs = ["strategy_store.cc"],
     hdrs = [
+        "cfr_state.h",
         "strategy_store.h",
         "solver_stats.h",
     ],
@@ -203,6 +204,7 @@ cc_library(
     name = "strategy_store_no_stats",
     srcs = ["strategy_store.cc"],
     hdrs = [
+        "cfr_state.h",
         "strategy_store.h",
         "solver_stats.h",
     ],

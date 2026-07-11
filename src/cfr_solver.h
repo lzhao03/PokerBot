@@ -42,7 +42,7 @@ class CFRSolver {
                            const HandRange& player_b_range);
 
   double get_expected_value(int player_id) const;
-  int get_iterations_run() const { return iterations_run_; }
+  uint64_t get_iterations_run() const { return cfr_state().iterations; }
   int64_t get_cfr_update_count() const { return cfr_update_count_; }
   size_t get_info_set_count() const {
     return tables().info_set_count;
@@ -66,8 +66,11 @@ class CFRSolver {
   StrategyTables& mtables() {
     return strategy_store_.mutable_tables();
   }
-  MutableCumulativeArrays& arrays() {
-    return storage_.cumulative_ref();
+  CfrState& cfr_state() {
+    return storage_.cfr_state_ref();
+  }
+  const CfrState& cfr_state() const {
+    return storage_.cfr_state_ref();
   }
   const std::vector<StrategyTables::Node>& nodes() const {
     return tables().nodes;
@@ -91,7 +94,7 @@ class CFRSolver {
 
   struct TraversalOptions {
     int update_player = 0;
-    int iteration = 0;
+    uint64_t iteration = 0;
     int max_depth = 0;
     RegretLoadMode regret_load_mode = RegretLoadMode::kAtomic;
     RegretUpdateMode regret_update_mode = RegretUpdateMode::kAtomic;
@@ -208,12 +211,13 @@ class CFRSolver {
       const TrainingRange& a_range,
       const TrainingRange& b_range);
   Deal traversal_deal(RangeDeal deal) const;
-  TraversalOptions traversal_options(int iteration, int max_depth) const;
+  TraversalOptions traversal_options(uint64_t iteration,
+                                     int max_depth) const;
   void log_training_summary() const;
   template <typename WorkerFn, typename AccumulateFn>
   void run_sharded(int work_count,
                    int worker_count,
-                   int first_index,
+                   uint64_t first_index,
                    WorkerFn&& worker_fn,
                    AccumulateFn&& accumulate_fn);
   template <typename Graph>
@@ -269,8 +273,6 @@ class CFRSolver {
   BettingRules betting_rules_;
   ExactPublicState initial_state_;
   std::mt19937 rng_;
-  double cumulative_root_utility_ = 0.0;
-  int iterations_run_ = 0;
   int64_t cfr_update_count_ = 0;
   TraversalStats traversal_stats_;
   TrainingRunStats last_training_run_stats_;

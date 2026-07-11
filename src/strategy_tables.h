@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <new>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -23,44 +22,6 @@ inline constexpr NodeId kInvalidNodeId =
 inline constexpr BettingNodeId kInvalidBettingNodeId =
     std::numeric_limits<uint32_t>::max();
 inline constexpr NodeId kCappedNodeId = kInvalidNodeId - 1;
-
-inline constexpr size_t kCacheLineBytes = 64;
-inline constexpr size_t kCumulativeActionBlockAlignment =
-    kCacheLineBytes / sizeof(float);
-
-template <typename T>
-class CacheLineAlignedAllocator {
- public:
-  using value_type = T;
-
-  CacheLineAlignedAllocator() noexcept = default;
-  template <typename U>
-  CacheLineAlignedAllocator(const CacheLineAlignedAllocator<U>&) noexcept {}
-
-  T* allocate(size_t n) {
-    if (n > std::numeric_limits<size_t>::max() / sizeof(T)) {
-      throw std::bad_array_new_length();
-    }
-    return static_cast<T*>(
-        ::operator new(n * sizeof(T), std::align_val_t{kCacheLineBytes}));
-  }
-
-  void deallocate(T* ptr, size_t) noexcept {
-    ::operator delete(ptr, std::align_val_t{kCacheLineBytes});
-  }
-};
-
-template <typename T, typename U>
-bool operator==(const CacheLineAlignedAllocator<T>&,
-                const CacheLineAlignedAllocator<U>&) noexcept {
-  return true;
-}
-
-template <typename T, typename U>
-bool operator!=(const CacheLineAlignedAllocator<T>&,
-                const CacheLineAlignedAllocator<U>&) noexcept {
-  return false;
-}
 
 class StrategyTables {
  public:
@@ -172,11 +133,6 @@ class StrategyTables {
   std::vector<FrozenPublicInfoSetRange> frozen_info_set_ranges;
   size_t info_set_count = 0;
   std::vector<std::unique_ptr<GrowingPublicInfoSets>> growing_info_sets;
-};
-
-struct MutableCumulativeArrays {
-  std::vector<float, CacheLineAlignedAllocator<float>> cumulative_regrets;
-  std::vector<float, CacheLineAlignedAllocator<float>> cumulative_strategies;
 };
 
 }  // namespace poker
