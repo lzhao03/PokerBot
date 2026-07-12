@@ -352,7 +352,7 @@ class CFRSolver {
                                     const Position& child) const;
   double traverse(HistoryId history,
                   const PublicPosition& public_state,
-                  TraversalFrame frame,
+                  const TraversalFrame& frame,
                   TraversalContext& context);
   double evaluate_deal(const Deal& deal, TraversalMode mode);
   double evaluate_deals(int samples, TraversalMode mode);

@@ -1228,7 +1228,7 @@ std::optional<InfoSetRow> CFRSolver::find_or_create_row(
 
 double CFRSolver::traverse(HistoryId history,
                            const PublicPosition& public_state,
-                           TraversalFrame frame,
+                           const TraversalFrame& frame,
                            TraversalContext& context) {
   const Deal& deal = context.deal;
   assert(history.index() < history_.nodes.size());
