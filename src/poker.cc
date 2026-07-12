@@ -490,17 +490,25 @@ double TerminalUtility(const ShowdownState& state,
                        const RiverBoard& board,
                        HoleCards player_a,
                        HoleCards player_b) noexcept {
+  return TerminalUtilityFromComparison(
+      state, CompareHands(player_a.combo(), player_b.combo(), board),
+      Player::A);
+}
+
+double TerminalUtilityFromComparison(const ShowdownState& state,
+                                     int hand_comparison,
+                                     Player evaluated_player) noexcept {
   const BettingData& data = state.data;
   const double player0_committed = data.total_committed[0];
-  const int comparison = CompareHands(player_a.combo(), player_b.combo(),
-                                      board);
-  if (comparison > 0) {
-    return Pot(data) - player0_committed;
+  double player0_utility;
+  if (hand_comparison > 0) {
+    player0_utility = Pot(data) - player0_committed;
+  } else if (hand_comparison < 0) {
+    player0_utility = -player0_committed;
+  } else {
+    player0_utility = (Pot(data) / 2.0) - player0_committed;
   }
-  if (comparison < 0) {
-    return -player0_committed;
-  }
-  return (Pot(data) / 2.0) - player0_committed;
+  return evaluated_player == Player::A ? player0_utility : -player0_utility;
 }
 
 }  // namespace poker

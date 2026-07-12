@@ -20,6 +20,7 @@
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/types/span.h"
+#include "src/hand_evaluator.h"
 
 namespace poker {
 namespace {
@@ -1248,11 +1249,9 @@ double CFRSolver::traverse(Position position,
       return TerminalUtility(node.state, Player::A);
     } else if constexpr (std::is_same_v<Node, ShowdownNode>) {
       ++context.stats.terminal_visits;
-      const auto* board =
-          std::get_if<RiverBoard>(&position.public_state.board());
-      assert(board != nullptr);
-      return TerminalUtility(node.state, *board, deal.hand(Player::A),
-                             deal.hand(Player::B));
+      assert(frame.has_showdown_comparison);
+      return TerminalUtilityFromComparison(
+          node.state, frame.showdown_comparison, Player::A);
     } else if constexpr (std::is_same_v<Node, ChanceNode>) {
       const int samples = spec_.config.chance_samples();
       context.stats.chance_samples += static_cast<uint64_t>(samples);
@@ -1261,6 +1260,13 @@ double CFRSolver::traverse(Position position,
         const Position child = sample_chance_child(
             position, deal, context.rng);
         TraversalFrame child_frame = frame;
+        if (const auto* river =
+                std::get_if<RiverBoard>(&child.public_state.board())) {
+          child_frame.showdown_comparison = static_cast<int8_t>(CompareHands(
+              deal.hand(Player::A).combo(), deal.hand(Player::B).combo(),
+              *river));
+          child_frame.has_showdown_comparison = true;
+        }
         advance_private_observations(child_frame, deal, child);
         value += traverse(child, child_frame, context);
       }
@@ -1340,6 +1346,13 @@ TrainingResult CFRSolver::run(uint64_t iterations, int threads) {
     const Deal deal = deals_.sample(rng);
     TraversalFrame frame;
     frame.private_observations = private_observations_for_position(deal, root);
+    if (const auto* river =
+            std::get_if<RiverBoard>(&root.public_state.board())) {
+      frame.showdown_comparison = static_cast<int8_t>(CompareHands(
+          deal.hand(Player::A).combo(), deal.hand(Player::B).combo(),
+          *river));
+      frame.has_showdown_comparison = true;
+    }
     const Player update_player =
         iteration % kPlayerCount == 0 ? Player::A : Player::B;
     TraversalContext context{deal, TraversalMode::Train, update_player,
@@ -1404,6 +1417,12 @@ double CFRSolver::evaluate_deal(const Deal& deal, TraversalMode mode) {
   const Position root = root_position();
   TraversalFrame frame;
   frame.private_observations = private_observations_for_position(deal, root);
+  if (const auto* river =
+          std::get_if<RiverBoard>(&root.public_state.board())) {
+    frame.showdown_comparison = static_cast<int8_t>(CompareHands(
+        deal.hand(Player::A).combo(), deal.hand(Player::B).combo(), *river));
+    frame.has_showdown_comparison = true;
+  }
   TraversalContext context{deal, mode, std::nullopt, 0, rng_, stats_, false};
   return traverse(root, frame, context);
 }

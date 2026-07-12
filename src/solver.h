@@ -319,6 +319,8 @@ class CFRSolver {
   struct TraversalFrame {
     std::array<double, kPlayerCount> reach = {1.0, 1.0};
     std::array<PrivateObservationId, kPlayerCount> private_observations = {};
+    int8_t showdown_comparison = 0;
+    bool has_showdown_comparison = false;
   };
 
   enum class TraversalMode : uint8_t {

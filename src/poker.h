@@ -412,6 +412,9 @@ double TerminalUtility(const ShowdownState& state,
                        const RiverBoard& board,
                        HoleCards player_a,
                        HoleCards player_b) noexcept;
+double TerminalUtilityFromComparison(const ShowdownState& state,
+                                     int hand_comparison,
+                                     Player evaluated_player) noexcept;
 bool IsTerminal(const ExactPublicState& state);
 
 }  // namespace poker
