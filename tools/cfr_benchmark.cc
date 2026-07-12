@@ -1,6 +1,7 @@
 #include "src/solver.h"
 #include "src/evaluation.h"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
@@ -42,6 +43,8 @@ ABSL_FLAG(uint64_t, best_response_iterations, 0,
 ABSL_FLAG(int, starting_stack, 100, "starting stack in chips");
 ABSL_FLAG(int, max_info_sets, 500000, "maximum infosets");
 ABSL_FLAG(int, chance_samples, 1, "chance samples per chance node");
+ABSL_FLAG(uint64_t, progress_interval, 0,
+          "log progress after this many iterations; 0 disables logging");
 ABSL_FLAG(uint64_t, policy_max_bytes, 0,
           "maximum serialized policy bytes; 0 keeps all infosets");
 ABSL_FLAG(std::string, policy_output, "", "optional policy output path");
@@ -135,6 +138,9 @@ int main(int argc, char** argv) {
 
   std::unique_ptr<poker::CFRSolver> solver;
   std::string build_error;
+  const uint64_t progress_interval =
+      absl::GetFlag(FLAGS_progress_interval);
+  if (progress_interval > 0) std::cerr << "building_history\n";
   Measure("build_history", [&] {
     auto result = poker::CFRSolver::Create(
         {config, root, {a_range, b_range}});
@@ -149,15 +155,36 @@ int main(int argc, char** argv) {
     std::cerr << "Error: " << build_error << '\n';
     return 1;
   }
+  if (progress_interval > 0) {
+    std::cerr << "history_nodes\t" << solver->get_history_count() << '\n';
+  }
   const double training_seconds = Measure("train_range", [&] {
     const double seconds = absl::GetFlag(FLAGS_training_seconds);
     if (seconds <= 0.0) {
-      solver->run(absl::GetFlag(FLAGS_iterations));
+      const uint64_t iterations =
+          static_cast<uint64_t>(absl::GetFlag(FLAGS_iterations));
+      if (progress_interval == 0) {
+        solver->run(iterations);
+      } else {
+        while (solver->get_iterations_run() < iterations) {
+          const uint64_t batch = std::min(
+              progress_interval,
+              iterations - solver->get_iterations_run());
+          solver->run(batch);
+          std::cerr << "training_iterations\t"
+                    << solver->get_iterations_run() << '\n';
+        }
+      }
     } else {
       const auto deadline = std::chrono::steady_clock::now() +
           std::chrono::duration<double>(seconds);
       while (std::chrono::steady_clock::now() < deadline) {
         solver->run(1);
+        if (progress_interval > 0 &&
+            solver->get_iterations_run() % progress_interval == 0) {
+          std::cerr << "training_iterations\t"
+                    << solver->get_iterations_run() << '\n';
+        }
       }
     }
     return solver->get_expected_value(poker::Player::A);
