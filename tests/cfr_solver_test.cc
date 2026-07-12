@@ -166,6 +166,10 @@ TEST_CASE("solver configuration rejects invalid boundary values") {
   CHECK(normalized->bet_abstraction().pot_fractions[0] ==
         std::vector<double>{0.25, 0.5, 1.0});
 
+  options.bet_abstraction.pot_fractions[0] = {0.1, 0.2, 0.3,
+                                               0.4, 0.5, 0.6};
+  CHECK_FALSE(SolverConfig::Create(options).ok());
+
   const SolverConfig defaults = SolverConfig::Default();
   CHECK(defaults.card_abstraction().public_mode == PublicCardMode::Texture);
   CHECK(defaults.card_abstraction().private_kind ==

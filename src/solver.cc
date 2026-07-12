@@ -1025,8 +1025,7 @@ absl::StatusOr<SolverConfig> SolverConfig::Create(
     std::sort(fractions.begin(), fractions.end());
     fractions.erase(std::unique(fractions.begin(), fractions.end()),
                     fractions.end());
-    if (fractions.size() >
-        std::numeric_limits<uint8_t>::max() - size_t{3}) {
+    if (fractions.size() > kMaxActionsPerNode - size_t{3}) {
       return absl::InvalidArgumentError("too many pot fractions");
     }
   }
@@ -1266,7 +1265,7 @@ double CFRSolver::traverse(HistoryId history,
       const Player player = node.state.actor;
       const size_t player_index = Index(player);
       const uint8_t action_count = node.edges.count;
-      assert(action_count > 0);
+      assert(action_count > 0 && action_count <= kMaxActionsPerNode);
       const InfoSetKey key{
           history, public_state.observation(),
           frame.private_observations[player_index]};
@@ -1280,8 +1279,8 @@ double CFRSolver::traverse(HistoryId history,
       }
       const InfoSetRow* strategy_row = row ? &*row : nullptr;
 
-      std::array<double, 8> probabilities;
-      std::array<double, 8> values;
+      std::array<double, kMaxActionsPerNode> probabilities;
+      std::array<double, kMaxActionsPerNode> values;
       const absl::Span<double> probability_span(
           probabilities.data(), action_count);
       if (context.mode == TraversalMode::EvaluateAverage) {

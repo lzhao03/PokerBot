@@ -1,12 +1,15 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
 #include "src/poker.h"
 
 namespace poker {
+
+inline constexpr size_t kMaxActionsPerNode = 8;
 
 struct BetAbstractionConfig {
   std::array<std::vector<double>, 4> pot_fractions = {{
@@ -17,7 +20,8 @@ struct BetAbstractionConfig {
   }};
 };
 
-using AbstractActions = absl::InlinedVector<GameAction, 8>;
+using AbstractActions =
+    absl::InlinedVector<GameAction, kMaxActionsPerNode>;
 
 AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
                                       const DecisionState& state);
