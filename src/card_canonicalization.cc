@@ -66,19 +66,16 @@ PublicObservationId CanonicalPublicObservation(const Board& board) noexcept {
 PrivateObservationId CanonicalPrivateObservation(
     ComboId hand,
     const Board& board) noexcept {
-  uint64_t best_board = std::numeric_limits<uint64_t>::max();
-  uint16_t best_hand = std::numeric_limits<uint16_t>::max();
+  std::pair<uint64_t, uint16_t> best{
+      std::numeric_limits<uint64_t>::max(),
+      std::numeric_limits<uint16_t>::max()};
   for (const SuitPermutation& permutation : kSuitPermutations) {
     const uint64_t board_id = EncodeBoard(board, permutation);
     const ComboId mapped_hand = PermuteCombo(hand, permutation);
     const uint16_t hand_id = static_cast<uint16_t>(mapped_hand.index());
-    if (board_id < best_board ||
-        (board_id == best_board && hand_id < best_hand)) {
-      best_board = board_id;
-      best_hand = hand_id;
-    }
+    best = std::min(best, std::pair{board_id, hand_id});
   }
-  return PrivateObservationId(best_hand);
+  return PrivateObservationId(best.second);
 }
 
 }  // namespace poker
