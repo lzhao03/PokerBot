@@ -55,8 +55,7 @@ PublicObservationId AdvanceCoarsePublic(PublicObservationId previous,
                                         BoardBucketId bucket) noexcept {
   assert(bucket < kCoarsePublicStreetObservationCount);
   const int shift = PublicShift(street);
-  return PublicObservationId(
-      previous.value() | ((static_cast<uint64_t>(bucket) + 1) << shift));
+  return PublicObservationId(previous.value() | ((bucket + 1) << shift));
 }
 
 PublicObservationId ObserveCoarsePublic(StreetKind street,
