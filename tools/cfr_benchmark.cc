@@ -29,10 +29,13 @@ constexpr const char* kDefaultRange = "premium";
 
 ABSL_FLAG(int, iterations, kDefaultIterations, "CFR iterations");
 ABSL_FLAG(int, eval_samples, kDefaultEvalSamples, "evaluation samples");
+ABSL_FLAG(bool, evaluate, true, "evaluate and extract a policy after training");
 ABSL_FLAG(std::string, range, kDefaultRange,
           "premium, all, or a poker range");
 ABSL_FLAG(double, training_seconds, 0.0,
           "train for this wall-clock duration; 0 uses iterations");
+ABSL_FLAG(uint64_t, prefill_iterations, 0,
+          "single-thread iterations before timed training");
 ABSL_FLAG(std::string, private_abstraction, "handcrafted36",
           "exact or handcrafted36");
 ABSL_FLAG(std::string, private_recall, "auto",
@@ -43,6 +46,9 @@ ABSL_FLAG(uint64_t, best_response_iterations, 0,
 ABSL_FLAG(int, starting_stack, 100, "starting stack in chips");
 ABSL_FLAG(int, max_info_sets, 500000, "maximum infosets");
 ABSL_FLAG(int, chance_samples, 1, "chance samples per chance node");
+ABSL_FLAG(bool, accumulate_average_strategy, true,
+          "accumulate average-strategy values during training");
+ABSL_FLAG(int, threads, 1, "training worker threads");
 ABSL_FLAG(uint64_t, progress_interval, 0,
           "log progress after this many iterations; 0 disables logging");
 ABSL_FLAG(uint64_t, policy_max_bytes, 0,
@@ -70,6 +76,8 @@ absl::StatusOr<poker::SolverConfig> BenchmarkConfig() {
   options.starting_stack = absl::GetFlag(FLAGS_starting_stack);
   options.max_info_sets = absl::GetFlag(FLAGS_max_info_sets);
   options.chance_samples = absl::GetFlag(FLAGS_chance_samples);
+  options.accumulate_average_strategy =
+      absl::GetFlag(FLAGS_accumulate_average_strategy);
   const std::string kind = absl::GetFlag(FLAGS_private_abstraction);
   if (kind == "exact") {
     options.card_abstraction.private_kind =
@@ -140,6 +148,11 @@ int main(int argc, char** argv) {
   std::string build_error;
   const uint64_t progress_interval =
       absl::GetFlag(FLAGS_progress_interval);
+  const int threads = absl::GetFlag(FLAGS_threads);
+  if (threads <= 0) {
+    std::cerr << "Error: threads must be positive\n";
+    return 1;
+  }
   if (progress_interval > 0) std::cerr << "building_history\n";
   Measure("build_history", [&] {
     auto result = poker::CFRSolver::Create(
@@ -158,19 +171,35 @@ int main(int argc, char** argv) {
   if (progress_interval > 0) {
     std::cerr << "history_nodes\t" << solver->get_history_count() << '\n';
   }
+  const uint64_t prefill_iterations =
+      absl::GetFlag(FLAGS_prefill_iterations);
+  if (prefill_iterations > 0) {
+    Measure("prefill", [&] {
+      solver->run(prefill_iterations);
+      return solver->get_info_set_count();
+    });
+    solver->reset_stats();
+  }
   const double training_seconds = Measure("train_range", [&] {
+    poker::TrainingResult training_result;
     const double seconds = absl::GetFlag(FLAGS_training_seconds);
     if (seconds <= 0.0) {
       const uint64_t iterations =
           static_cast<uint64_t>(absl::GetFlag(FLAGS_iterations));
       if (progress_interval == 0) {
-        solver->run(iterations);
+        training_result = solver->run(iterations, threads);
       } else {
         while (solver->get_iterations_run() < iterations) {
           const uint64_t batch = std::min(
               progress_interval,
               iterations - solver->get_iterations_run());
-          solver->run(batch);
+          const poker::TrainingResult batch_result =
+              solver->run(batch, threads);
+          training_result.iterations_completed +=
+              batch_result.iterations_completed;
+          training_result.serial_iterations += batch_result.serial_iterations;
+          training_result.parallel_iterations +=
+              batch_result.parallel_iterations;
           std::cerr << "training_iterations\t"
                     << solver->get_iterations_run() << '\n';
         }
@@ -179,7 +208,13 @@ int main(int argc, char** argv) {
       const auto deadline = std::chrono::steady_clock::now() +
           std::chrono::duration<double>(seconds);
       while (std::chrono::steady_clock::now() < deadline) {
-        solver->run(1);
+        const poker::TrainingResult batch_result = solver->run(
+            static_cast<uint64_t>(threads), threads);
+        training_result.iterations_completed +=
+            batch_result.iterations_completed;
+        training_result.serial_iterations += batch_result.serial_iterations;
+        training_result.parallel_iterations +=
+            batch_result.parallel_iterations;
         if (progress_interval > 0 &&
             solver->get_iterations_run() % progress_interval == 0) {
           std::cerr << "training_iterations\t"
@@ -187,10 +222,15 @@ int main(int argc, char** argv) {
         }
       }
     }
+    std::cout << "serial_iterations\t"
+              << training_result.serial_iterations << '\n'
+              << "parallel_iterations\t"
+              << training_result.parallel_iterations << '\n';
     return solver->get_expected_value(poker::Player::A);
   });
   const auto training = solver->get_stats();
   std::cout << "iterations\t" << solver->get_iterations_run() << '\n'
+            << "threads\t" << threads << '\n'
             << "decision_visits\t" << training.decision_visits << '\n'
             << "decision_visits_per_second\t"
             << Rate(training.decision_visits, training_seconds) << '\n'
@@ -200,6 +240,8 @@ int main(int argc, char** argv) {
             << "history_nodes\t" << solver->get_history_count() << '\n'
             << "regret_bytes\t" << solver->get_regret_bytes() << '\n'
             << "strategy_bytes\t" << solver->get_strategy_bytes() << '\n';
+
+  if (!absl::GetFlag(FLAGS_evaluate)) return 0;
 
   solver->reset_stats();
   Measure("evaluate_range", [&] {

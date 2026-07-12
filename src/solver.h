@@ -229,6 +229,8 @@ struct SolverStats {
 
 struct TrainingResult {
   uint64_t iterations_completed = 0;
+  uint64_t serial_iterations = 0;
+  uint64_t parallel_iterations = 0;
 };
 
 struct Deal {
@@ -268,7 +270,7 @@ class CFRSolver {
  public:
   static absl::StatusOr<std::unique_ptr<CFRSolver>> Create(SolveSpec spec);
 
-  TrainingResult run(uint64_t iterations);
+  TrainingResult run(uint64_t iterations, int threads = 1);
 
   double evaluate_current(HoleCards player_a,
                           HoleCards player_b);
@@ -330,11 +332,16 @@ class CFRSolver {
     TraversalMode mode = TraversalMode::Train;
     std::optional<Player> update_player;
     uint64_t iteration = 0;
+    std::mt19937& rng;
+    SolverStats& stats;
+    bool concurrent_updates = false;
   };
 
   Position root_position() const;
   Position action_child(Position position, uint8_t action_index) const;
-  Position sample_chance_child(Position position, const Deal& deal);
+  Position sample_chance_child(Position position,
+                               const Deal& deal,
+                               std::mt19937& rng);
   std::array<PrivateObservationId, kPlayerCount>
   private_observations_for_position(const Deal& deal,
                                     const Position& position) const;

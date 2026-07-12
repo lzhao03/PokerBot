@@ -12,6 +12,7 @@
 #include <locale>
 #include <optional>
 #include <sstream>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -22,6 +23,8 @@
 
 namespace poker {
 namespace {
+
+static_assert(__atomic_always_lock_free(sizeof(float), nullptr));
 
 void AddBettingData(FingerprintBuilder& hash,
                     const BettingData& data) noexcept {
@@ -544,8 +547,16 @@ void FillUniform(absl::Span<double> probabilities) {
   }
 }
 
+float LoadValue(const float& value, bool concurrent) {
+  if (!concurrent) return value;
+  float loaded;
+  __atomic_load(&value, &loaded, __ATOMIC_RELAXED);
+  return loaded;
+}
+
 void RegretMatch(const CfrState& state,
                  const InfoSetRow* row,
+                 bool concurrent,
                  absl::Span<double> probabilities) {
   if (row == nullptr) {
     FillUniform(probabilities);
@@ -555,7 +566,8 @@ void RegretMatch(const CfrState& state,
   double sum = 0.0;
   for (size_t action = 0; action < probabilities.size(); ++action) {
     const size_t index = static_cast<size_t>(row->action_offset) + action;
-    const double regret = std::max(0.0, static_cast<double>(state.regret_sum[index]));
+    const double regret = std::max(
+        0.0, static_cast<double>(LoadValue(state.regret_sum[index], concurrent)));
     probabilities[action] = regret;
     sum += regret;
   }
@@ -570,6 +582,7 @@ void RegretMatch(const CfrState& state,
 
 void AverageStrategy(const CfrState& state,
                      const InfoSetRow* row,
+                     bool concurrent,
                      absl::Span<double> probabilities) {
   if (row == nullptr) {
     FillUniform(probabilities);
@@ -579,7 +592,7 @@ void AverageStrategy(const CfrState& state,
   double sum = 0.0;
   for (size_t action = 0; action < probabilities.size(); ++action) {
     const size_t index = static_cast<size_t>(row->action_offset) + action;
-    const float value = state.strategy_sum[index];
+    const float value = LoadValue(state.strategy_sum[index], concurrent);
     probabilities[action] = std::max(0.0, static_cast<double>(value));
     sum += probabilities[action];
   }
@@ -595,19 +608,45 @@ void AverageStrategy(const CfrState& state,
 void AddCfrPlusRegret(CfrState& state,
                       InfoSetRow row,
                       size_t action,
-                      float delta) {
+                      float delta,
+                      bool concurrent) {
   const size_t index = static_cast<size_t>(row.action_offset) + action;
-  state.regret_sum[index] = std::max(0.0f, state.regret_sum[index] + delta);
+  float& regret = state.regret_sum[index];
+  if (!concurrent) {
+    regret = std::max(0.0f, regret + delta);
+    return;
+  }
+  float old = LoadValue(regret, true);
+  float next;
+  do {
+    next = std::max(0.0f, old + delta);
+  } while (!__atomic_compare_exchange(
+      &regret, &old, &next, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
+}
+
+void AtomicAdd(float& target, float delta) {
+  float old = LoadValue(target, true);
+  float next;
+  do {
+    next = old + delta;
+  } while (!__atomic_compare_exchange(
+      &target, &old, &next, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
 }
 
 void AddStrategySum(CfrState& state,
                     InfoSetRow row,
                     absl::Span<const double> probabilities,
-                    double weight) {
+                    double weight,
+                    bool concurrent) {
   for (size_t action = 0; action < probabilities.size(); ++action) {
     const size_t index = static_cast<size_t>(row.action_offset) + action;
-    state.strategy_sum[index] +=
-        static_cast<float>(weight * probabilities[action]);
+    float& sum = state.strategy_sum[index];
+    const float delta = static_cast<float>(weight * probabilities[action]);
+    if (concurrent) {
+      AtomicAdd(sum, delta);
+    } else {
+      sum += delta;
+    }
   }
 }
 
@@ -1125,7 +1164,8 @@ Position CFRSolver::action_child(Position position,
 }
 
 Position CFRSolver::sample_chance_child(Position position,
-                                        const Deal& deal) {
+                                        const Deal& deal,
+                                        std::mt19937& rng) {
   assert(position.history.index() < history_.nodes.size());
   const auto* node =
       std::get_if<ChanceNode>(&history_.nodes[position.history.index()]);
@@ -1134,7 +1174,7 @@ Position CFRSolver::sample_chance_child(Position position,
   const BettingData& data = node->state.data;
   const auto sampled = SampleStreetCards(data.street,
                                          position.public_state.board(),
-                                         deal.blocked_mask, rng_);
+                                         deal.blocked_mask, rng);
   assert(sampled.ok());
   const ExactPublicState child = AdvanceChance(
       node->state, position.public_state.board(), *sampled, betting_rules_);
@@ -1204,10 +1244,10 @@ double CFRSolver::traverse(Position position,
   return std::visit([&](const auto& node) -> double {
     using Node = std::decay_t<decltype(node)>;
     if constexpr (std::is_same_v<Node, FoldTerminalNode>) {
-      ++stats_.terminal_visits;
+      ++context.stats.terminal_visits;
       return TerminalUtility(node.state, Player::A);
     } else if constexpr (std::is_same_v<Node, ShowdownNode>) {
-      ++stats_.terminal_visits;
+      ++context.stats.terminal_visits;
       const auto* board =
           std::get_if<RiverBoard>(&position.public_state.board());
       assert(board != nullptr);
@@ -1215,10 +1255,11 @@ double CFRSolver::traverse(Position position,
                              deal.hand(Player::B));
     } else if constexpr (std::is_same_v<Node, ChanceNode>) {
       const int samples = spec_.config.chance_samples();
-      stats_.chance_samples += static_cast<uint64_t>(samples);
+      context.stats.chance_samples += static_cast<uint64_t>(samples);
       double value = 0.0;
       for (int sample = 0; sample < samples; ++sample) {
-        const Position child = sample_chance_child(position, deal);
+        const Position child = sample_chance_child(
+            position, deal, context.rng);
         TraversalFrame child_frame = frame;
         advance_private_observations(child_frame, deal, child);
         value += traverse(child, child_frame, context);
@@ -1245,9 +1286,11 @@ double CFRSolver::traverse(Position position,
       absl::InlinedVector<double, 8> probabilities(action_count, 0.0);
       absl::InlinedVector<double, 8> values(action_count, 0.0);
       if (context.mode == TraversalMode::EvaluateAverage) {
-        AverageStrategy(state_, strategy_row, absl::MakeSpan(probabilities));
+        AverageStrategy(state_, strategy_row, context.concurrent_updates,
+                        absl::MakeSpan(probabilities));
       } else {
-        RegretMatch(state_, strategy_row, absl::MakeSpan(probabilities));
+        RegretMatch(state_, strategy_row, context.concurrent_updates,
+                    absl::MakeSpan(probabilities));
       }
 
       double node_value = 0.0;
@@ -1261,7 +1304,7 @@ double CFRSolver::traverse(Position position,
       if (!training) {
         return node_value;
       }
-      ++stats_.decision_visits;
+      ++context.stats.decision_visits;
       if (!updates || !row.has_value()) {
         return node_value;
       }
@@ -1271,38 +1314,86 @@ double CFRSolver::traverse(Position position,
       for (uint8_t action = 0; action < action_count; ++action) {
         const double regret =
             opponent_reach * sign * (values[action] - node_value);
-        AddCfrPlusRegret(state_, *row, action, static_cast<float>(regret));
+        AddCfrPlusRegret(state_, *row, action, static_cast<float>(regret),
+                         context.concurrent_updates);
       }
       if (spec_.config.accumulate_average_strategy()) {
         const double weight = frame.reach[player_index] *
                               static_cast<double>(context.iteration + 1);
         AddStrategySum(state_, *row, absl::MakeConstSpan(probabilities),
-                       weight);
+                       weight, context.concurrent_updates);
       }
       return node_value;
     }
   }, history_.nodes[position.history.index()]);
 }
 
-TrainingResult CFRSolver::run(uint64_t iterations) {
+TrainingResult CFRSolver::run(uint64_t iterations, int threads) {
   TrainingResult result;
   if (iterations <= 0) {
     return result;
   }
 
   const Position root = root_position();
-  for (uint64_t i = 0; i < iterations; ++i) {
-    const Deal deal = deals_.sample(rng_);
+  auto run_iteration = [&](uint64_t iteration, std::mt19937& rng,
+                           SolverStats& stats, bool concurrent) {
+    const Deal deal = deals_.sample(rng);
     TraversalFrame frame;
     frame.private_observations = private_observations_for_position(deal, root);
     const Player update_player =
-        state_.iterations % kPlayerCount == 0 ? Player::A : Player::B;
-    TraversalContext context{
-        deal, TraversalMode::Train, update_player, state_.iterations};
-    state_.cumulative_root_utility +=
-        traverse(root, frame, context);
+        iteration % kPlayerCount == 0 ? Player::A : Player::B;
+    TraversalContext context{deal, TraversalMode::Train, update_player,
+                             iteration, rng, stats, concurrent};
+    return traverse(root, frame, context);
+  };
+
+  const size_t capacity =
+      static_cast<size_t>(spec_.config.max_info_sets());
+  while (result.iterations_completed < iterations &&
+         (threads <= 1 || state_.rows.size() < capacity)) {
+    state_.cumulative_root_utility += run_iteration(
+        state_.iterations, rng_, stats_, false);
     ++state_.iterations;
     ++result.iterations_completed;
+    ++result.serial_iterations;
+  }
+
+  const uint64_t remaining = iterations - result.iterations_completed;
+  if (remaining > 0) {
+    const size_t worker_count = std::min<size_t>(
+        static_cast<size_t>(threads), static_cast<size_t>(remaining));
+    struct WorkerResult {
+      double utility = 0.0;
+      SolverStats stats;
+    };
+    std::vector<uint32_t> seeds(worker_count);
+    for (uint32_t& seed : seeds) seed = rng_();
+    std::vector<WorkerResult> worker_results(worker_count);
+    std::vector<std::thread> workers;
+    workers.reserve(worker_count);
+    const uint64_t first_iteration = state_.iterations;
+    for (size_t worker = 0; worker < worker_count; ++worker) {
+      workers.emplace_back([&, worker] {
+        std::seed_seq seed{seeds[worker], static_cast<uint32_t>(worker)};
+        std::mt19937 rng(seed);
+        WorkerResult& output = worker_results[worker];
+        for (uint64_t offset = worker; offset < remaining;
+             offset += worker_count) {
+          output.utility += run_iteration(
+              first_iteration + offset, rng, output.stats, true);
+        }
+      });
+    }
+    for (std::thread& worker : workers) worker.join();
+    for (const WorkerResult& worker : worker_results) {
+      state_.cumulative_root_utility += worker.utility;
+      stats_.decision_visits += worker.stats.decision_visits;
+      stats_.chance_samples += worker.stats.chance_samples;
+      stats_.terminal_visits += worker.stats.terminal_visits;
+    }
+    state_.iterations += remaining;
+    result.iterations_completed += remaining;
+    result.parallel_iterations += remaining;
   }
 
   log_training_summary();
@@ -1313,7 +1404,7 @@ double CFRSolver::evaluate_deal(const Deal& deal, TraversalMode mode) {
   const Position root = root_position();
   TraversalFrame frame;
   frame.private_observations = private_observations_for_position(deal, root);
-  TraversalContext context{deal, mode};
+  TraversalContext context{deal, mode, std::nullopt, 0, rng_, stats_, false};
   return traverse(root, frame, context);
 }
 

@@ -380,6 +380,24 @@ TEST_CASE("training continues after the infoset cap is reached") {
   CHECK(solver->get_info_set_count() == 1);
 }
 
+TEST_CASE("parallel training updates a fixed-capacity table") {
+  auto solver = MakeSolver(Config(true, 1), R(kA), R(kB));
+  const TrainingResult result = solver->run(20, 4);
+  CHECK(result.iterations_completed == 20);
+  CHECK(result.serial_iterations == 1);
+  CHECK(result.parallel_iterations == 19);
+  CHECK(solver->get_iterations_run() == 20);
+  CHECK(solver->get_info_set_count() == 1);
+  CHECK(solver->get_stats().decision_visits > 0);
+  const CfrState& state = CFRSolverTestAccess::state(*solver);
+  CHECK(std::ranges::all_of(state.regret_sum, [](float value) {
+    return std::isfinite(value) && value >= 0.0f;
+  }));
+  CHECK(std::ranges::all_of(state.strategy_sum, [](float value) {
+    return std::isfinite(value) && value >= 0.0f;
+  }));
+}
+
 TEST_CASE("average strategy storage is optional") {
   const SolverConfig config = Config(false);
   auto solver = MakeSolver(config, R(kA), R(kB));
