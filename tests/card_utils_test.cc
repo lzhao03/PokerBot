@@ -125,7 +125,7 @@ TEST_CASE("hand evaluator matches an independent five-card oracle") {
   std::array<Card, kDeckCardCount> deck = {};
   std::copy(kDeck.begin(), kDeck.end(), deck.begin());
   std::mt19937 rng(12345);
-  for (int trial = 0; trial < 400; ++trial) {
+  for (int trial = 0; trial < 10000; ++trial) {
     std::shuffle(deck.begin(), deck.end(), rng);
     const ComboId a = H(deck[0], deck[1]);
     const ComboId b = H(deck[2], deck[3]);
