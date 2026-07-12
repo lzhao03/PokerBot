@@ -25,6 +25,7 @@ ABSL_FLAG(int, small_blind, 1, "small blind in chips");
 ABSL_FLAG(int, big_blind, 2, "big blind in chips");
 ABSL_FLAG(int, chance_samples, 1, "chance samples per chance node");
 ABSL_FLAG(int, max_info_sets, 500000, "maximum infosets");
+ABSL_FLAG(int, threads, 1, "training worker threads after infoset prefill");
 ABSL_FLAG(int64_t, max_memory_mb, 4096,
           "hard memory limit in MB; 0 is unlimited");
 ABSL_FLAG(bool, accumulate_average_strategy, true,
@@ -195,6 +196,11 @@ int main(int argc, char** argv) {
     std::cerr << "Error: --max_memory_mb must be non-negative\n";
     return 1;
   }
+  const int threads = absl::GetFlag(FLAGS_threads);
+  if (threads <= 0) {
+    std::cerr << "Error: --threads must be positive\n";
+    return 1;
+  }
   const auto config = ConfigFromFlags();
   if (!config.ok()) {
     std::cerr << "Error: " << config.status() << "\n";
@@ -215,11 +221,12 @@ int main(int argc, char** argv) {
   }
   const auto start = std::chrono::steady_clock::now();
   const poker::TrainingResult result =
-      (*solver)->run(absl::GetFlag(FLAGS_iterations));
+      (*solver)->run(absl::GetFlag(FLAGS_iterations), threads);
   const auto end = std::chrono::steady_clock::now();
 
   const std::chrono::duration<double> elapsed = end - start;
   PrintRunSummary(**solver, *config, elapsed.count());
+  std::cout << "threads=" << threads << "\n";
   std::cout << "iterations_completed=" << result.iterations_completed << "\n";
   return 0;
 }
