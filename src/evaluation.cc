@@ -222,9 +222,8 @@ double TraverseResponse(const CFRSolver& game,
       if (responds) {
         offset = context.state.find_or_create(
             key, node.child_count, context.max_info_sets, true);
-        const size_t* strategy_offset = offset ? &*offset : nullptr;
-        context.state.regret_matching_strategy(
-            strategy_offset, absl::MakeSpan(probabilities));
+        context.state.strategy(context.state.regret_sum, offset,
+                               absl::MakeSpan(probabilities));
       } else {
         absl::InlinedVector<float, 8> stored(node.child_count, 0.0f);
         ++context.opponent_lookups;

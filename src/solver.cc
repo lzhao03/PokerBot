@@ -343,31 +343,6 @@ float LoadValue(const float& value, bool concurrent) {
   return loaded;
 }
 
-void AverageStrategy(const CfrState& state,
-                     const size_t* offset,
-                     bool concurrent,
-                     absl::Span<double> probabilities) {
-  if (offset == nullptr) {
-    FillUniform(probabilities);
-    return;
-  }
-
-  double sum = 0.0;
-  for (size_t action = 0; action < probabilities.size(); ++action) {
-    const size_t index = *offset + action;
-    const float value = LoadValue(state.strategy_sum[index], concurrent);
-    probabilities[action] = std::max(0.0f, value);
-    sum += probabilities[action];
-  }
-  if (sum <= 0.0) {
-    FillUniform(probabilities);
-    return;
-  }
-  for (double& probability : probabilities) {
-    probability /= sum;
-  }
-}
-
 void AtomicAdd(float& target, float delta) {
   float old = LoadValue(target, true);
   float next;
@@ -413,20 +388,19 @@ void CfrState::add_strategy(size_t offset,
   }
 }
 
-void CfrState::regret_matching_strategy(
-    const size_t* offset,
-    absl::Span<double> probabilities,
-    bool concurrent) const {
-  if (offset == nullptr) {
+void CfrState::strategy(absl::Span<const float> values,
+                        std::optional<size_t> offset,
+                        absl::Span<double> probabilities,
+                        bool concurrent) const {
+  if (!offset) {
     FillUniform(probabilities);
     return;
   }
   double sum = 0.0;
   for (size_t action = 0; action < probabilities.size(); ++action) {
-    const double regret = std::max(
-        0.0f, LoadValue(regret_sum[*offset + action], concurrent));
-    probabilities[action] = regret;
-    sum += regret;
+    probabilities[action] = std::max(
+        0.0f, LoadValue(values[*offset + action], concurrent));
+    sum += probabilities[action];
   }
   if (sum <= 0.0) {
     FillUniform(probabilities);
@@ -783,18 +757,16 @@ double CFRSolver::traverse(HistoryId history,
         const auto found = state_.rows.find(key);
         if (found != state_.rows.end()) offset = found->second;
       }
-      const size_t* strategy_offset = offset ? &*offset : nullptr;
-
       std::array<double, kMaxActionsPerNode> probabilities;
       std::array<double, kMaxActionsPerNode> values;
       const absl::Span<double> probability_span(
           probabilities.data(), action_count);
       if (context.mode == TraversalMode::EvaluateAverage) {
-        AverageStrategy(state_, strategy_offset, context.concurrent_updates,
-                        probability_span);
+        state_.strategy(state_.strategy_sum, offset, probability_span,
+                        context.concurrent_updates);
       } else {
-        state_.regret_matching_strategy(
-            strategy_offset, probability_span, context.concurrent_updates);
+        state_.strategy(state_.regret_sum, offset, probability_span,
+                        context.concurrent_updates);
       }
 
       double node_value = 0.0;

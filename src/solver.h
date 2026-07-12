@@ -113,10 +113,10 @@ struct CfrState {
 
   void reserve(const SolverConfig& config,
                bool accumulate_average_strategy);
-  void regret_matching_strategy(
-      const size_t* offset,
-      absl::Span<double> probabilities,
-      bool concurrent = false) const;
+  void strategy(absl::Span<const float> values,
+                std::optional<size_t> offset,
+                absl::Span<double> probabilities,
+                bool concurrent = false) const;
   void add_regret(size_t offset,
                   size_t action,
                   float delta,
