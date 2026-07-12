@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -15,7 +16,6 @@
 #include "absl/status/statusor.h"
 #include "src/bet_abstraction.h"
 #include "src/card_abstraction.h"
-#include "src/fingerprint.h"
 #include "src/poker.h"
 
 namespace poker {
@@ -33,18 +33,17 @@ struct SolverConfig {
 
 struct ComboRange {
   std::array<float, kComboCount> weights = {};
-  std::vector<ComboId> combos;
 
   void add(ComboId combo, float weight = 1.0f) {
     if (weight > 0.0f) {
-      if (weights[combo.index()] == 0.0f) {
-        combos.push_back(combo);
-      }
       weights[combo.index()] += weight;
     }
   }
 
-  size_t count() const { return combos.size(); }
+  size_t count() const {
+    return static_cast<size_t>(std::ranges::count_if(
+        weights, [](float weight) { return weight > 0.0f; }));
+  }
   float weight(ComboId combo) const { return weights[combo.index()]; }
 };
 
@@ -53,6 +52,8 @@ struct SolveSpec {
   ExactPublicState root;
   std::array<ComboRange, kPlayerCount> ranges;
 };
+
+enum class ModelFingerprint : uint64_t {};
 
 absl::StatusOr<ComboRange> ParseRange(std::string_view text);
 ComboRange UniformComboRange();
@@ -129,7 +130,7 @@ struct CfrState {
 struct Policy {
   absl::flat_hash_map<InfoSetKey, size_t> rows;
   std::vector<float> probabilities;
-  ModelFingerprint model;
+  ModelFingerprint model{};
 
   bool strategy(InfoSetKey key, absl::Span<float> output) const;
 };
@@ -197,9 +198,7 @@ class CFRSolver {
   size_t get_strategy_bytes() const {
     return state_.strategy_sum.size() * sizeof(float);
   }
-  const ModelFingerprint& model_fingerprint() const noexcept {
-    return model_;
-  }
+  ModelFingerprint model_fingerprint() const noexcept { return model_; }
   const SolveSpec& solve_spec() const noexcept { return spec_; }
   const HistoryTree& history_tree() const noexcept { return history_; }
   const DealDistribution& deal_distribution() const noexcept {
@@ -257,7 +256,7 @@ class CFRSolver {
   DealDistribution deals_;
   std::mt19937 rng_;
   HistoryTree history_;
-  ModelFingerprint model_;
+  ModelFingerprint model_{};
   CfrState state_;
   SolverStats stats_;
 };

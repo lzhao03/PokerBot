@@ -34,6 +34,15 @@ void AppendInteger(std::vector<uint8_t>& bytes, Integer value) {
   }
 }
 
+// ponytail: Use a library hash if fingerprints ever cross a hostile boundary.
+ModelFingerprint Fingerprint(absl::Span<const uint8_t> bytes) noexcept {
+  uint64_t hash = 14695981039346656037ULL;
+  for (uint8_t byte : bytes) {
+    hash = (hash ^ byte) * 1099511628211ULL;
+  }
+  return ModelFingerprint{hash};
+}
+
 void AddBettingData(std::vector<uint8_t>& bytes,
                     const BettingData& data) noexcept {
   for (Chips value : data.stack) AppendInteger(bytes, value);
@@ -63,32 +72,20 @@ void AddBoard(std::vector<uint8_t>& bytes, const Board& board) noexcept {
 }
 
 void AddRange(std::vector<uint8_t>& bytes, const ComboRange& range) noexcept {
-  AppendInteger(bytes, static_cast<uint32_t>(range.combos.size()));
-  for (ComboId combo : range.combos) {
-    AppendInteger(bytes, static_cast<uint32_t>(combo.index()));
-  }
   for (float weight : range.weights) {
     AppendInteger(bytes, std::bit_cast<uint32_t>(weight));
   }
 }
 
-ModelFingerprint FingerprintModel(const SolveSpec& spec,
-                                  const HistoryTree& history) noexcept {
+ModelFingerprint FingerprintModel(const SolveSpec& spec) noexcept {
   std::vector<uint8_t> bytes;
-  AppendInteger<uint32_t>(bytes, 2);  // Fingerprint schema.
-  AppendInteger<uint32_t>(bytes, 1);  // Exact poker rules.
-  AppendInteger<uint32_t>(bytes, 1);  // Card abstraction implementation.
-  AppendInteger<uint32_t>(bytes, 1);  // Perfect-recall observation encoding.
+  AppendInteger<uint32_t>(bytes, 3);  // Fingerprint schema.
 
   const SolverConfig& config = spec.config;
   AppendInteger(bytes, config.betting_rules.minimum_bet);
-  AppendInteger(bytes, config.chance_samples);
-  AppendInteger(bytes, config.max_info_sets);
-  bytes.push_back(config.accumulate_average_strategy ? 1 : 0);
   bytes.push_back(std::to_underlying(config.card_abstraction.public_mode));
   bytes.push_back(std::to_underlying(config.card_abstraction.private_kind));
   bytes.push_back(std::to_underlying(config.card_abstraction.recall_mode));
-  bytes.push_back(0);  // Reserved model extension.
   for (const auto& fractions :
        config.bet_abstraction.pot_fractions) {
     AppendInteger(bytes, static_cast<uint32_t>(fractions.size()));
@@ -100,19 +97,7 @@ ModelFingerprint FingerprintModel(const SolveSpec& spec,
   AddBettingState(bytes, spec.root.betting);
   AddBoard(bytes, spec.root.board);
   for (const ComboRange& range : spec.ranges) AddRange(bytes, range);
-
-  AppendInteger<uint32_t>(bytes, 0);  // Root history ID.
-  AppendInteger(bytes, static_cast<uint32_t>(history.nodes.size()));
-  for (const HistoryNode& node : history.nodes) {
-    AddBettingState(bytes, node.state);
-    AppendInteger(bytes, node.children_begin);
-    bytes.push_back(node.child_count);
-  }
-  AppendInteger(bytes, static_cast<uint32_t>(history.children.size()));
-  for (HistoryId child : history.children) {
-    AppendInteger(bytes, std::to_underlying(child));
-  }
-  return Sha256(bytes);
+  return Fingerprint(bytes);
 }
 
 absl::Status WriteBytes(const std::filesystem::path& path,
@@ -269,17 +254,23 @@ absl::StatusOr<DealDistribution> DealDistribution::Create(
   const std::array ranges = {&player_a, &player_b};
   for (size_t player = 0; player < ranges.size(); ++player) {
     float total = 0.0f;
-    for (ComboId hand : ranges[player]->combos) {
-      distribution.hands_[player].push_back(hand);
-      total += ranges[player]->weight(hand);
-      distribution.cumulative_weights_[player].push_back(total);
+    for (size_t first = 0; first < kDeck.size(); ++first) {
+      for (size_t second = first + 1; second < kDeck.size(); ++second) {
+        const ComboId hand = CardsToComboId(kDeck[first], kDeck[second]);
+        const float weight = ranges[player]->weight(hand);
+        if (weight <= 0.0f) continue;
+        distribution.hands_[player].push_back(hand);
+        total += weight;
+        distribution.cumulative_weights_[player].push_back(total);
+      }
     }
   }
   const bool compatible = std::ranges::any_of(
-      player_a.combos, [&](ComboId a) {
-        return std::ranges::any_of(player_b.combos, [&](ComboId b) {
-          return (a.mask() & b.mask()) == 0;
-        });
+      distribution.hands_[0], [&](ComboId a) {
+        return std::ranges::any_of(
+            distribution.hands_[1], [&](ComboId b) {
+              return (a.mask() & b.mask()) == 0;
+            });
       });
   if (!compatible) {
     return absl::InvalidArgumentError(
@@ -480,7 +471,7 @@ absl::Status ValidatePolicy(const Policy& policy) {
 }
 
 constexpr std::array<uint8_t, 8> kPolicyMagic = {
-    'P', 'K', 'P', 'O', 'L', 'C', 'Y', '2'};
+    'P', 'K', 'P', 'O', 'L', 'C', 'Y', '3'};
 
 }  // namespace
 
@@ -497,9 +488,8 @@ absl::Status SavePolicy(const Policy& policy,
 
   std::vector<uint8_t> bytes;
   bytes.insert(bytes.end(), kPolicyMagic.begin(), kPolicyMagic.end());
-  AppendInteger<uint32_t>(bytes, 2);
-  bytes.insert(bytes.end(), policy.model.bytes.begin(),
-               policy.model.bytes.end());
+  AppendInteger<uint32_t>(bytes, 3);
+  AppendInteger(bytes, std::to_underlying(policy.model));
   AppendInteger<uint64_t>(bytes, rows.size());
   AppendInteger<uint64_t>(bytes, policy.probabilities.size());
   for (const auto& [key, offset] : rows) {
@@ -616,7 +606,7 @@ CFRSolver::CFRSolver(SolveSpec spec, DealDistribution deals)
   history_.children.reserve(4096);
   AppendHistory(history_, spec_.root.betting,
                 spec_.config.betting_rules, spec_.config);
-  model_ = FingerprintModel(spec_, history_);
+  model_ = FingerprintModel(spec_);
 }
 
 absl::StatusOr<CFRSolver> CFRSolver::Create(SolveSpec spec) {

@@ -114,17 +114,6 @@ std::unique_ptr<CFRSolver> MakeSolver(
   return std::make_unique<CFRSolver>(std::move(*solver));
 }
 
-std::string Hex(ModelFingerprint fingerprint) {
-  constexpr char kDigits[] = "0123456789abcdef";
-  std::string text;
-  text.reserve(fingerprint.bytes.size() * 2);
-  for (uint8_t value : fingerprint.bytes) {
-    text.push_back(kDigits[value >> 4]);
-    text.push_back(kDigits[value & 0x0F]);
-  }
-  return text;
-}
-
 TEST_CASE("solver configuration rejects invalid boundary values") {
   SolverConfig options;
   options.max_info_sets = 0;
@@ -207,12 +196,14 @@ TEST_CASE("small exact solver baseline is deterministic") {
 TEST_CASE("model fingerprints are stable and cover solve ranges") {
   auto first = MakeSolver(Config(), R(kA), R(kB));
   auto second = MakeSolver(Config(), R(kA), R(kB));
+  auto different_training = MakeSolver(Config(false, 10), R(kA), R(kB));
   auto changed = MakeSolver(Config(), R(kB), R(kA));
   CHECK(first->model_fingerprint() == second->model_fingerprint());
+  CHECK(first->model_fingerprint() ==
+        different_training->model_fingerprint());
   CHECK(first->model_fingerprint() != changed->model_fingerprint());
-  CHECK(Hex(first->model_fingerprint()) ==
-        "e2fb6db92eafd22c1f8f279e60d02921"
-        "50bc8e39318df22bd60d70a37472ffa2");
+  CHECK(std::to_underlying(first->model_fingerprint()) ==
+        0x795747a4f22f81b8ULL);
 }
 
 TEST_CASE("private abstraction cannot change terminal utility") {

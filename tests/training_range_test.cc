@@ -38,8 +38,8 @@ TEST_CASE("range syntax expands to exact combo weights") {
 
   const ComboRange uniform = UniformComboRange();
   CHECK(uniform.count() == kComboCount);
-  for (ComboId combo : uniform.combos) {
-    CHECK(uniform.weight(combo) == 1.0f);
+  for (float weight : uniform.weights) {
+    CHECK(weight == 1.0f);
   }
 
   const auto suited = ParseRange("AKs");
