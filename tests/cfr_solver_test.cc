@@ -372,12 +372,12 @@ TEST_CASE("postflop roots use full observation identity") {
       {tree.root, public_state.observation(), private_id}));
 }
 
-TEST_CASE("infoset caps stop after completing the current iteration") {
+TEST_CASE("training continues after the infoset cap is reached") {
   auto solver = MakeSolver(Config(true, 1), R(kA), R(kB));
   const TrainingResult result = solver->run(2);
-  CHECK(result.iterations_completed == 1);
-  CHECK(result.stop_reason == TrainingStopReason::InfoSetLimit);
-  CHECK(solver->get_iterations_run() == 1);
+  CHECK(result.iterations_completed == 2);
+  CHECK(solver->get_iterations_run() == 2);
+  CHECK(solver->get_info_set_count() == 1);
 }
 
 TEST_CASE("average strategy storage is optional") {
@@ -580,7 +580,7 @@ TEST_CASE("approximate responses are reproducible and respect infosets") {
   CHECK(root_rows == 1);
 }
 
-TEST_CASE("approximate response reports infoset capacity") {
+TEST_CASE("approximate response continues after infoset capacity") {
   auto game = MakeSolver(Config(true, 1), R(kA), R(kB));
   game->run(1);
   const auto opponent = game->extract_average_policy();
@@ -588,8 +588,7 @@ TEST_CASE("approximate response reports infoset capacity") {
   const auto response = TrainApproximateBestResponse(
       *game, Player::A, *opponent, BestResponseConfig{10, 2, 7});
   REQUIRE(response.ok());
-  CHECK(response->stop_reason == TrainingStopReason::InfoSetLimit);
-  CHECK(response->training_iterations_completed == 1);
+  CHECK(response->training_iterations_completed == 10);
   CHECK(response->response_policy.rows.size() == 1);
 }
 

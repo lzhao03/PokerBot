@@ -220,11 +220,6 @@ int main(int argc, char** argv) {
 
   const std::chrono::duration<double> elapsed = end - start;
   PrintRunSummary(**solver, *config, elapsed.count());
-  std::cout << "stop_reason="
-            << (result.stop_reason ==
-                        poker::TrainingStopReason::IterationsCompleted
-                    ? "iterations_completed"
-                    : "info_set_limit")
-            << "\n";
+  std::cout << "iterations_completed=" << result.iterations_completed << "\n";
   return 0;
 }

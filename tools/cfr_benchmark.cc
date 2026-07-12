@@ -157,10 +157,7 @@ int main(int argc, char** argv) {
       const auto deadline = std::chrono::steady_clock::now() +
           std::chrono::duration<double>(seconds);
       while (std::chrono::steady_clock::now() < deadline) {
-        if (solver->run(1).stop_reason ==
-            poker::TrainingStopReason::InfoSetLimit) {
-          break;
-        }
+        solver->run(1);
       }
     }
     return solver->get_expected_value(poker::Player::A);

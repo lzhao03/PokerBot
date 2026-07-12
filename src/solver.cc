@@ -1237,9 +1237,6 @@ double CFRSolver::traverse(Position position,
       std::optional<InfoSetRow> row;
       if (updates) {
         row = find_or_create_row(key, action_count);
-        if (!row.has_value()) {
-          context.info_set_limit_reached = true;
-        }
       } else {
         row = find_row(key);
       }
@@ -1306,10 +1303,6 @@ TrainingResult CFRSolver::run(uint64_t iterations) {
         traverse(root, frame, context);
     ++state_.iterations;
     ++result.iterations_completed;
-    if (context.info_set_limit_reached) {
-      result.stop_reason = TrainingStopReason::InfoSetLimit;
-      break;
-    }
   }
 
   log_training_summary();

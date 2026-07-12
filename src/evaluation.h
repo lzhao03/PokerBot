@@ -27,7 +27,6 @@ struct BestResponseResult {
   double value = 0.0;
   double standard_error = 0.0;
   uint64_t training_iterations_completed = 0;
-  TrainingStopReason stop_reason = TrainingStopReason::IterationsCompleted;
   uint64_t opponent_policy_lookups = 0;
   uint64_t missing_opponent_lookups = 0;
 };

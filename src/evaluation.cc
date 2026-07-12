@@ -238,7 +238,6 @@ struct ResponseTrainingContext {
   CfrState& state;
   uint64_t iteration = 0;
   size_t max_info_sets = 0;
-  bool info_set_limit_reached = false;
   uint64_t opponent_lookups = 0;
   uint64_t missing_opponent_lookups = 0;
 };
@@ -283,7 +282,6 @@ double TraverseResponse(const CFRSolver& game,
       if (responds) {
         row = FindOrCreateResponseRow(context.state, key, node.edges.count,
                                       context.max_info_sets);
-        if (!row) context.info_set_limit_reached = true;
         const InfoSetRow* strategy_row = row ? &*row : nullptr;
         RegretMatch(context.state, strategy_row,
                     absl::MakeSpan(probabilities));
@@ -387,10 +385,6 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     response_state.cumulative_root_utility += value;
     ++response_state.iterations;
     ++result.training_iterations_completed;
-    if (context.info_set_limit_reached) {
-      result.stop_reason = TrainingStopReason::InfoSetLimit;
-      break;
-    }
   }
 
   auto response = ExtractAveragePolicy(

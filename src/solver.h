@@ -227,15 +227,8 @@ struct SolverStats {
   uint64_t terminal_visits = 0;
 };
 
-enum class TrainingStopReason : uint8_t {
-  IterationsCompleted,
-  InfoSetLimit,
-};
-
 struct TrainingResult {
   uint64_t iterations_completed = 0;
-  TrainingStopReason stop_reason =
-      TrainingStopReason::IterationsCompleted;
 };
 
 struct Deal {
@@ -337,7 +330,6 @@ class CFRSolver {
     TraversalMode mode = TraversalMode::Train;
     std::optional<Player> update_player;
     uint64_t iteration = 0;
-    bool info_set_limit_reached = false;
   };
 
   Position root_position() const;
