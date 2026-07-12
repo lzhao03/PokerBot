@@ -46,7 +46,7 @@ constexpr std::array<uint8_t, 8192> BuildStraightDensityTable() {
 
 inline const auto kStraightDensity = BuildStraightDensityTable();
 
-PublicObservationId AdvanceCoarsePublic(PublicObservationId previous,
+PublicObservationId AppendBoardTextureBucket(PublicObservationId previous,
                                         StreetKind street,
                                         BoardBucketId bucket) noexcept {
   assert(street != StreetKind::Preflop);
@@ -55,26 +55,26 @@ PublicObservationId AdvanceCoarsePublic(PublicObservationId previous,
   return PublicObservationId(previous.value() | ((bucket + 1) << shift));
 }
 
-PublicObservationId ObserveCoarsePublic(const Board& board) noexcept {
+PublicObservationId EncodeBoardTextureHistory(const Board& board) noexcept {
   PublicObservationId observation;
   const auto cards = BoardCards(board);
   if (cards.empty()) return observation;
 
   const FlopBoard flop =
       DealFlop(PreflopBoard{}, {cards[0], cards[1], cards[2]});
-  observation = AdvanceCoarsePublic(
+  observation = AppendBoardTextureBucket(
       observation, StreetKind::Flop,
       BoardTextureBucket(StreetKind::Flop, BoardFeaturesFor(Board{flop})));
   if (cards.size() == 3) return observation;
 
   const TurnBoard turn = DealTurn(flop, cards[3]);
-  observation = AdvanceCoarsePublic(
+  observation = AppendBoardTextureBucket(
       observation, StreetKind::Turn,
       BoardTextureBucket(StreetKind::Turn, BoardFeaturesFor(Board{turn})));
   if (cards.size() == 4) return observation;
 
   const RiverBoard river = DealRiver(turn, cards[4]);
-  return AdvanceCoarsePublic(
+  return AppendBoardTextureBucket(
       observation, StreetKind::River,
       BoardTextureBucket(StreetKind::River, BoardFeaturesFor(Board{river})));
 }
@@ -728,7 +728,7 @@ PublicObservationId ObservePublic(const CardAbstraction& abstraction,
     case PublicCardMode::ExactCanonical:
       return CanonicalPublicObservation(board);
     case PublicCardMode::Texture:
-      return ObserveCoarsePublic(board);
+      return EncodeBoardTextureHistory(board);
   }
 }
 
@@ -763,7 +763,7 @@ PublicPosition PublicPosition::after_chance(
   if (abstraction.config().public_mode == PublicCardMode::ExactCanonical) {
     observation = CanonicalPublicObservation(board);
   } else {
-    observation = AdvanceCoarsePublic(
+    observation = AppendBoardTextureBucket(
         observation_, street, BoardTextureBucket(street, features));
   }
   return PublicPosition(street, std::move(board), observation, features);
