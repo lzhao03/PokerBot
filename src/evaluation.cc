@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <optional>
 #include <random>
-#include <type_traits>
 
 #include "absl/container/inlined_vector.h"
 #include "absl/status/status.h"
@@ -94,45 +93,45 @@ double TraverseProfile(const CFRSolver& game,
                        EvaluationCounters& counters) {
   const HistoryTree& history = game.history_tree();
   const HistoryNode& node = history.nodes[Index(position.history)];
-  return std::visit([&](const auto& state) -> double {
-    using State = std::decay_t<decltype(state)>;
-    if constexpr (std::is_same_v<State, FoldTerminalState>) {
-      return TerminalUtility(state, Player::A);
-    } else if constexpr (std::is_same_v<State, ShowdownState>) {
-      const Board& board = position.public_state.board();
-      return TerminalUtility(state, board, deal.hand(Player::A),
-                             deal.hand(Player::B));
-    } else if constexpr (std::is_same_v<State, ChanceState>) {
-      double value = 0.0;
-      const int samples = game.solve_spec().config.chance_samples;
-      for (int sample = 0; sample < samples; ++sample) {
-        const Position child = ChanceChild(game, node, position, deal, rng);
-        EvaluationFrame child_frame = frame;
-        AdvancePrivateObservations(game, child_frame, child, deal);
-        value += TraverseProfile(game, policies, child, child_frame, deal,
-                                 rng, counters);
-      }
-      return value / samples;
-    } else {
-      const size_t player = Index(state.actor);
-      const InfoSetKey key{
-          position.history, position.public_state.observation(),
-          frame.private_observations[player]};
-      absl::InlinedVector<float, 8> probabilities(node.child_count, 0.0f);
-      ++counters.lookups[player];
-      if (!policies[player]->strategy(key, absl::MakeSpan(probabilities))) {
-        ++counters.missing[player];
-      }
-      double value = 0.0;
-      for (uint8_t action = 0; action < node.child_count; ++action) {
-        Position child = position;
-        child.history = history.children[node.children_begin + action];
-        value += probabilities[action] * TraverseProfile(
-            game, policies, child, frame, deal, rng, counters);
-      }
-      return value;
+  if (const auto* state = std::get_if<FoldTerminalState>(&node.state)) {
+    return TerminalUtility(*state, Player::A);
+  }
+  if (const auto* state = std::get_if<ShowdownState>(&node.state)) {
+    const Board& board = position.public_state.board();
+    return TerminalUtility(*state, board, deal.hand(Player::A),
+                           deal.hand(Player::B));
+  }
+  if (std::get_if<ChanceState>(&node.state)) {
+    double value = 0.0;
+    const int samples = game.solve_spec().config.chance_samples;
+    for (int sample = 0; sample < samples; ++sample) {
+      const Position child = ChanceChild(game, node, position, deal, rng);
+      EvaluationFrame child_frame = frame;
+      AdvancePrivateObservations(game, child_frame, child, deal);
+      value += TraverseProfile(game, policies, child, child_frame, deal,
+                               rng, counters);
     }
-  }, node.state);
+    return value / samples;
+  }
+
+  const DecisionState& state = std::get<DecisionState>(node.state);
+  const size_t player = Index(state.actor);
+  const InfoSetKey key{
+      position.history, position.public_state.observation(),
+      frame.private_observations[player]};
+  absl::InlinedVector<float, 8> probabilities(node.child_count, 0.0f);
+  ++counters.lookups[player];
+  if (!policies[player]->strategy(key, absl::MakeSpan(probabilities))) {
+    ++counters.missing[player];
+  }
+  double value = 0.0;
+  for (uint8_t action = 0; action < node.child_count; ++action) {
+    Position child = position;
+    child.history = history.children[node.children_begin + action];
+    value += probabilities[action] * TraverseProfile(
+        game, policies, child, frame, deal, rng, counters);
+  }
+  return value;
 }
 
 ProfileEstimate EstimateProfile(
@@ -182,73 +181,73 @@ double TraverseResponse(const CFRSolver& game,
                         ResponseTrainingContext& context) {
   const HistoryTree& history = game.history_tree();
   const HistoryNode& node = history.nodes[Index(position.history)];
-  return std::visit([&](const auto& state) -> double {
-    using State = std::decay_t<decltype(state)>;
-    if constexpr (std::is_same_v<State, FoldTerminalState>) {
-      return TerminalUtility(state, Player::A);
-    } else if constexpr (std::is_same_v<State, ShowdownState>) {
-      const Board& board = position.public_state.board();
-      return TerminalUtility(state, board, deal.hand(Player::A),
-                             deal.hand(Player::B));
-    } else if constexpr (std::is_same_v<State, ChanceState>) {
-      double value = 0.0;
-      const int samples = game.solve_spec().config.chance_samples;
-      for (int sample = 0; sample < samples; ++sample) {
-        const Position child = ChanceChild(game, node, position, deal, rng);
-        EvaluationFrame child_frame = frame;
-        AdvancePrivateObservations(game, child_frame, child, deal);
-        value += TraverseResponse(game, child, child_frame, deal, rng,
-                                  context);
-      }
-      return value / samples;
-    } else {
-      const Player actor = state.actor;
-      const size_t player = Index(actor);
-      const InfoSetKey key{
-          position.history, position.public_state.observation(),
-          frame.private_observations[player]};
-      const bool responds = actor == context.responder;
-      std::optional<size_t> offset;
-      absl::InlinedVector<double, 8> probabilities(node.child_count, 0.0);
-      if (responds) {
-        offset = context.state.find_or_create(key, node.child_count);
-        context.state.strategy(context.state.regret_sum, offset,
-                               absl::MakeSpan(probabilities));
-      } else {
-        absl::InlinedVector<float, 8> stored(node.child_count, 0.0f);
-        ++context.opponent_lookups;
-        if (!context.opponent.strategy(key, absl::MakeSpan(stored))) {
-          ++context.missing_opponent_lookups;
-        }
-        std::copy(stored.begin(), stored.end(), probabilities.begin());
-      }
-
-      absl::InlinedVector<double, 8> values(node.child_count, 0.0);
-      double node_value = 0.0;
-      for (uint8_t action = 0; action < node.child_count; ++action) {
-        EvaluationFrame child_frame = frame;
-        child_frame.reach[player] *= probabilities[action];
-        Position child = position;
-        child.history = history.children[node.children_begin + action];
-        values[action] = TraverseResponse(game, child, child_frame, deal,
-                                          rng, context);
-        node_value += probabilities[action] * values[action];
-      }
-      if (!responds || !offset) return node_value;
-
-      const double sign = actor == Player::A ? 1.0 : -1.0;
-      const double opponent_reach = frame.reach[Index(Opponent(actor))];
-      for (uint8_t action = 0; action < node.child_count; ++action) {
-        const float delta = static_cast<float>(
-            opponent_reach * sign * (values[action] - node_value));
-        context.state.add_regret(*offset, action, delta);
-      }
-      context.state.add_strategy(
-          *offset, absl::MakeConstSpan(probabilities),
-          frame.reach[player] * (context.state.iterations + 1));
-      return node_value;
+  if (const auto* state = std::get_if<FoldTerminalState>(&node.state)) {
+    return TerminalUtility(*state, Player::A);
+  }
+  if (const auto* state = std::get_if<ShowdownState>(&node.state)) {
+    const Board& board = position.public_state.board();
+    return TerminalUtility(*state, board, deal.hand(Player::A),
+                           deal.hand(Player::B));
+  }
+  if (std::get_if<ChanceState>(&node.state)) {
+    double value = 0.0;
+    const int samples = game.solve_spec().config.chance_samples;
+    for (int sample = 0; sample < samples; ++sample) {
+      const Position child = ChanceChild(game, node, position, deal, rng);
+      EvaluationFrame child_frame = frame;
+      AdvancePrivateObservations(game, child_frame, child, deal);
+      value += TraverseResponse(game, child, child_frame, deal, rng,
+                                context);
     }
-  }, node.state);
+    return value / samples;
+  }
+
+  const DecisionState& state = std::get<DecisionState>(node.state);
+  const Player actor = state.actor;
+  const size_t player = Index(actor);
+  const InfoSetKey key{
+      position.history, position.public_state.observation(),
+      frame.private_observations[player]};
+  const bool responds = actor == context.responder;
+  std::optional<size_t> offset;
+  absl::InlinedVector<double, 8> probabilities(node.child_count, 0.0);
+  if (responds) {
+    offset = context.state.find_or_create(key, node.child_count);
+    context.state.strategy(context.state.regret_sum, offset,
+                           absl::MakeSpan(probabilities));
+  } else {
+    absl::InlinedVector<float, 8> stored(node.child_count, 0.0f);
+    ++context.opponent_lookups;
+    if (!context.opponent.strategy(key, absl::MakeSpan(stored))) {
+      ++context.missing_opponent_lookups;
+    }
+    std::copy(stored.begin(), stored.end(), probabilities.begin());
+  }
+
+  absl::InlinedVector<double, 8> values(node.child_count, 0.0);
+  double node_value = 0.0;
+  for (uint8_t action = 0; action < node.child_count; ++action) {
+    EvaluationFrame child_frame = frame;
+    child_frame.reach[player] *= probabilities[action];
+    Position child = position;
+    child.history = history.children[node.children_begin + action];
+    values[action] = TraverseResponse(game, child, child_frame, deal,
+                                      rng, context);
+    node_value += probabilities[action] * values[action];
+  }
+  if (!responds || !offset) return node_value;
+
+  const double sign = actor == Player::A ? 1.0 : -1.0;
+  const double opponent_reach = frame.reach[Index(Opponent(actor))];
+  for (uint8_t action = 0; action < node.child_count; ++action) {
+    const float delta = static_cast<float>(
+        opponent_reach * sign * (values[action] - node_value));
+    context.state.add_regret(*offset, action, delta);
+  }
+  context.state.add_strategy(
+      *offset, absl::MakeConstSpan(probabilities),
+      frame.reach[player] * (context.state.iterations + 1));
+  return node_value;
 }
 
 }  // namespace

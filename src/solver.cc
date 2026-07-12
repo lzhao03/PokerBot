@@ -690,100 +690,96 @@ double CFRSolver::traverse(HistoryId history,
                            TraversalContext& context) {
   const Deal& deal = context.deal;
   const HistoryNode& history_node = history_.nodes[Index(history)];
-  return std::visit([&](const auto& state) -> double {
-    using State = std::decay_t<decltype(state)>;
-    if constexpr (std::is_same_v<State, FoldTerminalState>) {
-      ++context.stats.terminal_visits;
-      return TerminalUtility(state, Player::A);
-    } else if constexpr (std::is_same_v<State, ShowdownState>) {
-      ++context.stats.terminal_visits;
-      assert(frame.showdown_comparison.has_value());
-      return TerminalUtilityFromComparison(
-          state, *frame.showdown_comparison, Player::A);
-    } else if constexpr (std::is_same_v<State, ChanceState>) {
-      const int samples = spec_.config.chance_samples;
-      context.stats.chance_samples += static_cast<uint64_t>(samples);
-      double value = 0.0;
-      for (int sample = 0; sample < samples; ++sample) {
-        const Position child = sample_chance_child(
-            history_node, public_state, deal, context.rng);
-        TraversalFrame child_frame = frame;
-        if (child.public_state.board().count() == kMaxBoardCards) {
-          child_frame.showdown_comparison = static_cast<int8_t>(CompareHands(
-              deal.hand(Player::A), deal.hand(Player::B),
-              child.public_state.board()));
-        }
-        advance_private_observations(child_frame, deal, child);
-        value += traverse(
-            child.history, child.public_state, child_frame, context);
+  const BettingState& state = history_node.state;
+  if (const auto* fold = std::get_if<FoldTerminalState>(&state)) {
+    ++context.stats.terminal_visits;
+    return TerminalUtility(*fold, Player::A);
+  }
+  if (const auto* showdown = std::get_if<ShowdownState>(&state)) {
+    ++context.stats.terminal_visits;
+    assert(frame.showdown_comparison.has_value());
+    return TerminalUtilityFromComparison(
+        *showdown, *frame.showdown_comparison, Player::A);
+  }
+  if (std::holds_alternative<ChanceState>(state)) {
+    const int samples = spec_.config.chance_samples;
+    context.stats.chance_samples += static_cast<uint64_t>(samples);
+    double value = 0.0;
+    for (int sample = 0; sample < samples; ++sample) {
+      const Position child = sample_chance_child(
+          history_node, public_state, deal, context.rng);
+      TraversalFrame child_frame = frame;
+      if (child.public_state.board().count() == kMaxBoardCards) {
+        child_frame.showdown_comparison = static_cast<int8_t>(CompareHands(
+            deal.hand(Player::A), deal.hand(Player::B),
+            child.public_state.board()));
       }
-      return value / samples;
-    } else {
-      const Player player = state.actor;
-      const size_t player_index = Index(player);
-      const uint8_t action_count = history_node.child_count;
-      const InfoSetKey key{
-          history, public_state.observation(),
-          frame.private_observations[player_index]};
-      const bool training = context.mode == TraversalMode::Train;
-      const bool updates =
-          training && context.iteration % kPlayerCount == player_index;
-      std::optional<size_t> offset;
-      if (updates) {
-        offset = state_.find_or_create(key, action_count);
-      } else {
-        const auto found = state_.rows.find(key);
-        if (found != state_.rows.end()) offset = found->second;
-      }
-      std::array<double, kMaxActionsPerNode> probabilities;
-      std::array<double, kMaxActionsPerNode> values;
-      const absl::Span<double> probability_span(
-          probabilities.data(), action_count);
-      if (context.mode == TraversalMode::EvaluateAverage) {
-        state_.strategy(state_.strategy_sum, offset, probability_span,
-                        context.concurrent_updates);
-      } else {
-        state_.strategy(state_.regret_sum, offset, probability_span,
-                        context.concurrent_updates);
-      }
-
-      double node_value = 0.0;
-      for (uint8_t action = 0; action < action_count; ++action) {
-        TraversalFrame child_frame = frame;
-        child_frame.reach[player_index] *= probabilities[action];
-        const HistoryId child = history_.children[
-            history_node.children_begin + action];
-        values[action] = traverse(
-            child, public_state, child_frame, context);
-        node_value += probabilities[action] * values[action];
-      }
-      if (!training) {
-        return node_value;
-      }
-      ++context.stats.decision_visits;
-      if (!updates || !offset.has_value()) {
-        return node_value;
-      }
-
-      const double sign = player == Player::A ? 1.0 : -1.0;
-      const double opponent_reach = frame.reach[Index(Opponent(player))];
-      for (uint8_t action = 0; action < action_count; ++action) {
-        const double regret =
-            opponent_reach * sign * (values[action] - node_value);
-        state_.add_regret(*offset, action, static_cast<float>(regret),
-                          context.concurrent_updates);
-      }
-      if (spec_.config.accumulate_average_strategy) {
-        const double weight = frame.reach[player_index] *
-                              (context.iteration + 1);
-        state_.add_strategy(
-            *offset,
-            absl::Span<const double>(probabilities.data(), action_count),
-            weight, context.concurrent_updates);
-      }
-      return node_value;
+      advance_private_observations(child_frame, deal, child);
+      value += traverse(
+          child.history, child.public_state, child_frame, context);
     }
-  }, history_node.state);
+    return value / samples;
+  }
+
+  const Player player = std::get<DecisionState>(state).actor;
+  const size_t player_index = Index(player);
+  const uint8_t action_count = history_node.child_count;
+  const InfoSetKey key{
+      history, public_state.observation(),
+      frame.private_observations[player_index]};
+  const bool training = context.mode == TraversalMode::Train;
+  const bool updates =
+      training && context.iteration % kPlayerCount == player_index;
+  std::optional<size_t> offset;
+  if (updates) {
+    offset = state_.find_or_create(key, action_count);
+  } else {
+    const auto found = state_.rows.find(key);
+    if (found != state_.rows.end()) offset = found->second;
+  }
+  std::array<double, kMaxActionsPerNode> probabilities;
+  std::array<double, kMaxActionsPerNode> values;
+  const absl::Span<double> probability_span(
+      probabilities.data(), action_count);
+  if (context.mode == TraversalMode::EvaluateAverage) {
+    state_.strategy(state_.strategy_sum, offset, probability_span,
+                    context.concurrent_updates);
+  } else {
+    state_.strategy(state_.regret_sum, offset, probability_span,
+                    context.concurrent_updates);
+  }
+
+  double node_value = 0.0;
+  for (uint8_t action = 0; action < action_count; ++action) {
+    TraversalFrame child_frame = frame;
+    child_frame.reach[player_index] *= probabilities[action];
+    const HistoryId child = history_.children[
+        history_node.children_begin + action];
+    values[action] = traverse(child, public_state, child_frame, context);
+    node_value += probabilities[action] * values[action];
+  }
+  if (!training) return node_value;
+
+  ++context.stats.decision_visits;
+  if (!updates || !offset) return node_value;
+
+  const double sign = player == Player::A ? 1.0 : -1.0;
+  const double opponent_reach = frame.reach[Index(Opponent(player))];
+  for (uint8_t action = 0; action < action_count; ++action) {
+    const double regret =
+        opponent_reach * sign * (values[action] - node_value);
+    state_.add_regret(*offset, action, static_cast<float>(regret),
+                      context.concurrent_updates);
+  }
+  if (spec_.config.accumulate_average_strategy) {
+    const double weight = frame.reach[player_index] *
+                          (context.iteration + 1);
+    state_.add_strategy(
+        *offset,
+        absl::Span<const double>(probabilities.data(), action_count),
+        weight, context.concurrent_updates);
+  }
+  return node_value;
 }
 
 void CFRSolver::run(uint64_t iterations, int threads) {
