@@ -340,8 +340,8 @@ class CFRSolver {
   };
 
   Position root_position() const;
-  Position action_child(Position position, uint8_t action_index) const;
-  Position sample_chance_child(Position position,
+  Position sample_chance_child(HistoryId history,
+                               const PublicPosition& public_state,
                                const Deal& deal,
                                std::mt19937& rng);
   std::array<PrivateObservationId, kPlayerCount>
@@ -350,7 +350,8 @@ class CFRSolver {
   void advance_private_observations(TraversalFrame& frame,
                                     const Deal& deal,
                                     const Position& child) const;
-  double traverse(Position position,
+  double traverse(HistoryId history,
+                  const PublicPosition& public_state,
                   TraversalFrame frame,
                   TraversalContext& context);
   double evaluate_deal(const Deal& deal, TraversalMode mode);

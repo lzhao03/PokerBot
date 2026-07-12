@@ -1152,36 +1152,26 @@ Position CFRSolver::root_position() const {
                                spec_.root.board)};
 }
 
-Position CFRSolver::action_child(Position position,
-                                 uint8_t action_index) const {
-  assert(position.history.index() < history_.nodes.size());
-  const auto* node =
-      std::get_if<DecisionNode>(&history_.nodes[position.history.index()]);
-  assert(node != nullptr && action_index < node->edges.count);
-  position.history = history_.edges[
-      node->edges.begin + action_index].child;
-  return position;
-}
-
-Position CFRSolver::sample_chance_child(Position position,
+Position CFRSolver::sample_chance_child(HistoryId history,
+                                        const PublicPosition& public_state,
                                         const Deal& deal,
                                         std::mt19937& rng) {
-  assert(position.history.index() < history_.nodes.size());
+  assert(history.index() < history_.nodes.size());
   const auto* node =
-      std::get_if<ChanceNode>(&history_.nodes[position.history.index()]);
+      std::get_if<ChanceNode>(&history_.nodes[history.index()]);
   assert(node != nullptr);
 
   const BettingData& data = node->state.data;
   const auto sampled = SampleStreetCards(data.street,
-                                         position.public_state.board(),
+                                         public_state.board(),
                                          deal.blocked_mask, rng);
   assert(sampled.ok());
   const ExactPublicState child = AdvanceChance(
-      node->state, position.public_state.board(), *sampled, betting_rules_);
-  position.history = node->child;
-  position.public_state = position.public_state.after_chance(
-      card_abstraction_, Data(child.betting).street, child.board);
-  return position;
+      node->state, public_state.board(), *sampled, betting_rules_);
+  return {
+      node->child,
+      public_state.after_chance(
+          card_abstraction_, Data(child.betting).street, child.board)};
 }
 
 std::array<PrivateObservationId, kPlayerCount>
@@ -1236,11 +1226,12 @@ std::optional<InfoSetRow> CFRSolver::find_or_create_row(
   return state_.rows.emplace(key, row).first->second;
 }
 
-double CFRSolver::traverse(Position position,
+double CFRSolver::traverse(HistoryId history,
+                           const PublicPosition& public_state,
                            TraversalFrame frame,
                            TraversalContext& context) {
   const Deal& deal = context.deal;
-  assert(position.history.index() < history_.nodes.size());
+  assert(history.index() < history_.nodes.size());
   return std::visit([&](const auto& node) -> double {
     using Node = std::decay_t<decltype(node)>;
     if constexpr (std::is_same_v<Node, FoldTerminalNode>) {
@@ -1257,7 +1248,7 @@ double CFRSolver::traverse(Position position,
       double value = 0.0;
       for (int sample = 0; sample < samples; ++sample) {
         const Position child = sample_chance_child(
-            position, deal, context.rng);
+            history, public_state, deal, context.rng);
         TraversalFrame child_frame = frame;
         if (const auto* river =
                 std::get_if<RiverBoard>(&child.public_state.board())) {
@@ -1267,7 +1258,8 @@ double CFRSolver::traverse(Position position,
           child_frame.has_showdown_comparison = true;
         }
         advance_private_observations(child_frame, deal, child);
-        value += traverse(child, child_frame, context);
+        value += traverse(
+            child.history, child.public_state, child_frame, context);
       }
       return value / samples;
     } else {
@@ -1276,7 +1268,7 @@ double CFRSolver::traverse(Position position,
       const uint8_t action_count = node.edges.count;
       assert(action_count > 0);
       const InfoSetKey key{
-          position.history, position.public_state.observation(),
+          history, public_state.observation(),
           frame.private_observations[player_index]};
       const bool training = context.mode == TraversalMode::Train;
       const bool updates = training && context.update_player == player;
@@ -1304,8 +1296,10 @@ double CFRSolver::traverse(Position position,
       for (uint8_t action = 0; action < action_count; ++action) {
         TraversalFrame child_frame = frame;
         child_frame.reach[player_index] *= probabilities[action];
-        values[action] =
-            traverse(action_child(position, action), child_frame, context);
+        const HistoryId child = history_.edges[
+            node.edges.begin + action].child;
+        values[action] = traverse(
+            child, public_state, child_frame, context);
         node_value += probabilities[action] * values[action];
       }
       if (!training) {
@@ -1334,7 +1328,7 @@ double CFRSolver::traverse(Position position,
       }
       return node_value;
     }
-  }, history_.nodes[position.history.index()]);
+  }, history_.nodes[history.index()]);
 }
 
 TrainingResult CFRSolver::run(uint64_t iterations, int threads) {
@@ -1360,7 +1354,7 @@ TrainingResult CFRSolver::run(uint64_t iterations, int threads) {
         iteration % kPlayerCount == 0 ? Player::A : Player::B;
     TraversalContext context{deal, TraversalMode::Train, update_player,
                              iteration, rng, stats, concurrent};
-    return traverse(root, frame, context);
+    return traverse(root.history, root.public_state, frame, context);
   };
 
   const size_t capacity =
@@ -1427,7 +1421,7 @@ double CFRSolver::evaluate_deal(const Deal& deal, TraversalMode mode) {
     frame.has_showdown_comparison = true;
   }
   TraversalContext context{deal, mode, std::nullopt, 0, rng_, stats_, false};
-  return traverse(root, frame, context);
+  return traverse(root.history, root.public_state, frame, context);
 }
 
 double CFRSolver::evaluate_deals(int samples, TraversalMode mode) {
