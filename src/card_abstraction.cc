@@ -55,30 +55,23 @@ PublicObservationId AdvanceCoarsePublic(PublicObservationId previous,
   return PublicObservationId(previous.value() | ((bucket + 1) << shift));
 }
 
-PublicObservationId ObserveCoarsePublic(StreetKind street,
-                                        const Board& board) noexcept {
+PublicObservationId ObserveCoarsePublic(const Board& board) noexcept {
   PublicObservationId observation;
-  if (street == StreetKind::Preflop) {
-    return observation;
-  }
-
   const auto cards = BoardCards(board);
+  if (cards.empty()) return observation;
+
   const FlopBoard flop =
       DealFlop(PreflopBoard{}, {cards[0], cards[1], cards[2]});
   observation = AdvanceCoarsePublic(
       observation, StreetKind::Flop,
       BoardTextureBucket(StreetKind::Flop, BoardFeaturesFor(Board{flop})));
-  if (street == StreetKind::Flop) {
-    return observation;
-  }
+  if (cards.size() == 3) return observation;
 
   const TurnBoard turn = DealTurn(flop, cards[3]);
   observation = AdvanceCoarsePublic(
       observation, StreetKind::Turn,
       BoardTextureBucket(StreetKind::Turn, BoardFeaturesFor(Board{turn})));
-  if (street == StreetKind::Turn) {
-    return observation;
-  }
+  if (cards.size() == 4) return observation;
 
   const RiverBoard river = DealRiver(turn, cards[4]);
   return AdvanceCoarsePublic(
@@ -730,13 +723,12 @@ PrivateBucketId CardAbstraction::equity_bucket(
 }
 
 PublicObservationId ObservePublic(const CardAbstraction& abstraction,
-                                  StreetKind street,
                                   const Board& board) noexcept {
   switch (abstraction.config().public_mode) {
     case PublicCardMode::ExactCanonical:
       return CanonicalPublicObservation(board);
     case PublicCardMode::Texture:
-      return ObserveCoarsePublic(street, board);
+      return ObserveCoarsePublic(board);
   }
 }
 
@@ -758,8 +750,7 @@ PublicPosition PublicPosition::Root(const CardAbstraction& abstraction,
                                     StreetKind street,
                                     Board board) {
   const BoardFeatures features = BoardFeaturesFor(board);
-  const PublicObservationId observation =
-      ObservePublic(abstraction, street, board);
+  const PublicObservationId observation = ObservePublic(abstraction, board);
   return PublicPosition(street, std::move(board), observation, features);
 }
 

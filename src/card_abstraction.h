@@ -162,7 +162,7 @@ class CardAbstraction {
   mutable absl::flat_hash_map<CacheKey, PrivateBucketId> equity_cache_;
 
   friend PublicObservationId ObservePublic(
-      const CardAbstraction&, StreetKind, const Board&) noexcept;
+      const CardAbstraction&, const Board&) noexcept;
   friend PrivateObservationId ObservePrivate(
       const CardAbstraction&, ComboId, const PublicPosition&) noexcept;
 };
@@ -175,7 +175,6 @@ PrivateBucketId Handcrafted36Bucket(ComboId hand,
                                     const BoardFeatures& features) noexcept;
 
 PublicObservationId ObservePublic(const CardAbstraction& abstraction,
-                                  StreetKind street,
                                   const Board& board) noexcept;
 PrivateObservationId ObservePrivate(const CardAbstraction& abstraction,
                                     ComboId hand,

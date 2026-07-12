@@ -479,7 +479,7 @@ TEST_CASE("all abstraction modes preserve observation history") {
       position = position.after_chance(abstraction, street, board);
       private_id = ObservePrivate(abstraction, hand, position);
       CHECK(position.observation() ==
-            ObservePublic(abstraction, street, board));
+            ObservePublic(abstraction, board));
       CHECK(private_id == ObservePrivate(abstraction, hand, position));
     }
 
