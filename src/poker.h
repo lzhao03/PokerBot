@@ -406,15 +406,32 @@ absl::StatusOr<ExactPublicState> TryApplyChance(
     const ExactPublicState& state,
     absl::Span<const Card> cards,
     const BettingRules& rules);
-double TerminalUtility(const FoldTerminalState& state,
-                       Player evaluated_player) noexcept;
+inline double TerminalUtility(const FoldTerminalState& state,
+                              Player evaluated_player) noexcept {
+  const double committed = state.data.total_committed[0];
+  const double player_a_utility = state.folded == Player::A
+                                      ? -committed
+                                      : Pot(state.data) - committed;
+  return evaluated_player == Player::A ? player_a_utility
+                                        : -player_a_utility;
+}
 double TerminalUtility(const ShowdownState& state,
                        const RiverBoard& board,
                        HoleCards player_a,
                        HoleCards player_b) noexcept;
-double TerminalUtilityFromComparison(const ShowdownState& state,
-                                     int hand_comparison,
-                                     Player evaluated_player) noexcept;
+inline double TerminalUtilityFromComparison(
+    const ShowdownState& state,
+    int hand_comparison,
+    Player evaluated_player) noexcept {
+  const double committed = state.data.total_committed[0];
+  const double player_a_utility =
+      hand_comparison > 0
+          ? Pot(state.data) - committed
+          : hand_comparison < 0 ? -committed
+                                : (Pot(state.data) / 2.0) - committed;
+  return evaluated_player == Player::A ? player_a_utility
+                                        : -player_a_utility;
+}
 bool IsTerminal(const ExactPublicState& state);
 
 }  // namespace poker

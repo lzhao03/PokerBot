@@ -476,16 +476,6 @@ absl::StatusOr<ExactPublicState> TryApplyChance(
   return AdvanceChance(*chance, state.board, cards, rules);
 }
 
-double TerminalUtility(const FoldTerminalState& state,
-                       Player evaluated_player) noexcept {
-  const BettingData& data = state.data;
-  const double player0_committed = data.total_committed[0];
-  const double player0_utility = state.folded == Player::A
-                                     ? -player0_committed
-                                     : Pot(data) - player0_committed;
-  return evaluated_player == Player::A ? player0_utility : -player0_utility;
-}
-
 double TerminalUtility(const ShowdownState& state,
                        const RiverBoard& board,
                        HoleCards player_a,
@@ -493,22 +483,6 @@ double TerminalUtility(const ShowdownState& state,
   return TerminalUtilityFromComparison(
       state, CompareHands(player_a.combo(), player_b.combo(), board),
       Player::A);
-}
-
-double TerminalUtilityFromComparison(const ShowdownState& state,
-                                     int hand_comparison,
-                                     Player evaluated_player) noexcept {
-  const BettingData& data = state.data;
-  const double player0_committed = data.total_committed[0];
-  double player0_utility;
-  if (hand_comparison > 0) {
-    player0_utility = Pot(data) - player0_committed;
-  } else if (hand_comparison < 0) {
-    player0_utility = -player0_committed;
-  } else {
-    player0_utility = (Pot(data) / 2.0) - player0_committed;
-  }
-  return evaluated_player == Player::A ? player0_utility : -player0_utility;
 }
 
 }  // namespace poker
