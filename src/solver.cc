@@ -46,24 +46,13 @@ void AddBettingData(std::vector<uint8_t>& bytes,
 
 void AddBettingState(std::vector<uint8_t>& bytes,
                      const BettingState& state) noexcept {
-  std::visit([&](const auto& phase) {
-    using Phase = std::decay_t<decltype(phase)>;
-    if constexpr (std::is_same_v<Phase, DecisionState>) {
-      bytes.push_back(0);
-      AddBettingData(bytes, phase.data);
-      bytes.push_back(std::to_underlying(phase.actor));
-    } else if constexpr (std::is_same_v<Phase, ChanceState>) {
-      bytes.push_back(1);
-      AddBettingData(bytes, phase.data);
-    } else if constexpr (std::is_same_v<Phase, FoldTerminalState>) {
-      bytes.push_back(2);
-      AddBettingData(bytes, phase.data);
-      bytes.push_back(std::to_underlying(phase.folded));
-    } else {
-      bytes.push_back(3);
-      AddBettingData(bytes, phase.data);
-    }
-  }, state);
+  bytes.push_back(static_cast<uint8_t>(state.index()));
+  AddBettingData(bytes, Data(state));
+  if (const auto* decision = std::get_if<DecisionState>(&state)) {
+    bytes.push_back(std::to_underlying(decision->actor));
+  } else if (const auto* fold = std::get_if<FoldTerminalState>(&state)) {
+    bytes.push_back(std::to_underlying(fold->folded));
+  }
 }
 
 void AddBoard(std::vector<uint8_t>& bytes, const Board& board) noexcept {

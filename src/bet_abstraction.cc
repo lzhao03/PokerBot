@@ -14,8 +14,8 @@ AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
   const Chips highest_to = CurrentWager(data);
   const Chips to_call = highest_to - current_to;
   const Chips call_to = std::min(highest_to, current_to + data.stack[player]);
-  const Chips all_in_to = current_to + MaxContestableAdditional(data, state.actor);
-  const Chips min_full_raise_to = (highest_to > 0 ? highest_to : current_to) + data.last_full_raise;
+  const Chips all_in_to =
+      current_to + MaxContestableAdditional(data, state.actor);
   AbstractActions actions;
   if (to_call > 0) {
     actions.emplace_back(ActionKind::Fold, 0);
@@ -25,18 +25,20 @@ AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
   }
 
   const ActionKind kind = highest_to > 0 ? ActionKind::Raise : ActionKind::Bet;
-  const auto& fractions = config.pot_fractions[std::to_underlying(data.street)];
+  const auto& fractions =
+      config.pot_fractions[std::to_underlying(data.street)];
   const Chips pot_after_call = Pot(data) + to_call;
   for (double fraction : fractions) {
-    const Chips raise_by = static_cast<Chips>(std::ceil(fraction * pot_after_call));
+    const Chips raise_by =
+        static_cast<Chips>(std::ceil(fraction * pot_after_call));
     const Chips target = highest_to + raise_by;
-    if (target >= min_full_raise_to && target < all_in_to &&
+    if (IsLegalAction(state, {kind, target}) &&
         actions.back().target_street_commitment != target) {
       actions.emplace_back(kind, target);
     }
   }
 
-  if (all_in_to > call_to) {
+  if (IsLegalAction(state, {ActionKind::AllIn, all_in_to})) {
     actions.emplace_back(ActionKind::AllIn, all_in_to);
   }
 

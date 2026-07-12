@@ -44,14 +44,6 @@ Position RootPosition(const CFRSolver& game) {
           PublicPosition(game.card_abstraction(), spec.root.board)};
 }
 
-Position ActionChild(const HistoryTree& history,
-                     const HistoryNode& node,
-                     Position position,
-                     uint8_t action) {
-  position.history = history.children[node.children_begin + action];
-  return position;
-}
-
 Position ChanceChild(const CFRSolver& game,
                      const HistoryNode& node,
                      Position position,
@@ -133,10 +125,10 @@ double TraverseProfile(const CFRSolver& game,
       }
       double value = 0.0;
       for (uint8_t action = 0; action < node.child_count; ++action) {
-        value += probabilities[action] *
-                 TraverseProfile(game, policies,
-                                 ActionChild(history, node, position, action),
-                                 frame, deal, rng, counters);
+        Position child = position;
+        child.history = history.children[node.children_begin + action];
+        value += probabilities[action] * TraverseProfile(
+            game, policies, child, frame, deal, rng, counters);
       }
       return value;
     }
@@ -236,9 +228,10 @@ double TraverseResponse(const CFRSolver& game,
       for (uint8_t action = 0; action < node.child_count; ++action) {
         EvaluationFrame child_frame = frame;
         child_frame.reach[player] *= probabilities[action];
-        values[action] = TraverseResponse(
-            game, ActionChild(history, node, position, action), child_frame,
-            deal, rng, context);
+        Position child = position;
+        child.history = history.children[node.children_begin + action];
+        values[action] = TraverseResponse(game, child, child_frame, deal,
+                                          rng, context);
         node_value += probabilities[action] * values[action];
       }
       if (!responds || !offset) return node_value;
