@@ -25,7 +25,6 @@ cc_test(
         "poker_rules_test.cc",
         "training_range_test.cc",
     ],
-    data = ["//models:equity_32_32_64_v1.bin"],
     deps = DOCTEST_DEPS + [
         "//src:bet_abstraction",
         "//src:solver",

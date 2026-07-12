@@ -31,11 +31,9 @@ ABSL_FLAG(bool, accumulate_average_strategy, true,
           "store the average strategy");
 ABSL_FLAG(bool, log, false, "show INFO logs and VLOG(1) progress");
 ABSL_FLAG(std::string, private_abstraction, "handcrafted36",
-          "exact, handcrafted36, or equity");
+          "exact or handcrafted36");
 ABSL_FLAG(std::string, private_recall, "auto",
           "auto, current, or history");
-ABSL_FLAG(std::string, equity_model, "",
-          "equity abstraction model path");
 ABSL_FLAG(std::vector<std::string>, pot_fractions,
           std::vector<std::string>({"0.25", "0.5", "1.0"}),
           "pot fractions after calling for every street");
@@ -110,17 +108,6 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
   } else if (private_abstraction == "handcrafted36") {
     config.card_abstraction.private_kind =
         poker::PrivateAbstractionKind::Handcrafted36;
-  } else if (private_abstraction == "equity") {
-    config.card_abstraction.private_kind =
-        poker::PrivateAbstractionKind::EquityPotential;
-    const std::string path = absl::GetFlag(FLAGS_equity_model);
-    if (path.empty()) {
-      return absl::InvalidArgumentError(
-          "--equity_model is required for equity abstraction");
-    }
-    auto model = poker::LoadEquityBucketModel(path);
-    if (!model.ok()) return model.status();
-    config.card_abstraction.equity_model = std::move(*model);
   } else {
     return absl::InvalidArgumentError("invalid private abstraction");
   }
@@ -185,8 +172,6 @@ void PrintRunSummary(const poker::CFRSolver& solver,
             << "\n";
   std::cout << "seconds=" << seconds << "\n";
   std::cout << "history_nodes=" << history_nodes << "\n";
-  std::cout << "equity_cache_entries="
-            << solver.card_abstraction().cache_size() << "\n";
   std::cout << "decision_visits=" << visits << "\n";
   if (seconds > 0.0) {
     std::cout << "decision_visits_per_second="

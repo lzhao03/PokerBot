@@ -8,13 +8,10 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdlib>
-#include <filesystem>
 #include <initializer_list>
 #include <random>
 #include <set>
 #include <stdexcept>
-#include <tuple>
 
 namespace poker {
 namespace {
@@ -42,41 +39,6 @@ Board Runout(absl::Span<const Card> cards) {
 
 Board B(std::initializer_list<Card> cards) {
   return Runout(absl::Span<const Card>(cards.begin(), cards.size()));
-}
-
-EquityBucketModel TestEquityModel() {
-  EquityBucketModel model;
-  model.rollout_seed = 7;
-  model.fit_seed = 11;
-  model.training_samples = 100;
-  model.opponent_samples = 16;
-  model.runout_samples = 8;
-  for (StreetKind street : {StreetKind::Flop, StreetKind::Turn}) {
-    auto& cutoffs = model.ehs2_cutoffs[static_cast<size_t>(street)];
-    auto& medians = model.ehs_medians[static_cast<size_t>(street)];
-    for (int index = 1; index < 16; ++index) {
-      cutoffs.push_back(static_cast<float>(index) / 16.0f);
-    }
-    medians.assign(16, 0.5f);
-  }
-  for (int index = 1; index < 64; ++index) {
-    model.river_equity_cutoffs.push_back(
-        static_cast<float>(index) / 64.0f);
-  }
-  const auto finalized = FinalizeEquityBucketModel(std::move(model));
-  if (!finalized.ok()) {
-    throw std::invalid_argument(std::string(finalized.status().message()));
-  }
-  return *finalized;
-}
-
-CardAbstraction Abstraction(CardAbstractionConfig config) {
-  auto abstraction = CardAbstraction::Create(std::move(config));
-  if (!abstraction.ok()) {
-    throw std::invalid_argument(
-        std::string(abstraction.status().message()));
-  }
-  return std::move(*abstraction);
 }
 
 HandEvaluation Score5(const std::array<Card, 5>& cards) {
@@ -271,124 +233,11 @@ TEST_CASE("handcrafted 36 mappings remain stable") {
       PublicCardMode::Texture,
       PrivateAbstractionKind::Handcrafted36,
       RecallMode::CurrentBucketOnly};
-  const CardAbstraction abstraction = Abstraction(current);
+  const CardAbstraction abstraction(current);
   const PublicPosition position =
       PublicPosition::Root(abstraction, StreetKind::Flop, flop);
   CHECK(ObservePrivate(abstraction, hand, position) ==
         PrivateObservationId(7));
-}
-
-TEST_CASE("equity models preserve cutoffs and bucket boundaries") {
-  const EquityBucketModel model = TestEquityModel();
-  CHECK(EquityBucket(StreetKind::Flop, {0.49f, 0.0f}, model) == 0);
-  CHECK(EquityBucket(StreetKind::Flop, {0.50f, 0.0f}, model) == 1);
-  CHECK(EquityBucket(StreetKind::Turn, {0.49f, 1.0f}, model) == 30);
-  CHECK(EquityBucket(StreetKind::Turn, {0.50f, 1.0f}, model) == 31);
-  CHECK(EquityBucket(StreetKind::River, {0.0f, 0.0f}, model) == 0);
-  CHECK(EquityBucket(StreetKind::River, {1.0f, 1.0f}, model) == 63);
-
-  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
-  REQUIRE(test_tmpdir != nullptr);
-  const std::filesystem::path path =
-      std::filesystem::path(test_tmpdir) / "equity.model";
-  REQUIRE(SaveEquityBucketModel(model, path).ok());
-  const auto loaded = LoadEquityBucketModel(path);
-  REQUIRE(loaded.ok());
-  CHECK(*loaded == model);
-
-  EquityBucketModel changed = model;
-  changed.river_equity_cutoffs[0] += 0.001f;
-  CHECK_FALSE(ValidateEquityBucketModel(changed).ok());
-}
-
-TEST_CASE("checked-in equity model is valid and reproducible") {
-  const char* test_srcdir = std::getenv("TEST_SRCDIR");
-  const char* test_workspace = std::getenv("TEST_WORKSPACE");
-  REQUIRE(test_srcdir != nullptr);
-  REQUIRE(test_workspace != nullptr);
-  const std::filesystem::path path =
-      std::filesystem::path(test_srcdir) / test_workspace / "models" /
-      "equity_32_32_64_v1.bin";
-  const auto model = LoadEquityBucketModel(path);
-  REQUIRE(model.ok());
-  CHECK(model->training_samples == 100000);
-  CHECK(model->opponent_samples == 16);
-  CHECK(model->runout_samples == 8);
-  CHECK(ValidateEquityBucketModel(*model).ok());
-}
-
-TEST_CASE("equity features are deterministic under suit renaming") {
-  const EquityBucketModel model = TestEquityModel();
-  const Board board = B({C(2, S::Hearts), C(7, S::Hearts),
-                         C(12, S::Clubs), C(9, S::Diamonds)});
-  const ComboId hand = H(C(14, S::Hearts), C(13, S::Spades));
-  const EquityFeatures first = EvaluateEquityFeatures(hand, board, model);
-  CHECK(EvaluateEquityFeatures(hand, board, model) == first);
-
-  const std::array<S, 4> suits = {
-      S::Clubs, S::Spades, S::Hearts, S::Diamonds};
-  const EquityFeatures renamed = EvaluateEquityFeatures(
-      Rename(hand, suits), Rename(board, suits), model);
-  CHECK(renamed == first);
-  const PrivateBucketId bucket =
-      EquityBucket(StreetKind::Turn, first, model);
-  CHECK(bucket < 32);
-  CHECK(EquityBucket(StreetKind::Turn, renamed, model) == bucket);
-}
-
-TEST_CASE("equity observations are cached, bounded, and suit invariant") {
-  CardAbstractionConfig config{
-      PublicCardMode::Texture,
-      PrivateAbstractionKind::EquityPotential,
-      RecallMode::CurrentBucketOnly,
-      TestEquityModel()};
-  CardAbstraction abstraction = Abstraction(config);
-  CardAbstraction cold = Abstraction(config);
-  const ComboId hand = H(C(14, S::Hearts), C(13, S::Spades));
-  const FlopBoard flop = DealFlop(
-      PreflopBoard{},
-      {C(2, S::Hearts), C(7, S::Hearts), C(12, S::Clubs)});
-  const TurnBoard turn = DealTurn(flop, C(9, S::Diamonds));
-  const RiverBoard river = DealRiver(turn, C(4, S::Spades));
-
-  PublicPosition position = PublicPosition::Root(
-      abstraction, StreetKind::Preflop, Board{PreflopBoard{}});
-  const uint64_t preflop = ObservePrivate(abstraction, hand, position).value();
-  CHECK(preflop >= 1);
-  CHECK(preflop <= 169);
-  std::set<uint64_t> preflop_classes;
-  for (size_t first = 0; first < kDeck.size(); ++first) {
-    for (size_t second = first + 1; second < kDeck.size(); ++second) {
-      preflop_classes.insert(ObservePrivate(
-          abstraction, H(kDeck[first], kDeck[second]), position).value());
-    }
-  }
-  CHECK(preflop_classes.size() == 169);
-  for (const auto& [street, board, maximum] : {
-           std::tuple{StreetKind::Flop, Board{flop}, uint64_t{32}},
-           std::tuple{StreetKind::Turn, Board{turn}, uint64_t{32}},
-           std::tuple{StreetKind::River, Board{river}, uint64_t{64}},
-       }) {
-    position = position.after_chance(abstraction, street, board);
-    const PrivateObservationId observed =
-        ObservePrivate(abstraction, hand, position);
-    CHECK(observed.value() >= 1);
-    CHECK(observed.value() <= maximum);
-    const PublicPosition cold_position =
-        PublicPosition::Root(cold, street, board);
-    CHECK(ObservePrivate(cold, hand, cold_position) == observed);
-  }
-  CHECK(abstraction.cache_size() == 3);
-
-  const std::array<S, 4> suits = {
-      S::Clubs, S::Spades, S::Hearts, S::Diamonds};
-  const PublicPosition renamed = PublicPosition::Root(
-      cold, StreetKind::River, Rename(Board{river}, suits));
-  CHECK(ObservePrivate(cold, Rename(hand, suits), renamed) ==
-        ObservePrivate(abstraction, hand, position));
-
-  config.equity_model.reset();
-  CHECK_FALSE(CardAbstraction::Create(config).ok());
 }
 
 TEST_CASE("canonical observations preserve card relationships and order") {
@@ -465,7 +314,7 @@ TEST_CASE("all abstraction modes preserve observation history") {
   for (const CardAbstractionConfig& config : configs) {
     CAPTURE(static_cast<int>(config.public_mode));
     CAPTURE(static_cast<int>(config.private_kind));
-    const CardAbstraction abstraction = Abstraction(config);
+    const CardAbstraction abstraction(config);
     PublicPosition position = PublicPosition::Root(
         abstraction, StreetKind::Preflop, Board{PreflopBoard{}});
     PrivateObservationId private_id =
@@ -498,7 +347,7 @@ TEST_CASE("coarse public exact private keeps relative flush information") {
   const CardAbstractionConfig config{
       PublicCardMode::Texture,
       PrivateAbstractionKind::ExactCanonical};
-  const CardAbstraction abstraction = Abstraction(config);
+  const CardAbstraction abstraction(config);
   const Board board = B({C(2, S::Hearts), C(7, S::Hearts),
                          C(12, S::Clubs)});
   const ComboId hand = H(C(14, S::Hearts), C(13, S::Spades));

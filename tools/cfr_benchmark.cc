@@ -32,10 +32,9 @@ ABSL_FLAG(std::string, range, kDefaultRange,
 ABSL_FLAG(double, training_seconds, 0.0,
           "train for this wall-clock duration; 0 uses iterations");
 ABSL_FLAG(std::string, private_abstraction, "handcrafted36",
-          "handcrafted36 or equity");
+          "exact or handcrafted36");
 ABSL_FLAG(std::string, private_recall, "auto",
           "auto, current, or history");
-ABSL_FLAG(std::string, equity_model, "", "equity model path");
 ABSL_FLAG(uint64_t, evaluation_seed, 1, "policy evaluation seed");
 ABSL_FLAG(uint64_t, best_response_iterations, 0,
           "approximate best-response iterations; 0 disables it");
@@ -65,28 +64,20 @@ absl::StatusOr<poker::SolverConfig> BenchmarkConfig() {
   options.max_info_sets = absl::GetFlag(FLAGS_max_info_sets);
   options.chance_samples = absl::GetFlag(FLAGS_chance_samples);
   const std::string kind = absl::GetFlag(FLAGS_private_abstraction);
-  if (kind == "handcrafted36") {
+  if (kind == "exact") {
+    options.card_abstraction.private_kind =
+        poker::PrivateAbstractionKind::ExactCanonical;
+  } else if (kind == "handcrafted36") {
     options.card_abstraction.private_kind =
         poker::PrivateAbstractionKind::Handcrafted36;
-  } else if (kind == "equity") {
-    options.card_abstraction.private_kind =
-        poker::PrivateAbstractionKind::EquityPotential;
-    const std::string path = absl::GetFlag(FLAGS_equity_model);
-    if (path.empty()) {
-      return absl::InvalidArgumentError(
-          "--equity_model is required for equity abstraction");
-    }
-    auto model = poker::LoadEquityBucketModel(path);
-    if (!model.ok()) return model.status();
-    options.card_abstraction.equity_model = std::move(*model);
   } else {
     return absl::InvalidArgumentError("invalid private abstraction");
   }
   const std::string recall = absl::GetFlag(FLAGS_private_recall);
   if (recall == "auto") {
     options.card_abstraction.recall_mode =
-        kind == "equity" ? poker::RecallMode::CurrentBucketOnly
-                         : poker::RecallMode::BucketHistory;
+        kind == "handcrafted36" ? poker::RecallMode::BucketHistory
+                                : poker::RecallMode::CurrentBucketOnly;
   } else if (recall == "current") {
     options.card_abstraction.recall_mode =
         poker::RecallMode::CurrentBucketOnly;
@@ -181,8 +172,6 @@ int main(int argc, char** argv) {
             << "history_nodes\t" << solver->get_history_count() << '\n'
             << "regret_bytes\t" << solver->get_regret_bytes() << '\n'
             << "strategy_bytes\t" << solver->get_strategy_bytes() << '\n';
-  std::cout << "equity_cache_entries\t"
-            << solver->card_abstraction().cache_size() << '\n';
 
   solver->reset_stats();
   Measure("evaluate_range", [&] {

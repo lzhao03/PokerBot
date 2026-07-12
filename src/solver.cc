@@ -88,15 +88,7 @@ ModelFingerprint FingerprintModel(const SolveSpec& spec,
   hash.add_u8(static_cast<uint8_t>(config.card_abstraction().public_mode));
   hash.add_u8(static_cast<uint8_t>(config.card_abstraction().private_kind));
   hash.add_u8(static_cast<uint8_t>(config.card_abstraction().recall_mode));
-  if (config.card_abstraction().equity_model.has_value()) {
-    hash.add_u8(1);
-    for (std::byte byte :
-         config.card_abstraction().equity_model->fingerprint.bytes) {
-      hash.add_u8(std::to_integer<uint8_t>(byte));
-    }
-  } else {
-    hash.add_u8(0);
-  }
+  hash.add_u8(0);  // Reserved model extension.
   for (const auto& fractions :
        config.bet_abstraction().pot_fractions) {
     hash.add_u32(static_cast<uint32_t>(fractions.size()));
@@ -994,8 +986,6 @@ absl::StatusOr<SolverConfig> SolverConfig::Create(
       return absl::InvalidArgumentError("too many pot fractions");
     }
   }
-  auto abstraction = CardAbstraction::Create(options.card_abstraction);
-  if (!abstraction.ok()) return abstraction.status();
   return SolverConfig(std::move(options));
 }
 
@@ -1105,11 +1095,10 @@ absl::StatusOr<std::unique_ptr<CFRSolver>> CFRSolver::Create(
   if (!deals.ok()) {
     return deals.status();
   }
-  auto abstraction = CardAbstraction::Create(spec.config.card_abstraction());
-  if (!abstraction.ok()) return abstraction.status();
+  CardAbstraction abstraction(spec.config.card_abstraction());
   return std::unique_ptr<CFRSolver>(
       new CFRSolver(std::move(spec), std::move(*deals),
-                    std::move(*abstraction)));
+                    std::move(abstraction)));
 }
 
 Position CFRSolver::root_position() const {
