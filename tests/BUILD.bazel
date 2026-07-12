@@ -37,3 +37,11 @@ cc_test(
     srcs = ["strict_abstraction_test.cc"],
     deps = DOCTEST_DEPS + ["//src:solver"],
 )
+
+cc_test(
+    name = "experimental_policy_encoder_test",
+    srcs = ["experimental_policy_encoder_test.cc"],
+    deps = DOCTEST_DEPS + [
+        "//src:experimental_policy_encoder",
+    ],
+)
