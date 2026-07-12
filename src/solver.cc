@@ -16,7 +16,6 @@
 #include <type_traits>
 #include <vector>
 
-#include "absl/container/inlined_vector.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/types/span.h"
@@ -1289,14 +1288,16 @@ double CFRSolver::traverse(Position position,
       }
       const InfoSetRow* strategy_row = row ? &*row : nullptr;
 
-      absl::InlinedVector<double, 8> probabilities(action_count, 0.0);
-      absl::InlinedVector<double, 8> values(action_count, 0.0);
+      std::array<double, 8> probabilities;
+      std::array<double, 8> values;
+      const absl::Span<double> probability_span(
+          probabilities.data(), action_count);
       if (context.mode == TraversalMode::EvaluateAverage) {
         AverageStrategy(state_, strategy_row, context.concurrent_updates,
-                        absl::MakeSpan(probabilities));
+                        probability_span);
       } else {
         RegretMatch(state_, strategy_row, context.concurrent_updates,
-                    absl::MakeSpan(probabilities));
+                    probability_span);
       }
 
       double node_value = 0.0;
@@ -1326,8 +1327,10 @@ double CFRSolver::traverse(Position position,
       if (spec_.config.accumulate_average_strategy()) {
         const double weight = frame.reach[player_index] *
                               static_cast<double>(context.iteration + 1);
-        AddStrategySum(state_, *row, absl::MakeConstSpan(probabilities),
-                       weight, context.concurrent_updates);
+        AddStrategySum(
+            state_, *row,
+            absl::Span<const double>(probabilities.data(), action_count),
+            weight, context.concurrent_updates);
       }
       return node_value;
     }
