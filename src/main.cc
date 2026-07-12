@@ -188,11 +188,11 @@ int main(int argc, char** argv) {
     return 1;
   }
   const auto start = std::chrono::steady_clock::now();
-  (*solver)->run(absl::GetFlag(FLAGS_iterations), threads);
+  solver->run(absl::GetFlag(FLAGS_iterations), threads);
   const auto end = std::chrono::steady_clock::now();
 
   const std::chrono::duration<double> elapsed = end - start;
-  PrintRunSummary(**solver, *config, elapsed.count());
+  PrintRunSummary(*solver, *config, elapsed.count());
   std::cout << "threads=" << threads << "\n";
   return 0;
 }

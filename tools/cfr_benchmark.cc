@@ -5,7 +5,7 @@
 #include <chrono>
 #include <filesystem>
 #include <iostream>
-#include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -132,7 +132,7 @@ int main(int argc, char** argv) {
   std::cout << "case\tseconds\tresult\n";
   Measure("range_expand", [&] { return a_range.count(); });
 
-  std::unique_ptr<poker::CFRSolver> solver;
+  std::optional<poker::CFRSolver> solver;
   std::string build_error;
   const uint64_t progress_interval =
       absl::GetFlag(FLAGS_progress_interval);

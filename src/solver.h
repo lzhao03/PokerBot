@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <memory>
 #include <optional>
 #include <random>
 #include <string_view>
@@ -177,7 +176,7 @@ struct CFRSolverTestAccess;
 
 class CFRSolver {
  public:
-  static absl::StatusOr<std::unique_ptr<CFRSolver>> Create(SolveSpec spec);
+  static absl::StatusOr<CFRSolver> Create(SolveSpec spec);
 
   void run(uint64_t iterations, int threads = 1);
 

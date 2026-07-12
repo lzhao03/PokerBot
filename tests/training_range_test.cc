@@ -81,8 +81,8 @@ TEST_CASE("deal sampling rejects incompatible ranges") {
       SingleComboRange(H(12, S::Clubs, 12, S::Diamonds));
   auto solver = CFRSolver::Create({config, root, {a, compatible}});
   REQUIRE(solver.ok());
-  (*solver)->run(1);
-  CHECK(std::isfinite((*solver)->get_expected_value(Player::A)));
+  solver->run(1);
+  CHECK(std::isfinite(solver->get_expected_value(Player::A)));
 }
 
 }  // namespace

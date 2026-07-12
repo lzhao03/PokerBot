@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -110,7 +111,7 @@ std::unique_ptr<CFRSolver> MakeSolver(
   if (!solver.ok()) {
     throw std::invalid_argument(std::string(solver.status().message()));
   }
-  return std::move(*solver);
+  return std::make_unique<CFRSolver>(std::move(*solver));
 }
 
 std::string Hex(ModelFingerprint fingerprint) {

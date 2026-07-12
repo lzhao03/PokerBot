@@ -630,8 +630,7 @@ CFRSolver::CFRSolver(SolveSpec spec, DealDistribution deals)
   model_ = FingerprintModel(spec_, history_);
 }
 
-absl::StatusOr<std::unique_ptr<CFRSolver>> CFRSolver::Create(
-    SolveSpec spec) {
+absl::StatusOr<CFRSolver> CFRSolver::Create(SolveSpec spec) {
   auto config = SolverConfig::Create(std::move(spec.config));
   if (!config.ok()) return config.status();
   spec.config = std::move(*config);
@@ -643,8 +642,7 @@ absl::StatusOr<std::unique_ptr<CFRSolver>> CFRSolver::Create(
   if (!deals.ok()) {
     return deals.status();
   }
-  return std::unique_ptr<CFRSolver>(
-      new CFRSolver(std::move(spec), std::move(*deals)));
+  return CFRSolver(std::move(spec), std::move(*deals));
 }
 
 Position CFRSolver::root_position() const {

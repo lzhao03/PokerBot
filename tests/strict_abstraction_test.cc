@@ -82,12 +82,12 @@ TEST_CASE("all card abstraction combinations support history traversal") {
          {Range(14, 13, Suit::Hearts),
           Range(12, 11, Suit::Clubs)}});
     REQUIRE(solver.ok());
-    (*solver)->run(2);
+    solver->run(2);
 
-    CHECK((*solver)->get_iterations_run() == 2);
-    CHECK(std::isfinite((*solver)->get_expected_value(Player::A)));
-    CHECK((*solver)->get_history_count() > 0);
-    CHECK((*solver)->get_info_set_count() > 0);
+    CHECK(solver->get_iterations_run() == 2);
+    CHECK(std::isfinite(solver->get_expected_value(Player::A)));
+    CHECK(solver->get_history_count() > 0);
+    CHECK(solver->get_info_set_count() > 0);
   }
 }
 
