@@ -1,14 +1,12 @@
 #include "src/solver.h"
 
-#include "absl/log/globals.h"
-#include "absl/log/initialize.h"
-#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
 #include "absl/flags/usage.h"
 #include "absl/strings/numbers.h"
 
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
@@ -30,7 +28,6 @@ ABSL_FLAG(int64_t, max_memory_mb, 4096,
           "hard memory limit in MB; 0 is unlimited");
 ABSL_FLAG(bool, accumulate_average_strategy, true,
           "store the average strategy");
-ABSL_FLAG(bool, log, false, "show INFO logs and VLOG(1) progress");
 ABSL_FLAG(std::string, private_abstraction, "handcrafted36",
           "exact or handcrafted36");
 ABSL_FLAG(std::string, private_recall, "auto",
@@ -54,9 +51,7 @@ void SetMemoryLimit(int64_t megabytes) {
     return;
   }
   const rlim_t bytes = static_cast<rlim_t>(megabytes) * 1024ULL * 1024ULL;
-  struct rlimit limit;
-  limit.rlim_cur = bytes;
-  limit.rlim_max = bytes;
+  const rlimit limit{bytes, bytes};
   if (setrlimit(RLIMIT_AS, &limit) != 0) {
     std::cerr << "Warning: failed to set memory limit to " << megabytes
               << " MB: " << std::strerror(errno) << "\n";
@@ -77,25 +72,16 @@ absl::StatusOr<std::vector<double>> ParsePotFractions(
   return sizes;
 }
 
-absl::Status OverridePotFractions(poker::SolverConfigOptions& config,
-                                  poker::StreetKind street,
-                                  const std::vector<std::string>& values) {
-  if (!values.empty()) {
-    const auto fractions = ParsePotFractions(values);
-    if (!fractions.ok()) {
-      return fractions.status();
-    }
-    config.bet_abstraction.pot_fractions[std::to_underlying(street)] =
-        *fractions;
-  }
-  return absl::OkStatus();
-}
-
 absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
-  poker::SolverConfigOptions config;
-  config.starting_stack = absl::GetFlag(FLAGS_starting_stack);
-  config.small_blind = absl::GetFlag(FLAGS_small_blind);
-  config.big_blind = absl::GetFlag(FLAGS_big_blind);
+  poker::SolverConfig config;
+  const poker::Chips stack = absl::GetFlag(FLAGS_starting_stack);
+  const poker::Chips small_blind = absl::GetFlag(FLAGS_small_blind);
+  const poker::Chips big_blind = absl::GetFlag(FLAGS_big_blind);
+  if (stack <= 0 || small_blind <= 0 || big_blind < small_blind ||
+      stack < big_blind) {
+    return absl::InvalidArgumentError("invalid stack or blind configuration");
+  }
+  config.betting_rules.minimum_bet = big_blind;
   config.chance_samples = absl::GetFlag(FLAGS_chance_samples);
   config.max_info_sets = absl::GetFlag(FLAGS_max_info_sets);
   config.accumulate_average_strategy =
@@ -103,31 +89,25 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
 
   const std::string private_abstraction =
       absl::GetFlag(FLAGS_private_abstraction);
-  if (private_abstraction == "exact") {
-    config.card_abstraction.private_kind =
-        poker::PrivateAbstractionKind::ExactCanonical;
-  } else if (private_abstraction == "handcrafted36") {
-    config.card_abstraction.private_kind =
-        poker::PrivateAbstractionKind::Handcrafted36;
-  } else {
+  if (private_abstraction != "exact" &&
+      private_abstraction != "handcrafted36") {
     return absl::InvalidArgumentError("invalid private abstraction");
   }
+  config.card_abstraction.private_kind = private_abstraction == "exact"
+      ? poker::PrivateAbstractionKind::ExactCanonical
+      : poker::PrivateAbstractionKind::Handcrafted36;
 
   const std::string recall = absl::GetFlag(FLAGS_private_recall);
-  if (recall == "auto") {
-    config.card_abstraction.recall_mode =
-        config.card_abstraction.private_kind ==
-                poker::PrivateAbstractionKind::Handcrafted36
-            ? poker::RecallMode::BucketHistory
-            : poker::RecallMode::CurrentBucketOnly;
-  } else if (recall == "current") {
-    config.card_abstraction.recall_mode =
-        poker::RecallMode::CurrentBucketOnly;
-  } else if (recall == "history") {
-    config.card_abstraction.recall_mode = poker::RecallMode::BucketHistory;
-  } else {
+  if (recall != "auto" && recall != "current" && recall != "history") {
     return absl::InvalidArgumentError("invalid private recall mode");
   }
+  config.card_abstraction.recall_mode =
+      recall == "history" ||
+              (recall == "auto" &&
+               config.card_abstraction.private_kind ==
+                   poker::PrivateAbstractionKind::Handcrafted36)
+          ? poker::RecallMode::BucketHistory
+          : poker::RecallMode::CurrentBucketOnly;
 
   const auto fractions =
       ParsePotFractions(absl::GetFlag(FLAGS_pot_fractions));
@@ -135,26 +115,19 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
     return fractions.status();
   }
   config.bet_abstraction.pot_fractions.fill(*fractions);
-  for (const auto& [street, values] : {
-           std::pair{poker::StreetKind::Preflop,
-                     absl::GetFlag(FLAGS_preflop_pot_fractions)},
-           std::pair{poker::StreetKind::Flop,
-                     absl::GetFlag(FLAGS_flop_pot_fractions)},
-           std::pair{poker::StreetKind::Turn,
-                     absl::GetFlag(FLAGS_turn_pot_fractions)},
-           std::pair{poker::StreetKind::River,
-                     absl::GetFlag(FLAGS_river_pot_fractions)},
-       }) {
-    const absl::Status status = OverridePotFractions(config, street, values);
-    if (!status.ok()) {
-      return status;
-    }
+  const std::array overrides = {
+      absl::GetFlag(FLAGS_preflop_pot_fractions),
+      absl::GetFlag(FLAGS_flop_pot_fractions),
+      absl::GetFlag(FLAGS_turn_pot_fractions),
+      absl::GetFlag(FLAGS_river_pot_fractions),
+  };
+  for (size_t street = 0; street < overrides.size(); ++street) {
+    if (overrides[street].empty()) continue;
+    const auto override = ParsePotFractions(overrides[street]);
+    if (!override.ok()) return override.status();
+    config.bet_abstraction.pot_fractions[street] = *override;
   }
   return poker::SolverConfig::Create(std::move(config));
-}
-
-bool CapHit(size_t count, int cap) {
-  return count >= static_cast<size_t>(cap);
 }
 
 void PrintRunSummary(const poker::CFRSolver& solver,
@@ -166,8 +139,9 @@ void PrintRunSummary(const poker::CFRSolver& solver,
 
   std::cout << "iterations=" << solver.get_iterations_run() << "\n";
   std::cout << "info_sets=" << info_sets << "\n";
-  std::cout << "max_info_sets=" << config.max_info_sets() << "\n";
-  std::cout << "info_set_cap_hit=" << CapHit(info_sets, config.max_info_sets())
+  std::cout << "max_info_sets=" << config.max_info_sets << "\n";
+  std::cout << "info_set_cap_hit="
+            << (info_sets >= static_cast<size_t>(config.max_info_sets))
             << "\n";
   std::cout << "player_a_ev=" << solver.get_expected_value(poker::Player::A)
             << "\n";
@@ -176,7 +150,7 @@ void PrintRunSummary(const poker::CFRSolver& solver,
   std::cout << "decision_visits=" << visits << "\n";
   if (seconds > 0.0) {
     std::cout << "decision_visits_per_second="
-              << static_cast<double>(visits) / seconds << "\n";
+              << visits / seconds << "\n";
   }
 }
 
@@ -185,12 +159,6 @@ void PrintRunSummary(const poker::CFRSolver& solver,
 int main(int argc, char** argv) {
   absl::SetProgramUsageMessage("Train the heads-up poker CFR solver.");
   absl::ParseCommandLine(argc, argv);
-  absl::InitializeLog();
-  if (absl::GetFlag(FLAGS_log)) {
-    absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
-    absl::SetGlobalVLogLevel(1);
-  }
-
   const int64_t memory_limit_mb = absl::GetFlag(FLAGS_max_memory_mb);
   if (memory_limit_mb < 0) {
     std::cerr << "Error: --max_memory_mb must be non-negative\n";
@@ -206,27 +174,25 @@ int main(int argc, char** argv) {
     std::cerr << "Error: " << config.status() << "\n";
     return 1;
   }
-  const poker::ComboRange a_range = poker::UniformComboRange();
-  const poker::ComboRange b_range = poker::UniformComboRange();
-  const poker::Chips stack = config->starting_stack();
+  const poker::ComboRange range = poker::UniformComboRange();
+  const poker::Chips stack = absl::GetFlag(FLAGS_starting_stack);
+  const poker::Chips small_blind = absl::GetFlag(FLAGS_small_blind);
   const poker::ExactPublicState root = poker::MakeInitialState(
-      poker::BettingRules{config->big_blind()}, {stack, stack},
-      {config->small_blind(), config->big_blind()});
+      config->betting_rules, {stack, stack},
+      {small_blind, config->betting_rules.minimum_bet});
   SetMemoryLimit(memory_limit_mb);
   auto solver = poker::CFRSolver::Create(
-      {*config, root, {a_range, b_range}});
+      {*config, root, {range, range}});
   if (!solver.ok()) {
     std::cerr << "Error: " << solver.status() << "\n";
     return 1;
   }
   const auto start = std::chrono::steady_clock::now();
-  const poker::TrainingResult result =
-      (*solver)->run(absl::GetFlag(FLAGS_iterations), threads);
+  (*solver)->run(absl::GetFlag(FLAGS_iterations), threads);
   const auto end = std::chrono::steady_clock::now();
 
   const std::chrono::duration<double> elapsed = end - start;
   PrintRunSummary(**solver, *config, elapsed.count());
   std::cout << "threads=" << threads << "\n";
-  std::cout << "iterations_completed=" << result.iterations_completed << "\n";
   return 0;
 }

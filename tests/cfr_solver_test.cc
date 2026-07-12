@@ -4,8 +4,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstdlib>
-#include <filesystem>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -64,18 +62,9 @@ ExactPublicState DealChance(const ExactPublicState& state,
   return *child;
 }
 
-BettingState NodeState(const HistoryNode& node) {
-  return std::visit([](const auto& value) -> BettingState {
-    return value.state;
-  }, node);
-}
-
 SolverConfig Config(bool accumulate_average = true,
                     int max_info_sets = 500000) {
-  SolverConfigOptions options;
-  options.starting_stack = 8;
-  options.small_blind = 1;
-  options.big_blind = 2;
+  SolverConfig options;
   options.card_abstraction = {
       PublicCardMode::ExactCanonical,
       PrivateAbstractionKind::ExactCanonical,
@@ -94,9 +83,7 @@ SolverConfig Config(bool accumulate_average = true,
 }
 
 ExactPublicState Root(const SolverConfig& config) {
-  const Chips stack = config.starting_stack();
-  return MakeInitialState(BettingRules{config.big_blind()}, {stack, stack},
-                          {config.small_blind(), config.big_blind()});
+  return MakeInitialState(config.betting_rules, {8, 8}, {1, 2});
 }
 
 ExactPublicState WinningRiverRoot() {
@@ -106,13 +93,11 @@ ExactPublicState WinningRiverRoot() {
   data.street_committed = {0, 0};
   data.last_full_raise = 2;
   data.street = StreetKind::River;
-  data.pending_action_mask = kAllPlayersMask;
-  const FlopBoard flop = DealFlop(
-      PreflopBoard{}, {C(2, S::Clubs), C(7, S::Diamonds),
-                      C(9, S::Hearts)});
-  return {DecisionState{data, Player::A},
-          DealRiver(DealTurn(flop, C(11, S::Spades)),
-                    C(12, S::Clubs))};
+  data.actions_remaining = 2;
+  const std::array board = {
+      C(2, S::Clubs), C(7, S::Diamonds), C(9, S::Hearts),
+      C(11, S::Spades), C(12, S::Clubs)};
+  return {DecisionState{data, Player::A}, *MakeBoard(board)};
 }
 
 std::unique_ptr<CFRSolver> MakeSolver(
@@ -140,16 +125,8 @@ std::string Hex(ModelFingerprint fingerprint) {
   return text;
 }
 
-void CheckSameState(const CfrState& left, const CfrState& right) {
-  CHECK(left.rows == right.rows);
-  CHECK(left.regret_sum == right.regret_sum);
-  CHECK(left.strategy_sum == right.strategy_sum);
-  CHECK(left.iterations == right.iterations);
-  CHECK(left.cumulative_root_utility == right.cumulative_root_utility);
-}
-
 TEST_CASE("solver configuration rejects invalid boundary values") {
-  SolverConfigOptions options;
+  SolverConfig options;
   options.max_info_sets = 0;
   CHECK_FALSE(SolverConfig::Create(options).ok());
 
@@ -163,18 +140,18 @@ TEST_CASE("solver configuration rejects invalid boundary values") {
   options.bet_abstraction.pot_fractions[0] = {1.0, 0.25, 0.5, 0.5};
   const auto normalized = SolverConfig::Create(options);
   REQUIRE(normalized.ok());
-  CHECK(normalized->bet_abstraction().pot_fractions[0] ==
+  CHECK(normalized->bet_abstraction.pot_fractions[0] ==
         std::vector<double>{0.25, 0.5, 1.0});
 
   options.bet_abstraction.pot_fractions[0] = {0.1, 0.2, 0.3,
                                                0.4, 0.5, 0.6};
   CHECK_FALSE(SolverConfig::Create(options).ok());
 
-  const SolverConfig defaults = SolverConfig::Default();
-  CHECK(defaults.card_abstraction().public_mode == PublicCardMode::Texture);
-  CHECK(defaults.card_abstraction().private_kind ==
+  const SolverConfig defaults;
+  CHECK(defaults.card_abstraction.public_mode == PublicCardMode::Texture);
+  CHECK(defaults.card_abstraction.private_kind ==
         PrivateAbstractionKind::Handcrafted36);
-  CHECK(defaults.card_abstraction().recall_mode ==
+  CHECK(defaults.card_abstraction.recall_mode ==
         RecallMode::BucketHistory);
 }
 
@@ -185,23 +162,22 @@ const ComboId kC = H(12, S::Clubs, 12, S::Diamonds);
 Policy PassiveCallingPolicy(const CFRSolver& game, ComboId hand) {
   Policy policy;
   policy.model = game.model_fingerprint();
-  const PublicPosition position = PublicPosition::Root(
-      game.card_abstraction(), StreetKind::River,
-      game.solve_spec().root.board);
+  const PublicPosition position(
+      game.card_abstraction(), game.solve_spec().root.board);
   const PrivateObservationId private_observation = ObservePrivate(
-      game.card_abstraction(), hand, position);
+      game.card_abstraction(), hand, position.board());
   for (size_t history = 0; history < game.history_tree().nodes.size();
        ++history) {
-    const auto* node =
-        std::get_if<DecisionNode>(&game.history_tree().nodes[history]);
-    if (node == nullptr || node->state.actor != Player::B) continue;
+    const HistoryNode& node = game.history_tree().nodes[history];
+    const auto* decision = std::get_if<DecisionState>(&node.state);
+    if (decision == nullptr || decision->actor != Player::B) continue;
+    const AbstractActions actions = SelectAbstractActions(
+        game.solve_spec().config.bet_abstraction, *decision);
     const size_t offset = policy.probabilities.size();
-    policy.probabilities.resize(offset + node->edges.count, 0.0f);
+    policy.probabilities.resize(offset + node.child_count, 0.0f);
     bool selected = false;
-    for (uint8_t action = 0; action < node->edges.count; ++action) {
-      const ActionKind kind = game.history_tree()
-                                  .edges[node->edges.begin + action]
-                                  .action.kind;
+    for (uint8_t action = 0; action < node.child_count; ++action) {
+      const ActionKind kind = actions[action].kind;
       if (kind == ActionKind::Call || kind == ActionKind::Check) {
         policy.probabilities[offset + action] = 1.0f;
         selected = true;
@@ -211,7 +187,7 @@ Policy PassiveCallingPolicy(const CFRSolver& game, ComboId hand) {
     policy.rows.emplace(
         InfoSetKey{HistoryId(static_cast<uint32_t>(history)),
                    position.observation(), private_observation},
-        PolicyRow{offset, node->edges.count});
+        offset);
   }
   return policy;
 }
@@ -222,10 +198,10 @@ TEST_CASE("small exact solver baseline is deterministic") {
   solver->run(10);
 
   CHECK(solver->get_history_count() == 417);
-  CHECK(solver->get_info_set_count() == 720);
-  CHECK(solver->get_cfr_update_count() == 1440);
+  CHECK(solver->get_info_set_count() == 714);
+  CHECK(solver->get_stats().decision_visits == 1440);
   CHECK(solver->get_expected_value(Player::A) ==
-        doctest::Approx(-1.01572));
+        doctest::Approx(-0.428839));
 }
 
 TEST_CASE("model fingerprints are stable and cover solve ranges") {
@@ -235,53 +211,55 @@ TEST_CASE("model fingerprints are stable and cover solve ranges") {
   CHECK(first->model_fingerprint() == second->model_fingerprint());
   CHECK(first->model_fingerprint() != changed->model_fingerprint());
   CHECK(Hex(first->model_fingerprint()) ==
-        "d888124d143d268d139afce227d10e26"
-        "624b3c05912c12885f0d8b7696b14041");
+        "e2fb6db92eafd22c1f8f279e60d02921"
+        "50bc8e39318df22bd60d70a37472ffa2");
 }
 
 TEST_CASE("private abstraction cannot change terminal utility") {
   ExactPublicState terminal = WinningRiverRoot();
   BettingData data = Data(terminal.betting);
-  data.pending_action_mask = 0;
+  data.actions_remaining = 0;
   terminal.betting = ShowdownState{data};
   auto exact = MakeSolver(Config(), R(kA), R(kB), terminal);
   auto handcrafted = MakeSolver(
-      SolverConfig::Default(), R(kA), R(kB), terminal);
-  const double expected = exact->evaluate_current(
-      HoleCards(kA), HoleCards(kB));
+      SolverConfig{}, R(kA), R(kB), terminal);
+  const double expected = exact->evaluate_current(kA, kB);
   CHECK(expected == doctest::Approx(4.0));
-  CHECK(handcrafted->evaluate_current(HoleCards(kA), HoleCards(kB)) ==
-        expected);
+  CHECK(handcrafted->evaluate_current(kA, kB) == expected);
 }
 
 TEST_CASE("history tree stores direct rule transitions") {
   auto solver = MakeSolver(Config(), R(kA), R(kB));
   const HistoryTree& tree = CFRSolverTestAccess::history(*solver);
-  REQUIRE(tree.root.index() < tree.nodes.size());
+  REQUIRE_FALSE(tree.nodes.empty());
 
   for (size_t id = 0; id < tree.nodes.size(); ++id) {
     const HistoryNode& node = tree.nodes[id];
-    if (const auto* decision = std::get_if<DecisionNode>(&node)) {
-      REQUIRE(decision->edges.count > 0);
-      for (uint8_t action = 0; action < decision->edges.count; ++action) {
-        const HistoryEdge& edge =
-            tree.edges[decision->edges.begin + action];
-        REQUIRE(edge.child.index() < tree.nodes.size());
-        CHECK(NodeState(tree.nodes[edge.child.index()]) ==
-              Apply(decision->state, edge.action));
+    if (const auto* decision = std::get_if<DecisionState>(&node.state)) {
+      const AbstractActions actions = SelectAbstractActions(
+          solver->solve_spec().config.bet_abstraction, *decision);
+      REQUIRE(node.child_count == actions.size());
+      for (uint8_t action = 0; action < node.child_count; ++action) {
+        const HistoryId child = tree.children[node.children_begin + action];
+        REQUIRE(child.index() < tree.nodes.size());
+        CHECK(tree.nodes[child.index()].state ==
+              Apply(node.state, actions[action]));
       }
-    } else if (const auto* chance = std::get_if<ChanceNode>(&node)) {
-      REQUIRE(chance->child.index() < tree.nodes.size());
-      CHECK(NodeState(tree.nodes[chance->child.index()]) ==
-            AdvanceBettingStreet(chance->state, BettingRules{2}));
+    } else if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
+      REQUIRE(node.child_count == 1);
+      const HistoryId child = tree.children[node.children_begin];
+      REQUIRE(child.index() < tree.nodes.size());
+      CHECK(tree.nodes[child.index()].state == AdvanceBettingStreet(
+                *chance, solver->solve_spec().config.betting_rules));
+    } else {
+      CHECK(node.child_count == 0);
     }
   }
 
-  const DecisionNode& root =
-      std::get<DecisionNode>(tree.nodes[tree.root.index()]);
-  REQUIRE(root.edges.count >= 2);
-  CHECK(tree.edges[root.edges.begin].child !=
-        tree.edges[root.edges.begin + 1].child);
+  const HistoryNode& root = tree.nodes[0];
+  REQUIRE(root.child_count >= 2);
+  CHECK(tree.children[root.children_begin] !=
+        tree.children[root.children_begin + 1]);
 }
 
 TEST_CASE("training mutates only CFR state") {
@@ -290,18 +268,17 @@ TEST_CASE("training mutates only CFR state") {
   solver->run(4);
   CHECK(solver->get_iterations_run() == 4);
   CHECK(solver->get_info_set_count() > 0);
-  CHECK(solver->get_cfr_update_count() > 0);
+  CHECK(solver->get_stats().decision_visits > 0);
   CHECK(std::isfinite(solver->get_expected_value(Player::A)));
   CHECK(solver->get_history_count() == history_count);
 
   const CfrState before = CFRSolverTestAccess::state(*solver);
-  const int64_t updates = solver->get_cfr_update_count();
-  const auto value =
-      solver->evaluate_average(HoleCards(kA), HoleCards(kB));
+  const uint64_t updates = solver->get_stats().decision_visits;
+  const auto value = solver->evaluate_average(kA, kB);
   REQUIRE(value.ok());
   CHECK(std::isfinite(*value));
   CHECK(solver->get_history_count() == history_count);
-  CHECK(solver->get_cfr_update_count() == updates);
+  CHECK(solver->get_stats().decision_visits == updates);
   CHECK(CFRSolverTestAccess::state(*solver).rows == before.rows);
   CHECK(CFRSolverTestAccess::state(*solver).regret_sum == before.regret_sum);
   CHECK(CFRSolverTestAccess::state(*solver).strategy_sum ==
@@ -327,7 +304,7 @@ TEST_CASE("infoset action rows are contiguous") {
   const CfrState& state = CFRSolverTestAccess::state(*solver);
 
   struct RowSize {
-    InfoSetRow row;
+    size_t offset;
     uint8_t action_count;
   };
   std::vector<RowSize> rows;
@@ -335,16 +312,16 @@ TEST_CASE("infoset action rows are contiguous") {
   for (const auto& entry : state.rows) {
     const HistoryNode& node = CFRSolverTestAccess::history(*solver)
                                   .nodes[entry.first.history.index()];
-    rows.push_back({entry.second,
-                    std::get<DecisionNode>(node).edges.count});
+    REQUIRE(std::holds_alternative<DecisionState>(node.state));
+    rows.push_back({entry.second, node.child_count});
   }
   std::sort(rows.begin(), rows.end(), [](RowSize left, RowSize right) {
-    return left.row.action_offset < right.row.action_offset;
+    return left.offset < right.offset;
   });
 
   size_t offset = 0;
   for (const RowSize& item : rows) {
-    CHECK(item.row.action_offset == offset);
+    CHECK(item.offset == offset);
     offset += item.action_count;
   }
   CHECK(offset == state.regret_sum.size());
@@ -353,7 +330,7 @@ TEST_CASE("infoset action rows are contiguous") {
 
 TEST_CASE("postflop roots use full observation identity") {
   SolverConfig config = Config();
-  const BettingRules rules{config.big_blind()};
+  const BettingRules& rules = config.betting_rules;
   ExactPublicState root = MakeInitialState(rules, {8, 8}, {1, 2});
   root.betting = Apply(root.betting, {ActionKind::Call, 2});
   root.betting = Apply(root.betting, {ActionKind::Check, 0});
@@ -365,31 +342,25 @@ TEST_CASE("postflop roots use full observation identity") {
   auto solver = MakeSolver(config, R(kA), R(kB), root);
   solver->run(2);
   const HistoryTree& tree = CFRSolverTestAccess::history(*solver);
-  const Player player =
-      std::get<DecisionNode>(tree.nodes[tree.root.index()]).state.actor;
+  const Player player = std::get<DecisionState>(tree.nodes[0].state).actor;
   const ComboId hand = player == Player::A ? kA : kB;
-  const PublicPosition public_state = PublicPosition::Root(
-      solver->card_abstraction(), Data(root.betting).street, root.board);
+  const PublicPosition public_state(solver->card_abstraction(), root.board);
   const PrivateObservationId private_id = ObservePrivate(
-      solver->card_abstraction(), hand, public_state);
+      solver->card_abstraction(), hand, root.board);
   CHECK(CFRSolverTestAccess::state(*solver).rows.contains(
-      {tree.root, public_state.observation(), private_id}));
+      {HistoryId{}, public_state.observation(), private_id}));
 }
 
 TEST_CASE("training continues after the infoset cap is reached") {
   auto solver = MakeSolver(Config(true, 1), R(kA), R(kB));
-  const TrainingResult result = solver->run(2);
-  CHECK(result.iterations_completed == 2);
+  solver->run(2);
   CHECK(solver->get_iterations_run() == 2);
   CHECK(solver->get_info_set_count() == 1);
 }
 
 TEST_CASE("parallel training updates a fixed-capacity table") {
   auto solver = MakeSolver(Config(true, 1), R(kA), R(kB));
-  const TrainingResult result = solver->run(20, 4);
-  CHECK(result.iterations_completed == 20);
-  CHECK(result.serial_iterations == 1);
-  CHECK(result.parallel_iterations == 19);
+  solver->run(20, 4);
   CHECK(solver->get_iterations_run() == 20);
   CHECK(solver->get_info_set_count() == 1);
   CHECK(solver->get_stats().decision_visits > 0);
@@ -408,21 +379,21 @@ TEST_CASE("average strategy storage is optional") {
   solver->run(2);
 
   CHECK(CFRSolverTestAccess::state(*solver).strategy_sum.empty());
-  CHECK(std::isfinite(
-      solver->evaluate_current(HoleCards(kA), HoleCards(kB))));
-  CHECK_FALSE(
-      solver->evaluate_average(HoleCards(kA), HoleCards(kB)).ok());
+  CHECK(std::isfinite(solver->evaluate_current(kA, kB)));
+  CHECK_FALSE(solver->evaluate_average(kA, kB).ok());
 }
 
-TEST_CASE("average policies are normalized and persist exactly") {
+TEST_CASE("average policies are normalized and evaluate reproducibly") {
   auto solver = MakeSolver(Config(), R(kA), R(kB));
   solver->run(4);
   const auto extracted = solver->extract_average_policy();
   REQUIRE(extracted.ok());
   const Policy policy = *extracted;
   REQUIRE_FALSE(policy.rows.empty());
-  for (const auto& [key, row] : policy.rows) {
-    std::vector<float> probabilities(row.action_count);
+  for (const auto& [key, offset] : policy.rows) {
+    (void)offset;
+    const HistoryNode& node = solver->history_tree().nodes[key.history.index()];
+    std::vector<float> probabilities(node.child_count);
     CHECK(policy.strategy(key, absl::MakeSpan(probabilities)));
     double sum = 0.0;
     for (float probability : probabilities) sum += probability;
@@ -438,18 +409,6 @@ TEST_CASE("average policies are normalized and persist exactly") {
     CHECK(probability == doctest::Approx(1.0 / missing.size()));
   }
 
-  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
-  REQUIRE(test_tmpdir != nullptr);
-  const std::filesystem::path path =
-      std::filesystem::path(test_tmpdir) / "average.policy";
-  REQUIRE(SavePolicy(policy, path).ok());
-  const auto loaded = LoadPolicy(path);
-  REQUIRE(loaded.ok());
-  CHECK(loaded->model == policy.model);
-  CHECK(loaded->rows == policy.rows);
-  CHECK(loaded->probabilities == policy.probabilities);
-
-  const SerializedRngState rng_before = solver->checkpoint().rng;
   const auto evaluated = EstimateExpectedValue(*solver, policy, policy, 4, 17);
   const auto repeated = EstimateExpectedValue(*solver, policy, policy, 4, 17);
   REQUIRE(evaluated.ok());
@@ -461,7 +420,6 @@ TEST_CASE("average policies are normalized and persist exactly") {
   CHECK(evaluated->policy_lookups == repeated->policy_lookups);
   CHECK(evaluated->missing_policy_lookups ==
         repeated->missing_policy_lookups);
-  CHECK(solver->checkpoint().rng == rng_before);
 
   Policy empty;
   empty.model = policy.model;
@@ -480,88 +438,15 @@ TEST_CASE("zero average mass extracts as uniform policy") {
   std::fill(state.strategy_sum.begin(), state.strategy_sum.end(), 0.0f);
   const auto extracted = solver->extract_average_policy();
   REQUIRE(extracted.ok());
-  for (const auto& [key, row] : extracted->rows) {
-    std::vector<float> probabilities(row.action_count);
+  for (const auto& [key, offset] : extracted->rows) {
+    (void)offset;
+    const HistoryNode& node = solver->history_tree().nodes[key.history.index()];
+    std::vector<float> probabilities(node.child_count);
     REQUIRE(extracted->strategy(key, absl::MakeSpan(probabilities)));
     for (float probability : probabilities) {
-      CHECK(probability == doctest::Approx(1.0 / row.action_count));
+      CHECK(probability == doctest::Approx(1.0 / node.child_count));
     }
   }
-}
-
-TEST_CASE("lossy average policy respects its serialized byte budget") {
-  auto solver = MakeSolver(Config(), R(kA), R(kB));
-  solver->run(4);
-  constexpr size_t kBudget = 256;
-  const auto extracted = solver->extract_average_policy(kBudget);
-  REQUIRE(extracted.ok());
-  CHECK(extracted->rows.size() < solver->get_info_set_count());
-
-  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
-  REQUIRE(test_tmpdir != nullptr);
-  const std::filesystem::path path =
-      std::filesystem::path(test_tmpdir) / "lossy.policy";
-  REQUIRE(SavePolicy(*extracted, path).ok());
-  CHECK(std::filesystem::file_size(path) <= kBudget);
-
-  const auto repeated = solver->extract_average_policy(kBudget);
-  REQUIRE(repeated.ok());
-  CHECK(repeated->rows == extracted->rows);
-  CHECK(repeated->probabilities == extracted->probabilities);
-  CHECK_FALSE(solver->extract_average_policy(59).ok());
-}
-
-TEST_CASE("checkpoints resume training bit for bit") {
-  const SolverConfig config = Config();
-  auto uninterrupted = MakeSolver(config, R(kA), R(kB));
-  uninterrupted->run(6);
-
-  auto split = MakeSolver(config, R(kA), R(kB));
-  split->run(3);
-  const SolverCheckpoint saved = split->checkpoint();
-
-  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
-  REQUIRE(test_tmpdir != nullptr);
-  const std::filesystem::path path =
-      std::filesystem::path(test_tmpdir) / "resume.checkpoint";
-  REQUIRE(SaveCheckpoint(saved, path).ok());
-  const auto loaded = LoadCheckpoint(path);
-  REQUIRE(loaded.ok());
-  CHECK(loaded->format_version == saved.format_version);
-  CHECK(loaded->model == saved.model);
-  CHECK(loaded->rng == saved.rng);
-  CheckSameState(loaded->state, saved.state);
-
-  auto resumed = MakeSolver(config, R(kA), R(kB));
-  REQUIRE(resumed->restore(*loaded).ok());
-  resumed->run(3);
-  CheckSameState(CFRSolverTestAccess::state(*uninterrupted),
-                 CFRSolverTestAccess::state(*resumed));
-  CHECK(uninterrupted->checkpoint().rng == resumed->checkpoint().rng);
-}
-
-TEST_CASE("checkpoint restore rejects mismatched and corrupt state") {
-  auto solver = MakeSolver(Config(), R(kA), R(kB));
-  solver->run(2);
-  const SolverCheckpoint valid = solver->checkpoint();
-
-  auto different = MakeSolver(Config(), R(kB), R(kA));
-  CHECK_FALSE(different->restore(valid).ok());
-
-  SolverCheckpoint bad_offset = valid;
-  REQUIRE_FALSE(bad_offset.state.rows.empty());
-  ++bad_offset.state.rows.begin()->second.action_offset;
-  CHECK_FALSE(solver->restore(std::move(bad_offset)).ok());
-
-  SolverCheckpoint bad_size = valid;
-  REQUIRE_FALSE(bad_size.state.regret_sum.empty());
-  bad_size.state.regret_sum.pop_back();
-  CHECK_FALSE(solver->restore(std::move(bad_size)).ok());
-
-  SolverCheckpoint bad_value = valid;
-  bad_value.state.regret_sum[0] =
-      std::numeric_limits<float>::infinity();
-  CHECK_FALSE(SaveCheckpoint(bad_value, "invalid.checkpoint").ok());
 }
 
 TEST_CASE("approximate responses are reproducible and respect infosets") {
@@ -573,7 +458,6 @@ TEST_CASE("approximate responses are reproducible and respect infosets") {
   const auto opponent = game->extract_average_policy();
   REQUIRE(opponent.ok());
 
-  const SerializedRngState rng_before = game->checkpoint().rng;
   const BestResponseConfig config{30, 20, 91};
   const auto first = TrainApproximateBestResponse(
       *game, Player::A, *opponent, config);
@@ -587,17 +471,15 @@ TEST_CASE("approximate responses are reproducible and respect infosets") {
   CHECK(first->value == second->value);
   CHECK(first->standard_error == second->standard_error);
   CHECK(first->opponent_policy_lookups > 0);
-  CHECK(game->checkpoint().rng == rng_before);
 
   size_t root_rows = 0;
   for (const auto& [key, row] : first->response_policy.rows) {
     (void)row;
-    const auto* node =
-        std::get_if<DecisionNode>(&game->history_tree().nodes[
-            key.history.index()]);
-    REQUIRE(node != nullptr);
-    CHECK(node->state.actor == Player::A);
-    root_rows += key.history == game->history_tree().root ? 1 : 0;
+    const HistoryNode& node =
+        game->history_tree().nodes[key.history.index()];
+    REQUIRE(std::holds_alternative<DecisionState>(node.state));
+    CHECK(std::get<DecisionState>(node.state).actor == Player::A);
+    root_rows += key.history == HistoryId{} ? 1 : 0;
   }
   CHECK(root_rows == 1);
 }
@@ -610,7 +492,6 @@ TEST_CASE("approximate response continues after infoset capacity") {
   const auto response = TrainApproximateBestResponse(
       *game, Player::A, *opponent, BestResponseConfig{10, 2, 7});
   REQUIRE(response.ok());
-  CHECK(response->training_iterations_completed == 10);
   CHECK(response->response_policy.rows.size() == 1);
 }
 
@@ -628,21 +509,21 @@ TEST_CASE("approximate response learns a profitable shared action") {
   CHECK(response->value >= baseline->mean);
   CHECK(response->value > 7.5);
 
-  const PublicPosition position = PublicPosition::Root(
-      game->card_abstraction(), StreetKind::River,
-      game->solve_spec().root.board);
+  const PublicPosition position(
+      game->card_abstraction(), game->solve_spec().root.board);
   const InfoSetKey root_key{
-      game->history_tree().root, position.observation(),
-      ObservePrivate(game->card_abstraction(), kA, position)};
-  const PolicyRow root_row = response->response_policy.rows.at(root_key);
-  for (uint8_t action = 0; action < root_row.action_count; ++action) {
-    const GameAction game_action = game->history_tree()
-        .edges[std::get<DecisionNode>(game->history_tree().nodes[0])
-                   .edges.begin + action]
-        .action;
+      HistoryId{}, position.observation(),
+      ObservePrivate(game->card_abstraction(), kA, position.board())};
+  const size_t offset = response->response_policy.rows.at(root_key);
+  const HistoryNode& root = game->history_tree().nodes[0];
+  const AbstractActions actions = SelectAbstractActions(
+      game->solve_spec().config.bet_abstraction,
+      std::get<DecisionState>(root.state));
+  for (uint8_t action = 0; action < root.child_count; ++action) {
+    const GameAction game_action = actions[action];
     if (game_action.kind == ActionKind::AllIn) {
       CHECK(response->response_policy.probabilities[
-                root_row.action_offset + action] > 0.95f);
+                offset + action] > 0.95f);
     }
   }
 }

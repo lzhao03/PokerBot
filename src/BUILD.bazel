@@ -50,48 +50,30 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
-SOLVER_SRCS = [
-    "card_abstraction.cc",
-    "evaluation.cc",
-    "fingerprint.cc",
-    "solver.cc",
-]
-SOLVER_HDRS = [
-    "card_abstraction.h",
-    "evaluation.h",
-    "fingerprint.h",
-    "solver.h",
-]
-SOLVER_DEPS = [
-    ":bet_abstraction",
-    ":card_canonicalization",
-    ":poker",
-    "@abseil-cpp//absl/container:flat_hash_map",
-    "@abseil-cpp//absl/container:inlined_vector",
-    "@abseil-cpp//absl/log:log",
-    "@abseil-cpp//absl/status:status",
-    "@abseil-cpp//absl/status:statusor",
-    "@abseil-cpp//absl/types:span",
-]
-
 cc_library(
     name = "solver",
-    srcs = SOLVER_SRCS,
-    hdrs = SOLVER_HDRS,
-    copts = CORE_COPTS,
-    deps = SOLVER_DEPS,
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
-    name = "experimental_policy_encoder",
-    srcs = ["experimental_policy_encoder.cc"],
-    hdrs = ["experimental_policy_encoder.h"],
+    srcs = [
+        "card_abstraction.cc",
+        "evaluation.cc",
+        "fingerprint.cc",
+        "solver.cc",
+    ],
+    hdrs = [
+        "card_abstraction.h",
+        "evaluation.h",
+        "fingerprint.h",
+        "solver.h",
+    ],
     copts = CORE_COPTS,
     deps = [
-        ":solver",
+        ":bet_abstraction",
+        ":card_canonicalization",
+        ":poker",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:inlined_vector",
         "@abseil-cpp//absl/status:status",
         "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/types:span",
     ],
     visibility = ["//visibility:public"],
 )
@@ -104,9 +86,6 @@ cc_binary(
         "@abseil-cpp//absl/flags:flag",
         "@abseil-cpp//absl/flags:parse",
         "@abseil-cpp//absl/flags:usage",
-        "@abseil-cpp//absl/log:globals",
-        "@abseil-cpp//absl/log:initialize",
-        "@abseil-cpp//absl/status:status",
         "@abseil-cpp//absl/status:statusor",
         "@abseil-cpp//absl/strings",
     ],

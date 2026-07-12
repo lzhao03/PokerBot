@@ -56,11 +56,8 @@ TEST_CASE("all card abstraction combinations support history traversal") {
   for (const CardAbstractionConfig& abstraction : abstractions) {
     CAPTURE(static_cast<int>(abstraction.public_mode));
     CAPTURE(static_cast<int>(abstraction.private_kind));
-    SolverConfigOptions options;
+    SolverConfig options;
     options.card_abstraction = abstraction;
-    options.starting_stack = 8;
-    options.small_blind = 1;
-    options.big_blind = 2;
     for (auto& fractions : options.bet_abstraction.pot_fractions) {
       fractions = {1.0};
     }
@@ -70,7 +67,7 @@ TEST_CASE("all card abstraction combinations support history traversal") {
     REQUIRE(config_result.ok());
     const SolverConfig config = *config_result;
 
-    const BettingRules rules{config.big_blind()};
+    const BettingRules& rules = config.betting_rules;
     ExactPublicState state = MakeInitialState(rules, {8, 8}, {1, 2});
     state.betting = Apply(state.betting, {ActionKind::Call, 2});
     state.betting = Apply(state.betting, {ActionKind::Check, 0});

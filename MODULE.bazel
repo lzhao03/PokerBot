@@ -5,37 +5,13 @@ module(
 
 bazel_dep(name = "abseil-cpp", version = "20260107.1")
 bazel_dep(name = "doctest", version = "2.5.2")
-bazel_dep(name = "rapidcheck", version = "2023.12.14")
 bazel_dep(name = "rules_cc", version = "0.2.16")
-
-archive_override(
-    module_name = "rapidcheck",
-    integrity = "sha256-h/9vmEwb6ie8aXzAg1UecgZpjCzM72mGmRI7DonPoho=",
-    patch_strip = 0,
-    patches = [
-        "//third_party/rapidcheck:add_build_file.patch",
-        "//third_party/rapidcheck:module_dot_bazel.patch",
-    ],
-    strip_prefix = "rapidcheck-b2d9ed2dddefc4b84318d664b4f221eb792d89c7",
-    urls = [
-        "https://github.com/emil-e/rapidcheck/archive/b2d9ed2dddefc4b84318d664b4f221eb792d89c7.tar.gz",
-    ],
-)
 
 # Hedron's Compile Commands Extractor for Bazel
 # https://github.com/hedronvision/bazel-compile-commands-extractor
 bazel_dep(name = "hedron_compile_commands", dev_dependency = True)
 git_override(
     module_name = "hedron_compile_commands",
-    # commit = "0e990032f3c5a866e72615cf67e5ce22186dcb97",
-    # commit = "4f28899228fb3ad0126897876f147ca15026151e",
-    commit = "f5fbd4cee671d8d908f37c83abaf70fba5928fc7",  # header only patch
+    commit = "f5fbd4cee671d8d908f37c83abaf70fba5928fc7",
     remote = "https://github.com/hedronvision/bazel-compile-commands-extractor.git",
-    # Replace the commit hash (above) with the latest (https://github.com/hedronvision/bazel-compile-commands-extractor/commits/main).
-    # Even better, set up Renovate and let it do the work for you (see "Suggestion: Updates" in the README).
 )
-
-# bazel_dep(
-#     name = "rules_proto",
-#     version = "7.0.2",
-# )

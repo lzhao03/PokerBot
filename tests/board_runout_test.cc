@@ -1,4 +1,3 @@
-#include "src/hand_evaluator.h"
 #include "src/poker.h"
 
 #include <array>
@@ -13,42 +12,43 @@ Card C(int rank, Suit suit) {
   return Card(static_cast<Rank>(rank - 2), suit);
 }
 
-TEST_CASE("board types preserve reveal order and card invariants") {
+TEST_CASE("board preserves reveal order and card invariants") {
   const Card ace = C(14, Suit::Spades);
   const Card king = C(13, Suit::Spades);
   const Card queen = C(12, Suit::Spades);
   const Card jack = C(11, Suit::Hearts);
   const Card ten = C(10, Suit::Diamonds);
 
-  const FlopBoard flop = DealFlop(PreflopBoard{}, {ace, king, queen});
-  const FlopBoard permuted = DealFlop(PreflopBoard{}, {queen, ace, king});
+  const Board flop = DealCards(
+      Board{}, std::array<Card, 3>{ace, king, queen});
+  const Board permuted = DealCards(
+      Board{}, std::array<Card, 3>{queen, ace, king});
   CHECK(flop == permuted);
 
-  const TurnBoard first_turn = DealTurn(flop, jack);
-  const TurnBoard different_turn = DealTurn(
-      DealFlop(PreflopBoard{}, {ace, king, jack}), queen);
+  const Board first_turn = DealCards(flop, std::array<Card, 1>{jack});
+  const Board different_turn = DealCards(
+      DealCards(Board{}, std::array<Card, 3>{ace, king, jack}),
+      std::array<Card, 1>{queen});
   CHECK(first_turn.mask() == different_turn.mask());
   CHECK_FALSE(first_turn == different_turn);
 
-  const RiverBoard river = DealRiver(first_turn, ten);
-  const RiverBoard different_river = DealRiver(DealTurn(flop, ten), jack);
+  const Board river = DealCards(first_turn, std::array<Card, 1>{ten});
+  const Board different_river = DealCards(
+      DealCards(flop, std::array<Card, 1>{ten}),
+      std::array<Card, 1>{jack});
   CHECK(river.mask() == different_river.mask());
   CHECK_FALSE(river == different_river);
   CHECK(std::popcount(river.mask()) == kMaxBoardCards);
 
-  CHECK_FALSE(MakeFlop({ace, king, ace}).ok());
-  CHECK_FALSE(MakeTurn(flop, ace).ok());
-  CHECK_FALSE(MakeRiver(first_turn, jack).ok());
-}
+  const auto made = MakeBoard(
+      std::array<Card, 5>{queen, ace, king, jack, ten});
+  REQUIRE(made.ok());
+  CHECK(*made == river);
 
-TEST_CASE("hand evaluator recognizes a royal flush") {
-  const std::array<Card, 5> cards = {
-      C(10, Suit::Hearts), C(11, Suit::Hearts),
-      C(12, Suit::Hearts), C(13, Suit::Hearts),
-      C(14, Suit::Hearts),
-  };
-
-  CHECK(EvaluateFiveCards(cards).rank == HandRank::RoyalFlush);
+  CHECK_FALSE(MakeBoard(std::array<Card, 2>{ace, king}).ok());
+  CHECK_FALSE(MakeBoard(std::array<Card, 3>{ace, king, ace}).ok());
+  CHECK_FALSE(
+      MakeBoard(std::array<Card, 4>{ace, king, queen, ace}).ok());
 }
 
 }  // namespace

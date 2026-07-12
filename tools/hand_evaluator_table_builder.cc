@@ -17,7 +17,6 @@ EvaluationScore MakeScore(HandRank rank, Kickers... kickers) {
   EvaluationScore score;
   score.rank = rank;
   score.kickers = {static_cast<int>(kickers)...};
-  score.kicker_count = sizeof...(Kickers);
   return score;
 }
 
@@ -73,13 +72,6 @@ struct CactusLookupRecord {
 
 }  // namespace
 
-bool EvaluationScore::operator<(const EvaluationScore& other) const {
-  if (rank != other.rank) {
-    return static_cast<int>(rank) < static_cast<int>(other.rank);
-  }
-  return kickers < other.kickers;
-}
-
 EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards) {
   std::array<int, 5> ranks;
   size_t rank_count = 0;
@@ -91,7 +83,7 @@ EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards) {
 
   bool flush = true;
   for (Card card : cards) {
-    if (CardSuit(card) != CardSuit(cards[0])) {
+    if (card.suit() != cards[0].suit()) {
       flush = false;
       break;
     }
@@ -209,17 +201,6 @@ EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards) {
                    ranks[3], ranks[4]);
 }
 
-int CompareScores(const EvaluationScore& first,
-                  const EvaluationScore& second) {
-  if (second < first) {
-    return 1;
-  }
-  if (first < second) {
-    return -1;
-  }
-  return 0;
-}
-
 TableData BuildCactusTables() {
   std::vector<CactusLookupRecord> records;
   records.reserve(7462);
@@ -268,7 +249,7 @@ TableData BuildCactusTables() {
   std::sort(records.begin(), records.end(),
             [](const CactusLookupRecord& first,
                const CactusLookupRecord& second) {
-              return CompareScores(first.score, second.score) > 0;
+              return second.score < first.score;
             });
 
   TableData tables;
@@ -276,7 +257,6 @@ TableData BuildCactusTables() {
   for (size_t i = 0; i < records.size(); ++i) {
     const uint16_t value = static_cast<uint16_t>(i + 1);
     const CactusLookupRecord& record = records[i];
-    tables.scores[value] = record.score;
     switch (record.kind) {
       case CactusLookupRecord::Kind::Flush:
         tables.flushes[record.key] = value;

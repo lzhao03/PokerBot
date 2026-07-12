@@ -40,42 +40,35 @@ std::mt19937 MakeEvaluationRng(uint64_t seed) {
 
 Position RootPosition(const CFRSolver& game) {
   const SolveSpec& spec = game.solve_spec();
-  return {game.history_tree().root,
-          PublicPosition::Root(game.card_abstraction(),
-                               Data(spec.root.betting).street,
-                               spec.root.board)};
+  return {HistoryId{},
+          PublicPosition(game.card_abstraction(), spec.root.board)};
 }
 
-Position ActionChild(const CFRSolver& game,
+Position ActionChild(const HistoryTree& history,
+                     const HistoryNode& node,
                      Position position,
                      uint8_t action) {
-  const HistoryTree& history = game.history_tree();
-  const auto* node =
-      std::get_if<DecisionNode>(&history.nodes[position.history.index()]);
-  assert(node != nullptr && action < node->edges.count);
-  position.history = history.edges[node->edges.begin + action].child;
+  position.history = history.children[node.children_begin + action];
   return position;
 }
 
 Position ChanceChild(const CFRSolver& game,
+                     const HistoryNode& node,
                      Position position,
                      const Deal& deal,
                      std::mt19937& rng) {
-  const HistoryTree& history = game.history_tree();
-  const auto* node =
-      std::get_if<ChanceNode>(&history.nodes[position.history.index()]);
-  assert(node != nullptr);
+  const ChanceState& chance = std::get<ChanceState>(node.state);
   const auto cards = SampleStreetCards(
-      node->state.data.street, position.public_state.board(),
-      deal.blocked_mask, rng);
+      chance.data.street, position.public_state.board(),
+      deal.blocked_mask(), rng);
   assert(cards.ok());
   const SolverConfig& config = game.solve_spec().config;
   const ExactPublicState child = AdvanceChance(
-      node->state, position.public_state.board(), *cards,
-      BettingRules{config.big_blind()});
-  position.history = node->child;
-  position.public_state = position.public_state.after_chance(
-      game.card_abstraction(), Data(child.betting).street, child.board);
+      chance, position.public_state.board(), *cards,
+      config.betting_rules);
+  position.history = game.history_tree().children[node.children_begin];
+  position.public_state = PublicPosition(
+      game.card_abstraction(), child.board);
   return position;
 }
 
@@ -83,10 +76,11 @@ EvaluationFrame InitialFrame(const CFRSolver& game,
                              const Position& position,
                              const Deal& deal) {
   EvaluationFrame frame;
-  for (size_t player = 0; player < kPlayerCount; ++player) {
-    const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
-    frame.private_observations[player] =
-        ObservePrivate(game.card_abstraction(), hand, position.public_state);
+  for (Player player : {Player::A, Player::B}) {
+    const ComboId hand = deal.hand(player);
+    frame.private_observations[Index(player)] =
+        ObservePrivate(game.card_abstraction(), hand,
+                       position.public_state.board());
   }
   return frame;
 }
@@ -95,10 +89,10 @@ void AdvancePrivateObservations(const CFRSolver& game,
                                 EvaluationFrame& frame,
                                 const Position& child,
                                 const Deal& deal) {
-  for (size_t player = 0; player < kPlayerCount; ++player) {
-    const ComboId hand = deal.hand(static_cast<Player>(player)).combo();
-    frame.private_observations[player] = ObservePrivate(
-        game.card_abstraction(), hand, child.public_state);
+  for (Player player : {Player::A, Player::B}) {
+    const ComboId hand = deal.hand(player);
+    frame.private_observations[Index(player)] = ObservePrivate(
+        game.card_abstraction(), hand, child.public_state.board());
   }
 }
 
@@ -110,21 +104,20 @@ double TraverseProfile(const CFRSolver& game,
                        std::mt19937& rng,
                        EvaluationCounters& counters) {
   const HistoryTree& history = game.history_tree();
-  return std::visit([&](const auto& node) -> double {
-    using Node = std::decay_t<decltype(node)>;
-    if constexpr (std::is_same_v<Node, FoldTerminalNode>) {
-      return TerminalUtility(node.state, Player::A);
-    } else if constexpr (std::is_same_v<Node, ShowdownNode>) {
-      const auto* board =
-          std::get_if<RiverBoard>(&position.public_state.board());
-      assert(board != nullptr);
-      return TerminalUtility(node.state, *board, deal.hand(Player::A),
+  const HistoryNode& node = history.nodes[position.history.index()];
+  return std::visit([&](const auto& state) -> double {
+    using State = std::decay_t<decltype(state)>;
+    if constexpr (std::is_same_v<State, FoldTerminalState>) {
+      return TerminalUtility(state, Player::A);
+    } else if constexpr (std::is_same_v<State, ShowdownState>) {
+      const Board& board = position.public_state.board();
+      return TerminalUtility(state, board, deal.hand(Player::A),
                              deal.hand(Player::B));
-    } else if constexpr (std::is_same_v<Node, ChanceNode>) {
+    } else if constexpr (std::is_same_v<State, ChanceState>) {
       double value = 0.0;
-      const int samples = game.solve_spec().config.chance_samples();
+      const int samples = game.solve_spec().config.chance_samples;
       for (int sample = 0; sample < samples; ++sample) {
-        const Position child = ChanceChild(game, position, deal, rng);
+        const Position child = ChanceChild(game, node, position, deal, rng);
         EvaluationFrame child_frame = frame;
         AdvancePrivateObservations(game, child_frame, child, deal);
         value += TraverseProfile(game, policies, child, child_frame, deal,
@@ -132,30 +125,26 @@ double TraverseProfile(const CFRSolver& game,
       }
       return value / samples;
     } else {
-      const size_t player = Index(node.state.actor);
+      const size_t player = Index(state.actor);
       const InfoSetKey key{
           position.history, position.public_state.observation(),
           frame.private_observations[player]};
-      absl::InlinedVector<float, 8> probabilities(node.edges.count, 0.0f);
+      absl::InlinedVector<float, 8> probabilities(node.child_count, 0.0f);
       ++counters.lookups[player];
       if (!policies[player]->strategy(key, absl::MakeSpan(probabilities))) {
         ++counters.missing[player];
       }
       double value = 0.0;
-      for (uint8_t action = 0; action < node.edges.count; ++action) {
+      for (uint8_t action = 0; action < node.child_count; ++action) {
         value += probabilities[action] *
                  TraverseProfile(game, policies,
-                                 ActionChild(game, position, action), frame,
-                                 deal, rng, counters);
+                                 ActionChild(history, node, position, action),
+                                 frame, deal, rng, counters);
       }
       return value;
     }
-  }, history.nodes[position.history.index()]);
+  }, node.state);
 }
-
-}  // namespace
-
-namespace {
 
 ProfileEstimate EstimateProfile(
     const CFRSolver& game,
@@ -176,67 +165,22 @@ ProfileEstimate EstimateProfile(
     const double value = TraverseProfile(
         game, policies, root, frame, deal, rng, counters);
     const double delta = value - mean;
-    mean += delta / static_cast<double>(sample + 1);
+    mean += delta / (sample + 1);
     squared_error += delta * (value - mean);
   }
   const double standard_error = samples > 1
       ? std::sqrt(squared_error /
-                  static_cast<double>(samples - 1) /
-                  static_cast<double>(samples))
+                  (samples - 1) / samples)
       : 0.0;
   const uint64_t lookups = counters.lookups[0] + counters.lookups[1];
   const uint64_t missing = counters.missing[0] + counters.missing[1];
-  return {{mean, standard_error, samples, lookups, missing}, counters};
-}
-
-void FillUniform(absl::Span<double> probabilities) {
-  if (!probabilities.empty()) {
-    std::fill(probabilities.begin(), probabilities.end(),
-              1.0 / probabilities.size());
-  }
-}
-
-void RegretMatch(const CfrState& state,
-                 const InfoSetRow* row,
-                 absl::Span<double> probabilities) {
-  if (row == nullptr) {
-    FillUniform(probabilities);
-    return;
-  }
-  double sum = 0.0;
-  for (size_t action = 0; action < probabilities.size(); ++action) {
-    const float regret = state.regret_sum[row->action_offset + action];
-    probabilities[action] = std::max(0.0, static_cast<double>(regret));
-    sum += probabilities[action];
-  }
-  if (sum <= 0.0) {
-    FillUniform(probabilities);
-    return;
-  }
-  for (double& probability : probabilities) probability /= sum;
-}
-
-std::optional<InfoSetRow> FindOrCreateResponseRow(
-    CfrState& state,
-    InfoSetKey key,
-    uint8_t action_count,
-    size_t max_info_sets) {
-  const auto found = state.rows.find(key);
-  if (found != state.rows.end()) return found->second;
-  if (state.rows.size() >= max_info_sets) return std::nullopt;
-  const size_t offset = state.regret_sum.size();
-  state.regret_sum.resize(offset + action_count, 0.0f);
-  state.strategy_sum.resize(offset + action_count, 0.0f);
-  const InfoSetRow row{offset};
-  state.rows.emplace(key, row);
-  return row;
+  return {{mean, standard_error, lookups, missing}, counters};
 }
 
 struct ResponseTrainingContext {
   Player responder = Player::A;
   const Policy& opponent;
   CfrState& state;
-  uint64_t iteration = 0;
   size_t max_info_sets = 0;
   uint64_t opponent_lookups = 0;
   uint64_t missing_opponent_lookups = 0;
@@ -249,21 +193,20 @@ double TraverseResponse(const CFRSolver& game,
                         std::mt19937& rng,
                         ResponseTrainingContext& context) {
   const HistoryTree& history = game.history_tree();
-  return std::visit([&](const auto& node) -> double {
-    using Node = std::decay_t<decltype(node)>;
-    if constexpr (std::is_same_v<Node, FoldTerminalNode>) {
-      return TerminalUtility(node.state, Player::A);
-    } else if constexpr (std::is_same_v<Node, ShowdownNode>) {
-      const auto* board =
-          std::get_if<RiverBoard>(&position.public_state.board());
-      assert(board != nullptr);
-      return TerminalUtility(node.state, *board, deal.hand(Player::A),
+  const HistoryNode& node = history.nodes[position.history.index()];
+  return std::visit([&](const auto& state) -> double {
+    using State = std::decay_t<decltype(state)>;
+    if constexpr (std::is_same_v<State, FoldTerminalState>) {
+      return TerminalUtility(state, Player::A);
+    } else if constexpr (std::is_same_v<State, ShowdownState>) {
+      const Board& board = position.public_state.board();
+      return TerminalUtility(state, board, deal.hand(Player::A),
                              deal.hand(Player::B));
-    } else if constexpr (std::is_same_v<Node, ChanceNode>) {
+    } else if constexpr (std::is_same_v<State, ChanceState>) {
       double value = 0.0;
-      const int samples = game.solve_spec().config.chance_samples();
+      const int samples = game.solve_spec().config.chance_samples;
       for (int sample = 0; sample < samples; ++sample) {
-        const Position child = ChanceChild(game, position, deal, rng);
+        const Position child = ChanceChild(game, node, position, deal, rng);
         EvaluationFrame child_frame = frame;
         AdvancePrivateObservations(game, child_frame, child, deal);
         value += TraverseResponse(game, child, child_frame, deal, rng,
@@ -271,22 +214,22 @@ double TraverseResponse(const CFRSolver& game,
       }
       return value / samples;
     } else {
-      const Player actor = node.state.actor;
+      const Player actor = state.actor;
       const size_t player = Index(actor);
       const InfoSetKey key{
           position.history, position.public_state.observation(),
           frame.private_observations[player]};
       const bool responds = actor == context.responder;
-      std::optional<InfoSetRow> row;
-      absl::InlinedVector<double, 8> probabilities(node.edges.count, 0.0);
+      std::optional<size_t> offset;
+      absl::InlinedVector<double, 8> probabilities(node.child_count, 0.0);
       if (responds) {
-        row = FindOrCreateResponseRow(context.state, key, node.edges.count,
-                                      context.max_info_sets);
-        const InfoSetRow* strategy_row = row ? &*row : nullptr;
-        RegretMatch(context.state, strategy_row,
-                    absl::MakeSpan(probabilities));
+        offset = context.state.find_or_create(
+            key, node.child_count, context.max_info_sets, true);
+        const size_t* strategy_offset = offset ? &*offset : nullptr;
+        context.state.regret_matching_strategy(
+            strategy_offset, absl::MakeSpan(probabilities));
       } else {
-        absl::InlinedVector<float, 8> stored(node.edges.count, 0.0f);
+        absl::InlinedVector<float, 8> stored(node.child_count, 0.0f);
         ++context.opponent_lookups;
         if (!context.opponent.strategy(key, absl::MakeSpan(stored))) {
           ++context.missing_opponent_lookups;
@@ -294,33 +237,31 @@ double TraverseResponse(const CFRSolver& game,
         std::copy(stored.begin(), stored.end(), probabilities.begin());
       }
 
-      absl::InlinedVector<double, 8> values(node.edges.count, 0.0);
+      absl::InlinedVector<double, 8> values(node.child_count, 0.0);
       double node_value = 0.0;
-      for (uint8_t action = 0; action < node.edges.count; ++action) {
+      for (uint8_t action = 0; action < node.child_count; ++action) {
         EvaluationFrame child_frame = frame;
         child_frame.reach[player] *= probabilities[action];
         values[action] = TraverseResponse(
-            game, ActionChild(game, position, action), child_frame, deal, rng,
-            context);
+            game, ActionChild(history, node, position, action), child_frame,
+            deal, rng, context);
         node_value += probabilities[action] * values[action];
       }
-      if (!responds || !row) return node_value;
+      if (!responds || !offset) return node_value;
 
       const double sign = actor == Player::A ? 1.0 : -1.0;
       const double opponent_reach = frame.reach[Index(Opponent(actor))];
-      for (uint8_t action = 0; action < node.edges.count; ++action) {
-        const size_t index = row->action_offset + action;
+      for (uint8_t action = 0; action < node.child_count; ++action) {
         const float delta = static_cast<float>(
             opponent_reach * sign * (values[action] - node_value));
-        context.state.regret_sum[index] =
-            std::max(0.0f, context.state.regret_sum[index] + delta);
-        context.state.strategy_sum[index] += static_cast<float>(
-            frame.reach[player] * static_cast<double>(context.iteration + 1) *
-            probabilities[action]);
+        context.state.add_regret(*offset, action, delta);
       }
+      context.state.add_strategy(
+          *offset, absl::MakeConstSpan(probabilities),
+          frame.reach[player] * (context.state.iterations + 1));
       return node_value;
     }
-  }, history.nodes[position.history.index()]);
+  }, node.state);
 }
 
 }  // namespace
@@ -358,33 +299,23 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
 
   const SolverConfig& solver_config = game.solve_spec().config;
   const size_t max_info_sets =
-      static_cast<size_t>(solver_config.max_info_sets());
-  size_t max_actions = 3;
-  for (const auto& fractions :
-       solver_config.bet_abstraction().pot_fractions) {
-    max_actions = std::max(max_actions, fractions.size() + 3);
-  }
+      static_cast<size_t>(solver_config.max_info_sets);
 
   CfrState response_state;
-  response_state.rows.reserve(max_info_sets);
-  response_state.regret_sum.reserve(max_info_sets * max_actions);
-  response_state.strategy_sum.reserve(max_info_sets * max_actions);
+  response_state.reserve(solver_config, true);
   std::mt19937 rng = MakeEvaluationRng(config.seed);
   const Position root = RootPosition(game);
   ResponseTrainingContext context{
-      responder, opponent, response_state, 0, max_info_sets};
+      responder, opponent, response_state, max_info_sets};
   BestResponseResult result;
   result.responder = responder;
-  for (uint64_t iteration = 0; iteration < config.training_iterations;
-       ++iteration) {
+  while (response_state.iterations < config.training_iterations) {
     const Deal deal = game.deal_distribution().sample(rng);
     EvaluationFrame frame = InitialFrame(game, root, deal);
-    context.iteration = iteration;
     const double value =
         TraverseResponse(game, root, frame, deal, rng, context);
     response_state.cumulative_root_utility += value;
     ++response_state.iterations;
-    ++result.training_iterations_completed;
   }
 
   auto response = ExtractAveragePolicy(

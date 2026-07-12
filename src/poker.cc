@@ -5,8 +5,6 @@
 #include <cassert>
 #include <cstddef>
 #include <random>
-#include <stdexcept>
-#include <type_traits>
 
 #include "absl/container/inlined_vector.h"
 #include "absl/status/status.h"
@@ -15,38 +13,24 @@
 namespace poker {
 namespace {
 
-std::array<ComboInfo, kComboCount> BuildComboTable() {
-  std::array<ComboInfo, kComboCount> combos;
+inline constexpr auto kComboCards = [] {
+  std::array<std::array<Card, 2>, kComboCount> combos;
   size_t combo = 0;
   for (size_t first = 0; first < kDeck.size(); ++first) {
     for (size_t second = first + 1; second < kDeck.size(); ++second) {
-      combos[combo++] = {
-          kDeck[first],
-          kDeck[second],
-          CardBit(kDeck[first]) | CardBit(kDeck[second]),
-      };
+      combos[combo++] = {kDeck[first], kDeck[second]};
     }
   }
   return combos;
-}
+}();
 
-const std::array<ComboInfo, kComboCount>& ComboTable() {
-  static const std::array<ComboInfo, kComboCount> table = BuildComboTable();
-  return table;
-}
-
-Player FirstPlayerForStreet(StreetKind street) {
-  return street == StreetKind::Preflop ? Player::A : Player::B;
-}
-
-Chips CommitChips(BettingData& state, Player player, Chips requested) {
+void CommitChips(BettingData& state, Player player, Chips requested) {
   assert(requested > 0);
   const size_t index = Index(player);
   const Chips committed = std::min(requested, state.stack[index]);
   state.stack[index] -= committed;
   state.total_committed[index] += committed;
   state.street_committed[index] += committed;
-  return committed;
 }
 
 void RefundUnmatchedCommitment(BettingData& state) {
@@ -68,7 +52,7 @@ void RefundUnmatchedCommitment(BettingData& state) {
 bool IsBettingRoundOver(const BettingData& state) noexcept {
   const bool commitments_match =
       state.street_committed[0] == state.street_committed[1];
-  if (state.pending_action_mask == 0 && commitments_match) {
+  if (state.actions_remaining == 0 && commitments_match) {
     return true;
   }
   if (!AnyPlayerAllIn(state)) {
@@ -113,12 +97,10 @@ BettingState ApplyActionUnchecked(const DecisionState& state,
     if (raise_size >= child.last_full_raise) {
       child.last_full_raise = raise_size;
     }
-  }
-  if (aggressive) {
-    child.pending_action_mask = PlayerBit(opponent);
+    child.actions_remaining = 1;
   } else {
-    child.pending_action_mask &=
-        static_cast<uint8_t>(~PlayerBit(player));
+    assert(child.actions_remaining > 0);
+    --child.actions_remaining;
   }
   if (IsBettingRoundOver(child)) {
     RefundUnmatchedCommitment(child);
@@ -134,95 +116,49 @@ BettingState ApplyActionUnchecked(const DecisionState& state,
 
 }  // namespace
 
-FlopBoard DealFlop(const PreflopBoard&,
-                   std::array<Card, 3> cards) noexcept {
-  CardMask mask = 0;
+Board DealCards(Board board, absl::Span<const Card> cards) noexcept {
+  assert((board.count() == 0 && cards.size() == 3) ||
+         (board.count() >= 3 && board.count() < kMaxBoardCards &&
+          cards.size() == 1));
   for (Card card : cards) {
-    assert((mask & CardBit(card)) == 0);
-    mask |= CardBit(card);
+    assert(!board.contains(card));
+    board.cards_[board.count_++] = card;
+    board.mask_ |= CardBit(card);
   }
-  std::sort(cards.begin(), cards.end());
-  return FlopBoard(cards, mask);
+  if (board.count_ == 3) {
+    std::sort(board.cards_.begin(), board.cards_.begin() + 3);
+  }
+  return board;
 }
 
-TurnBoard DealTurn(const FlopBoard& board, Card card) noexcept {
-  assert((board.mask() & CardBit(card)) == 0);
-  std::array<Card, 5> cards = {};
-  std::copy(board.cards().begin(), board.cards().end(), cards.begin());
-  cards[3] = card;
-  return TurnBoard(cards, board.mask() | CardBit(card));
-}
-
-RiverBoard DealRiver(const TurnBoard& board, Card card) noexcept {
-  assert((board.mask() & CardBit(card)) == 0);
-  std::array<Card, 5> cards = {};
-  std::copy(board.cards().begin(), board.cards().end(), cards.begin());
-  cards[4] = card;
-  return RiverBoard(cards, board.mask() | CardBit(card));
-}
-
-absl::StatusOr<FlopBoard> MakeFlop(std::array<Card, 3> cards) {
+absl::StatusOr<Board> MakeBoard(absl::Span<const Card> cards) {
+  if (!(cards.empty() || (cards.size() >= 3 &&
+                          cards.size() <= kMaxBoardCards))) {
+    return absl::InvalidArgumentError("board must have 0, 3, 4, or 5 cards");
+  }
+  std::array<Card, kMaxBoardCards> stored = {};
   CardMask mask = 0;
-  for (Card card : cards) {
+  for (size_t index = 0; index < cards.size(); ++index) {
+    const Card card = cards[index];
     if ((mask & CardBit(card)) != 0) {
-      return absl::InvalidArgumentError("duplicate flop card");
+      return absl::InvalidArgumentError("duplicate board card");
     }
+    stored[index] = card;
     mask |= CardBit(card);
   }
-  std::sort(cards.begin(), cards.end());
-  return FlopBoard(cards, mask);
-}
-
-absl::StatusOr<TurnBoard> MakeTurn(const FlopBoard& board, Card card) {
-  if ((board.mask() & CardBit(card)) != 0) {
-    return absl::InvalidArgumentError("duplicate turn card");
+  if (cards.size() >= 3) {
+    std::sort(stored.begin(), stored.begin() + 3);
   }
-  return DealTurn(board, card);
+  return Board(stored, static_cast<uint8_t>(cards.size()), mask);
 }
 
-absl::StatusOr<RiverBoard> MakeRiver(const TurnBoard& board, Card card) {
-  if ((board.mask() & CardBit(card)) != 0) {
-    return absl::InvalidArgumentError("duplicate river card");
-  }
-  return DealRiver(board, card);
+std::array<Card, 2> ComboId::cards() const noexcept {
+  return kComboCards[index()];
 }
 
-absl::Span<const Card> BoardCards(const Board& board) noexcept {
-  return std::visit([](const auto& street) -> absl::Span<const Card> {
-    using Street = std::decay_t<decltype(street)>;
-    if constexpr (std::is_same_v<Street, PreflopBoard>) {
-      return {};
-    } else {
-      return street.cards();
-    }
-  }, board);
-}
-
-CardMask BoardMask(const Board& board) noexcept {
-  return std::visit([](const auto& street) -> CardMask {
-    using Street = std::decay_t<decltype(street)>;
-    if constexpr (std::is_same_v<Street, PreflopBoard>) {
-      return 0;
-    } else {
-      return street.mask();
-    }
-  }, board);
-}
-
-uint8_t BoardCount(const Board& board) noexcept {
-  return static_cast<uint8_t>(BoardCards(board).size());
-}
-
-bool BoardContains(const Board& board, Card card) noexcept {
-  return (BoardMask(board) & CardBit(card)) != 0;
-}
-
-const ComboInfo& GetComboInfo(ComboId combo_id) {
-  return ComboTable()[combo_id.index()];
-}
-
-CardMask ComboMask(ComboId combo_id) {
-  return GetComboInfo(combo_id).mask;
+CardMask ComboId::mask() const noexcept {
+  const auto [first, second] = cards();
+  return CardBit(first) | CardBit(second);
 }
 
 std::optional<ComboId> MaybeCardsToComboId(Card first, Card second) {
@@ -233,12 +169,12 @@ std::optional<ComboId> MaybeCardsToComboId(Card first, Card second) {
     std::swap(first, second);
   }
 
-  uint16_t combo = 0;
+  size_t combo = 0;
   for (size_t card = 0; card < first.index(); ++card) {
-    combo += static_cast<uint16_t>(kDeckCardCount - card - 1);
+    combo += kDeckCardCount - card - 1;
   }
-  combo += static_cast<uint16_t>(second.index() - first.index() - 1);
-  return ComboId(combo);
+  combo += second.index() - first.index() - 1;
+  return ComboId(static_cast<uint16_t>(combo));
 }
 
 ComboId CardsToComboId(Card first, Card second) noexcept {
@@ -247,37 +183,9 @@ ComboId CardsToComboId(Card first, Card second) noexcept {
   return *combo;
 }
 
-absl::StatusOr<HoleCards> MakeHoleCards(Card first, Card second) {
-  const std::optional<ComboId> combo = MaybeCardsToComboId(first, second);
-  if (!combo.has_value()) {
-    return absl::InvalidArgumentError("hole cards must be distinct");
-  }
-  return HoleCards(*combo);
-}
-
-int CardsForNextStreet(StreetKind street) {
-  switch (street) {
-    case StreetKind::Preflop:
-      return 3;
-    case StreetKind::Flop:
-    case StreetKind::Turn:
-      return 1;
-    case StreetKind::River:
-      return 0;
-  }
-}
-
-int BoardCardsForStreet(StreetKind street) {
-  switch (street) {
-    case StreetKind::Preflop:
-      return 0;
-    case StreetKind::Flop:
-      return 3;
-    case StreetKind::Turn:
-      return 4;
-    case StreetKind::River:
-      return 5;
-  }
+size_t CardsForNextStreet(StreetKind street) {
+  if (street == StreetKind::Preflop) return 3;
+  return street == StreetKind::River ? 0 : 1;
 }
 
 absl::StatusOr<absl::InlinedVector<Card, 5>> SampleStreetCards(
@@ -285,17 +193,17 @@ absl::StatusOr<absl::InlinedVector<Card, 5>> SampleStreetCards(
     const Board& board,
     CardMask known_private_cards,
     std::mt19937& rng) {
-  const int open_slots = std::max(0, kMaxBoardCards - BoardCount(board));
-  const int count = std::min(CardsForNextStreet(street), open_slots);
-  if (count <= 0) {
+  const size_t open_slots = kMaxBoardCards - board.count();
+  const size_t count = std::min(CardsForNextStreet(street), open_slots);
+  if (count == 0) {
     return absl::InlinedVector<Card, 5>{};
   }
 
-  const CardMask blocked = known_private_cards | BoardMask(board);
+  const CardMask blocked = known_private_cards | board.mask();
   if (count == 1) {
-    std::uniform_int_distribution<int> card_dist(0, kDeckCardCount - 1);
-    for (int attempt = 0; attempt < kDeckCardCount; ++attempt) {
-      const Card candidate = kDeck[static_cast<size_t>(card_dist(rng))];
+    std::uniform_int_distribution<size_t> card_dist(0, kDeckCardCount - 1);
+    for (size_t attempt = 0; attempt < kDeckCardCount; ++attempt) {
+      const Card candidate = kDeck[card_dist(rng)];
       if ((blocked & CardBit(candidate)) == 0) {
         return absl::InlinedVector<Card, 5>{candidate};
       }
@@ -303,10 +211,10 @@ absl::StatusOr<absl::InlinedVector<Card, 5>> SampleStreetCards(
   }
 
   std::array<Card, kDeckCardCount> candidates = {};
-  int candidate_count = 0;
+  size_t candidate_count = 0;
   for (Card candidate : kDeck) {
     if ((blocked & CardBit(candidate)) == 0) {
-      candidates[static_cast<size_t>(candidate_count++)] = candidate;
+      candidates[candidate_count++] = candidate;
     }
   }
   if (candidate_count < count) {
@@ -314,21 +222,20 @@ absl::StatusOr<absl::InlinedVector<Card, 5>> SampleStreetCards(
   }
 
   absl::InlinedVector<Card, 5> sampled;
-  sampled.reserve(static_cast<size_t>(count));
-  for (int i = 0; i < count; ++i) {
-    std::uniform_int_distribution<int> card_dist(i, candidate_count - 1);
-    const int chosen = card_dist(rng);
-    std::swap(candidates[static_cast<size_t>(i)],
-              candidates[static_cast<size_t>(chosen)]);
-    sampled.push_back(candidates[static_cast<size_t>(i)]);
+  sampled.reserve(count);
+  for (size_t i = 0; i < count; ++i) {
+    std::uniform_int_distribution<size_t> card_dist(i, candidate_count - 1);
+    const size_t chosen = card_dist(rng);
+    std::swap(candidates[i], candidates[chosen]);
+    sampled.push_back(candidates[i]);
   }
   return sampled;
 }
 
 ExactPublicState MakeInitialState(
     const BettingRules& rules,
-  std::array<Chips, kPlayerCount> stacks,
-  std::array<Chips, kPlayerCount> blinds) {
+    std::array<Chips, kPlayerCount> stacks,
+    std::array<Chips, kPlayerCount> blinds) {
   assert(rules.minimum_bet > 0);
   for (size_t player = 0; player < kPlayerCount; ++player) {
     assert(blinds[player] >= 0 && stacks[player] >= blinds[player]);
@@ -341,16 +248,13 @@ ExactPublicState MakeInitialState(
   betting.total_committed = blinds;
   betting.street_committed = blinds;
   betting.last_full_raise = rules.minimum_bet;
-  return ExactPublicState{DecisionState{betting, Player::A},
-                          PreflopBoard{}};
+  return ExactPublicState{DecisionState{betting, Player::A}, Board{}};
 }
 
 bool IsTerminal(const ExactPublicState& state) {
-  if (std::holds_alternative<FoldTerminalState>(state.betting)) {
-    return true;
-  }
-  return std::holds_alternative<ShowdownState>(state.betting) &&
-         BoardCount(state.board) == kMaxBoardCards;
+  return std::holds_alternative<FoldTerminalState>(state.betting) ||
+         (std::holds_alternative<ShowdownState>(state.betting) &&
+          state.board.count() == kMaxBoardCards);
 }
 
 bool IsLegalAction(const DecisionState& state,
@@ -404,10 +308,10 @@ BettingState AdvanceBettingStreet(const ChanceState& state,
 
   BettingData child = state.data;
   child.street = static_cast<StreetKind>(
-      static_cast<int>(state.data.street) + 1);
+      std::to_underlying(state.data.street) + 1);
   child.street_committed = {0, 0};
   child.last_full_raise = rules.minimum_bet;
-  child.pending_action_mask = kAllPlayersMask;
+  child.actions_remaining = 2;
   if (IsBettingRoundOver(child)) {
     assert(IsValidBettingData(child));
     return child.street == StreetKind::River
@@ -415,7 +319,7 @@ BettingState AdvanceBettingStreet(const ChanceState& state,
                : BettingState(ChanceState{child});
   }
   assert(IsValidBettingData(child));
-  return DecisionState{child, FirstPlayerForStreet(child.street)};
+  return DecisionState{child, Player::B};
 }
 
 ExactPublicState AdvanceChance(const ChanceState& state,
@@ -423,35 +327,9 @@ ExactPublicState AdvanceChance(const ChanceState& state,
                                absl::Span<const Card> cards,
                                const BettingRules& rules) noexcept {
   assert(rules.minimum_bet > 0);
-  assert(cards.size() ==
-         static_cast<size_t>(CardsForNextStreet(state.data.street)));
-  Board child_board;
-  switch (state.data.street) {
-    case StreetKind::Preflop: {
-      std::array<Card, 3> flop;
-      std::copy_n(cards.begin(), 3, flop.begin());
-      const auto* preflop = std::get_if<PreflopBoard>(&board);
-      assert(preflop != nullptr);
-      child_board = DealFlop(*preflop, flop);
-      break;
-    }
-    case StreetKind::Flop: {
-      const auto* flop = std::get_if<FlopBoard>(&board);
-      assert(flop != nullptr);
-      child_board = DealTurn(*flop, cards[0]);
-      break;
-    }
-    case StreetKind::Turn: {
-      const auto* turn = std::get_if<TurnBoard>(&board);
-      assert(turn != nullptr);
-      child_board = DealRiver(*turn, cards[0]);
-      break;
-    }
-    case StreetKind::River:
-      child_board = board;
-      break;
-  }
-  return {AdvanceBettingStreet(state, rules), child_board};
+  assert(cards.size() == CardsForNextStreet(state.data.street));
+  assert(board.street() == state.data.street);
+  return {AdvanceBettingStreet(state, rules), DealCards(board, cards)};
 }
 
 absl::StatusOr<ExactPublicState> TryApplyChance(
@@ -462,11 +340,11 @@ absl::StatusOr<ExactPublicState> TryApplyChance(
   if (chance == nullptr) {
     return absl::InvalidArgumentError("state is not a chance node");
   }
-  if (rules.minimum_bet <= 0 || cards.size() !=
-      static_cast<size_t>(CardsForNextStreet(chance->data.street))) {
+  if (rules.minimum_bet <= 0 || state.board.street() != chance->data.street ||
+      cards.size() != CardsForNextStreet(chance->data.street)) {
     return absl::InvalidArgumentError("invalid chance transition");
   }
-  CardMask mask = BoardMask(state.board);
+  CardMask mask = state.board.mask();
   for (Card card : cards) {
     if ((mask & CardBit(card)) != 0) {
       return absl::InvalidArgumentError("duplicate board card");
@@ -477,12 +355,11 @@ absl::StatusOr<ExactPublicState> TryApplyChance(
 }
 
 double TerminalUtility(const ShowdownState& state,
-                       const RiverBoard& board,
-                       HoleCards player_a,
-                       HoleCards player_b) noexcept {
+                       const Board& board,
+                       ComboId player_a,
+                       ComboId player_b) noexcept {
   return TerminalUtilityFromComparison(
-      state, CompareHands(player_a.combo(), player_b.combo(), board),
-      Player::A);
+      state, CompareHands(player_a, player_b, board), Player::A);
 }
 
 }  // namespace poker

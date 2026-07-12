@@ -13,24 +13,12 @@
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
 #include "absl/flags/usage.h"
-#include "absl/log/initialize.h"
 #include "absl/status/status.h"
 
-#ifndef POKER_BENCHMARK_PROD_DEFAULTS
-#define POKER_BENCHMARK_PROD_DEFAULTS 0
-#endif
-
-constexpr bool kProdBenchmarkDefaults =
-    POKER_BENCHMARK_PROD_DEFAULTS != 0;
-
-constexpr int kDefaultIterations = kProdBenchmarkDefaults ? 1 : 100;
-constexpr int kDefaultEvalSamples = kProdBenchmarkDefaults ? 1 : 100;
-constexpr const char* kDefaultRange = "premium";
-
-ABSL_FLAG(int, iterations, kDefaultIterations, "CFR iterations");
-ABSL_FLAG(int, eval_samples, kDefaultEvalSamples, "evaluation samples");
+ABSL_FLAG(int, iterations, 100, "CFR iterations");
+ABSL_FLAG(int, eval_samples, 100, "evaluation samples");
 ABSL_FLAG(bool, evaluate, true, "evaluate and extract a policy after training");
-ABSL_FLAG(std::string, range, kDefaultRange,
+ABSL_FLAG(std::string, range, "premium",
           "premium, all, or a poker range");
 ABSL_FLAG(double, training_seconds, 0.0,
           "train for this wall-clock duration; 0 uses iterations");
@@ -51,8 +39,6 @@ ABSL_FLAG(bool, accumulate_average_strategy, true,
 ABSL_FLAG(int, threads, 1, "training worker threads");
 ABSL_FLAG(uint64_t, progress_interval, 0,
           "log progress after this many iterations; 0 disables logging");
-ABSL_FLAG(uint64_t, policy_max_bytes, 0,
-          "maximum serialized policy bytes; 0 keeps all infosets");
 ABSL_FLAG(std::string, policy_output, "", "optional policy output path");
 
 namespace {
@@ -72,8 +58,11 @@ double Rate(double count, double seconds) {
 }
 
 absl::StatusOr<poker::SolverConfig> BenchmarkConfig() {
-  poker::SolverConfigOptions options;
-  options.starting_stack = absl::GetFlag(FLAGS_starting_stack);
+  poker::SolverConfig options;
+  if (absl::GetFlag(FLAGS_starting_stack) <
+      options.betting_rules.minimum_bet) {
+    return absl::InvalidArgumentError("starting stack is too small");
+  }
   options.max_info_sets = absl::GetFlag(FLAGS_max_info_sets);
   options.chance_samples = absl::GetFlag(FLAGS_chance_samples);
   options.accumulate_average_strategy =
@@ -120,7 +109,6 @@ double Measure(std::string_view name, Function function) {
 int main(int argc, char** argv) {
   absl::SetProgramUsageMessage("Benchmark the heads-up poker CFR solver.");
   absl::ParseCommandLine(argc, argv);
-  absl::InitializeLog();
   const auto config_result = BenchmarkConfig();
   if (!config_result.ok()) {
     std::cerr << "Error: " << config_result.status() << '\n';
@@ -136,10 +124,10 @@ int main(int argc, char** argv) {
   }
   const poker::ComboRange a_range = *parsed_range;
   const poker::ComboRange b_range = *parsed_range;
-  const poker::Chips stack = config.starting_stack();
+  const poker::Chips stack = absl::GetFlag(FLAGS_starting_stack);
   const poker::ExactPublicState root = poker::MakeInitialState(
-      poker::BettingRules{config.big_blind()}, {stack, stack},
-      {config.small_blind(), config.big_blind()});
+      config.betting_rules, {stack, stack},
+      {1, config.betting_rules.minimum_bet});
 
   std::cout << "case\tseconds\tresult\n";
   Measure("range_expand", [&] { return a_range.count(); });
@@ -181,25 +169,18 @@ int main(int argc, char** argv) {
     solver->reset_stats();
   }
   const double training_seconds = Measure("train_range", [&] {
-    poker::TrainingResult training_result;
     const double seconds = absl::GetFlag(FLAGS_training_seconds);
     if (seconds <= 0.0) {
       const uint64_t iterations =
           static_cast<uint64_t>(absl::GetFlag(FLAGS_iterations));
       if (progress_interval == 0) {
-        training_result = solver->run(iterations, threads);
+        solver->run(iterations, threads);
       } else {
         while (solver->get_iterations_run() < iterations) {
           const uint64_t batch = std::min(
               progress_interval,
               iterations - solver->get_iterations_run());
-          const poker::TrainingResult batch_result =
-              solver->run(batch, threads);
-          training_result.iterations_completed +=
-              batch_result.iterations_completed;
-          training_result.serial_iterations += batch_result.serial_iterations;
-          training_result.parallel_iterations +=
-              batch_result.parallel_iterations;
+          solver->run(batch, threads);
           std::cerr << "training_iterations\t"
                     << solver->get_iterations_run() << '\n';
         }
@@ -208,13 +189,7 @@ int main(int argc, char** argv) {
       const auto deadline = std::chrono::steady_clock::now() +
           std::chrono::duration<double>(seconds);
       while (std::chrono::steady_clock::now() < deadline) {
-        const poker::TrainingResult batch_result = solver->run(
-            static_cast<uint64_t>(threads), threads);
-        training_result.iterations_completed +=
-            batch_result.iterations_completed;
-        training_result.serial_iterations += batch_result.serial_iterations;
-        training_result.parallel_iterations +=
-            batch_result.parallel_iterations;
+        solver->run(static_cast<uint64_t>(threads), threads);
         if (progress_interval > 0 &&
             solver->get_iterations_run() % progress_interval == 0) {
           std::cerr << "training_iterations\t"
@@ -222,10 +197,6 @@ int main(int argc, char** argv) {
         }
       }
     }
-    std::cout << "serial_iterations\t"
-              << training_result.serial_iterations << '\n'
-              << "parallel_iterations\t"
-              << training_result.parallel_iterations << '\n';
     return solver->get_expected_value(poker::Player::A);
   });
   const auto training = solver->get_stats();
@@ -245,7 +216,7 @@ int main(int argc, char** argv) {
 
   solver->reset_stats();
   Measure("evaluate_range", [&] {
-    if (!config.accumulate_average_strategy()) {
+    if (!config.accumulate_average_strategy) {
       return solver->evaluate_current(
           absl::GetFlag(FLAGS_eval_samples));
     }
@@ -254,11 +225,7 @@ int main(int argc, char** argv) {
     return value.ok() ? *value : 0.0;
   });
 
-  const uint64_t policy_max_bytes = absl::GetFlag(FLAGS_policy_max_bytes);
-  const auto policy = policy_max_bytes == 0
-      ? solver->extract_average_policy()
-      : solver->extract_average_policy(
-            static_cast<size_t>(policy_max_bytes));
+  const auto policy = solver->extract_average_policy();
   if (policy.ok()) {
     std::cout << "policy_rows\t" << policy->rows.size() << '\n'
               << "policy_probability_bytes\t"

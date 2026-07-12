@@ -25,10 +25,26 @@ constexpr std::array<uint32_t, 64> kRoundConstants = {
     0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 };
 
+class Sha256State {
+ public:
+  void update(absl::Span<const uint8_t> bytes) noexcept;
+  ModelFingerprint finish() noexcept;
+
+ private:
+  void transform() noexcept;
+
+  std::array<uint32_t, 8> state_ = {
+      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+  };
+  std::array<uint8_t, 64> block_ = {};
+  size_t block_size_ = 0;
+  uint64_t total_bytes_ = 0;
+};
+
 }  // namespace
 
-void FingerprintBuilder::add_bytes(
-    absl::Span<const uint8_t> bytes) noexcept {
+void Sha256State::update(absl::Span<const uint8_t> bytes) noexcept {
   total_bytes_ += bytes.size();
   for (uint8_t byte : bytes) {
     block_[block_size_++] = byte;
@@ -39,50 +55,20 @@ void FingerprintBuilder::add_bytes(
   }
 }
 
-void FingerprintBuilder::add_u8(uint8_t value) noexcept {
-  add_bytes(absl::Span<const uint8_t>(&value, 1));
-}
-
-void FingerprintBuilder::add_u32(uint32_t value) noexcept {
-  std::array<uint8_t, 4> bytes = {};
-  for (size_t index = 0; index < bytes.size(); ++index) {
-    bytes[index] =
-        static_cast<uint8_t>(value >> static_cast<unsigned>(index * 8));
-  }
-  add_bytes(bytes);
-}
-
-void FingerprintBuilder::add_u64(uint64_t value) noexcept {
-  std::array<uint8_t, 8> bytes = {};
-  for (size_t index = 0; index < bytes.size(); ++index) {
-    bytes[index] =
-        static_cast<uint8_t>(value >> static_cast<unsigned>(index * 8));
-  }
-  add_bytes(bytes);
-}
-
-void FingerprintBuilder::add_i32(int32_t value) noexcept {
-  add_u32(static_cast<uint32_t>(value));
-}
-
-void FingerprintBuilder::add_float(float value) noexcept {
-  add_u32(std::bit_cast<uint32_t>(value));
-}
-
-void FingerprintBuilder::add_double(double value) noexcept {
-  add_u64(std::bit_cast<uint64_t>(value));
-}
-
-ModelFingerprint FingerprintBuilder::finish() noexcept {
+ModelFingerprint Sha256State::finish() noexcept {
   const uint64_t bit_count = total_bytes_ * 8;
-  add_u8(0x80);
-  while (block_size_ != 56) add_u8(0);
+  uint8_t padding = 0x80;
+  update(absl::Span<const uint8_t>(&padding, 1));
+  padding = 0;
+  while (block_size_ != 56) {
+    update(absl::Span<const uint8_t>(&padding, 1));
+  }
   std::array<uint8_t, 8> length = {};
   for (size_t index = 0; index < length.size(); ++index) {
     length[7 - index] =
         static_cast<uint8_t>(bit_count >> static_cast<unsigned>(index * 8));
   }
-  add_bytes(length);
+  update(length);
 
   ModelFingerprint fingerprint;
   for (size_t word = 0; word < state_.size(); ++word) {
@@ -94,7 +80,7 @@ ModelFingerprint FingerprintBuilder::finish() noexcept {
   return fingerprint;
 }
 
-void FingerprintBuilder::transform() noexcept {
+void Sha256State::transform() noexcept {
   std::array<uint32_t, 64> words = {};
   for (size_t index = 0; index < 16; ++index) {
     const size_t offset = index * 4;
@@ -149,6 +135,12 @@ void FingerprintBuilder::transform() noexcept {
   state_[5] += f;
   state_[6] += g;
   state_[7] += h;
+}
+
+ModelFingerprint Sha256(absl::Span<const uint8_t> bytes) noexcept {
+  Sha256State state;
+  state.update(bytes);
+  return state.finish();
 }
 
 }  // namespace poker

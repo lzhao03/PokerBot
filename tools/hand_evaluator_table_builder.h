@@ -1,34 +1,44 @@
 #pragma once
 
 #include <array>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <utility>
 #include <vector>
 
-#include "src/hand_evaluator.h"
+#include "src/poker.h"
 
 namespace poker::hand_evaluator_generation {
 
-constexpr size_t kCactusScoreCount = 7463;
+enum class HandRank {
+  HighCard,
+  Pair,
+  TwoPair,
+  ThreeOfAKind,
+  Straight,
+  Flush,
+  FullHouse,
+  FourOfAKind,
+  StraightFlush,
+  RoyalFlush,
+};
 
 struct EvaluationScore {
   HandRank rank = HandRank::HighCard;
   std::array<int, 5> kickers = {};
-  size_t kicker_count = 0;
 
-  bool operator<(const EvaluationScore& other) const;
+  friend auto operator<=>(const EvaluationScore&,
+                          const EvaluationScore&) = default;
 };
 
 struct TableData {
   std::array<uint16_t, 8192> flushes = {};
   std::array<uint16_t, 8192> unique5 = {};
-  std::array<EvaluationScore, kCactusScoreCount> scores = {};
   std::vector<std::pair<int, uint16_t>> products;
 };
 
 EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards);
-int CompareScores(const EvaluationScore& first, const EvaluationScore& second);
 TableData BuildCactusTables();
 
 }  // namespace poker::hand_evaluator_generation

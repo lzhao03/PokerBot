@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <utility>
 
 namespace poker {
 namespace {
@@ -24,34 +25,33 @@ constexpr std::array<SuitPermutation, 24> BuildSuitPermutations() {
 inline constexpr auto kSuitPermutations = BuildSuitPermutations();
 
 Card PermuteCard(Card card, const SuitPermutation& permutation) noexcept {
-  return Card(card.rank(), permutation[static_cast<size_t>(card.suit())]);
+  return Card(card.rank(), permutation[std::to_underlying(card.suit())]);
 }
 
 Board PermuteBoard(const Board& board,
                    const SuitPermutation& permutation) noexcept {
-  const auto cards = BoardCards(board);
+  const auto cards = board.cards();
   if (cards.empty()) {
-    return PreflopBoard{};
+    return {};
   }
 
   std::array<Card, kMaxBoardCards> mapped = {};
   for (size_t index = 0; index < cards.size(); ++index) {
     mapped[index] = PermuteCard(cards[index], permutation);
   }
-  const FlopBoard flop =
-      DealFlop(PreflopBoard{}, {mapped[0], mapped[1], mapped[2]});
-  if (cards.size() == 3) {
-    return flop;
+  Board result = DealCards(
+      Board{}, absl::Span<const Card>(mapped.data(), 3));
+  for (size_t index = 3; index < cards.size(); ++index) {
+    result = DealCards(
+        result, absl::Span<const Card>(mapped.data() + index, 1));
   }
-  const TurnBoard turn = DealTurn(flop, mapped[3]);
-  return cards.size() == 4 ? Board{turn}
-                           : Board{DealRiver(turn, mapped[4])};
+  return result;
 }
 
 uint64_t EncodeBoard(const Board& board) noexcept {
-  uint64_t encoded = BoardCount(board);
+  uint64_t encoded = board.count();
   size_t shift = 3;
-  for (Card card : BoardCards(board)) {
+  for (Card card : board.cards()) {
     encoded |= static_cast<uint64_t>(card.index()) << shift;
     shift += 6;
   }
@@ -60,9 +60,9 @@ uint64_t EncodeBoard(const Board& board) noexcept {
 
 ComboId PermuteCombo(ComboId hand,
                      const SuitPermutation& permutation) noexcept {
-  const ComboInfo& combo = GetComboInfo(hand);
-  return CardsToComboId(PermuteCard(combo.card0, permutation),
-                        PermuteCard(combo.card1, permutation));
+  const auto cards = hand.cards();
+  return CardsToComboId(PermuteCard(cards[0], permutation),
+                        PermuteCard(cards[1], permutation));
 }
 
 }  // namespace
@@ -75,7 +75,7 @@ PublicObservationId CanonicalPublicObservation(const Board& board) noexcept {
   return PublicObservationId(best);
 }
 
-CanonicalCardObservation CanonicalizeObservation(
+PrivateObservationId CanonicalPrivateObservation(
     ComboId hand,
     const Board& board) noexcept {
   uint64_t best_board = std::numeric_limits<uint64_t>::max();
@@ -91,7 +91,7 @@ CanonicalCardObservation CanonicalizeObservation(
       best_hand = hand_id;
     }
   }
-  return {PublicObservationId(best_board), PrivateObservationId(best_hand)};
+  return PrivateObservationId(best_hand);
 }
 
 }  // namespace poker

@@ -17,13 +17,12 @@
 namespace poker {
 
 using CardMask = uint64_t;
-using BoardBucketId = uint64_t;
 using Chips = int32_t;
 
-constexpr int kDeckCardCount = 52;
-constexpr int kMaxBoardCards = 5;
-constexpr int kPlayerCount = 2;
-constexpr int kComboCount = 1326;
+constexpr size_t kDeckCardCount = 52;
+constexpr size_t kMaxBoardCards = 5;
+constexpr size_t kPlayerCount = 2;
+constexpr size_t kComboCount = 1326;
 
 enum class Player : uint8_t {
   A = 0,
@@ -31,7 +30,7 @@ enum class Player : uint8_t {
 };
 
 constexpr size_t Index(Player player) noexcept {
-  return static_cast<size_t>(player);
+  return std::to_underlying(player);
 }
 
 constexpr Player Opponent(Player player) noexcept {
@@ -66,8 +65,7 @@ class Card {
   constexpr Card() = default;
   constexpr Card(Rank rank, Suit suit) noexcept
       : value_(static_cast<uint8_t>(
-            static_cast<uint8_t>(suit) * 13 +
-            static_cast<uint8_t>(rank))) {}
+            std::to_underlying(suit) * 13 + std::to_underlying(rank))) {}
 
   constexpr size_t index() const noexcept { return value_; }
   constexpr Rank rank() const noexcept {
@@ -87,6 +85,8 @@ class ComboId {
  public:
   constexpr ComboId() = default;
   constexpr size_t index() const noexcept { return value_; }
+  std::array<Card, 2> cards() const noexcept;
+  CardMask mask() const noexcept;
 
   friend constexpr auto operator<=>(const ComboId&,
                                     const ComboId&) = default;
@@ -128,23 +128,6 @@ class PrivateObservationId {
   uint64_t value_ = 0;
 };
 
-struct ComboInfo {
-  Card card0;
-  Card card1;
-  CardMask mask = 0;
-};
-
-class HoleCards {
- public:
-  constexpr HoleCards() = default;
-  explicit constexpr HoleCards(ComboId combo) noexcept : combo_(combo) {}
-
-  constexpr ComboId combo() const noexcept { return combo_; }
-
- private:
-  ComboId combo_;
-};
-
 inline constexpr std::array<Card, kDeckCardCount> kDeck = [] {
   std::array<Card, kDeckCardCount> cards = {};
   size_t index = 0;
@@ -180,36 +163,17 @@ struct GameAction {
   friend bool operator==(const GameAction&, const GameAction&) = default;
 };
 
-inline int SuitIndex(Suit suit) {
-  return static_cast<int>(suit);
-}
-
 inline int PokerRank(Card card) {
-  return 2 + static_cast<int>(card.rank());
-}
-
-inline Suit CardSuit(Card card) {
-  return card.suit();
+  return 2 + std::to_underlying(card.rank());
 }
 
 inline CardMask CardBit(Card card) {
   return CardMask{1} << card.index();
 }
 
-inline int EncodedCard(Card card) {
-  return PokerRank(card) * 8 + 1 + SuitIndex(CardSuit(card));
-}
-
 struct BettingRules {
   Chips minimum_bet = 0;
 };
-
-constexpr uint8_t PlayerBit(Player player) noexcept {
-  return static_cast<uint8_t>(1u << Index(player));
-}
-
-constexpr uint8_t kAllPlayersMask =
-    static_cast<uint8_t>((1u << kPlayerCount) - 1u);
 
 struct BettingData {
   std::array<Chips, kPlayerCount> stack = {0, 0};
@@ -217,7 +181,7 @@ struct BettingData {
   std::array<Chips, kPlayerCount> street_committed = {0, 0};
   Chips last_full_raise = 0;
   StreetKind street = StreetKind::Preflop;
-  uint8_t pending_action_mask = kAllPlayersMask;
+  uint8_t actions_remaining = 2;
 
   friend bool operator==(const BettingData&, const BettingData&) = default;
 };
@@ -259,85 +223,44 @@ inline const BettingData& Data(const BettingState& state) noexcept {
   }, state);
 }
 
-struct PreflopBoard {
-  friend bool operator==(const PreflopBoard&, const PreflopBoard&) = default;
-};
-
-class FlopBoard {
+class Board {
  public:
-  absl::Span<const Card> cards() const { return cards_; }
-  CardMask mask() const { return mask_; }
+  Board() = default;
 
-  friend bool operator==(const FlopBoard&, const FlopBoard&) = default;
-
- private:
-  FlopBoard(std::array<Card, 3> cards, CardMask mask)
-      : cards_(cards), mask_(mask) {}
-
-  friend FlopBoard DealFlop(const PreflopBoard&,
-                            std::array<Card, 3> cards) noexcept;
-  friend absl::StatusOr<FlopBoard> MakeFlop(std::array<Card, 3> cards);
-
-  std::array<Card, 3> cards_ = {};
-  CardMask mask_ = 0;
-};
-
-class TurnBoard {
- public:
-  absl::Span<const Card> cards() const {
-    return absl::Span<const Card>(cards_.data(), 4);
+  absl::Span<const Card> cards() const noexcept {
+    return absl::Span<const Card>(cards_.data(), count_);
   }
-  CardMask mask() const { return mask_; }
+  CardMask mask() const noexcept { return mask_; }
+  size_t count() const noexcept { return count_; }
+  bool contains(Card card) const noexcept {
+    return (mask_ & CardBit(card)) != 0;
+  }
+  StreetKind street() const noexcept {
+    return count_ == 0
+               ? StreetKind::Preflop
+               : static_cast<StreetKind>(count_ - 2);
+  }
 
-  friend bool operator==(const TurnBoard&, const TurnBoard&) = default;
+  friend bool operator==(const Board&, const Board&) = default;
 
  private:
-  TurnBoard(std::array<Card, 5> cards, CardMask mask)
-      : cards_(cards), mask_(mask) {}
+  Board(std::array<Card, kMaxBoardCards> cards, uint8_t count, CardMask mask)
+      : cards_(cards), count_(count), mask_(mask) {}
 
-  friend TurnBoard DealTurn(const FlopBoard&, Card card) noexcept;
-  friend absl::StatusOr<TurnBoard> MakeTurn(const FlopBoard&, Card card);
+  friend Board DealCards(Board board, absl::Span<const Card> cards) noexcept;
+  friend absl::StatusOr<Board> MakeBoard(absl::Span<const Card> cards);
 
-  std::array<Card, 5> cards_ = {};
+  std::array<Card, kMaxBoardCards> cards_ = {};
+  uint8_t count_ = 0;
   CardMask mask_ = 0;
 };
 
-class RiverBoard {
- public:
-  absl::Span<const Card> cards() const { return cards_; }
-  CardMask mask() const { return mask_; }
-
-  friend bool operator==(const RiverBoard&, const RiverBoard&) = default;
-
- private:
-  RiverBoard(std::array<Card, 5> cards, CardMask mask)
-      : cards_(cards), mask_(mask) {}
-
-  friend RiverBoard DealRiver(const TurnBoard&, Card card) noexcept;
-  friend absl::StatusOr<RiverBoard> MakeRiver(const TurnBoard&, Card card);
-
-  std::array<Card, 5> cards_ = {};
-  CardMask mask_ = 0;
-};
-
-using Board = std::variant<PreflopBoard, FlopBoard, TurnBoard, RiverBoard>;
-
-FlopBoard DealFlop(const PreflopBoard& board,
-                   std::array<Card, 3> cards) noexcept;
-TurnBoard DealTurn(const FlopBoard& board, Card card) noexcept;
-RiverBoard DealRiver(const TurnBoard& board, Card card) noexcept;
-absl::StatusOr<FlopBoard> MakeFlop(std::array<Card, 3> cards);
-absl::StatusOr<TurnBoard> MakeTurn(const FlopBoard& board, Card card);
-absl::StatusOr<RiverBoard> MakeRiver(const TurnBoard& board, Card card);
-
-absl::Span<const Card> BoardCards(const Board& board) noexcept;
-CardMask BoardMask(const Board& board) noexcept;
-uint8_t BoardCount(const Board& board) noexcept;
-bool BoardContains(const Board& board, Card card) noexcept;
+Board DealCards(Board board, absl::Span<const Card> cards) noexcept;
+absl::StatusOr<Board> MakeBoard(absl::Span<const Card> cards);
 
 struct ExactPublicState {
   BettingState betting;
-  Board board = PreflopBoard{};
+  Board board;
 };
 
 inline Chips Pot(const BettingData& state) noexcept {
@@ -371,17 +294,13 @@ inline bool IsValidBettingData(const BettingData& state) noexcept {
          state.street_committed[0] <= state.total_committed[0] &&
          state.street_committed[1] <= state.total_committed[1] &&
          state.last_full_raise > 0 &&
-         (state.pending_action_mask & ~kAllPlayersMask) == 0;
+         state.actions_remaining <= 2;
 }
 
-const ComboInfo& GetComboInfo(ComboId combo_id);
-CardMask ComboMask(ComboId combo_id);
 std::optional<ComboId> MaybeCardsToComboId(Card first, Card second);
 ComboId CardsToComboId(Card first, Card second) noexcept;
-absl::StatusOr<HoleCards> MakeHoleCards(Card first, Card second);
 
-int CardsForNextStreet(StreetKind street);
-int BoardCardsForStreet(StreetKind street);
+size_t CardsForNextStreet(StreetKind street);
 absl::StatusOr<absl::InlinedVector<Card, 5>> SampleStreetCards(
     StreetKind street,
     const Board& board,
@@ -416,9 +335,9 @@ inline double TerminalUtility(const FoldTerminalState& state,
                                         : -player_a_utility;
 }
 double TerminalUtility(const ShowdownState& state,
-                       const RiverBoard& board,
-                       HoleCards player_a,
-                       HoleCards player_b) noexcept;
+                       const Board& board,
+                       ComboId player_a,
+                       ComboId player_b) noexcept;
 inline double TerminalUtilityFromComparison(
     const ShowdownState& state,
     int hand_comparison,

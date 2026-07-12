@@ -4,10 +4,7 @@ cc_library(
     name = "hand_evaluator_table_builder",
     srcs = ["hand_evaluator_table_builder.cc"],
     hdrs = ["hand_evaluator_table_builder.h"],
-    deps = [
-        "//src:poker",
-        "@abseil-cpp//absl/types:span",
-    ],
+    deps = ["//src:poker"],
     visibility = ["//tests:__pkg__"],
 )
 
@@ -25,22 +22,6 @@ cc_binary(
         "@abseil-cpp//absl/flags:flag",
         "@abseil-cpp//absl/flags:parse",
         "@abseil-cpp//absl/flags:usage",
-        "@abseil-cpp//absl/log:initialize",
-        "@abseil-cpp//absl/status:status",
-        "@abseil-cpp//absl/status:statusor",
-    ],
-)
-
-cc_binary(
-    name = "cfr_prod_benchmark",
-    srcs = ["cfr_benchmark.cc"],
-    copts = ["-DPOKER_BENCHMARK_PROD_DEFAULTS=1"],
-    deps = [
-        "//src:solver",
-        "@abseil-cpp//absl/flags:flag",
-        "@abseil-cpp//absl/flags:parse",
-        "@abseil-cpp//absl/flags:usage",
-        "@abseil-cpp//absl/log:initialize",
         "@abseil-cpp//absl/status:status",
         "@abseil-cpp//absl/status:statusor",
     ],

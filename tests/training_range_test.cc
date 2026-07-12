@@ -38,7 +38,7 @@ TEST_CASE("range syntax expands to exact combo weights") {
 
   const ComboRange uniform = UniformComboRange();
   CHECK(uniform.count() == kComboCount);
-  for (ComboId combo : uniform.active) {
+  for (ComboId combo : uniform.combos) {
     CHECK(uniform.weight(combo) == 1.0f);
   }
 
@@ -61,8 +61,7 @@ TEST_CASE("range syntax expands to exact combo weights") {
 }
 
 TEST_CASE("deal sampling rejects incompatible ranges") {
-  SolverConfigOptions options;
-  options.starting_stack = 8;
+  SolverConfig options;
   for (auto& fractions : options.bet_abstraction.pot_fractions) {
     fractions = {1.0};
   }
@@ -74,10 +73,8 @@ TEST_CASE("deal sampling rejects incompatible ranges") {
   ComboRange b;
   b.add(CardsToComboId(kDeck[0], kDeck[2]));
   b.add(CardsToComboId(kDeck[1], kDeck[3]));
-  const Chips stack = config.starting_stack();
   const ExactPublicState root = MakeInitialState(
-      BettingRules{config.big_blind()}, {stack, stack},
-      {config.small_blind(), config.big_blind()});
+      config.betting_rules, {8, 8}, {1, 2});
   CHECK_FALSE(CFRSolver::Create({config, root, {a, b}}).ok());
 
   const ComboRange compatible =

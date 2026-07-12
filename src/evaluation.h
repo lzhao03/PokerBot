@@ -10,7 +10,6 @@ namespace poker {
 struct ValueEstimate {
   double mean = 0.0;
   double standard_error = 0.0;
-  uint64_t samples = 0;
   uint64_t policy_lookups = 0;
   uint64_t missing_policy_lookups = 0;
 };
@@ -26,7 +25,6 @@ struct BestResponseResult {
   Policy response_policy;
   double value = 0.0;
   double standard_error = 0.0;
-  uint64_t training_iterations_completed = 0;
   uint64_t opponent_policy_lookups = 0;
   uint64_t missing_opponent_lookups = 0;
 };
