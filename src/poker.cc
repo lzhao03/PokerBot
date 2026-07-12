@@ -76,18 +76,10 @@ BettingState ApplyActionUnchecked(const DecisionState& state,
   const Chips current = child.street_committed[player_index];
   const Chips delta = action.target_street_commitment - current;
 
-  switch (action.kind) {
-    case ActionKind::Fold:
-      return FoldTerminalState{child, player};
-    case ActionKind::Check:
-      break;
-    case ActionKind::Call:
-    case ActionKind::Bet:
-    case ActionKind::Raise:
-    case ActionKind::AllIn:
-      CommitChips(child, player, delta);
-      break;
+  if (action.kind == ActionKind::Fold) {
+    return FoldTerminalState{child, player};
   }
+  if (delta > 0) CommitChips(child, player, delta);
 
   const bool aggressive =
       action.target_street_commitment > highest_before;
@@ -123,7 +115,6 @@ Board DealCards(Board board, absl::Span<const Card> cards) noexcept {
   for (Card card : cards) {
     assert(!board.contains(card));
     board.cards_[board.count_++] = card;
-    board.mask_ |= CardBit(card);
   }
   if (board.count_ == 3) {
     std::sort(board.cards_.begin(), board.cards_.begin() + 3);
@@ -149,7 +140,7 @@ absl::StatusOr<Board> MakeBoard(absl::Span<const Card> cards) {
   if (cards.size() >= 3) {
     std::sort(stored.begin(), stored.begin() + 3);
   }
-  return Board(stored, static_cast<uint8_t>(cards.size()), mask);
+  return Board(stored, static_cast<uint8_t>(cards.size()));
 }
 
 std::array<Card, 2> ComboId::cards() const noexcept {
@@ -169,11 +160,10 @@ std::optional<ComboId> MaybeCardsToComboId(Card first, Card second) {
     std::swap(first, second);
   }
 
-  size_t combo = 0;
-  for (size_t card = 0; card < first.index(); ++card) {
-    combo += kDeckCardCount - card - 1;
-  }
-  combo += second.index() - first.index() - 1;
+  const size_t first_index = first.index();
+  const size_t combo =
+      first_index * (2 * kDeckCardCount - first_index - 1) / 2 +
+      second.index() - first_index - 1;
   return ComboId(static_cast<uint16_t>(combo));
 }
 

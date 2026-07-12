@@ -100,33 +100,8 @@ class ComboId {
   uint16_t value_ = 0;
 };
 
-class PublicObservationId {
- public:
-  constexpr PublicObservationId() = default;
-  explicit constexpr PublicObservationId(uint64_t value) noexcept
-      : value_(value) {}
-
-  constexpr uint64_t value() const noexcept { return value_; }
-  friend constexpr auto operator<=>(const PublicObservationId&,
-                                    const PublicObservationId&) = default;
-
- private:
-  uint64_t value_ = 0;
-};
-
-class PrivateObservationId {
- public:
-  constexpr PrivateObservationId() = default;
-  explicit constexpr PrivateObservationId(uint64_t value) noexcept
-      : value_(value) {}
-
-  constexpr uint64_t value() const noexcept { return value_; }
-  friend constexpr auto operator<=>(const PrivateObservationId&,
-                                    const PrivateObservationId&) = default;
-
- private:
-  uint64_t value_ = 0;
-};
+enum class PublicObservationId : uint64_t {};
+enum class PrivateObservationId : uint64_t {};
 
 inline constexpr std::array<Card, kDeckCardCount> kDeck = [] {
   std::array<Card, kDeckCardCount> cards = {};
@@ -230,10 +205,14 @@ class Board {
   absl::Span<const Card> cards() const noexcept {
     return absl::Span<const Card>(cards_.data(), count_);
   }
-  CardMask mask() const noexcept { return mask_; }
+  CardMask mask() const noexcept {
+    CardMask result = 0;
+    for (Card card : cards()) result |= CardBit(card);
+    return result;
+  }
   size_t count() const noexcept { return count_; }
   bool contains(Card card) const noexcept {
-    return (mask_ & CardBit(card)) != 0;
+    return (mask() & CardBit(card)) != 0;
   }
   StreetKind street() const noexcept {
     return count_ == 0
@@ -244,15 +223,14 @@ class Board {
   friend bool operator==(const Board&, const Board&) = default;
 
  private:
-  Board(std::array<Card, kMaxBoardCards> cards, uint8_t count, CardMask mask)
-      : cards_(cards), count_(count), mask_(mask) {}
+  Board(std::array<Card, kMaxBoardCards> cards, uint8_t count)
+      : cards_(cards), count_(count) {}
 
   friend Board DealCards(Board board, absl::Span<const Card> cards) noexcept;
   friend absl::StatusOr<Board> MakeBoard(absl::Span<const Card> cards);
 
   std::array<Card, kMaxBoardCards> cards_ = {};
   uint8_t count_ = 0;
-  CardMask mask_ = 0;
 };
 
 Board DealCards(Board board, absl::Span<const Card> cards) noexcept;

@@ -548,8 +548,8 @@ absl::Status SavePolicy(const Policy& policy,
   AppendInteger<uint64_t>(bytes, policy.probabilities.size());
   for (const auto& [key, offset] : rows) {
     AppendInteger(bytes, key.history.value());
-    AppendInteger(bytes, key.public_observation.value());
-    AppendInteger(bytes, key.private_observation.value());
+    AppendInteger(bytes, std::to_underlying(key.public_observation));
+    AppendInteger(bytes, std::to_underlying(key.private_observation));
     AppendInteger<uint64_t>(bytes, offset);
   }
   for (float probability : policy.probabilities) {
@@ -694,12 +694,10 @@ Position CFRSolver::sample_chance_child(const HistoryNode& node,
                                          public_state.board(),
                                          deal.blocked_mask(), rng);
   assert(sampled.ok());
-  const ExactPublicState child = AdvanceChance(
-      chance, public_state.board(), *sampled,
-      spec_.config.betting_rules);
   return {
       history_.children[node.children_begin],
-      PublicPosition(card_abstraction(), child.board)};
+      PublicPosition(card_abstraction(),
+                     DealCards(public_state.board(), *sampled))};
 }
 
 CFRSolver::TraversalFrame CFRSolver::initial_frame(

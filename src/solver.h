@@ -99,8 +99,8 @@ struct InfoSetKey {
   template <typename H>
   friend H AbslHashValue(H h, const InfoSetKey& key) {
     return H::combine(std::move(h), key.history.value(),
-                      key.public_observation.value(),
-                      key.private_observation.value());
+                      std::to_underlying(key.public_observation),
+                      std::to_underlying(key.private_observation));
   }
 };
 

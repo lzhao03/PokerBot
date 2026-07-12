@@ -11,6 +11,7 @@
 #include <initializer_list>
 #include <random>
 #include <set>
+#include <utility>
 
 namespace poker {
 namespace {
@@ -154,8 +155,8 @@ TEST_CASE("sampling and card abstractions preserve identity") {
     CHECK(ObservePublic(current, reversed) == ObservePublic(current, board));
     const PrivateObservationId private_observation =
         ObservePrivate(current, hand, board);
-    CHECK(private_observation.value() >= 1);
-    CHECK(private_observation.value() <= 36);
+    CHECK(std::to_underlying(private_observation) >= 1);
+    CHECK(std::to_underlying(private_observation) <= 36);
 
     std::array<S, 4> suits = {
         S::Hearts, S::Diamonds, S::Clubs, S::Spades};
@@ -260,7 +261,8 @@ TEST_CASE("canonical observation counts match holdem suit isomorphisms") {
     for (size_t second = first + 1; second < kDeck.size(); ++second) {
       const ComboId hand = H(kDeck[first], kDeck[second]);
       private_observations.insert(
-          CanonicalPrivateObservation(hand, preflop).value());
+          std::to_underlying(
+              CanonicalPrivateObservation(hand, preflop)));
     }
   }
   CHECK(private_observations.size() == 169);
@@ -273,7 +275,7 @@ TEST_CASE("canonical observation counts match holdem suit isomorphisms") {
             Board{}, std::array<Card, 3>{
                          kDeck[first], kDeck[second], kDeck[third]});
         public_observations.insert(
-            CanonicalPublicObservation(flop).value());
+            std::to_underlying(CanonicalPublicObservation(flop)));
       }
     }
   }

@@ -62,13 +62,10 @@ Position ChanceChild(const CFRSolver& game,
       chance.data.street, position.public_state.board(),
       deal.blocked_mask(), rng);
   assert(cards.ok());
-  const SolverConfig& config = game.solve_spec().config;
-  const ExactPublicState child = AdvanceChance(
-      chance, position.public_state.board(), *cards,
-      config.betting_rules);
   position.history = game.history_tree().children[node.children_begin];
   position.public_state = PublicPosition(
-      game.card_abstraction(), child.board);
+      game.card_abstraction(),
+      DealCards(position.public_state.board(), *cards));
   return position;
 }
 

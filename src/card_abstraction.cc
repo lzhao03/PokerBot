@@ -128,37 +128,27 @@ uint16_t Handcrafted36Bucket(
   return static_cast<uint16_t>(made * 9 + draw * 3 + hole_strength);
 }
 
-PublicObservationId AppendBoardTextureBucket(PublicObservationId previous,
-                                             StreetKind street,
-                                             uint64_t bucket) noexcept {
-  const int shift =
-      (std::to_underlying(street) - 1) * kPublicObservationBitsPerStreet;
-  return PublicObservationId(previous.value() | ((bucket + 1) << shift));
-}
-
 PublicObservationId EncodeBoardTextureHistory(const Board& board) noexcept {
-  PublicObservationId observation;
+  uint64_t observation = 0;
   BoardFeatures features;
   const auto cards = board.cards();
   for (size_t index = 0; index < cards.size(); ++index) {
     AddCard(features, cards[index]);
     if (index >= 2) {
-      observation = AppendBoardTextureBucket(
-          observation, static_cast<StreetKind>(index - 1),
-          BoardTextureBucket(features));
+      observation |= (BoardTextureBucket(features) + 1)
+                     << ((index - 2) * kPublicObservationBitsPerStreet);
     }
   }
-  return observation;
+  return PublicObservationId(observation);
 }
 
 PrivateObservationId HandcraftedObservation(
     const CardAbstractionConfig& config,
     ComboId hand,
     const Board& board) noexcept {
-  const uint16_t current = Handcrafted36Bucket(
-      hand, BoardFeaturesFor(board));
   if (config.recall_mode == RecallMode::CurrentBucketOnly) {
-    return PrivateObservationId(current + 1);
+    return PrivateObservationId(
+        Handcrafted36Bucket(hand, BoardFeaturesFor(board)) + 1);
   }
 
   uint64_t observation =
