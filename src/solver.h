@@ -97,14 +97,15 @@ struct InfoSetKey {
 };
 
 struct CfrState {
+  CfrState(const SolverConfig& config,
+           bool accumulate_average_strategy);
+
   absl::flat_hash_map<InfoSetKey, size_t> rows;
   std::vector<float> regret_sum;
   std::vector<float> strategy_sum;
   uint64_t iterations = 0;
   double cumulative_root_utility = 0.0;
 
-  void reserve(const SolverConfig& config,
-               bool accumulate_average_strategy);
   void strategy(absl::Span<const float> values,
                 std::optional<size_t> offset,
                 absl::Span<double> probabilities,
@@ -119,9 +120,11 @@ struct CfrState {
                     bool concurrent = false);
   std::optional<size_t> find_or_create(
       InfoSetKey key,
-      uint8_t action_count,
-      size_t max_info_sets,
-      bool accumulate_average_strategy);
+      uint8_t action_count);
+
+ private:
+  size_t max_info_sets_;
+  bool accumulate_average_strategy_;
 };
 
 struct Policy {

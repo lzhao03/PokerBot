@@ -402,32 +402,31 @@ void CfrState::strategy(absl::Span<const float> values,
   }
 }
 
-void CfrState::reserve(const SolverConfig& config,
-                       bool accumulate_average_strategy) {
-  const size_t max_rows = static_cast<size_t>(config.max_info_sets);
+CfrState::CfrState(const SolverConfig& config,
+                   bool accumulate_average_strategy)
+    : max_info_sets_(static_cast<size_t>(config.max_info_sets)),
+      accumulate_average_strategy_(accumulate_average_strategy) {
   size_t max_actions = 3;
   for (const auto& fractions : config.bet_abstraction.pot_fractions) {
     max_actions = std::max(max_actions, fractions.size() + 3);
   }
-  rows.reserve(max_rows);
-  regret_sum.reserve(max_rows * max_actions);
+  rows.reserve(max_info_sets_);
+  regret_sum.reserve(max_info_sets_ * max_actions);
   if (accumulate_average_strategy) {
-    strategy_sum.reserve(max_rows * max_actions);
+    strategy_sum.reserve(max_info_sets_ * max_actions);
   }
 }
 
 std::optional<size_t> CfrState::find_or_create(
     InfoSetKey key,
-    uint8_t action_count,
-    size_t max_info_sets,
-    bool accumulate_average_strategy) {
+    uint8_t action_count) {
   if (const auto found = rows.find(key); found != rows.end()) {
     return found->second;
   }
-  if (rows.size() >= max_info_sets) return std::nullopt;
+  if (rows.size() >= max_info_sets_) return std::nullopt;
   const size_t offset = regret_sum.size();
   regret_sum.resize(offset + action_count, 0.0f);
-  if (accumulate_average_strategy) {
+  if (accumulate_average_strategy_) {
     strategy_sum.resize(offset + action_count, 0.0f);
   }
   return rows.emplace(key, offset).first->second;
@@ -621,13 +620,14 @@ ComboRange SingleComboRange(ComboId combo, float weight) {
 CFRSolver::CFRSolver(SolveSpec spec, DealDistribution deals)
     : spec_(std::move(spec)),
       deals_(std::move(deals)),
-      rng_(12345) {
+      rng_(12345),
+      state_(spec_.config,
+             spec_.config.accumulate_average_strategy) {
   history_.nodes.reserve(4096);
   history_.children.reserve(4096);
   AppendHistory(history_, spec_.root.betting,
                 spec_.config.betting_rules, spec_.config);
   model_ = FingerprintModel(spec_, history_);
-  state_.reserve(spec_.config, spec_.config.accumulate_average_strategy);
 }
 
 absl::StatusOr<std::unique_ptr<CFRSolver>> CFRSolver::Create(
@@ -743,10 +743,7 @@ double CFRSolver::traverse(HistoryId history,
           training && context.iteration % kPlayerCount == player_index;
       std::optional<size_t> offset;
       if (updates) {
-        offset = state_.find_or_create(
-            key, action_count,
-            static_cast<size_t>(spec_.config.max_info_sets),
-            spec_.config.accumulate_average_strategy);
+        offset = state_.find_or_create(key, action_count);
       } else {
         const auto found = state_.rows.find(key);
         if (found != state_.rows.end()) offset = found->second;

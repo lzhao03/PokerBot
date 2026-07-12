@@ -178,7 +178,6 @@ struct ResponseTrainingContext {
   Player responder = Player::A;
   const Policy& opponent;
   CfrState& state;
-  size_t max_info_sets = 0;
   uint64_t opponent_lookups = 0;
   uint64_t missing_opponent_lookups = 0;
 };
@@ -220,8 +219,7 @@ double TraverseResponse(const CFRSolver& game,
       std::optional<size_t> offset;
       absl::InlinedVector<double, 8> probabilities(node.child_count, 0.0);
       if (responds) {
-        offset = context.state.find_or_create(
-            key, node.child_count, context.max_info_sets, true);
+        offset = context.state.find_or_create(key, node.child_count);
         context.state.strategy(context.state.regret_sum, offset,
                                absl::MakeSpan(probabilities));
       } else {
@@ -294,15 +292,10 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
   }
 
   const SolverConfig& solver_config = game.solve_spec().config;
-  const size_t max_info_sets =
-      static_cast<size_t>(solver_config.max_info_sets);
-
-  CfrState response_state;
-  response_state.reserve(solver_config, true);
+  CfrState response_state(solver_config, true);
   std::mt19937 rng = MakeEvaluationRng(config.seed);
   const Position root = RootPosition(game);
-  ResponseTrainingContext context{
-      responder, opponent, response_state, max_info_sets};
+  ResponseTrainingContext context{responder, opponent, response_state};
   BestResponseResult result;
   result.responder = responder;
   while (response_state.iterations < config.training_iterations) {
