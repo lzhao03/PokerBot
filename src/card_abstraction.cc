@@ -12,6 +12,7 @@
 #include <fstream>
 #include <optional>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace poker {
@@ -45,16 +46,12 @@ constexpr std::array<uint8_t, 8192> BuildStraightDensityTable() {
 
 inline const auto kStraightDensity = BuildStraightDensityTable();
 
-constexpr int PublicShift(StreetKind street) noexcept {
-  assert(street != StreetKind::Preflop);
-  return (static_cast<int>(street) - 1) * kPublicObservationBitsPerStreet;
-}
-
 PublicObservationId AdvanceCoarsePublic(PublicObservationId previous,
                                         StreetKind street,
                                         BoardBucketId bucket) noexcept {
+  assert(street != StreetKind::Preflop);
   assert(bucket < kCoarsePublicStreetObservationCount);
-  const int shift = PublicShift(street);
+  const int shift = (std::to_underlying(street) - 1) * kPublicObservationBitsPerStreet;
   return PublicObservationId(previous.value() | ((bucket + 1) << shift));
 }
 
