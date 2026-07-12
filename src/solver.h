@@ -59,19 +59,11 @@ absl::StatusOr<ComboRange> ParseRange(std::string_view text);
 ComboRange UniformComboRange();
 ComboRange SingleComboRange(ComboId combo, float weight = 1.0f);
 
-class HistoryId {
- public:
-  constexpr HistoryId() = default;
-  explicit constexpr HistoryId(uint32_t value) noexcept : value_(value) {}
+enum class HistoryId : uint32_t {};
 
-  constexpr size_t index() const noexcept { return value_; }
-  constexpr uint32_t value() const noexcept { return value_; }
-  friend constexpr auto operator<=>(const HistoryId&,
-                                    const HistoryId&) = default;
-
- private:
-  uint32_t value_ = 0;
-};
+constexpr size_t Index(HistoryId history) noexcept {
+  return std::to_underlying(history);
+}
 
 struct HistoryNode {
   BettingState state;
@@ -98,7 +90,7 @@ struct InfoSetKey {
 
   template <typename H>
   friend H AbslHashValue(H h, const InfoSetKey& key) {
-    return H::combine(std::move(h), key.history.value(),
+    return H::combine(std::move(h), std::to_underlying(key.history),
                       std::to_underlying(key.public_observation),
                       std::to_underlying(key.private_observation));
   }

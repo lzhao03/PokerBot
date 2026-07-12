@@ -1,7 +1,6 @@
 #pragma once
 
 #include <array>
-#include <cstddef>
 #include <cstdint>
 
 #include "absl/types/span.h"
@@ -9,7 +8,7 @@
 namespace poker {
 
 struct ModelFingerprint {
-  std::array<std::byte, 32> bytes = {};
+  std::array<uint8_t, 32> bytes = {};
 
   friend bool operator==(const ModelFingerprint&,
                          const ModelFingerprint&) = default;

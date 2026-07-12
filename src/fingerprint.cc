@@ -2,6 +2,7 @@
 
 #include <array>
 #include <bit>
+#include <cstddef>
 
 namespace poker {
 namespace {
@@ -73,7 +74,7 @@ ModelFingerprint Sha256State::finish() noexcept {
   ModelFingerprint fingerprint;
   for (size_t word = 0; word < state_.size(); ++word) {
     for (size_t byte = 0; byte < 4; ++byte) {
-      fingerprint.bytes[word * 4 + byte] = static_cast<std::byte>(
+      fingerprint.bytes[word * 4 + byte] = static_cast<uint8_t>(
           state_[word] >> static_cast<unsigned>((3 - byte) * 8));
     }
   }

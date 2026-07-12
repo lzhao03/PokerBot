@@ -117,8 +117,7 @@ std::string Hex(ModelFingerprint fingerprint) {
   constexpr char kDigits[] = "0123456789abcdef";
   std::string text;
   text.reserve(fingerprint.bytes.size() * 2);
-  for (std::byte byte : fingerprint.bytes) {
-    const uint8_t value = std::to_integer<uint8_t>(byte);
+  for (uint8_t value : fingerprint.bytes) {
     text.push_back(kDigits[value >> 4]);
     text.push_back(kDigits[value & 0x0F]);
   }
@@ -185,7 +184,7 @@ Policy PassiveCallingPolicy(const CFRSolver& game, ComboId hand) {
     }
     REQUIRE(selected);
     policy.rows.emplace(
-        InfoSetKey{HistoryId(static_cast<uint32_t>(history)),
+        InfoSetKey{HistoryId{static_cast<uint32_t>(history)},
                    position.observation(), private_observation},
         offset);
   }
@@ -241,15 +240,15 @@ TEST_CASE("history tree stores direct rule transitions") {
       REQUIRE(node.child_count == actions.size());
       for (uint8_t action = 0; action < node.child_count; ++action) {
         const HistoryId child = tree.children[node.children_begin + action];
-        REQUIRE(child.index() < tree.nodes.size());
-        CHECK(tree.nodes[child.index()].state ==
+        REQUIRE(Index(child) < tree.nodes.size());
+        CHECK(tree.nodes[Index(child)].state ==
               Apply(node.state, actions[action]));
       }
     } else if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
       REQUIRE(node.child_count == 1);
       const HistoryId child = tree.children[node.children_begin];
-      REQUIRE(child.index() < tree.nodes.size());
-      CHECK(tree.nodes[child.index()].state == AdvanceBettingStreet(
+      REQUIRE(Index(child) < tree.nodes.size());
+      CHECK(tree.nodes[Index(child)].state == AdvanceBettingStreet(
                 *chance, solver->solve_spec().config.betting_rules));
     } else {
       CHECK(node.child_count == 0);
@@ -311,7 +310,7 @@ TEST_CASE("infoset action rows are contiguous") {
   rows.reserve(state.rows.size());
   for (const auto& entry : state.rows) {
     const HistoryNode& node = CFRSolverTestAccess::history(*solver)
-                                  .nodes[entry.first.history.index()];
+                                  .nodes[Index(entry.first.history)];
     REQUIRE(std::holds_alternative<DecisionState>(node.state));
     rows.push_back({entry.second, node.child_count});
   }
@@ -392,7 +391,8 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
   REQUIRE_FALSE(policy.rows.empty());
   for (const auto& [key, offset] : policy.rows) {
     (void)offset;
-    const HistoryNode& node = solver->history_tree().nodes[key.history.index()];
+    const HistoryNode& node =
+        solver->history_tree().nodes[Index(key.history)];
     std::vector<float> probabilities(node.child_count);
     CHECK(policy.strategy(key, absl::MakeSpan(probabilities)));
     double sum = 0.0;
@@ -402,7 +402,7 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
 
   std::array<float, 3> missing = {};
   CHECK_FALSE(policy.strategy(
-      {HistoryId(std::numeric_limits<uint32_t>::max()),
+      {HistoryId{std::numeric_limits<uint32_t>::max()},
        PublicObservationId(), PrivateObservationId()},
       absl::MakeSpan(missing)));
   for (float probability : missing) {
@@ -440,7 +440,8 @@ TEST_CASE("zero average mass extracts as uniform policy") {
   REQUIRE(extracted.ok());
   for (const auto& [key, offset] : extracted->rows) {
     (void)offset;
-    const HistoryNode& node = solver->history_tree().nodes[key.history.index()];
+    const HistoryNode& node =
+        solver->history_tree().nodes[Index(key.history)];
     std::vector<float> probabilities(node.child_count);
     REQUIRE(extracted->strategy(key, absl::MakeSpan(probabilities)));
     for (float probability : probabilities) {
@@ -476,7 +477,7 @@ TEST_CASE("approximate responses are reproducible and respect infosets") {
   for (const auto& [key, row] : first->response_policy.rows) {
     (void)row;
     const HistoryNode& node =
-        game->history_tree().nodes[key.history.index()];
+        game->history_tree().nodes[Index(key.history)];
     REQUIRE(std::holds_alternative<DecisionState>(node.state));
     CHECK(std::get<DecisionState>(node.state).actor == Player::A);
     root_rows += key.history == HistoryId{} ? 1 : 0;

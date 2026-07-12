@@ -121,16 +121,9 @@ ModelFingerprint FingerprintModel(const SolveSpec& spec,
   }
   AppendInteger(bytes, static_cast<uint32_t>(history.children.size()));
   for (HistoryId child : history.children) {
-    AppendInteger(bytes, child.value());
+    AppendInteger(bytes, std::to_underlying(child));
   }
   return Sha256(bytes);
-}
-
-void AppendFingerprint(std::vector<uint8_t>& bytes,
-                       ModelFingerprint fingerprint) {
-  for (std::byte byte : fingerprint.bytes) {
-    bytes.push_back(std::to_integer<uint8_t>(byte));
-  }
 }
 
 absl::Status WriteBytes(const std::filesystem::path& path,
@@ -247,7 +240,7 @@ HistoryId AppendHistory(HistoryTree& tree,
                         const BettingState& state,
                         const BettingRules& rules,
                         const SolverConfig& config) {
-  const HistoryId id(static_cast<uint32_t>(tree.nodes.size()));
+  const HistoryId id{static_cast<uint32_t>(tree.nodes.size())};
   if (const auto* decision = std::get_if<DecisionState>(&state)) {
     const AbstractActions actions = SelectAbstractActions(
         config.bet_abstraction, *decision);
@@ -517,11 +510,12 @@ absl::Status SavePolicy(const Policy& policy,
   std::vector<uint8_t> bytes;
   bytes.insert(bytes.end(), kPolicyMagic.begin(), kPolicyMagic.end());
   AppendInteger<uint32_t>(bytes, 2);
-  AppendFingerprint(bytes, policy.model);
+  bytes.insert(bytes.end(), policy.model.bytes.begin(),
+               policy.model.bytes.end());
   AppendInteger<uint64_t>(bytes, rows.size());
   AppendInteger<uint64_t>(bytes, policy.probabilities.size());
   for (const auto& [key, offset] : rows) {
-    AppendInteger(bytes, key.history.value());
+    AppendInteger(bytes, std::to_underlying(key.history));
     AppendInteger(bytes, std::to_underlying(key.public_observation));
     AppendInteger(bytes, std::to_underlying(key.private_observation));
     AppendInteger<uint64_t>(bytes, offset);
@@ -708,7 +702,7 @@ double CFRSolver::traverse(HistoryId history,
                            const TraversalFrame& frame,
                            TraversalContext& context) {
   const Deal& deal = context.deal;
-  const HistoryNode& history_node = history_.nodes[history.index()];
+  const HistoryNode& history_node = history_.nodes[Index(history)];
   return std::visit([&](const auto& state) -> double {
     using State = std::decay_t<decltype(state)>;
     if constexpr (std::is_same_v<State, FoldTerminalState>) {
@@ -928,10 +922,10 @@ absl::StatusOr<Policy> ExtractAveragePolicy(
   Policy policy;
   policy.model = model;
   for (const auto& [key, offset] : rows) {
-    if (key.history.index() >= history.nodes.size()) {
+    if (Index(key.history) >= history.nodes.size()) {
       return absl::DataLossError("infoset references an invalid history");
     }
-    const HistoryNode& node = history.nodes[key.history.index()];
+    const HistoryNode& node = history.nodes[Index(key.history)];
     if (!std::holds_alternative<DecisionState>(node.state) ||
         offset + node.child_count > state.strategy_sum.size()) {
       return absl::DataLossError("infoset strategy span is invalid");

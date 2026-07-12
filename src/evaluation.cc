@@ -101,7 +101,7 @@ double TraverseProfile(const CFRSolver& game,
                        std::mt19937& rng,
                        EvaluationCounters& counters) {
   const HistoryTree& history = game.history_tree();
-  const HistoryNode& node = history.nodes[position.history.index()];
+  const HistoryNode& node = history.nodes[Index(position.history)];
   return std::visit([&](const auto& state) -> double {
     using State = std::decay_t<decltype(state)>;
     if constexpr (std::is_same_v<State, FoldTerminalState>) {
@@ -190,7 +190,7 @@ double TraverseResponse(const CFRSolver& game,
                         std::mt19937& rng,
                         ResponseTrainingContext& context) {
   const HistoryTree& history = game.history_tree();
-  const HistoryNode& node = history.nodes[position.history.index()];
+  const HistoryNode& node = history.nodes[Index(position.history)];
   return std::visit([&](const auto& state) -> double {
     using State = std::decay_t<decltype(state)>;
     if constexpr (std::is_same_v<State, FoldTerminalState>) {
