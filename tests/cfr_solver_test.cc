@@ -467,6 +467,28 @@ TEST_CASE("zero average mass extracts as uniform policy") {
   }
 }
 
+TEST_CASE("lossy average policy respects its serialized byte budget") {
+  auto solver = MakeSolver(Config(), R(kA), R(kB));
+  solver->run(4);
+  constexpr size_t kBudget = 256;
+  const auto extracted = solver->extract_average_policy(kBudget);
+  REQUIRE(extracted.ok());
+  CHECK(extracted->rows.size() < solver->get_info_set_count());
+
+  const char* test_tmpdir = std::getenv("TEST_TMPDIR");
+  REQUIRE(test_tmpdir != nullptr);
+  const std::filesystem::path path =
+      std::filesystem::path(test_tmpdir) / "lossy.policy";
+  REQUIRE(SavePolicy(*extracted, path).ok());
+  CHECK(std::filesystem::file_size(path) <= kBudget);
+
+  const auto repeated = solver->extract_average_policy(kBudget);
+  REQUIRE(repeated.ok());
+  CHECK(repeated->rows == extracted->rows);
+  CHECK(repeated->probabilities == extracted->probabilities);
+  CHECK_FALSE(solver->extract_average_policy(59).ok());
+}
+
 TEST_CASE("checkpoints resume training bit for bit") {
   const SolverConfig config = Config();
   auto uninterrupted = MakeSolver(config, R(kA), R(kB));

@@ -192,6 +192,11 @@ absl::StatusOr<Policy> ExtractAveragePolicy(
     const CfrState& state,
     const HistoryTree& history,
     ModelFingerprint model);
+absl::StatusOr<Policy> ExtractAveragePolicy(
+    const CfrState& state,
+    const HistoryTree& history,
+    ModelFingerprint model,
+    size_t max_serialized_bytes);
 
 absl::Status SavePolicy(const Policy& policy,
                         const std::filesystem::path& path);
@@ -279,6 +284,8 @@ class CFRSolver {
                                           HoleCards player_b);
   absl::StatusOr<double> evaluate_average(int samples);
   absl::StatusOr<Policy> extract_average_policy() const;
+  absl::StatusOr<Policy> extract_average_policy(
+      size_t max_serialized_bytes) const;
   SolverCheckpoint checkpoint() const;
   absl::Status restore(SolverCheckpoint checkpoint);
 

@@ -671,6 +671,11 @@ absl::Status ValidatePolicy(const Policy& policy) {
 
 constexpr std::array<uint8_t, 8> kPolicyMagic = {
     'P', 'K', 'P', 'O', 'L', 'C', 'Y', '1'};
+constexpr size_t kPolicyHeaderBytes =
+    kPolicyMagic.size() + sizeof(uint32_t) + ModelFingerprint{}.bytes.size() +
+    2 * sizeof(uint64_t);
+constexpr size_t kPolicyRowBytes =
+    sizeof(uint32_t) + 3 * sizeof(uint64_t) + sizeof(uint8_t);
 
 }  // namespace
 
@@ -1364,11 +1369,20 @@ absl::StatusOr<double> CFRSolver::evaluate_average(int samples) {
 absl::StatusOr<Policy> ExtractAveragePolicy(
     const CfrState& state,
     const HistoryTree& history,
-    ModelFingerprint model) {
-  Policy policy;
-  policy.model = model;
-  policy.rows.reserve(state.rows.size());
-  policy.probabilities.resize(state.strategy_sum.size());
+    ModelFingerprint model,
+    size_t max_serialized_bytes) {
+  if (max_serialized_bytes < kPolicyHeaderBytes) {
+    return absl::InvalidArgumentError("policy budget is smaller than header");
+  }
+
+  struct Candidate {
+    InfoSetKey key;
+    InfoSetRow row;
+    uint8_t action_count;
+    double mass;
+  };
+  std::vector<Candidate> candidates;
+  candidates.reserve(state.rows.size());
   for (const auto& [key, row] : state.rows) {
     if (key.history.index() >= history.nodes.size()) {
       return absl::DataLossError("infoset references an invalid history");
@@ -1382,25 +1396,55 @@ absl::StatusOr<Policy> ExtractAveragePolicy(
     if (row.action_offset + count > state.strategy_sum.size()) {
       return absl::DataLossError("infoset strategy span is invalid");
     }
-    policy.rows.emplace(key, PolicyRow{row.action_offset, count});
-    double sum = 0.0;
+    double mass = 0.0;
     for (size_t action = 0; action < count; ++action) {
       const float value = state.strategy_sum[row.action_offset + action];
       if (!std::isfinite(value)) {
         return absl::DataLossError("nonfinite average strategy value");
       }
-      sum += std::max(0.0f, value);
+      mass += std::max(0.0f, value);
     }
-    for (size_t action = 0; action < count; ++action) {
-      const float value = state.strategy_sum[row.action_offset + action];
-      policy.probabilities[row.action_offset + action] =
-          sum > 0.0 ? static_cast<float>(std::max(0.0f, value) / sum)
-                    : 1.0f / count;
+    candidates.push_back({key, row, count, mass});
+  }
+  std::sort(candidates.begin(), candidates.end(),
+            [](const Candidate& left, const Candidate& right) {
+              return left.mass != right.mass ? left.mass > right.mass
+                                             : KeyLess(left.key, right.key);
+            });
+
+  Policy policy;
+  policy.model = model;
+  size_t serialized_bytes = kPolicyHeaderBytes;
+  for (const Candidate& candidate : candidates) {
+    const size_t row_bytes =
+        kPolicyRowBytes + sizeof(float) * candidate.action_count;
+    if (row_bytes > max_serialized_bytes - serialized_bytes) continue;
+
+    const size_t output_offset = policy.probabilities.size();
+    policy.rows.emplace(
+        candidate.key,
+        PolicyRow{output_offset, candidate.action_count});
+    for (size_t action = 0; action < candidate.action_count; ++action) {
+      const float value =
+          state.strategy_sum[candidate.row.action_offset + action];
+      policy.probabilities.push_back(
+          candidate.mass > 0.0
+              ? static_cast<float>(std::max(0.0f, value) / candidate.mass)
+              : 1.0f / candidate.action_count);
     }
+    serialized_bytes += row_bytes;
   }
   const absl::Status valid = ValidatePolicy(policy);
   if (!valid.ok()) return valid;
   return policy;
+}
+
+absl::StatusOr<Policy> ExtractAveragePolicy(
+    const CfrState& state,
+    const HistoryTree& history,
+    ModelFingerprint model) {
+  return ExtractAveragePolicy(
+      state, history, model, std::numeric_limits<size_t>::max());
 }
 
 absl::StatusOr<Policy> CFRSolver::extract_average_policy() const {
@@ -1409,6 +1453,16 @@ absl::StatusOr<Policy> CFRSolver::extract_average_policy() const {
         "average strategy accumulation is disabled");
   }
   return ExtractAveragePolicy(state_, history_, model_);
+}
+
+absl::StatusOr<Policy> CFRSolver::extract_average_policy(
+    size_t max_serialized_bytes) const {
+  if (!spec_.config.accumulate_average_strategy()) {
+    return absl::FailedPreconditionError(
+        "average strategy accumulation is disabled");
+  }
+  return ExtractAveragePolicy(
+      state_, history_, model_, max_serialized_bytes);
 }
 
 SolverCheckpoint CFRSolver::checkpoint() const {

@@ -2,6 +2,7 @@
 #include "src/evaluation.h"
 
 #include <chrono>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -41,6 +42,9 @@ ABSL_FLAG(uint64_t, best_response_iterations, 0,
 ABSL_FLAG(int, starting_stack, 100, "starting stack in chips");
 ABSL_FLAG(int, max_info_sets, 500000, "maximum infosets");
 ABSL_FLAG(int, chance_samples, 1, "chance samples per chance node");
+ABSL_FLAG(uint64_t, policy_max_bytes, 0,
+          "maximum serialized policy bytes; 0 keeps all infosets");
+ABSL_FLAG(std::string, policy_output, "", "optional policy output path");
 
 namespace {
 
@@ -184,8 +188,25 @@ int main(int argc, char** argv) {
     return value.ok() ? *value : 0.0;
   });
 
-  const auto policy = solver->extract_average_policy();
+  const uint64_t policy_max_bytes = absl::GetFlag(FLAGS_policy_max_bytes);
+  const auto policy = policy_max_bytes == 0
+      ? solver->extract_average_policy()
+      : solver->extract_average_policy(
+            static_cast<size_t>(policy_max_bytes));
   if (policy.ok()) {
+    std::cout << "policy_rows\t" << policy->rows.size() << '\n'
+              << "policy_probability_bytes\t"
+              << policy->probabilities.size() * sizeof(float) << '\n';
+    const std::string output = absl::GetFlag(FLAGS_policy_output);
+    if (!output.empty()) {
+      const absl::Status saved = poker::SavePolicy(*policy, output);
+      if (!saved.ok()) {
+        std::cerr << "Error: " << saved << '\n';
+        return 1;
+      }
+      std::cout << "policy_file_bytes\t"
+                << std::filesystem::file_size(output) << '\n';
+    }
     const auto profile = poker::EstimateExpectedValue(
         *solver, *policy, *policy,
         static_cast<uint64_t>(absl::GetFlag(FLAGS_eval_samples)),
