@@ -28,31 +28,19 @@ Card PermuteCard(Card card, const SuitPermutation& permutation) noexcept {
   return Card(card.rank(), permutation[std::to_underlying(card.suit())]);
 }
 
-Board PermuteBoard(const Board& board,
-                   const SuitPermutation& permutation) noexcept {
+uint64_t EncodeBoard(const Board& board,
+                     const SuitPermutation& permutation) noexcept {
   const auto cards = board.cards();
-  if (cards.empty()) {
-    return {};
-  }
-
   std::array<Card, kMaxBoardCards> mapped = {};
   for (size_t index = 0; index < cards.size(); ++index) {
     mapped[index] = PermuteCard(cards[index], permutation);
   }
-  Board result = DealCards(
-      Board{}, absl::Span<const Card>(mapped.data(), 3));
-  for (size_t index = 3; index < cards.size(); ++index) {
-    result = DealCards(
-        result, absl::Span<const Card>(mapped.data() + index, 1));
-  }
-  return result;
-}
-
-uint64_t EncodeBoard(const Board& board) noexcept {
-  uint64_t encoded = board.count();
+  std::sort(mapped.begin(),
+            mapped.begin() + std::min<size_t>(3, cards.size()));
+  uint64_t encoded = cards.size();
   size_t shift = 3;
-  for (Card card : board.cards()) {
-    encoded |= static_cast<uint64_t>(card.index()) << shift;
+  for (size_t index = 0; index < cards.size(); ++index) {
+    encoded |= static_cast<uint64_t>(mapped[index].index()) << shift;
     shift += 6;
   }
   return encoded;
@@ -70,7 +58,7 @@ ComboId PermuteCombo(ComboId hand,
 PublicObservationId CanonicalPublicObservation(const Board& board) noexcept {
   uint64_t best = std::numeric_limits<uint64_t>::max();
   for (const SuitPermutation& permutation : kSuitPermutations) {
-    best = std::min(best, EncodeBoard(PermuteBoard(board, permutation)));
+    best = std::min(best, EncodeBoard(board, permutation));
   }
   return PublicObservationId(best);
 }
@@ -81,8 +69,7 @@ PrivateObservationId CanonicalPrivateObservation(
   uint64_t best_board = std::numeric_limits<uint64_t>::max();
   uint16_t best_hand = std::numeric_limits<uint16_t>::max();
   for (const SuitPermutation& permutation : kSuitPermutations) {
-    const Board mapped_board = PermuteBoard(board, permutation);
-    const uint64_t board_id = EncodeBoard(mapped_board);
+    const uint64_t board_id = EncodeBoard(board, permutation);
     const ComboId mapped_hand = PermuteCombo(hand, permutation);
     const uint16_t hand_id = static_cast<uint16_t>(mapped_hand.index());
     if (board_id < best_board ||
