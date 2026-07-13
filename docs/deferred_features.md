@@ -146,13 +146,32 @@ git show dcbadfc^:<path>
 ### Redundant evaluation result fields
 
 - **Status:** Intentionally omitted unless consumers demonstrate a need.
-- **Removed:** `ValueEstimate::samples` and
+- **Removed:** `ValueEstimate::samples`, `BestResponseResult::responder`, and
   `BestResponseResult::training_iterations_completed`.
-- **Why removed:** Both repeated unchanged input configuration.
+- **Why removed:** They repeated unchanged request inputs.
 - **Restore when:** Serialized result records must be self-contained without the
   request/configuration that produced them.
 
 ## Experimental and build-time features
+
+### Sampled CFR traversal variants
+
+- **Status:** External sampling is available through `external_sampling` and
+  `--external_sampling`; outcome and public-chance sampling remain deferred.
+- **Current behavior:** Samples opponent actions while enumerating actions for
+  the player being updated. Evaluation remains a full traversal.
+- **Why defer the rest:** Additional variants add estimator variance, sampling
+  weights, and different average-strategy accounting. The default
+  chance-sampled traversal remains the simpler correctness baseline.
+- **Convergence requirements:** The textbook external-sampling guarantee assumes
+  a finite two-player zero-sum perfect-recall game and unbiased updates. The
+  current infoset cap, current-bucket-only recall, CFR+ regret clipping, and
+  concurrent updates fall outside that proof.
+- **Extend when:** Measured wall-clock convergence justifies another sampling
+  mode rather than further tuning external sampling.
+- **Verification:** Compare sampled updates against exact CFR on toy games, track
+  exploitability versus nodes touched and wall time, and first validate the
+  single-threaded uncapped perfect-recall implementation.
 
 ### Compact experimental policy encoding
 

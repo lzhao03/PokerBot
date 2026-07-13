@@ -1,4 +1,5 @@
 #include "src/card_abstraction.h"
+#include "src/card_canonicalization.h"
 #include "src/hand_evaluator.h"
 #include "src/poker.h"
 #include "src/solver.h"
@@ -305,15 +306,16 @@ TEST_CASE("all abstraction modes preserve observation history") {
   for (const CardAbstractionConfig& config : configs) {
     CAPTURE(static_cast<int>(config.public_mode));
     CAPTURE(static_cast<int>(config.private_kind));
+    PrivateObservationId private_id = ObservePrivate(config, hand, Board{});
     for (const Board& board : {flop, turn, river}) {
       const PublicPosition position(config, board);
       CHECK(position.observation() ==
             ObservePublic(config, board));
+      private_id = ObservePrivate(config, hand, board, private_id);
+      CHECK(private_id == ObservePrivate(config, hand, board));
     }
 
     const PublicPosition position(config, river);
-    const PrivateObservationId private_id =
-        ObservePrivate(config, hand, river);
     const std::array<S, 4> renamed_suits = {
         S::Clubs, S::Spades, S::Hearts, S::Diamonds};
     const Board renamed_board = Rename(river, renamed_suits);

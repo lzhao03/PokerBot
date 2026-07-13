@@ -46,14 +46,17 @@ TEST_CASE("range syntax expands to exact combo weights") {
   const auto offsuit = ParseRange("AKo");
   const auto any = ParseRange("AK");
   const auto split = ParseRange("AKs,AKo");
+  const auto overlap = ParseRange("AK,AKs");
   REQUIRE(suited.ok());
   REQUIRE(offsuit.ok());
   REQUIRE(any.ok());
   REQUIRE(split.ok());
+  REQUIRE(overlap.ok());
   CHECK(suited->count() == 4);
   CHECK(offsuit->count() == 12);
   CHECK(any->count() == 16);
   CHECK(split->weights == any->weights);
+  CHECK(overlap->weights == any->weights);
   CHECK(SingleComboRange(hand, 2.0f).weight(hand) == 2.0f);
   CHECK_FALSE(ParseRange("89s+").ok());
   CHECK_FALSE(ParseRange("AA,,KK").ok());

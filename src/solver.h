@@ -26,6 +26,7 @@ struct SolverConfig {
   BettingRules betting_rules = {2};
   int chance_samples = 1;
   bool accumulate_average_strategy = true;
+  bool external_sampling = false;
   int max_info_sets = 500000;
 
   static absl::StatusOr<SolverConfig> Create(SolverConfig config);
@@ -229,11 +230,11 @@ class CFRSolver {
 
   struct TraversalContext {
     const Deal& deal;
-    TraversalMode mode = TraversalMode::Train;
-    uint64_t iteration = 0;
+    TraversalMode mode;
+    uint64_t iteration;
     std::mt19937& rng;
     SolverStats& stats;
-    bool concurrent_updates = false;
+    bool concurrent_updates;
   };
 
   Position root_position() const;

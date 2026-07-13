@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include "src/card_canonicalization.h"
 #include "src/poker.h"
 
 namespace poker {
@@ -30,7 +29,7 @@ struct CardAbstractionConfig {
 
 class PublicPosition {
  public:
-  PublicPosition(const CardAbstractionConfig& config, Board board);
+  PublicPosition(const CardAbstractionConfig& config, const Board& board);
 
   const Board& board() const noexcept { return board_; }
   PublicObservationId observation() const noexcept { return observation_; }
@@ -44,6 +43,7 @@ PublicObservationId ObservePublic(const CardAbstractionConfig& config,
                                   const Board& board) noexcept;
 PrivateObservationId ObservePrivate(const CardAbstractionConfig& config,
                                     ComboId hand,
-                                    const Board& board) noexcept;
+                                    const Board& board,
+                                    PrivateObservationId previous = {}) noexcept;
 
 }  // namespace poker

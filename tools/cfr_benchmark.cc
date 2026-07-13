@@ -36,6 +36,8 @@ ABSL_FLAG(int, max_info_sets, 500000, "maximum infosets");
 ABSL_FLAG(int, chance_samples, 1, "chance samples per chance node");
 ABSL_FLAG(bool, accumulate_average_strategy, true,
           "accumulate average-strategy values during training");
+ABSL_FLAG(bool, external_sampling, false,
+          "sample opponent actions during training");
 ABSL_FLAG(int, threads, 1, "training worker threads");
 ABSL_FLAG(uint64_t, progress_interval, 0,
           "log progress after this many iterations; 0 disables logging");
@@ -67,6 +69,7 @@ absl::StatusOr<poker::SolverConfig> BenchmarkConfig() {
   options.chance_samples = absl::GetFlag(FLAGS_chance_samples);
   options.accumulate_average_strategy =
       absl::GetFlag(FLAGS_accumulate_average_strategy);
+  options.external_sampling = absl::GetFlag(FLAGS_external_sampling);
   const std::string kind = absl::GetFlag(FLAGS_private_abstraction);
   if (kind == "exact") {
     options.card_abstraction.private_kind =

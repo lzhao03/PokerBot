@@ -65,9 +65,8 @@ EvaluationFrame InitialFrame(const CFRSolver& game,
                              const Deal& deal) {
   EvaluationFrame frame;
   for (Player player : {Player::A, Player::B}) {
-    const ComboId hand = deal.hand(player);
     frame.private_observations[Index(player)] =
-        ObservePrivate(game.card_abstraction(), hand,
+        ObservePrivate(game.card_abstraction(), deal.hand(player),
                        position.public_state.board());
   }
   return frame;
@@ -78,16 +77,16 @@ void AdvancePrivateObservations(const CFRSolver& game,
                                 const Position& child,
                                 const Deal& deal) {
   for (Player player : {Player::A, Player::B}) {
-    const ComboId hand = deal.hand(player);
     frame.private_observations[Index(player)] = ObservePrivate(
-        game.card_abstraction(), hand, child.public_state.board());
+        game.card_abstraction(), deal.hand(player), child.public_state.board(),
+        frame.private_observations[Index(player)]);
   }
 }
 
 double TraverseProfile(const CFRSolver& game,
                        const std::array<const Policy*, kPlayerCount>& policies,
                        Position position,
-                       EvaluationFrame frame,
+                       const EvaluationFrame& frame,
                        const Deal& deal,
                        std::mt19937& rng,
                        EvaluationCounters& counters) {
@@ -101,7 +100,7 @@ double TraverseProfile(const CFRSolver& game,
     return TerminalUtility(*state, board, deal.hand(Player::A),
                            deal.hand(Player::B));
   }
-  if (std::get_if<ChanceState>(&node.state)) {
+  if (std::holds_alternative<ChanceState>(node.state)) {
     double value = 0.0;
     const int samples = game.solve_spec().config.chance_samples;
     for (int sample = 0; sample < samples; ++sample) {
@@ -114,8 +113,8 @@ double TraverseProfile(const CFRSolver& game,
     return value / samples;
   }
 
-  const DecisionState& state = std::get<DecisionState>(node.state);
-  const size_t player = Index(state.actor);
+  const DecisionState& decision = std::get<DecisionState>(node.state);
+  const size_t player = Index(decision.actor);
   const InfoSetKey key{
       position.history, position.public_state.observation(),
       frame.private_observations[player]};
@@ -166,16 +165,16 @@ ProfileEstimate EstimateProfile(
 }
 
 struct ResponseTrainingContext {
-  Player responder = Player::A;
+  Player responder;
   const Policy& opponent;
-  CfrState& state;
+  CfrState& response;
   uint64_t opponent_lookups = 0;
   uint64_t missing_opponent_lookups = 0;
 };
 
 double TraverseResponse(const CFRSolver& game,
                         Position position,
-                        EvaluationFrame frame,
+                        const EvaluationFrame& frame,
                         const Deal& deal,
                         std::mt19937& rng,
                         ResponseTrainingContext& context) {
@@ -189,7 +188,7 @@ double TraverseResponse(const CFRSolver& game,
     return TerminalUtility(*state, board, deal.hand(Player::A),
                            deal.hand(Player::B));
   }
-  if (std::get_if<ChanceState>(&node.state)) {
+  if (std::holds_alternative<ChanceState>(node.state)) {
     double value = 0.0;
     const int samples = game.solve_spec().config.chance_samples;
     for (int sample = 0; sample < samples; ++sample) {
@@ -202,51 +201,53 @@ double TraverseResponse(const CFRSolver& game,
     return value / samples;
   }
 
-  const DecisionState& state = std::get<DecisionState>(node.state);
-  const Player actor = state.actor;
+  const DecisionState& decision = std::get<DecisionState>(node.state);
+  const Player actor = decision.actor;
   const size_t player = Index(actor);
   const InfoSetKey key{
       position.history, position.public_state.observation(),
       frame.private_observations[player]};
-  const bool responds = actor == context.responder;
+  const bool responder_turn = actor == context.responder;
   std::optional<size_t> offset;
   absl::InlinedVector<double, 8> probabilities(node.child_count, 0.0);
-  if (responds) {
-    offset = context.state.find_or_create(key, node.child_count);
-    context.state.strategy(context.state.regret_sum, offset,
-                           absl::MakeSpan(probabilities));
+  if (responder_turn) {
+    offset = context.response.find_or_create(key, node.child_count);
+    context.response.strategy(context.response.regret_sum, offset,
+                              absl::MakeSpan(probabilities));
   } else {
-    absl::InlinedVector<float, 8> stored(node.child_count, 0.0f);
+    absl::InlinedVector<float, 8> opponent_strategy(
+        node.child_count, 0.0f);
     ++context.opponent_lookups;
-    if (!context.opponent.strategy(key, absl::MakeSpan(stored))) {
+    if (!context.opponent.strategy(key, absl::MakeSpan(opponent_strategy))) {
       ++context.missing_opponent_lookups;
     }
-    std::copy(stored.begin(), stored.end(), probabilities.begin());
+    std::ranges::copy(opponent_strategy, probabilities.begin());
   }
 
-  absl::InlinedVector<double, 8> values(node.child_count, 0.0);
+  absl::InlinedVector<double, 8> action_values(node.child_count, 0.0);
   double node_value = 0.0;
   for (uint8_t action = 0; action < node.child_count; ++action) {
     EvaluationFrame child_frame = frame;
     child_frame.reach[player] *= probabilities[action];
     Position child = position;
     child.history = history.children[node.children_begin + action];
-    values[action] = TraverseResponse(game, child, child_frame, deal,
-                                      rng, context);
-    node_value += probabilities[action] * values[action];
+    action_values[action] = TraverseResponse(
+        game, child, child_frame, deal, rng, context);
+    node_value += probabilities[action] * action_values[action];
   }
-  if (!responds || !offset) return node_value;
+  if (!responder_turn || !offset) return node_value;
 
-  const double sign = actor == Player::A ? 1.0 : -1.0;
+  const double utility_sign = actor == Player::A ? 1.0 : -1.0;
   const double opponent_reach = frame.reach[Index(Opponent(actor))];
   for (uint8_t action = 0; action < node.child_count; ++action) {
-    const float delta = static_cast<float>(
-        opponent_reach * sign * (values[action] - node_value));
-    context.state.add_regret(*offset, action, delta);
+    const float regret = static_cast<float>(
+        opponent_reach * utility_sign *
+        (action_values[action] - node_value));
+    context.response.add_regret(*offset, action, regret);
   }
-  context.state.add_strategy(
+  context.response.add_strategy(
       *offset, absl::MakeConstSpan(probabilities),
-      frame.reach[player] * (context.state.iterations + 1));
+      frame.reach[player] * (context.response.iterations + 1));
   return node_value;
 }
 
@@ -283,13 +284,11 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
         "opponent policy model does not match game");
   }
 
-  const SolverConfig& solver_config = game.solve_spec().config;
-  CfrState response_state(solver_config, true);
+  CfrState response_state(game.solve_spec().config, true);
   std::mt19937 rng = MakeEvaluationRng(config.seed);
   const Position root = RootPosition(game);
   ResponseTrainingContext context{responder, opponent, response_state};
   BestResponseResult result;
-  result.responder = responder;
   while (response_state.iterations < config.training_iterations) {
     const Deal deal = game.deal_distribution().sample(rng);
     EvaluationFrame frame = InitialFrame(game, root, deal);
@@ -339,13 +338,10 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
       game, Player::B, policy, player_b_config);
   if (!player_b.ok()) return player_b.status();
 
-  ExploitabilityEstimate result;
-  result.player_a_response = std::move(*player_a);
-  result.player_b_response = std::move(*player_b);
-  result.nash_conv =
-      result.player_a_response.value + result.player_b_response.value;
-  result.exploitability = 0.5 * result.nash_conv;
-  return result;
+  const double nash_conv = player_a->value + player_b->value;
+  return ExploitabilityEstimate{
+      std::move(*player_a), std::move(*player_b),
+      nash_conv, 0.5 * nash_conv};
 }
 
 }  // namespace poker

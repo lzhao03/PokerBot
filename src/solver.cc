@@ -126,30 +126,21 @@ absl::Status WriteBytes(const std::filesystem::path& path,
 }
 
 enum class HandShape {
-  Pair,
   Suited,
   Offsuit,
   Any,
 };
 
 struct HandType {
-  int high = 0;
-  int low = 0;
-  HandShape shape = HandShape::Pair;
+  int high;
+  int low;
+  HandShape shape;
 };
 
 std::optional<int> ParseRank(char rank) {
-  switch (rank) {
-    case 'A': return 14;
-    case 'K': return 13;
-    case 'Q': return 12;
-    case 'J': return 11;
-    case 'T': return 10;
-    default:
-      return rank >= '2' && rank <= '9'
-                 ? std::optional<int>(rank - '0')
-                 : std::nullopt;
-  }
+  const size_t index = std::string_view("23456789TJQKA").find(rank);
+  if (index == std::string_view::npos) return std::nullopt;
+  return static_cast<int>(index) + 2;
 }
 
 std::optional<HandType> ParseHandType(std::string_view text) {
@@ -162,13 +153,12 @@ std::optional<HandType> ParseHandType(std::string_view text) {
     return std::nullopt;
   }
   HandType type{std::max(*first, *second), std::min(*first, *second),
-                HandShape::Pair};
+                HandShape::Any};
   if (type.high == type.low) {
     return text.size() == 2 ? std::optional<HandType>(type) : std::nullopt;
   }
-  if (text.size() == 2) {
-    type.shape = HandShape::Any;
-  } else if (text[2] == 's') {
+  if (text.size() == 2) return type;
+  if (text[2] == 's') {
     type.shape = HandShape::Suited;
   } else if (text[2] == 'o') {
     type.shape = HandShape::Offsuit;
@@ -176,29 +166,6 @@ std::optional<HandType> ParseHandType(std::string_view text) {
     return std::nullopt;
   }
   return type;
-}
-
-std::vector<ComboId> Expand(HandType type) {
-  constexpr std::array<Suit, 4> suits = {
-      Suit::Hearts, Suit::Diamonds,
-      Suit::Clubs, Suit::Spades};
-  std::vector<ComboId> combos;
-  for (size_t first = 0; first < suits.size(); ++first) {
-    for (size_t second = 0; second < suits.size(); ++second) {
-      if (type.high == type.low && first >= second) {
-        continue;
-      }
-      const bool suited = first == second;
-      if (type.high != type.low && type.shape != HandShape::Any &&
-          suited != (type.shape == HandShape::Suited)) {
-        continue;
-      }
-      combos.push_back(CardsToComboId(
-          Card(static_cast<Rank>(type.high - 2), suits[first]),
-          Card(static_cast<Rank>(type.low - 2), suits[second])));
-    }
-  }
-  return combos;
 }
 
 std::string_view Trim(std::string_view text) {
@@ -432,11 +399,8 @@ namespace {
 absl::Status ValidatePolicy(const Policy& policy) {
   std::vector<size_t> rows;
   rows.reserve(policy.rows.size());
-  for (const auto& [key, offset] : policy.rows) {
-    (void)key;
-    rows.push_back(offset);
-  }
-  std::sort(rows.begin(), rows.end());
+  for (const auto& row : policy.rows) rows.push_back(row.second);
+  std::ranges::sort(rows);
   if (rows.empty()) {
     return policy.probabilities.empty()
                ? absl::OkStatus()
@@ -482,9 +446,7 @@ absl::Status SavePolicy(const Policy& policy,
 
   std::vector<std::pair<InfoSetKey, size_t>> rows(
       policy.rows.begin(), policy.rows.end());
-  std::sort(rows.begin(), rows.end(), [](const auto& left, const auto& right) {
-    return left.first < right.first;
-  });
+  std::ranges::sort(rows);
 
   std::vector<uint8_t> bytes;
   bytes.insert(bytes.end(), kPolicyMagic.begin(), kPolicyMagic.end());
@@ -532,23 +494,26 @@ absl::StatusOr<SolverConfig> SolverConfig::Create(SolverConfig config) {
 }
 
 absl::StatusOr<ComboRange> ParseRange(std::string_view text) {
-  std::array<bool, kComboCount> selected = {};
   ComboRange range;
   auto select = [&](HandType type) {
-    auto add = [&](HandType candidate) {
-      for (ComboId combo : Expand(candidate)) {
-        if (!selected[combo.index()]) {
-          selected[combo.index()] = true;
-          range.add(combo);
+    constexpr std::array suits = {
+        Suit::Hearts, Suit::Diamonds, Suit::Clubs, Suit::Spades};
+    const Rank high = static_cast<Rank>(type.high - 2);
+    const Rank low = static_cast<Rank>(type.low - 2);
+    const bool pair = type.high == type.low;
+    for (Suit first : suits) {
+      for (Suit second : suits) {
+        const bool suited = first == second;
+        if ((pair && first >= second) ||
+            (!pair && type.shape != HandShape::Any &&
+             suited != (type.shape == HandShape::Suited))) {
+          continue;
         }
+        const ComboId combo = CardsToComboId(
+            Card(high, first), Card(low, second));
+        range.weights[combo.index()] = 1.0f;
       }
-    };
-    if (type.shape == HandShape::Any) {
-      type.shape = HandShape::Suited;
-      add(type);
-      type.shape = HandShape::Offsuit;
     }
-    add(type);
   };
   while (!text.empty()) {
     const size_t comma = text.find(',');
@@ -564,7 +529,7 @@ absl::StatusOr<ComboRange> ParseRange(std::string_view text) {
         return absl::InvalidArgumentError("invalid pair range");
       }
       for (int value = *rank; value <= 14; ++value) {
-        select(HandType{value, value, HandShape::Pair});
+        select(HandType{value, value, HandShape::Any});
       }
       continue;
     }
@@ -582,11 +547,7 @@ absl::StatusOr<ComboRange> ParseRange(std::string_view text) {
 
 ComboRange UniformComboRange() {
   ComboRange range;
-  for (size_t first = 0; first < kDeck.size(); ++first) {
-    for (size_t second = first + 1; second < kDeck.size(); ++second) {
-      range.add(CardsToComboId(kDeck[first], kDeck[second]));
-    }
-  }
+  range.weights.fill(1.0f);
   return range;
 }
 
@@ -618,9 +579,7 @@ absl::StatusOr<CFRSolver> CFRSolver::Create(SolveSpec spec) {
   }
   auto deals = DealDistribution::Create(spec.ranges[Index(Player::A)],
                                         spec.ranges[Index(Player::B)]);
-  if (!deals.ok()) {
-    return deals.status();
-  }
+  if (!deals.ok()) return deals.status();
   return CFRSolver(std::move(spec), std::move(*deals));
 }
 
@@ -634,10 +593,8 @@ Position CFRSolver::sample_chance_child(const HistoryNode& node,
                                         const Deal& deal,
                                         std::mt19937& rng) {
   const ChanceState& chance = std::get<ChanceState>(node.state);
-  const BettingData& data = chance.data;
-  const auto sampled = SampleStreetCards(data.street,
-                                         public_state.board(),
-                                         deal.blocked_mask(), rng);
+  const auto sampled = SampleStreetCards(
+      chance.data.street, public_state.board(), deal.blocked_mask(), rng);
   assert(sampled.ok());
   return {
       history_.children[node.children_begin],
@@ -650,9 +607,8 @@ CFRSolver::TraversalFrame CFRSolver::initial_frame(
     const Position& position) const {
   TraversalFrame frame;
   for (Player player : {Player::A, Player::B}) {
-    const ComboId hand = deal.hand(player);
     frame.private_observations[Index(player)] =
-        ObservePrivate(card_abstraction(), hand,
+        ObservePrivate(card_abstraction(), deal.hand(player),
                        position.public_state.board());
   }
   if (position.public_state.board().count() == kMaxBoardCards) {
@@ -668,9 +624,10 @@ void CFRSolver::advance_private_observations(
     const Deal& deal,
     const Position& child) const {
   for (Player player : {Player::A, Player::B}) {
-    const ComboId hand = deal.hand(player);
     frame.private_observations[Index(player)] =
-        ObservePrivate(card_abstraction(), hand, child.public_state.board());
+        ObservePrivate(card_abstraction(), deal.hand(player),
+                       child.public_state.board(),
+                       frame.private_observations[Index(player)]);
   }
 }
 
@@ -680,18 +637,18 @@ double CFRSolver::traverse(HistoryId history,
                            TraversalContext& context) {
   const Deal& deal = context.deal;
   const HistoryNode& history_node = history_.nodes[Index(history)];
-  const BettingState& state = history_node.state;
-  if (const auto* fold = std::get_if<FoldTerminalState>(&state)) {
+  const BettingState& betting_state = history_node.state;
+  if (const auto* fold = std::get_if<FoldTerminalState>(&betting_state)) {
     ++context.stats.terminal_visits;
     return TerminalUtility(*fold, Player::A);
   }
-  if (const auto* showdown = std::get_if<ShowdownState>(&state)) {
+  if (const auto* showdown = std::get_if<ShowdownState>(&betting_state)) {
     ++context.stats.terminal_visits;
     assert(frame.showdown_comparison.has_value());
     return TerminalUtilityFromComparison(
         *showdown, *frame.showdown_comparison, Player::A);
   }
-  if (std::holds_alternative<ChanceState>(state)) {
+  if (std::holds_alternative<ChanceState>(betting_state)) {
     const int samples = spec_.config.chance_samples;
     context.stats.chance_samples += static_cast<uint64_t>(samples);
     double value = 0.0;
@@ -711,24 +668,26 @@ double CFRSolver::traverse(HistoryId history,
     return value / samples;
   }
 
-  const Player player = std::get<DecisionState>(state).actor;
+  const Player player = std::get<DecisionState>(betting_state).actor;
   const size_t player_index = Index(player);
   const uint8_t action_count = history_node.child_count;
   const InfoSetKey key{
       history, public_state.observation(),
       frame.private_observations[player_index]};
   const bool training = context.mode == TraversalMode::Train;
-  const bool updates =
+  const bool external_sampling =
+      training && spec_.config.external_sampling;
+  const bool updates_regrets =
       training && context.iteration % kPlayerCount == player_index;
   std::optional<size_t> offset;
-  if (updates) {
+  if (updates_regrets || external_sampling) {
     offset = state_.find_or_create(key, action_count);
   } else {
     const auto found = state_.rows.find(key);
     if (found != state_.rows.end()) offset = found->second;
   }
   std::array<double, kMaxActionsPerNode> probabilities;
-  std::array<double, kMaxActionsPerNode> values;
+  std::array<double, kMaxActionsPerNode> action_values;
   const absl::Span<double> probability_span(
       probabilities.data(), action_count);
   if (context.mode == TraversalMode::EvaluateAverage) {
@@ -738,30 +697,45 @@ double CFRSolver::traverse(HistoryId history,
     state_.strategy(state_.regret_sum, offset, probability_span,
                     context.concurrent_updates);
   }
+  if (training) ++context.stats.decision_visits;
+  if (external_sampling && !updates_regrets) {
+    if (offset && spec_.config.accumulate_average_strategy) {
+      state_.add_strategy(*offset, probability_span, 1.0,
+                          context.concurrent_updates);
+    }
+    std::discrete_distribution<size_t> sample(
+        probability_span.begin(), probability_span.end());
+    const HistoryId child = history_.children[
+        history_node.children_begin + sample(context.rng)];
+    return traverse(child, public_state, frame, context);
+  }
 
   double node_value = 0.0;
+  TraversalFrame child_frame = frame;
   for (uint8_t action = 0; action < action_count; ++action) {
-    TraversalFrame child_frame = frame;
-    child_frame.reach[player_index] *= probabilities[action];
+    child_frame.reach[player_index] =
+        frame.reach[player_index] * probabilities[action];
     const HistoryId child = history_.children[
         history_node.children_begin + action];
-    values[action] = traverse(child, public_state, child_frame, context);
-    node_value += probabilities[action] * values[action];
+    action_values[action] = traverse(
+        child, public_state, child_frame, context);
+    node_value += probabilities[action] * action_values[action];
   }
   if (!training) return node_value;
 
-  ++context.stats.decision_visits;
-  if (!updates || !offset) return node_value;
+  if (!updates_regrets || !offset) return node_value;
 
-  const double sign = player == Player::A ? 1.0 : -1.0;
-  const double opponent_reach = frame.reach[Index(Opponent(player))];
+  const double utility_sign = player == Player::A ? 1.0 : -1.0;
+  const double opponent_reach = external_sampling
+                                    ? 1.0
+                                    : frame.reach[Index(Opponent(player))];
   for (uint8_t action = 0; action < action_count; ++action) {
     const double regret =
-        opponent_reach * sign * (values[action] - node_value);
+        opponent_reach * utility_sign * (action_values[action] - node_value);
     state_.add_regret(*offset, action, static_cast<float>(regret),
                       context.concurrent_updates);
   }
-  if (spec_.config.accumulate_average_strategy) {
+  if (spec_.config.accumulate_average_strategy && !external_sampling) {
     const double weight = frame.reach[player_index] *
                           (context.iteration + 1);
     state_.add_strategy(
@@ -787,6 +761,7 @@ void CFRSolver::run(uint64_t iterations, int threads) {
 
   const size_t capacity = static_cast<size_t>(spec_.config.max_info_sets);
   uint64_t serial_iterations = 0;
+  // Fill the infoset map serially; workers only update it at capacity.
   while (serial_iterations < iterations &&
          (threads <= 1 || state_.rows.size() < capacity)) {
     state_.cumulative_root_utility += run_iteration(
@@ -803,15 +778,14 @@ void CFRSolver::run(uint64_t iterations, int threads) {
       double utility = 0.0;
       SolverStats stats;
     };
-    std::vector<uint32_t> seeds(worker_count);
-    for (uint32_t& seed : seeds) seed = rng_();
     std::vector<WorkerResult> worker_results(worker_count);
     std::vector<std::thread> workers;
     workers.reserve(worker_count);
     const uint64_t first_iteration = state_.iterations;
     for (size_t worker = 0; worker < worker_count; ++worker) {
-      workers.emplace_back([&, worker] {
-        std::seed_seq seed{seeds[worker], static_cast<uint32_t>(worker)};
+      const uint32_t worker_seed = rng_();
+      workers.emplace_back([&, worker, worker_seed] {
+        std::seed_seq seed{worker_seed, static_cast<uint32_t>(worker)};
         std::mt19937 rng(seed);
         WorkerResult& output = worker_results[worker];
         for (uint64_t offset = worker; offset < remaining;
@@ -830,7 +804,6 @@ void CFRSolver::run(uint64_t iterations, int threads) {
     }
     state_.iterations += remaining;
   }
-
 }
 
 double CFRSolver::evaluate_deal(const Deal& deal, TraversalMode mode) {
@@ -841,9 +814,7 @@ double CFRSolver::evaluate_deal(const Deal& deal, TraversalMode mode) {
 }
 
 double CFRSolver::evaluate_deals(int samples, TraversalMode mode) {
-  if (samples <= 0) {
-    return 0.0;
-  }
+  if (samples <= 0) return 0.0;
   double value = 0.0;
   for (int sample = 0; sample < samples; ++sample) {
     value += evaluate_deal(deals_.sample(rng_), mode);
@@ -885,9 +856,7 @@ absl::StatusOr<Policy> ExtractAveragePolicy(
     ModelFingerprint model) {
   std::vector<std::pair<InfoSetKey, size_t>> rows(
       state.rows.begin(), state.rows.end());
-  std::sort(rows.begin(), rows.end(), [](const auto& left, const auto& right) {
-    return left.first < right.first;
-  });
+  std::ranges::sort(rows);
 
   Policy policy;
   policy.model = model;
@@ -901,22 +870,27 @@ absl::StatusOr<Policy> ExtractAveragePolicy(
       return absl::DataLossError("infoset strategy span is invalid");
     }
 
+    const size_t output_offset = policy.probabilities.size();
     double mass = 0.0;
     for (size_t action = 0; action < node.child_count; ++action) {
       const float value = state.strategy_sum[offset + action];
       if (!std::isfinite(value)) {
         return absl::DataLossError("nonfinite average strategy value");
       }
-      mass += std::max(0.0f, value);
+      policy.probabilities.push_back(std::max(0.0f, value));
+      mass += policy.probabilities.back();
     }
 
-    const size_t output_offset = policy.probabilities.size();
     policy.rows.emplace(key, output_offset);
-    for (size_t action = 0; action < node.child_count; ++action) {
-      const float value = state.strategy_sum[offset + action];
-      policy.probabilities.push_back(
-          mass > 0.0 ? static_cast<float>(std::max(0.0f, value) / mass)
-                     : 1.0f / node.child_count);
+    absl::Span<float> probabilities(
+        policy.probabilities.data() + output_offset, node.child_count);
+    if (mass > 0.0) {
+      for (float& probability : probabilities) {
+        probability = static_cast<float>(probability / mass);
+      }
+    } else {
+      std::fill(probabilities.begin(), probabilities.end(),
+                1.0f / node.child_count);
     }
   }
   return policy;
@@ -931,11 +905,8 @@ absl::StatusOr<Policy> CFRSolver::extract_average_policy() const {
 }
 
 double CFRSolver::get_expected_value(Player player) const {
-  if (state_.iterations == 0) {
-    return 0.0;
-  }
-  const double player_a_ev =
-      state_.cumulative_root_utility / state_.iterations;
+  if (state_.iterations == 0) return 0.0;
+  const double player_a_ev = state_.cumulative_root_utility / state_.iterations;
   return player == Player::A ? player_a_ev : -player_a_ev;
 }
 

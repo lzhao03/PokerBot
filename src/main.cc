@@ -28,6 +28,8 @@ ABSL_FLAG(int64_t, max_memory_mb, 4096,
           "hard memory limit in MB; 0 is unlimited");
 ABSL_FLAG(bool, accumulate_average_strategy, true,
           "store the average strategy");
+ABSL_FLAG(bool, external_sampling, false,
+          "sample opponent actions during training");
 ABSL_FLAG(std::string, private_abstraction, "handcrafted36",
           "exact or handcrafted36");
 ABSL_FLAG(std::string, private_recall, "auto",
@@ -86,6 +88,7 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
   config.max_info_sets = absl::GetFlag(FLAGS_max_info_sets);
   config.accumulate_average_strategy =
       absl::GetFlag(FLAGS_accumulate_average_strategy);
+  config.external_sampling = absl::GetFlag(FLAGS_external_sampling);
 
   const std::string private_abstraction =
       absl::GetFlag(FLAGS_private_abstraction);
@@ -101,11 +104,12 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
   if (recall != "auto" && recall != "current" && recall != "history") {
     return absl::InvalidArgumentError("invalid private recall mode");
   }
-  config.card_abstraction.recall_mode =
+  const bool retain_bucket_history =
       recall == "history" ||
-              (recall == "auto" &&
-               config.card_abstraction.private_kind ==
-                   poker::PrivateAbstractionKind::Handcrafted36)
+      (recall == "auto" &&
+       config.card_abstraction.private_kind ==
+           poker::PrivateAbstractionKind::Handcrafted36);
+  config.card_abstraction.recall_mode = retain_bucket_history
           ? poker::RecallMode::BucketHistory
           : poker::RecallMode::CurrentBucketOnly;
 

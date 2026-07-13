@@ -21,7 +21,6 @@ struct BestResponseConfig {
 };
 
 struct BestResponseResult {
-  Player responder = Player::A;
   Policy response_policy;
   double value = 0.0;
   double standard_error = 0.0;

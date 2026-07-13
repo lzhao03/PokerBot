@@ -153,17 +153,12 @@ uint16_t ProductRank(int product) {
   return it->second;
 }
 
-consteval bool ProductsAreStrictlySorted() {
-  const auto& products = hand_evaluator_tables::kCactusProducts;
-  for (size_t index = 1; index < products.size(); ++index) {
-    if (products[index - 1].first >= products[index].first) {
-      return false;
-    }
-  }
-  return true;
-}
-
-static_assert(ProductsAreStrictlySorted());
+static_assert(std::adjacent_find(
+                  hand_evaluator_tables::kCactusProducts.begin(),
+                  hand_evaluator_tables::kCactusProducts.end(),
+                  [](const auto& left, const auto& right) {
+                    return left.first >= right.first;
+                  }) == hand_evaluator_tables::kCactusProducts.end());
 
 uint16_t EvaluateHand(ComboId hand, const Board& board) noexcept {
   assert(board.count() == kMaxBoardCards);

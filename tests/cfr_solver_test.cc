@@ -15,9 +15,6 @@
 namespace poker {
 
 struct CFRSolverTestAccess {
-  static const HistoryTree& history(const CFRSolver& solver) {
-    return solver.history_;
-  }
   static const CfrState& state(const CFRSolver& solver) {
     return solver.state_;
   }
@@ -193,6 +190,21 @@ TEST_CASE("small exact solver baseline is deterministic") {
         doctest::Approx(-0.428839));
 }
 
+TEST_CASE("external sampling visits only traverser action branches") {
+  auto full = MakeSolver(Config(), R(kA), R(kB));
+  SolverConfig config = Config();
+  config.external_sampling = true;
+  auto sampled = MakeSolver(config, R(kA), R(kB));
+  full->run(2);
+  sampled->run(2);
+
+  CHECK(sampled->get_stats().decision_visits <
+        full->get_stats().decision_visits);
+  CHECK(sampled->model_fingerprint() == full->model_fingerprint());
+  CHECK(sampled->get_iterations_run() == 2);
+  CHECK(sampled->extract_average_policy().ok());
+}
+
 TEST_CASE("model fingerprints are stable and cover solve ranges") {
   auto first = MakeSolver(Config(), R(kA), R(kB));
   auto second = MakeSolver(Config(), R(kA), R(kB));
@@ -221,7 +233,7 @@ TEST_CASE("private abstraction cannot change terminal utility") {
 
 TEST_CASE("history tree stores direct rule transitions") {
   auto solver = MakeSolver(Config(), R(kA), R(kB));
-  const HistoryTree& tree = CFRSolverTestAccess::history(*solver);
+  const HistoryTree& tree = solver->history_tree();
   REQUIRE_FALSE(tree.nodes.empty());
 
   for (size_t id = 0; id < tree.nodes.size(); ++id) {
@@ -301,8 +313,8 @@ TEST_CASE("infoset action rows are contiguous") {
   std::vector<RowSize> rows;
   rows.reserve(state.rows.size());
   for (const auto& entry : state.rows) {
-    const HistoryNode& node = CFRSolverTestAccess::history(*solver)
-                                  .nodes[Index(entry.first.history)];
+    const HistoryNode& node =
+        solver->history_tree().nodes[Index(entry.first.history)];
     REQUIRE(std::holds_alternative<DecisionState>(node.state));
     rows.push_back({entry.second, node.child_count});
   }
@@ -332,7 +344,7 @@ TEST_CASE("postflop roots use full observation identity") {
 
   auto solver = MakeSolver(config, R(kA), R(kB), root);
   solver->run(2);
-  const HistoryTree& tree = CFRSolverTestAccess::history(*solver);
+  const HistoryTree& tree = solver->history_tree();
   const Player player = std::get<DecisionState>(tree.nodes[0].state).actor;
   const ComboId hand = player == Player::A ? kA : kB;
   const PublicPosition public_state(solver->card_abstraction(), root.board);
@@ -535,8 +547,6 @@ TEST_CASE("exploitability reports both responder perspectives") {
   const auto estimate = EstimateExploitability(
       *game, *policy, BestResponseConfig{200, 2, 23});
   REQUIRE(estimate.ok());
-  CHECK(estimate->player_a_response.responder == Player::A);
-  CHECK(estimate->player_b_response.responder == Player::B);
   CHECK(estimate->nash_conv == doctest::Approx(
       estimate->player_a_response.value +
       estimate->player_b_response.value));
