@@ -92,11 +92,16 @@ uint16_t EvalSevenCactus(const HandFeatures& features) noexcept {
   const auto& suit_masks = features.suit_masks;
   const uint16_t rank_mask = features.rank_mask;
 
+  uint16_t flush_mask = 0;
   for (uint16_t suit_mask : suit_masks) {
     if (std::popcount(suit_mask) >= 5) {
-      if (const uint16_t straight = HighestStraightMask(suit_mask)) {
-        return hand_evaluator_tables::kCactusFlushes[straight];
-      }
+      flush_mask = suit_mask;
+      break;
+    }
+  }
+  if (flush_mask != 0) {
+    if (const uint16_t straight = HighestStraightMask(flush_mask)) {
+      return hand_evaluator_tables::kCactusFlushes[straight];
     }
   }
 
@@ -117,11 +122,9 @@ uint16_t EvalSevenCactus(const HandFeatures& features) noexcept {
         PrimePower(three, 3) * PrimePower(pair, 2));
   }
 
-  for (uint16_t suit_mask : suit_masks) {
-    if (std::popcount(suit_mask) >= 5) {
-      return hand_evaluator_tables::kCactusFlushes[
-          HighestFiveRanks(suit_mask)];
-    }
+  if (flush_mask != 0) {
+    return hand_evaluator_tables::kCactusFlushes[
+        HighestFiveRanks(flush_mask)];
   }
 
   if (const uint16_t straight = HighestStraightMask(rank_mask)) {
