@@ -24,7 +24,6 @@ cc_library(
         "@abseil-cpp//absl/status:status",
         "@abseil-cpp//absl/status:statusor",
         "@abseil-cpp//absl/types:span",
-        "//generated:hand_evaluator_tables",
     ],
     visibility = ["//visibility:public"],
 )
