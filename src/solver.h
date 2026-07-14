@@ -102,7 +102,6 @@ struct CfrState {
   CfrState(const SolverConfig& config,
            bool accumulate_average_strategy);
 
-  absl::flat_hash_map<InfoSetKey, size_t> rows;
   std::vector<float> regret_sum;
   std::vector<float> strategy_sum;
   uint64_t iterations = 0;
@@ -120,14 +119,28 @@ struct CfrState {
                     absl::Span<const float> probabilities,
                     double weight,
                     bool concurrent = false);
-  bool at_capacity() const { return rows.size() >= max_info_sets_; }
+  size_t row_count() const;
+  std::optional<size_t> find(InfoSetKey key) const;
+  bool contains(InfoSetKey key) const { return find(key).has_value(); }
+  std::vector<std::pair<InfoSetKey, size_t>> row_entries() const;
+  bool at_capacity() const { return row_count() >= max_info_sets_; }
   std::optional<size_t> find_or_create(
       InfoSetKey key,
       uint8_t action_count);
 
  private:
+  bool can_pack(InfoSetKey key) const;
+  uint64_t pack(InfoSetKey key) const;
+  InfoSetKey unpack(uint64_t key) const;
+  void use_full_keys();
+
+  absl::flat_hash_map<uint64_t, size_t> packed_rows_;
+  absl::flat_hash_map<InfoSetKey, size_t> full_rows_;
   size_t max_info_sets_;
   bool accumulate_average_strategy_;
+  uint8_t private_bits_ = 0;
+  uint8_t history_bits_ = 0;
+  bool packed_keys_ = false;
 };
 
 struct Policy {
@@ -193,7 +206,7 @@ class CFRSolver {
 
   double get_expected_value(Player player) const;
   uint64_t get_iterations_run() const { return state_.iterations; }
-  size_t get_info_set_count() const { return state_.rows.size(); }
+  size_t get_info_set_count() const { return state_.row_count(); }
   size_t get_history_count() const { return history_.nodes.size(); }
   size_t get_regret_bytes() const {
     return state_.regret_sum.size() * sizeof(float);

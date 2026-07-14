@@ -216,7 +216,7 @@ TEST_CASE("model fingerprints are stable and cover solve ranges") {
         different_training->model_fingerprint());
   CHECK(first->model_fingerprint() != changed->model_fingerprint());
   CHECK(std::to_underlying(first->model_fingerprint()) ==
-        0x795747a4f22f81b8ULL);
+        0x9ebae6e5a4064673ULL);
 }
 
 TEST_CASE("private abstraction cannot change terminal utility") {
@@ -283,7 +283,8 @@ TEST_CASE("training mutates only CFR state") {
   CHECK(std::isfinite(*value));
   CHECK(solver->get_history_count() == history_count);
   CHECK(solver->get_stats().decision_visits == updates);
-  CHECK(CFRSolverTestAccess::state(*solver).rows == before.rows);
+  CHECK(CFRSolverTestAccess::state(*solver).row_entries() ==
+        before.row_entries());
   CHECK(CFRSolverTestAccess::state(*solver).regret_sum == before.regret_sum);
   CHECK(CFRSolverTestAccess::state(*solver).strategy_sum ==
         before.strategy_sum);
@@ -312,8 +313,9 @@ TEST_CASE("infoset action rows are contiguous") {
     uint8_t action_count;
   };
   std::vector<RowSize> rows;
-  rows.reserve(state.rows.size());
-  for (const auto& entry : state.rows) {
+  const auto entries = state.row_entries();
+  rows.reserve(entries.size());
+  for (const auto& entry : entries) {
     const HistoryNode& node =
         solver->history_tree().nodes[Index(entry.first.history)];
     REQUIRE(std::holds_alternative<DecisionState>(node.state));
@@ -351,7 +353,7 @@ TEST_CASE("postflop roots use full observation identity") {
   const PublicPosition public_state(solver->card_abstraction(), root.board);
   const PrivateObservationId private_id = ObservePrivate(
       solver->card_abstraction(), hand, root.board);
-  CHECK(CFRSolverTestAccess::state(*solver).rows.contains(
+  CHECK(CFRSolverTestAccess::state(*solver).contains(
       {public_state.observation(), HistoryId{}, private_id}));
 }
 

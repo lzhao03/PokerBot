@@ -12,10 +12,11 @@ namespace poker {
 namespace {
 
 inline constexpr int kPublicObservationBitsPerStreet = 7;
-inline constexpr int kPrivateObservationBitsPerStreet = 6;
 inline constexpr int kSuitBucketCount = 4;
 inline constexpr int kStraightBucketCount = 3;
 inline constexpr int kHighBucketCount = 3;
+inline constexpr std::array<uint32_t, 4> kPrivateObservationPlaces = {
+    1, 37, 37 * 37, 37 * 37 * 37};
 
 struct BoardFeatures {
   std::array<uint8_t, 13> rank_counts = {};
@@ -168,9 +169,9 @@ PrivateObservationId HandcraftedObservation(
   }
   if (previous != PrivateObservationId{} && board.count() >= 3) {
     return PrivateObservationId(
-        std::to_underlying(previous) |
+        std::to_underlying(previous) +
         (uint32_t{Handcrafted36Bucket(hand, BoardFeaturesFor(board))} + 1)
-            << (kPrivateObservationBitsPerStreet * (board.count() - 2)));
+            * kPrivateObservationPlaces[board.count() - 2]);
   }
 
   uint32_t observation =
@@ -180,9 +181,9 @@ PrivateObservationId HandcraftedObservation(
   for (size_t index = 0; index < cards.size(); ++index) {
     AddCard(features, cards[index]);
     if (index >= 2) {
-      observation |=
+      observation +=
           (uint32_t{Handcrafted36Bucket(hand, features)} + 1)
-          << (kPrivateObservationBitsPerStreet * (index - 1));
+          * kPrivateObservationPlaces[index - 1];
     }
   }
   return PrivateObservationId(observation);

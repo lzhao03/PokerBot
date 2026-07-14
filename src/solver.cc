@@ -79,7 +79,7 @@ void AddRange(std::vector<uint8_t>& bytes, const ComboRange& range) noexcept {
 
 ModelFingerprint FingerprintModel(const SolveSpec& spec) noexcept {
   std::vector<uint8_t> bytes;
-  AppendInteger<uint32_t>(bytes, 3);  // Fingerprint schema.
+  AppendInteger<uint32_t>(bytes, 4);  // Fingerprint schema.
 
   const SolverConfig& config = spec.config;
   AppendInteger(bytes, config.betting_rules.minimum_bet);
@@ -354,33 +354,116 @@ CfrState::CfrState(const SolverConfig& config,
                    bool accumulate_average_strategy)
     : max_info_sets_(static_cast<size_t>(config.max_info_sets)),
       accumulate_average_strategy_(accumulate_average_strategy) {
+  const CardAbstractionConfig& cards = config.card_abstraction;
+  packed_keys_ = cards.public_mode == PublicCardMode::Texture;
+  if (packed_keys_) {
+    private_bits_ = cards.private_kind == PrivateAbstractionKind::ExactCanonical
+                        ? 11
+                        : cards.recall_mode == RecallMode::CurrentBucketOnly
+                              ? 6
+                              : 21;
+    history_bits_ = std::min<uint8_t>(
+        32, static_cast<uint8_t>(43 - private_bits_));
+  }
   size_t max_actions = 3;
   for (const auto& fractions : config.bet_abstraction.pot_fractions) {
     max_actions = std::max(max_actions, fractions.size() + 3);
   }
-  rows.reserve(max_info_sets_);
+  if (packed_keys_) {
+    packed_rows_.reserve(max_info_sets_);
+  } else {
+    full_rows_.reserve(max_info_sets_);
+  }
   regret_sum.reserve(max_info_sets_ * max_actions);
   if (accumulate_average_strategy) {
     strategy_sum.reserve(max_info_sets_ * max_actions);
   }
 }
 
+bool CfrState::can_pack(InfoSetKey key) const {
+  constexpr uint64_t kPublicMask = (uint64_t{1} << 21) - 1;
+  const auto mask = [](uint8_t bits) { return (uint64_t{1} << bits) - 1; };
+  return std::to_underlying(key.public_observation) <= kPublicMask &&
+         std::to_underlying(key.history) <= mask(history_bits_) &&
+         std::to_underlying(key.private_observation) <= mask(private_bits_);
+}
+
+uint64_t CfrState::pack(InfoSetKey key) const {
+  return std::to_underlying(key.private_observation) |
+         uint64_t{std::to_underlying(key.history)} << private_bits_ |
+         std::to_underlying(key.public_observation)
+             << (private_bits_ + history_bits_);
+}
+
+InfoSetKey CfrState::unpack(uint64_t key) const {
+  const auto mask = [](uint8_t bits) { return (uint64_t{1} << bits) - 1; };
+  return {
+      PublicObservationId(key >> (private_bits_ + history_bits_)),
+      HistoryId(static_cast<uint32_t>(key >> private_bits_ &
+                                      mask(history_bits_))),
+      PrivateObservationId(static_cast<uint32_t>(key & mask(private_bits_)))};
+}
+
+void CfrState::use_full_keys() {
+  full_rows_.reserve(max_info_sets_);
+  for (const auto& [key, offset] : packed_rows_) {
+    full_rows_.try_emplace(unpack(key), offset);
+  }
+  packed_rows_ = {};
+  packed_keys_ = false;
+}
+
+size_t CfrState::row_count() const {
+  return packed_keys_ ? packed_rows_.size() : full_rows_.size();
+}
+
+std::optional<size_t> CfrState::find(InfoSetKey key) const {
+  if (packed_keys_) {
+    if (!can_pack(key)) return std::nullopt;
+    const auto found = packed_rows_.find(pack(key));
+    return found == packed_rows_.end() ? std::nullopt
+                                       : std::optional(found->second);
+  }
+  const auto found = full_rows_.find(key);
+  return found == full_rows_.end() ? std::nullopt
+                                    : std::optional(found->second);
+}
+
+std::vector<std::pair<InfoSetKey, size_t>> CfrState::row_entries() const {
+  std::vector<std::pair<InfoSetKey, size_t>> entries;
+  entries.reserve(row_count());
+  if (packed_keys_) {
+    for (const auto& [key, offset] : packed_rows_) {
+      entries.emplace_back(unpack(key), offset);
+    }
+  } else {
+    entries.assign(full_rows_.begin(), full_rows_.end());
+  }
+  std::ranges::sort(entries);
+  return entries;
+}
+
 std::optional<size_t> CfrState::find_or_create(
     InfoSetKey key,
     uint8_t action_count) {
-  if (rows.size() >= max_info_sets_) {
-    const auto found = rows.find(key);
-    return found == rows.end() ? std::nullopt
-                               : std::optional(found->second);
-  }
-  const size_t offset = regret_sum.size();
-  const auto [row, inserted] = rows.try_emplace(key, offset);
-  if (!inserted) return row->second;
-  regret_sum.resize(offset + action_count, 0.0f);
-  if (accumulate_average_strategy_) {
-    strategy_sum.resize(offset + action_count, 0.0f);
-  }
-  return offset;
+  if (packed_keys_ && !can_pack(key)) use_full_keys();
+  auto insert = [&](auto& rows, auto row_key) -> std::optional<size_t> {
+    if (rows.size() >= max_info_sets_) {
+      const auto found = rows.find(row_key);
+      return found == rows.end() ? std::nullopt
+                                 : std::optional(found->second);
+    }
+    const size_t offset = regret_sum.size();
+    const auto [row, inserted] = rows.try_emplace(row_key, offset);
+    if (!inserted) return row->second;
+    regret_sum.resize(offset + action_count, 0.0f);
+    if (accumulate_average_strategy_) {
+      strategy_sum.resize(offset + action_count, 0.0f);
+    }
+    return offset;
+  };
+  return packed_keys_ ? insert(packed_rows_, pack(key))
+                      : insert(full_rows_, key);
 }
 
 bool Policy::strategy(InfoSetKey key, absl::Span<float> output) const {
@@ -691,8 +774,7 @@ double CFRSolver::traverse(HistoryId history,
       context.may_create_infosets) {
     offset = state_.find_or_create(key, action_count);
   } else {
-    const auto found = state_.rows.find(key);
-    if (found != state_.rows.end()) offset = found->second;
+    offset = state_.find(key);
   }
   std::array<float, kMaxActionsPerNode> probabilities;
   std::array<double, kMaxActionsPerNode> action_values;
@@ -869,9 +951,7 @@ absl::StatusOr<Policy> ExtractAveragePolicy(
     const CfrState& state,
     const HistoryTree& history,
     ModelFingerprint model) {
-  std::vector<std::pair<InfoSetKey, size_t>> rows(
-      state.rows.begin(), state.rows.end());
-  std::ranges::sort(rows);
+  std::vector<std::pair<InfoSetKey, size_t>> rows = state.row_entries();
 
   Policy policy;
   policy.model = model;
