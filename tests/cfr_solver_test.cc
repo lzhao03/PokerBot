@@ -184,10 +184,10 @@ TEST_CASE("small exact solver baseline is deterministic") {
   solver->run(10);
 
   CHECK(solver->get_history_count() == 417);
-  CHECK(solver->get_info_set_count() == 714);
+  CHECK(solver->get_info_set_count() == 720);
   CHECK(solver->get_stats().decision_visits == 1440);
   CHECK(solver->get_expected_value(Player::A) ==
-        doctest::Approx(-0.428839));
+        doctest::Approx(-0.737666));
 }
 
 TEST_CASE("external sampling visits only traverser action branches") {

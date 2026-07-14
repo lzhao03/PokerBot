@@ -189,16 +189,20 @@ absl::StatusOr<absl::InlinedVector<Card, 5>> SampleStreetCards(
     return absl::InlinedVector<Card, 5>{};
   }
 
-  const CardMask blocked = known_private_cards | board.mask();
-  if (count == 1) {
-    std::uniform_int_distribution<uint32_t> card_dist(0, kDeckCardCount - 1);
-    for (size_t attempt = 0; attempt < kDeckCardCount; ++attempt) {
-      const Card candidate = kDeck[card_dist(rng)];
-      if ((blocked & CardBit(candidate)) == 0) {
-        return absl::InlinedVector<Card, 5>{candidate};
-      }
+  CardMask blocked = known_private_cards | board.mask();
+  absl::InlinedVector<Card, 5> sampled;
+  sampled.reserve(count);
+  std::uniform_int_distribution<uint32_t> card_dist(0, kDeckCardCount - 1);
+  for (size_t attempt = 0;
+       attempt < kDeckCardCount && sampled.size() < count; ++attempt) {
+    const Card candidate = kDeck[card_dist(rng)];
+    const CardMask bit = CardBit(candidate);
+    if ((blocked & bit) == 0) {
+      sampled.push_back(candidate);
+      blocked |= bit;
     }
   }
+  if (sampled.size() == count) return sampled;
 
   std::array<Card, kDeckCardCount> candidates = {};
   uint32_t candidate_count = 0;
@@ -207,13 +211,12 @@ absl::StatusOr<absl::InlinedVector<Card, 5>> SampleStreetCards(
       candidates[candidate_count++] = candidate;
     }
   }
-  if (candidate_count < count) {
+  const size_t remaining = count - sampled.size();
+  if (candidate_count < remaining) {
     return absl::InvalidArgumentError("not enough unblocked cards");
   }
 
-  absl::InlinedVector<Card, 5> sampled;
-  sampled.reserve(count);
-  for (uint32_t i = 0; i < count; ++i) {
+  for (uint32_t i = 0; i < remaining; ++i) {
     std::uniform_int_distribution<uint32_t> card_dist(i, candidate_count - 1);
     const uint32_t chosen = card_dist(rng);
     std::swap(candidates[i], candidates[chosen]);
