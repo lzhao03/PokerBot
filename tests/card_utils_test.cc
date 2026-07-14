@@ -341,10 +341,10 @@ TEST_CASE("coarse public exact private keeps relative flush information") {
   const ComboId renamed_hand = Rename(hand, suits);
   const PublicPosition renamed(config, renamed_board);
 
-  const InfoSetKey key{HistoryId{7}, position.observation(),
+  const InfoSetKey key{position.observation(), HistoryId{7},
                        ObservePrivate(config, hand, board)};
   const InfoSetKey renamed_key{
-      HistoryId{7}, renamed.observation(),
+      renamed.observation(), HistoryId{7},
       ObservePrivate(config, renamed_hand, renamed_board)};
   CHECK(key == renamed_key);
 }

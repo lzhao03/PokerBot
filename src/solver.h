@@ -83,8 +83,8 @@ struct Position {
 };
 
 struct InfoSetKey {
-  HistoryId history;
   PublicObservationId public_observation;
+  HistoryId history;
   PrivateObservationId private_observation;
 
   friend auto operator<=>(const InfoSetKey&, const InfoSetKey&) = default;
@@ -96,6 +96,7 @@ struct InfoSetKey {
                       std::to_underlying(key.private_observation));
   }
 };
+static_assert(sizeof(InfoSetKey) == 16);
 
 struct CfrState {
   CfrState(const SolverConfig& config,
@@ -119,6 +120,7 @@ struct CfrState {
                     absl::Span<const float> probabilities,
                     double weight,
                     bool concurrent = false);
+  bool at_capacity() const { return rows.size() >= max_info_sets_; }
   std::optional<size_t> find_or_create(
       InfoSetKey key,
       uint8_t action_count);
@@ -234,6 +236,7 @@ class CFRSolver {
     uint64_t iteration;
     std::mt19937& rng;
     SolverStats& stats;
+    bool may_create_infosets;
     bool concurrent_updates;
   };
 

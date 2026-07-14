@@ -171,8 +171,9 @@ Policy PassiveCallingPolicy(const CFRSolver& game, ComboId hand) {
     }
     REQUIRE(selected);
     policy.rows.try_emplace(
-        InfoSetKey{HistoryId{static_cast<uint32_t>(history)},
-                   position.observation(), private_observation},
+        InfoSetKey{position.observation(),
+                   HistoryId{static_cast<uint32_t>(history)},
+                   private_observation},
         offset);
   }
   return policy;
@@ -351,7 +352,7 @@ TEST_CASE("postflop roots use full observation identity") {
   const PrivateObservationId private_id = ObservePrivate(
       solver->card_abstraction(), hand, root.board);
   CHECK(CFRSolverTestAccess::state(*solver).rows.contains(
-      {HistoryId{}, public_state.observation(), private_id}));
+      {public_state.observation(), HistoryId{}, private_id}));
 }
 
 TEST_CASE("training continues after the infoset cap is reached") {
@@ -406,8 +407,9 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
 
   std::array<float, 3> missing = {};
   CHECK_FALSE(policy.strategy(
-      {HistoryId{std::numeric_limits<uint32_t>::max()},
-       PublicObservationId(), PrivateObservationId()},
+      {PublicObservationId(),
+       HistoryId{std::numeric_limits<uint32_t>::max()},
+       PrivateObservationId()},
       absl::MakeSpan(missing)));
   for (float probability : missing) {
     CHECK(probability == doctest::Approx(1.0 / missing.size()));
@@ -517,7 +519,7 @@ TEST_CASE("approximate response learns a profitable shared action") {
   const PublicPosition position(
       game->card_abstraction(), game->solve_spec().root.board);
   const InfoSetKey root_key{
-      HistoryId{}, position.observation(),
+      position.observation(), HistoryId{},
       ObservePrivate(game->card_abstraction(), kA, position.board())};
   const size_t offset = response->response_policy.rows.at(root_key);
   const HistoryNode& root = game->history_tree().nodes[0];

@@ -336,7 +336,7 @@ void CfrState::strategy(absl::Span<const float> values,
     FillUniform(probabilities);
     return;
   }
-  double sum = 0.0;
+  float sum = 0.0f;
   for (size_t action = 0; action < probabilities.size(); ++action) {
     probabilities[action] =
         LoadValue(values[*offset + action], concurrent);
@@ -345,9 +345,8 @@ void CfrState::strategy(absl::Span<const float> values,
   if (sum <= 0.0) {
     FillUniform(probabilities);
   } else {
-    for (float& probability : probabilities) {
-      probability = static_cast<float>(probability / sum);
-    }
+    const float scale = 1.0f / sum;
+    for (float& probability : probabilities) probability *= scale;
   }
 }
 
@@ -462,7 +461,8 @@ absl::Status SavePolicy(const Policy& policy,
   for (const auto& [key, offset] : rows) {
     AppendInteger(bytes, std::to_underlying(key.history));
     AppendInteger(bytes, std::to_underlying(key.public_observation));
-    AppendInteger(bytes, std::to_underlying(key.private_observation));
+    AppendInteger<uint64_t>(
+        bytes, std::to_underlying(key.private_observation));
     AppendInteger<uint64_t>(bytes, offset);
   }
   for (float probability : policy.probabilities) {
@@ -679,7 +679,7 @@ double CFRSolver::traverse(HistoryId history,
   const size_t player_index = Index(player);
   const uint8_t action_count = history_node.child_count;
   const InfoSetKey key{
-      history, public_state.observation(),
+      public_state.observation(), history,
       frame.private_observations[player_index]};
   const bool training = context.mode == TraversalMode::Train;
   const bool external_sampling =
@@ -687,7 +687,8 @@ double CFRSolver::traverse(HistoryId history,
   const bool updates_regrets =
       training && context.iteration % kPlayerCount == player_index;
   std::optional<size_t> offset;
-  if (updates_regrets || external_sampling) {
+  if ((updates_regrets || external_sampling) &&
+      context.may_create_infosets) {
     offset = state_.find_or_create(key, action_count);
   } else {
     const auto found = state_.rows.find(key);
@@ -769,15 +770,15 @@ void CFRSolver::run(uint64_t iterations, int threads) {
     const Deal deal = deals_.sample(rng);
     const TraversalFrame frame = initial_frame(deal, root);
     TraversalContext context{
-        deal, TraversalMode::Train, iteration, rng, stats, concurrent};
+        deal, TraversalMode::Train, iteration, rng, stats,
+        !state_.at_capacity(), concurrent};
     return traverse(root.history, root.public_state, frame, context);
   };
 
-  const size_t capacity = static_cast<size_t>(spec_.config.max_info_sets);
   uint64_t serial_iterations = 0;
   // Fill the infoset map serially; workers only update it at capacity.
   while (serial_iterations < iterations &&
-         (threads <= 1 || state_.rows.size() < capacity)) {
+         (threads <= 1 || !state_.at_capacity())) {
     state_.cumulative_root_utility += run_iteration(
         state_.iterations, rng_, stats_, false);
     ++state_.iterations;
@@ -823,7 +824,7 @@ void CFRSolver::run(uint64_t iterations, int threads) {
 double CFRSolver::evaluate_deal(const Deal& deal, TraversalMode mode) {
   const Position root = root_position();
   const TraversalFrame frame = initial_frame(deal, root);
-  TraversalContext context{deal, mode, 0, rng_, stats_, false};
+  TraversalContext context{deal, mode, 0, rng_, stats_, false, false};
   return traverse(root.history, root.public_state, frame, context);
 }
 

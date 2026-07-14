@@ -169,19 +169,19 @@ PrivateObservationId HandcraftedObservation(
   if (previous != PrivateObservationId{} && board.count() >= 3) {
     return PrivateObservationId(
         std::to_underlying(previous) |
-        (uint64_t{Handcrafted36Bucket(hand, BoardFeaturesFor(board))} + 1)
+        (uint32_t{Handcrafted36Bucket(hand, BoardFeaturesFor(board))} + 1)
             << (kPrivateObservationBitsPerStreet * (board.count() - 2)));
   }
 
-  uint64_t observation =
-      uint64_t{Handcrafted36Bucket(hand, BoardFeatures{})} + 1;
+  uint32_t observation =
+      uint32_t{Handcrafted36Bucket(hand, BoardFeatures{})} + 1;
   BoardFeatures features;
   const auto cards = board.cards();
   for (size_t index = 0; index < cards.size(); ++index) {
     AddCard(features, cards[index]);
     if (index >= 2) {
       observation |=
-          (uint64_t{Handcrafted36Bucket(hand, features)} + 1)
+          (uint32_t{Handcrafted36Bucket(hand, features)} + 1)
           << (kPrivateObservationBitsPerStreet * (index - 1));
     }
   }

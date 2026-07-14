@@ -119,7 +119,7 @@ double TraverseProfile(const CFRSolver& game,
   const DecisionState& decision = std::get<DecisionState>(node.state);
   const size_t player = Index(decision.actor);
   const InfoSetKey key{
-      position.history, position.public_state.observation(),
+      position.public_state.observation(), position.history,
       frame.private_observations[player]};
   absl::InlinedVector<float, 8> probabilities(node.child_count, 0.0f);
   ++counters.lookups[player];
@@ -208,7 +208,7 @@ double TraverseResponse(const CFRSolver& game,
   const Player actor = decision.actor;
   const size_t player = Index(actor);
   const InfoSetKey key{
-      position.history, position.public_state.observation(),
+      position.public_state.observation(), position.history,
       frame.private_observations[player]};
   const bool responder_turn = actor == context.responder;
   std::optional<size_t> offset;

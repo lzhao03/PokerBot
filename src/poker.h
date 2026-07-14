@@ -101,7 +101,7 @@ class ComboId {
 };
 
 enum class PublicObservationId : uint64_t {};
-enum class PrivateObservationId : uint64_t {};
+enum class PrivateObservationId : uint32_t {};
 
 inline constexpr std::array<Card, kDeckCardCount> kDeck = [] {
   std::array<Card, kDeckCardCount> cards = {};

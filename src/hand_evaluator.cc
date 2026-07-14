@@ -1,6 +1,5 @@
 #include "src/hand_evaluator.h"
 
-#include <algorithm>
 #include <array>
 #include <bit>
 #include <cassert>
@@ -16,16 +15,20 @@ static constexpr std::array<int, 13> kRankPrimes = {
     2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41};
 
 struct HandFeatures {
-  std::array<uint8_t, 13> rank_counts = {};
   std::array<uint16_t, 4> suit_masks = {};
   uint16_t rank_mask = 0;
+  uint16_t pair_mask = 0;
+  uint16_t trip_mask = 0;
+  uint16_t quad_mask = 0;
 };
 
 void AddCard(HandFeatures& features, Card card) noexcept {
   const size_t rank = std::to_underlying(card.rank());
   const uint16_t bit = static_cast<uint16_t>(1U << rank);
-  ++features.rank_counts[rank];
   features.suit_masks[std::to_underlying(card.suit())] |= bit;
+  features.quad_mask |= features.trip_mask & bit;
+  features.trip_mask |= features.pair_mask & bit;
+  features.pair_mask |= features.rank_mask & bit;
   features.rank_mask |= bit;
 }
 
@@ -55,10 +58,37 @@ int PrimePower(int rank, int count) noexcept {
   return product;
 }
 
-uint16_t ProductRank(int product);
+constexpr int kProductTableBits = 13;
+constexpr size_t kProductTableSize = 1 << kProductTableBits;
+constexpr uint32_t kProductHashMultiplier = 0x9E3779B1;
+
+constexpr size_t ProductSlot(int product) noexcept {
+  return (static_cast<uint32_t>(product) * kProductHashMultiplier) >>
+      (32 - kProductTableBits);
+}
+
+constexpr auto kProductRanks = [] {
+  std::array<std::pair<int, uint16_t>, kProductTableSize> ranks = {};
+  for (const auto& entry : hand_evaluator_tables::kCactusProducts) {
+    size_t slot = ProductSlot(entry.first);
+    while (ranks[slot].first != 0) {
+      slot = (slot + 1) & (kProductTableSize - 1);
+    }
+    ranks[slot] = entry;
+  }
+  return ranks;
+}();
+
+[[gnu::noinline]] uint16_t ProductRank(int product) {
+  size_t slot = ProductSlot(product);
+  while (kProductRanks[slot].first != product) {
+    assert(kProductRanks[slot].first != 0);
+    slot = (slot + 1) & (kProductTableSize - 1);
+  }
+  return kProductRanks[slot].second;
+}
 
 uint16_t EvalSevenCactus(const HandFeatures& features) noexcept {
-  const auto& rank_counts = features.rank_counts;
   const auto& suit_masks = features.suit_masks;
   const uint16_t rank_mask = features.rank_mask;
 
@@ -70,39 +100,21 @@ uint16_t EvalSevenCactus(const HandFeatures& features) noexcept {
     }
   }
 
-  int four = -1;
-  int first_three = -1;
-  int second_three = -1;
-  std::array<int, 3> pairs = {-1, -1, -1};
-  int pair_count = 0;
-  for (int rank = 12; rank >= 0; --rank) {
-    const int count = rank_counts[static_cast<size_t>(rank)];
-    if (count == 4) {
-      four = rank;
-    } else if (count == 3) {
-      if (first_three < 0) {
-        first_three = rank;
-      } else {
-        second_three = rank;
-      }
-    } else if (count == 2) {
-      pairs[static_cast<size_t>(pair_count++)] = rank;
-    }
-  }
-
-  if (four >= 0) {
+  if (features.quad_mask != 0) {
+    const int four = std::bit_width(features.quad_mask) - 1;
     const uint16_t remaining = static_cast<uint16_t>(
         rank_mask & ~(1U << four));
-    const int kicker = 31 - std::countl_zero(
-        static_cast<unsigned int>(remaining));
+    const int kicker = std::bit_width(remaining) - 1;
     return ProductRank(
         PrimePower(four, 4) * kRankPrimes[static_cast<size_t>(kicker)]);
   }
 
-  if (first_three >= 0 && (second_three >= 0 || pair_count > 0)) {
-    const int pair = second_three >= 0 ? second_three : pairs[0];
+  if (features.trip_mask != 0 && std::popcount(features.pair_mask) > 1) {
+    const int three = std::bit_width(features.trip_mask) - 1;
+    const int pair = std::bit_width(static_cast<uint16_t>(
+        features.pair_mask & ~(1U << three))) - 1;
     return ProductRank(
-        PrimePower(first_three, 3) * PrimePower(pair, 2));
+        PrimePower(three, 3) * PrimePower(pair, 2));
   }
 
   for (uint16_t suit_mask : suit_masks) {
@@ -116,55 +128,41 @@ uint16_t EvalSevenCactus(const HandFeatures& features) noexcept {
     return hand_evaluator_tables::kCactusUnique5[straight];
   }
 
-  auto append_highest = [&](int product, uint16_t excluded, int count) {
-    for (int rank = 12; rank >= 0 && count > 0; --rank) {
-      if ((excluded & (1U << rank)) == 0 &&
-          rank_counts[static_cast<size_t>(rank)] > 0) {
-        product *= kRankPrimes[static_cast<size_t>(rank)];
-        --count;
-      }
+  auto append_highest = [](int product, uint16_t ranks, int count) {
+    while (count-- > 0) {
+      const int rank = std::bit_width(ranks) - 1;
+      product *= kRankPrimes[static_cast<size_t>(rank)];
+      ranks &= static_cast<uint16_t>(~(1U << rank));
     }
     return product;
   };
 
-  if (first_three >= 0) {
+  if (features.trip_mask != 0) {
+    const int three = std::bit_width(features.trip_mask) - 1;
     const int product = append_highest(
-        PrimePower(first_three, 3),
-        static_cast<uint16_t>(1U << first_three), 2);
+        PrimePower(three, 3),
+        static_cast<uint16_t>(rank_mask & ~(1U << three)), 2);
     return ProductRank(product);
   }
-  if (pair_count >= 2) {
-    int product = PrimePower(pairs[0], 2) * PrimePower(pairs[1], 2);
-    product = append_highest(
-        product,
-        static_cast<uint16_t>((1U << pairs[0]) | (1U << pairs[1])), 1);
+  if (std::popcount(features.pair_mask) >= 2) {
+    const int first = std::bit_width(features.pair_mask) - 1;
+    const int second = std::bit_width(static_cast<uint16_t>(
+        features.pair_mask & ~(1U << first))) - 1;
+    int product = PrimePower(first, 2) * PrimePower(second, 2);
+    product = append_highest(product, static_cast<uint16_t>(
+        rank_mask & ~(1U << first) & ~(1U << second)), 1);
     return ProductRank(product);
   }
-  if (pair_count == 1) {
+  if (features.pair_mask != 0) {
+    const int pair = std::bit_width(features.pair_mask) - 1;
     const int product = append_highest(
-        PrimePower(pairs[0], 2),
-        static_cast<uint16_t>(1U << pairs[0]), 3);
+        PrimePower(pair, 2),
+        static_cast<uint16_t>(rank_mask & ~(1U << pair)), 3);
     return ProductRank(product);
   }
   return hand_evaluator_tables::kCactusUnique5[
       HighestFiveRanks(rank_mask)];
 }
-
-uint16_t ProductRank(int product) {
-  const auto& products = hand_evaluator_tables::kCactusProducts;
-  const auto it = std::lower_bound(
-      products.begin(), products.end(), product,
-      [](const auto& entry, int value) { return entry.first < value; });
-  assert(it != products.end() && it->first == product);
-  return it->second;
-}
-
-static_assert(std::adjacent_find(
-                  hand_evaluator_tables::kCactusProducts.begin(),
-                  hand_evaluator_tables::kCactusProducts.end(),
-                  [](const auto& left, const auto& right) {
-                    return left.first >= right.first;
-                  }) == hand_evaluator_tables::kCactusProducts.end());
 
 uint16_t EvaluateHand(ComboId hand, HandFeatures features) noexcept {
   for (Card card : hand.cards()) AddCard(features, card);
