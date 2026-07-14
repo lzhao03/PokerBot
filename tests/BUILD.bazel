@@ -22,6 +22,7 @@ cc_test(
     srcs = [
         "card_utils_test.cc",
         "cfr_solver_test.cc",
+        "policy_codec_test.cc",
         "poker_rules_test.cc",
         "training_range_test.cc",
     ],

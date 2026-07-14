@@ -54,11 +54,13 @@ cc_library(
     srcs = [
         "card_abstraction.cc",
         "evaluation.cc",
+        "policy_codec.cc",
         "solver.cc",
     ],
     hdrs = [
         "card_abstraction.h",
         "evaluation.h",
+        "policy_codec.h",
         "solver.h",
     ],
     copts = CORE_COPTS,
