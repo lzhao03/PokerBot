@@ -109,14 +109,14 @@ struct CfrState {
 
   void strategy(absl::Span<const float> values,
                 std::optional<size_t> offset,
-                absl::Span<double> probabilities,
+                absl::Span<float> probabilities,
                 bool concurrent = false) const;
   void add_regret(size_t offset,
                   size_t action,
                   float delta,
                   bool concurrent = false);
   void add_strategy(size_t offset,
-                    absl::Span<const double> probabilities,
+                    absl::Span<const float> probabilities,
                     double weight,
                     bool concurrent = false);
   std::optional<size_t> find_or_create(

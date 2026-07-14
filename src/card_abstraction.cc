@@ -23,18 +23,24 @@ struct BoardFeatures {
   uint16_t rank_mask = 0;
   uint8_t max_rank_count = 0;
   uint8_t max_suit_count = 0;
-  uint8_t max_rank = 0;
 };
 
-int MaxStraightCards(uint16_t rank_mask) {
-  constexpr uint16_t wheel = (uint16_t{1} << 12) | 0x0F;
-  int best = std::popcount(static_cast<uint16_t>(rank_mask & wheel));
-  for (int start = 0; start <= 8; ++start) {
-    best = std::max(
-        best, std::popcount(
-                  static_cast<uint16_t>((rank_mask >> start) & 0x1F)));
+const auto kStraightCardsByRankMask = [] {
+  std::array<uint8_t, 1 << 13> values = {};
+  for (size_t rank_mask = 0; rank_mask < values.size(); ++rank_mask) {
+    constexpr uint16_t kWheel = (uint16_t{1} << 12) | 0x0F;
+    int best = std::popcount(static_cast<uint16_t>(rank_mask & kWheel));
+    for (int start = 0; start <= 8; ++start) {
+      best = std::max(best, std::popcount(static_cast<uint16_t>(
+                                (rank_mask >> start) & 0x1F)));
+    }
+    values[rank_mask] = static_cast<uint8_t>(best);
   }
-  return best;
+  return values;
+}();
+
+int MaxStraightCards(uint16_t rank_mask) {
+  return kStraightCardsByRankMask[rank_mask];
 }
 
 void AddCard(BoardFeatures& features, Card card) noexcept {
@@ -46,8 +52,6 @@ void AddCard(BoardFeatures& features, Card card) noexcept {
       std::max(features.max_rank_count, features.rank_counts[rank]);
   features.max_suit_count =
       std::max(features.max_suit_count, features.suit_counts[suit]);
-  features.max_rank =
-      std::max(features.max_rank, static_cast<uint8_t>(PokerRank(card)));
   features.rank_mask |= static_cast<uint16_t>(1u << rank);
 }
 
@@ -72,9 +76,8 @@ uint64_t BoardTextureBucket(const BoardFeatures& features) noexcept {
   const int straight_cards = MaxStraightCards(features.rank_mask);
   const int straight_bucket =
       straight_cards >= 4 ? 2 : (straight_cards >= 3 ? 1 : 0);
-  const int high_bucket = features.max_rank >= 14
-                              ? 0
-                              : (features.max_rank >= 11 ? 1 : 2);
+  const int high_rank = std::bit_width(features.rank_mask) + 1;
+  const int high_bucket = high_rank >= 14 ? 0 : (high_rank >= 11 ? 1 : 2);
   int bucket = pair_bucket;
   bucket = bucket * kSuitBucketCount + suit_bucket;
   bucket = bucket * kStraightBucketCount + straight_bucket;
@@ -85,8 +88,10 @@ uint16_t Handcrafted36Bucket(
     ComboId hand,
     const BoardFeatures& features) noexcept {
   const auto hole_cards = hand.cards();
-  const int rank0 = PokerRank(hole_cards[0]);
-  const int rank1 = PokerRank(hole_cards[1]);
+  const size_t rank_index0 = std::to_underlying(hole_cards[0].rank());
+  const size_t rank_index1 = std::to_underlying(hole_cards[1].rank());
+  const int rank0 = static_cast<int>(rank_index0) + 2;
+  const int rank1 = static_cast<int>(rank_index1) + 2;
   const int high = std::max(rank0, rank1);
   const int low = std::min(rank0, rank1);
   const bool pair = rank0 == rank1;
@@ -100,26 +105,32 @@ uint16_t Handcrafted36Bucket(
         shape_bucket * 12 + high_bucket * 3 + low_bucket);
   }
 
-  std::array<uint8_t, 13> rank_counts = features.rank_counts;
-  std::array<uint8_t, 4> suit_counts = features.suit_counts;
-  uint16_t rank_mask = features.rank_mask;
-  for (Card card : hole_cards) {
-    ++rank_counts[static_cast<size_t>(PokerRank(card) - 2)];
-    ++suit_counts[std::to_underlying(card.suit())];
-    rank_mask |= static_cast<uint16_t>(1u << (PokerRank(card) - 2));
-  }
-
-  int pairs = 0;
-  uint8_t max_count = 0;
-  for (uint8_t count : rank_counts) {
-    pairs += count >= 2 ? 1 : 0;
-    max_count = std::max(max_count, count);
+  int pairs = static_cast<int>(std::ranges::count_if(
+      features.rank_counts,
+      [](uint8_t count) { return count >= 2; }));
+  uint8_t max_count = features.max_rank_count;
+  auto add_hole_rank = [&](size_t rank, uint8_t count) {
+    const uint8_t board_count = features.rank_counts[rank];
+    if (board_count < 2 && board_count + count >= 2) ++pairs;
+    max_count = std::max(
+        max_count, static_cast<uint8_t>(board_count + count));
+  };
+  if (pair) {
+    add_hole_rank(rank_index0, 2);
+  } else {
+    add_hole_rank(rank_index0, 1);
+    add_hole_rank(rank_index1, 1);
   }
   const int made_bucket =
       max_count >= 3 ? 3 : (pairs >= 2 ? 2 : (pairs == 1 ? 1 : 0));
 
-  const bool flush_draw = std::ranges::any_of(
-      suit_counts, [](uint8_t count) { return count >= 4; });
+  const size_t suit0 = std::to_underlying(hole_cards[0].suit());
+  const size_t suit1 = std::to_underlying(hole_cards[1].suit());
+  const bool flush_draw = features.max_suit_count >= 4 ||
+      features.suit_counts[suit0] + 1 + (suit0 == suit1) >= 4 ||
+      features.suit_counts[suit1] + 1 >= 4;
+  const uint16_t rank_mask = static_cast<uint16_t>(
+      features.rank_mask | (1u << rank_index0) | (1u << rank_index1));
   const int draw_bucket =
       flush_draw ? 2 : (MaxStraightCards(rank_mask) >= 4 ? 1 : 0);
 

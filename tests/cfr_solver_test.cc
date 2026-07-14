@@ -170,7 +170,7 @@ Policy PassiveCallingPolicy(const CFRSolver& game, ComboId hand) {
       }
     }
     REQUIRE(selected);
-    policy.rows.emplace(
+    policy.rows.try_emplace(
         InfoSetKey{HistoryId{static_cast<uint32_t>(history)},
                    position.observation(), private_observation},
         offset);

@@ -148,7 +148,7 @@ std::array<Card, 2> ComboId::cards() const noexcept {
 }
 
 CardMask ComboId::mask() const noexcept {
-  const auto [first, second] = cards();
+  const auto [first, second] = kComboCards[index()];
   return CardBit(first) | CardBit(second);
 }
 
@@ -191,7 +191,7 @@ absl::StatusOr<absl::InlinedVector<Card, 5>> SampleStreetCards(
 
   const CardMask blocked = known_private_cards | board.mask();
   if (count == 1) {
-    std::uniform_int_distribution<size_t> card_dist(0, kDeckCardCount - 1);
+    std::uniform_int_distribution<uint32_t> card_dist(0, kDeckCardCount - 1);
     for (size_t attempt = 0; attempt < kDeckCardCount; ++attempt) {
       const Card candidate = kDeck[card_dist(rng)];
       if ((blocked & CardBit(candidate)) == 0) {
@@ -201,7 +201,7 @@ absl::StatusOr<absl::InlinedVector<Card, 5>> SampleStreetCards(
   }
 
   std::array<Card, kDeckCardCount> candidates = {};
-  size_t candidate_count = 0;
+  uint32_t candidate_count = 0;
   for (Card candidate : kDeck) {
     if ((blocked & CardBit(candidate)) == 0) {
       candidates[candidate_count++] = candidate;
@@ -213,9 +213,9 @@ absl::StatusOr<absl::InlinedVector<Card, 5>> SampleStreetCards(
 
   absl::InlinedVector<Card, 5> sampled;
   sampled.reserve(count);
-  for (size_t i = 0; i < count; ++i) {
-    std::uniform_int_distribution<size_t> card_dist(i, candidate_count - 1);
-    const size_t chosen = card_dist(rng);
+  for (uint32_t i = 0; i < count; ++i) {
+    std::uniform_int_distribution<uint32_t> card_dist(i, candidate_count - 1);
+    const uint32_t chosen = card_dist(rng);
     std::swap(candidates[i], candidates[chosen]);
     sampled.push_back(candidates[i]);
   }

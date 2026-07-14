@@ -269,10 +269,10 @@ Deal DealDistribution::sample(std::mt19937& rng) const {
 
 namespace {
 
-void FillUniform(absl::Span<double> probabilities) {
+void FillUniform(absl::Span<float> probabilities) {
   if (!probabilities.empty()) {
     std::fill(probabilities.begin(), probabilities.end(),
-              1.0 / probabilities.size());
+              1.0f / static_cast<float>(probabilities.size()));
   }
 }
 
@@ -313,7 +313,7 @@ void CfrState::add_regret(size_t offset,
 }
 
 void CfrState::add_strategy(size_t offset,
-                            absl::Span<const double> probabilities,
+                            absl::Span<const float> probabilities,
                             double weight,
                             bool concurrent) {
   for (size_t action = 0; action < probabilities.size(); ++action) {
@@ -330,7 +330,7 @@ void CfrState::add_strategy(size_t offset,
 
 void CfrState::strategy(absl::Span<const float> values,
                         std::optional<size_t> offset,
-                        absl::Span<double> probabilities,
+                        absl::Span<float> probabilities,
                         bool concurrent) const {
   if (!offset) {
     FillUniform(probabilities);
@@ -338,14 +338,16 @@ void CfrState::strategy(absl::Span<const float> values,
   }
   double sum = 0.0;
   for (size_t action = 0; action < probabilities.size(); ++action) {
-    probabilities[action] = std::max(
-        0.0f, LoadValue(values[*offset + action], concurrent));
+    probabilities[action] =
+        LoadValue(values[*offset + action], concurrent);
     sum += probabilities[action];
   }
   if (sum <= 0.0) {
     FillUniform(probabilities);
   } else {
-    for (double& probability : probabilities) probability /= sum;
+    for (float& probability : probabilities) {
+      probability = static_cast<float>(probability / sum);
+    }
   }
 }
 
@@ -367,16 +369,19 @@ CfrState::CfrState(const SolverConfig& config,
 std::optional<size_t> CfrState::find_or_create(
     InfoSetKey key,
     uint8_t action_count) {
-  if (const auto found = rows.find(key); found != rows.end()) {
-    return found->second;
+  if (rows.size() >= max_info_sets_) {
+    const auto found = rows.find(key);
+    return found == rows.end() ? std::nullopt
+                               : std::optional(found->second);
   }
-  if (rows.size() >= max_info_sets_) return std::nullopt;
   const size_t offset = regret_sum.size();
+  const auto [row, inserted] = rows.try_emplace(key, offset);
+  if (!inserted) return row->second;
   regret_sum.resize(offset + action_count, 0.0f);
   if (accumulate_average_strategy_) {
     strategy_sum.resize(offset + action_count, 0.0f);
   }
-  return rows.emplace(key, offset).first->second;
+  return offset;
 }
 
 bool Policy::strategy(InfoSetKey key, absl::Span<float> output) const {
@@ -623,6 +628,8 @@ void CFRSolver::advance_private_observations(
     TraversalFrame& frame,
     const Deal& deal,
     const Position& child) const {
+  const HistoryNode& child_node = history_.nodes[Index(child.history)];
+  if (!std::holds_alternative<DecisionState>(child_node.state)) return;
   for (Player player : {Player::A, Player::B}) {
     frame.private_observations[Index(player)] =
         ObservePrivate(card_abstraction(), deal.hand(player),
@@ -686,9 +693,9 @@ double CFRSolver::traverse(HistoryId history,
     const auto found = state_.rows.find(key);
     if (found != state_.rows.end()) offset = found->second;
   }
-  std::array<double, kMaxActionsPerNode> probabilities;
+  std::array<float, kMaxActionsPerNode> probabilities;
   std::array<double, kMaxActionsPerNode> action_values;
-  const absl::Span<double> probability_span(
+  const absl::Span<float> probability_span(
       probabilities.data(), action_count);
   if (context.mode == TraversalMode::EvaluateAverage) {
     state_.strategy(state_.strategy_sum, offset, probability_span,
@@ -703,18 +710,25 @@ double CFRSolver::traverse(HistoryId history,
       state_.add_strategy(*offset, probability_span, 1.0,
                           context.concurrent_updates);
     }
-    std::discrete_distribution<size_t> sample(
-        probability_span.begin(), probability_span.end());
+    float sample = std::uniform_real_distribution<float>{}(context.rng);
+    uint8_t sampled_action = 0;
+    while (sampled_action + 1 < action_count &&
+           sample >= probabilities[sampled_action]) {
+      sample -= probabilities[sampled_action];
+      ++sampled_action;
+    }
     const HistoryId child = history_.children[
-        history_node.children_begin + sample(context.rng)];
+        history_node.children_begin + sampled_action];
     return traverse(child, public_state, frame, context);
   }
 
   double node_value = 0.0;
   TraversalFrame child_frame = frame;
   for (uint8_t action = 0; action < action_count; ++action) {
-    child_frame.reach[player_index] =
-        frame.reach[player_index] * probabilities[action];
+    if (training && !external_sampling) {
+      child_frame.reach[player_index] =
+          frame.reach[player_index] * probabilities[action];
+    }
     const HistoryId child = history_.children[
         history_node.children_begin + action];
     action_values[action] = traverse(
@@ -740,7 +754,7 @@ double CFRSolver::traverse(HistoryId history,
                           (context.iteration + 1);
     state_.add_strategy(
         *offset,
-        absl::Span<const double>(probabilities.data(), action_count),
+        absl::Span<const float>(probabilities.data(), action_count),
         weight, context.concurrent_updates);
   }
   return node_value;
@@ -881,7 +895,7 @@ absl::StatusOr<Policy> ExtractAveragePolicy(
       mass += policy.probabilities.back();
     }
 
-    policy.rows.emplace(key, output_offset);
+    policy.rows.try_emplace(key, output_offset);
     absl::Span<float> probabilities(
         policy.probabilities.data() + output_offset, node.child_count);
     if (mass > 0.0) {

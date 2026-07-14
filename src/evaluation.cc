@@ -76,6 +76,9 @@ void AdvancePrivateObservations(const CFRSolver& game,
                                 EvaluationFrame& frame,
                                 const Position& child,
                                 const Deal& deal) {
+  const HistoryNode& child_node =
+      game.history_tree().nodes[Index(child.history)];
+  if (!std::holds_alternative<DecisionState>(child_node.state)) return;
   for (Player player : {Player::A, Player::B}) {
     frame.private_observations[Index(player)] = ObservePrivate(
         game.card_abstraction(), deal.hand(player), child.public_state.board(),
@@ -209,19 +212,16 @@ double TraverseResponse(const CFRSolver& game,
       frame.private_observations[player]};
   const bool responder_turn = actor == context.responder;
   std::optional<size_t> offset;
-  absl::InlinedVector<double, 8> probabilities(node.child_count, 0.0);
+  absl::InlinedVector<float, 8> probabilities(node.child_count, 0.0f);
   if (responder_turn) {
     offset = context.response.find_or_create(key, node.child_count);
     context.response.strategy(context.response.regret_sum, offset,
                               absl::MakeSpan(probabilities));
   } else {
-    absl::InlinedVector<float, 8> opponent_strategy(
-        node.child_count, 0.0f);
     ++context.opponent_lookups;
-    if (!context.opponent.strategy(key, absl::MakeSpan(opponent_strategy))) {
+    if (!context.opponent.strategy(key, absl::MakeSpan(probabilities))) {
       ++context.missing_opponent_lookups;
     }
-    std::ranges::copy(opponent_strategy, probabilities.begin());
   }
 
   absl::InlinedVector<double, 8> action_values(node.child_count, 0.0);

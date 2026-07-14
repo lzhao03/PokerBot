@@ -15,25 +15,38 @@ namespace {
 static constexpr std::array<int, 13> kRankPrimes = {
     2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41};
 
+struct HandFeatures {
+  std::array<uint8_t, 13> rank_counts = {};
+  std::array<uint16_t, 4> suit_masks = {};
+  uint16_t rank_mask = 0;
+};
+
+void AddCard(HandFeatures& features, Card card) noexcept {
+  const size_t rank = std::to_underlying(card.rank());
+  const uint16_t bit = static_cast<uint16_t>(1U << rank);
+  ++features.rank_counts[rank];
+  features.suit_masks[std::to_underlying(card.suit())] |= bit;
+  features.rank_mask |= bit;
+}
+
 uint16_t HighestStraightMask(uint16_t rank_mask) noexcept {
-  for (int start = 8; start >= 0; --start) {
-    const uint16_t straight = static_cast<uint16_t>(0x1F << start);
-    if ((rank_mask & straight) == straight) return straight;
+  uint16_t starts = rank_mask;
+  for (int shift = 1; shift < 5; ++shift) {
+    starts &= static_cast<uint16_t>(rank_mask >> shift);
+  }
+  if (starts != 0) {
+    return static_cast<uint16_t>(0x1F << (std::bit_width(starts) - 1));
   }
   constexpr uint16_t kWheel = (1U << 12) | 0x0F;
   return (rank_mask & kWheel) == kWheel ? kWheel : 0;
 }
 
-uint16_t HighestRanks(uint16_t rank_mask, int count) noexcept {
-  uint16_t selected = 0;
-  for (int rank = 12; rank >= 0 && count > 0; --rank) {
-    const uint16_t bit = static_cast<uint16_t>(1U << rank);
-    if ((rank_mask & bit) != 0) {
-      selected |= bit;
-      --count;
-    }
+uint16_t HighestFiveRanks(uint16_t rank_mask) noexcept {
+  for (int excess = std::popcount(rank_mask) - 5;
+       excess > 0; --excess) {
+    rank_mask &= static_cast<uint16_t>(rank_mask - 1);
   }
-  return selected;
+  return rank_mask;
 }
 
 int PrimePower(int rank, int count) noexcept {
@@ -44,17 +57,10 @@ int PrimePower(int rank, int count) noexcept {
 
 uint16_t ProductRank(int product);
 
-uint16_t EvalSevenCactus(const std::array<Card, 7>& cards) noexcept {
-  std::array<uint8_t, 13> rank_counts = {};
-  std::array<uint16_t, 4> suit_masks = {};
-  uint16_t rank_mask = 0;
-  for (Card card : cards) {
-    const int rank = PokerRank(card) - 2;
-    const uint16_t bit = static_cast<uint16_t>(1U << rank);
-    ++rank_counts[static_cast<size_t>(rank)];
-    suit_masks[std::to_underlying(card.suit())] |= bit;
-    rank_mask |= bit;
-  }
+uint16_t EvalSevenCactus(const HandFeatures& features) noexcept {
+  const auto& rank_counts = features.rank_counts;
+  const auto& suit_masks = features.suit_masks;
+  const uint16_t rank_mask = features.rank_mask;
 
   for (uint16_t suit_mask : suit_masks) {
     if (std::popcount(suit_mask) >= 5) {
@@ -102,7 +108,7 @@ uint16_t EvalSevenCactus(const std::array<Card, 7>& cards) noexcept {
   for (uint16_t suit_mask : suit_masks) {
     if (std::popcount(suit_mask) >= 5) {
       return hand_evaluator_tables::kCactusFlushes[
-          HighestRanks(suit_mask, 5)];
+          HighestFiveRanks(suit_mask)];
     }
   }
 
@@ -141,7 +147,7 @@ uint16_t EvalSevenCactus(const std::array<Card, 7>& cards) noexcept {
     return ProductRank(product);
   }
   return hand_evaluator_tables::kCactusUnique5[
-      HighestRanks(rank_mask, 5)];
+      HighestFiveRanks(rank_mask)];
 }
 
 uint16_t ProductRank(int product) {
@@ -160,14 +166,9 @@ static_assert(std::adjacent_find(
                     return left.first >= right.first;
                   }) == hand_evaluator_tables::kCactusProducts.end());
 
-uint16_t EvaluateHand(ComboId hand, const Board& board) noexcept {
-  assert(board.count() == kMaxBoardCards);
-  std::array<Card, 7> cards;
-  const auto hole_cards = hand.cards();
-  cards[0] = hole_cards[0];
-  cards[1] = hole_cards[1];
-  std::copy(board.cards().begin(), board.cards().end(), cards.begin() + 2);
-  return EvalSevenCactus(cards);
+uint16_t EvaluateHand(ComboId hand, HandFeatures features) noexcept {
+  for (Card card : hand.cards()) AddCard(features, card);
+  return EvalSevenCactus(features);
 }
 
 }  // namespace
@@ -175,8 +176,11 @@ uint16_t EvaluateHand(ComboId hand, const Board& board) noexcept {
 int CompareHands(ComboId first,
                  ComboId second,
                  const Board& board) {
-  const uint16_t first_value = EvaluateHand(first, board);
-  const uint16_t second_value = EvaluateHand(second, board);
+  assert(board.count() == kMaxBoardCards);
+  HandFeatures board_features;
+  for (Card card : board.cards()) AddCard(board_features, card);
+  const uint16_t first_value = EvaluateHand(first, board_features);
+  const uint16_t second_value = EvaluateHand(second, board_features);
   return first_value < second_value ? 1 : first_value > second_value ? -1 : 0;
 }
 
