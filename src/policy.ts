@@ -1,7 +1,9 @@
 import type { Action, Card, Game, LoggedAction } from "./poker";
 
-const FINGERPRINT = "d134d372f54a6e10eee5ce9fc74c411da09281145be34c32267c8160862d1ca5";
-const FRACTIONS = [0.25, 0.5, 1];
+const MODEL_LOW = 0xa150904f;
+const MODEL_HIGH = 0x5bf84653;
+const FRACTIONS = [0.5, 1];
+const MAX_ACTIONS = 8;
 
 type Player = 0 | 1;
 type Kind = "bet" | "fold" | "call" | "raise" | "check" | "all-in";
@@ -13,7 +15,7 @@ interface BettingData {
   committed: [number, number];
   lastRaise: number;
   street: Street;
-  pending: number;
+  actionsRemaining: number;
 }
 
 interface DecisionState {
@@ -31,19 +33,36 @@ interface ActionEdge {
 type State = DecisionState | { type: "chance"; data: BettingData } | { type: "terminal"; data: BettingData };
 type Node = { type: "decision"; actions: ActionEdge[] } | { type: "chance"; child: number } | { type: "terminal" };
 
-interface PolicyRow {
-  offset: number;
-  count: number;
+interface Decoder {
+  HEAPU8: Uint8Array;
+  HEAPF32: Float32Array;
+  _poker_allocate(size: number): number;
+  _poker_free(pointer: number): void;
+  _poker_load_policy(pointer: number, size: number): number;
+  _poker_strategy(
+    publicLow: number,
+    publicHigh: number,
+    history: number,
+    privateObservation: number,
+    actionCount: number,
+    output: number
+  ): number;
+  _poker_model_low(): number;
+  _poker_model_high(): number;
 }
 
 export interface Policy {
-  rows: Map<string, PolicyRow>;
-  probabilities: Float32Array;
+  decoder: Decoder;
+  output: number;
 }
 
-export interface PolicyMove {
+export interface PolicyAction {
   action: Action;
   raiseTo?: number;
+  allIn?: boolean;
+}
+
+export interface PolicyMove extends PolicyAction {
   found: boolean;
 }
 
@@ -85,7 +104,7 @@ function abstractActions(state: DecisionState): Omit<ActionEdge, "child">[] {
 
 function roundOver(data: BettingData): boolean {
   const matched = data.committed[0] === data.committed[1];
-  if (data.pending === 0 && matched) return true;
+  if (data.actionsRemaining === 0 && matched) return true;
   if (data.stack[0] > 0 && data.stack[1] > 0) return false;
   if (data.stack[0] === 0 && data.stack[1] === 0) return true;
   const live: Player = data.stack[0] > 0 ? 0 : 1;
@@ -108,7 +127,7 @@ function apply(state: DecisionState, action: Omit<ActionEdge, "child">): State {
   const aggressive = action.target > highest;
   const raise = data.committed[actor] - highest;
   if (aggressive && raise >= data.lastRaise) data.lastRaise = raise;
-  data.pending = aggressive ? 1 << opponent : data.pending & ~(1 << actor);
+  data.actionsRemaining = aggressive ? 1 : data.actionsRemaining - 1;
   if (!roundOver(data)) return { type: "decision", data, actor: opponent };
 
   if (data.committed[0] !== data.committed[1]) {
@@ -126,7 +145,7 @@ function afterChance(state: Extract<State, { type: "chance" }>): State {
   data.street = (data.street + 1) as Street;
   data.committed = [0, 0];
   data.lastRaise = 2;
-  data.pending = 3;
+  data.actionsRemaining = 2;
   if (roundOver(data)) return data.street === 3 ? { type: "terminal", data } : { type: "chance", data };
   return { type: "decision", data, actor: 1 };
 }
@@ -148,7 +167,7 @@ function buildTree(): Node[] {
   append({
     type: "decision",
     actor: 0,
-    data: { stack: [7, 6], total: [1, 2], committed: [1, 2], lastRaise: 2, street: 0, pending: 3 }
+    data: { stack: [199, 198], total: [1, 2], committed: [1, 2], lastRaise: 2, street: 0, actionsRemaining: 2 }
   });
   return nodes;
 }
@@ -219,15 +238,17 @@ function boardBucket(cards: Card[]): number {
   return (((paired * 4 + suited) * 3 + straight) * 3) + high;
 }
 
-function publicObservation(board: Card[]): bigint {
-  if (board.length === 0) return 0n;
-  let value = BigInt(boardBucket(board.slice(0, 3)) + 1);
-  if (board.length >= 4) value |= BigInt(boardBucket(board.slice(0, 4)) + 1) << 7n;
-  if (board.length >= 5) value |= BigInt(boardBucket(board) + 1) << 14n;
-  return value;
+export function publicObservation(board: Card[]): bigint {
+  const buckets = [16, 16, 64];
+  let observation = 0n;
+  for (let index = 2; index < board.length; index += 1) {
+    const bucket = Math.floor(boardBucket(board.slice(0, index + 1)) * buckets[index - 2] / 108);
+    observation |= BigInt(bucket + 1) << BigInt((index - 2) * 7);
+  }
+  return observation;
 }
 
-function privateObservation(hand: Card[], board: Card[]): bigint {
+export function privateObservation(hand: Card[], board: Card[]): number {
   const high = Math.max(...hand.map(rank));
   const low = Math.min(...hand.map(rank));
   const pair = high === low;
@@ -236,7 +257,7 @@ function privateObservation(hand: Card[], board: Card[]): bigint {
     const shape = pair ? 0 : suited ? 1 : 2;
     const highGroup = high >= 14 ? 0 : high >= 12 ? 1 : high >= 9 ? 2 : 3;
     const lowGroup = low >= 10 ? 0 : low >= 7 ? 1 : 2;
-    return BigInt(shape * 12 + highGroup * 3 + lowGroup + 1);
+    return shape * 12 + highGroup * 3 + lowGroup + 1;
   }
 
   const value = features([...board, ...hand]);
@@ -249,90 +270,73 @@ function privateObservation(hand: Card[], board: Card[]): bigint {
   const strength = pair || high === 14 || (high >= 13 && low >= 10)
     ? 0
     : (high >= 11 && low >= 8) || (suited && gap <= 2) ? 1 : 2;
-  return BigInt(made * 9 + draw * 3 + strength + 1);
-}
-
-const key = (history: number, publicId: bigint, privateId: bigint): string => `${history}/${publicId}/${privateId}`;
-
-export function parsePolicy(buffer: ArrayBuffer): Policy {
-  const bytes = new Uint8Array(buffer);
-  const view = new DataView(buffer);
-  if (bytes.length < 60 || String.fromCharCode(...bytes.slice(0, 8)) !== "PKPOLCY1" || view.getUint32(8, true) !== 1) {
-    throw new Error("Invalid policy header");
-  }
-  const fingerprint = [...bytes.slice(12, 44)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  if (fingerprint !== FINGERPRINT) throw new Error("Policy does not match the 8-chip game model");
-  const rowCount = Number(view.getBigUint64(44, true));
-  const probabilityCount = Number(view.getBigUint64(52, true));
-  const probabilityStart = 60 + rowCount * 29;
-  if (!Number.isSafeInteger(rowCount) || !Number.isSafeInteger(probabilityCount) || probabilityStart + probabilityCount * 4 !== bytes.length) {
-    throw new Error("Invalid policy size");
-  }
-
-  const rows = new Map<string, PolicyRow>();
-  const spans: PolicyRow[] = [];
-  let cursor = 60;
-  for (let index = 0; index < rowCount; index += 1) {
-    const history = view.getUint32(cursor, true);
-    const publicId = view.getBigUint64(cursor + 4, true);
-    const privateId = view.getBigUint64(cursor + 12, true);
-    const offset = Number(view.getBigUint64(cursor + 20, true));
-    const count = view.getUint8(cursor + 28);
-    const node = TREE[history];
-    if (node?.type !== "decision" || count !== node.actions.length || offset + count > probabilityCount) throw new Error("Invalid policy row");
-    const rowKey = key(history, publicId, privateId);
-    if (rows.has(rowKey)) throw new Error("Duplicate policy row");
-    const row = { offset, count };
-    rows.set(rowKey, row);
-    spans.push(row);
-    cursor += 29;
-  }
-  const probabilities = new Float32Array(probabilityCount);
-  for (let index = 0; index < probabilityCount; index += 1) probabilities[index] = view.getFloat32(cursor + index * 4, true);
-  spans.sort((left, right) => left.offset - right.offset);
-  let expectedOffset = 0;
-  for (const row of spans) {
-    if (row.offset !== expectedOffset) throw new Error("Non-contiguous policy rows");
-    let sum = 0;
-    for (let index = row.offset; index < row.offset + row.count; index += 1) {
-      const probability = probabilities[index];
-      if (!Number.isFinite(probability) || probability < 0 || probability > 1) throw new Error("Invalid policy probability");
-      sum += probability;
-    }
-    if (Math.abs(sum - 1) > 1e-5) throw new Error("Policy row is not normalized");
-    expectedOffset += row.count;
-  }
-  if (expectedOffset !== probabilityCount) throw new Error("Policy probability count does not match rows");
-  return { rows, probabilities };
+  return made * 9 + draw * 3 + strength + 1;
 }
 
 export async function loadPolicy(url = "/pokerbot.policy"): Promise<Policy> {
-  const response = await fetch(url);
+  const decoderPromise: Promise<Decoder> = import("./policy_decoder.js")
+    .then(async (module) => (await module.default()) as Decoder);
+  const [decoder, response] = await Promise.all([
+    decoderPromise,
+    fetch(url)
+  ]);
   if (!response.ok) throw new Error(`Could not load policy: ${response.status}`);
-  return parsePolicy(await response.arrayBuffer());
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const pointer = decoder._poker_allocate(bytes.length);
+  if (!pointer) throw new Error("Could not allocate policy memory");
+  try {
+    decoder.HEAPU8.set(bytes, pointer);
+    if (decoder._poker_load_policy(pointer, bytes.length) !== 1) throw new Error("Invalid compact policy");
+  } finally {
+    decoder._poker_free(pointer);
+  }
+  if ((decoder._poker_model_low() >>> 0) !== MODEL_LOW || (decoder._poker_model_high() >>> 0) !== MODEL_HIGH) {
+    throw new Error("Policy does not match the 100BB game model");
+  }
+  const output = decoder._poker_allocate(MAX_ACTIONS * Float32Array.BYTES_PER_ELEMENT);
+  if (!output) throw new Error("Could not allocate strategy memory");
+  return { decoder, output };
 }
 
-export function policyMove(policy: Policy, game: Game, random: () => number = Math.random): PolicyMove {
+const moveFor = (edge: ActionEdge): PolicyAction => ["bet", "raise", "all-in"].includes(edge.kind)
+  ? { action: "raise", raiseTo: edge.target, ...(edge.kind === "all-in" ? { allIn: true } : {}) }
+  : { action: edge.kind as Action };
+
+export function policyActions(game: Game): PolicyAction[] {
+  return decisionFor(game.actions).actions.map(moveFor);
+}
+
+export function policyMove(policy: Policy | null, game: Game, random: () => number = Math.random): PolicyMove {
   const decision = decisionFor(game.actions);
-  const hand = game.holes[game.toAct];
-  const row = policy.rows.get(key(decision.history, publicObservation(game.board), privateObservation(hand, game.board)));
-  const found = row?.count === decision.actions.length;
+  let probabilities: Float32Array | null = null;
+  let found = false;
+  if (policy) {
+    const publicId = publicObservation(game.board);
+    const result = policy.decoder._poker_strategy(
+      Number(publicId & 0xffffffffn),
+      Number(publicId >> 32n),
+      decision.history,
+      privateObservation(game.holes[game.toAct], game.board),
+      decision.actions.length,
+      policy.output
+    );
+    if (result < 0) throw new Error("Policy decoder rejected the game state");
+    found = result === 1;
+    probabilities = policy.decoder.HEAPF32.subarray(
+      policy.output / Float32Array.BYTES_PER_ELEMENT,
+      policy.output / Float32Array.BYTES_PER_ELEMENT + decision.actions.length
+    );
+  }
   let roll = random();
   let chosen = decision.actions.length - 1;
   for (let index = 0; index < decision.actions.length; index += 1) {
-    roll -= found ? policy.probabilities[row.offset + index] : 1 / decision.actions.length;
+    roll -= probabilities?.[index] ?? 1 / decision.actions.length;
     if (roll <= 0) {
       chosen = index;
       break;
     }
   }
-  const edge = decision.actions[chosen];
-  if (["bet", "raise", "all-in"].includes(edge.kind)) return { action: "raise", raiseTo: edge.target, found };
-  return { action: edge.kind as Action, found };
-}
-
-export function policyRaiseTo(game: Game): number | null {
-  return decisionFor(game.actions).actions.find((edge) => ["bet", "raise", "all-in"].includes(edge.kind))?.target ?? null;
+  return { ...moveFor(decision.actions[chosen]), found };
 }
 
 export const policyHistoryNodeCount = TREE.length;

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { act, bestHand, botAction, compareHands, legalActions, newHand, nextHand, type Card } from "./poker";
+import { policyActions, policyHistoryNodeCount, privateObservation, publicObservation } from "./policy";
 import { bbPer100, emptyStats, recordHand, variance } from "./stats";
 
 const cards = (text: string): Card[] => text.split(" ") as Card[];
@@ -80,6 +81,22 @@ assert.equal(game.pot, 3);
 game = act(game, "fold");
 game = nextHand(game);
 assert.equal(game.stacks[0] + game.stacks[1] + game.pot, 400);
+assert.deepEqual(game.startingStacks, [200, 200]);
+
+game = newHand([200, 200], 0);
+assert.equal(policyHistoryNodeCount, 136689);
+assert.deepEqual(policyActions(game), [
+  { action: "fold" },
+  { action: "call" },
+  { action: "raise", raiseTo: 4 },
+  { action: "raise", raiseTo: 6 },
+  { action: "raise", raiseTo: 200, allIn: true }
+]);
+assert.equal(privateObservation(cards("AH AS"), []), 1);
+assert.equal(privateObservation(cards("AH KH"), []), 13);
+assert.equal(privateObservation(cards("7H 2S"), []), 36);
+assert.equal(privateObservation(cards("AH KS"), cards("2H 7H QH")), 7);
+assert.equal(publicObservation(cards("AH 9H 4C 7D 2S")), 131330n);
 
 let stats = emptyStats();
 game = newHand([200, 200], 0);

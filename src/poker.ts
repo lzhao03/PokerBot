@@ -185,7 +185,7 @@ export function newHand(stacks: Pair<number> = [STARTING_STACK, STARTING_STACK],
 }
 
 export function nextHand(game: Game): Game {
-  return newHand(game.stacks, other(game.dealer));
+  return newHand([STARTING_STACK, STARTING_STACK], other(game.dealer));
 }
 
 export function legalActions(game: Game): LegalActions {
