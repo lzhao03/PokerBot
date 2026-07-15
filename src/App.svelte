@@ -221,9 +221,8 @@
       "player-one"
       "board"
       "player-two"
-      "controls"
-      "stats";
-    grid-template-rows: auto minmax(140px, 1fr) auto minmax(72px, auto) auto;
+      "controls";
+    grid-template-rows: auto minmax(140px, 1fr) auto minmax(72px, auto);
     gap: 12px;
     min-height: calc(100dvh - 16px);
     padding: 16px;
@@ -494,9 +493,10 @@
   }
 
   .stats {
-    grid-area: stats;
+    grid-area: player-one;
     z-index: 5;
-    justify-self: center;
+    align-self: start;
+    justify-self: start;
   }
 
   .stats summary {
@@ -521,8 +521,9 @@
 
   .stats-content {
     position: absolute;
+    top: 64px;
     right: 16px;
-    bottom: 64px;
+    bottom: 16px;
     left: 16px;
     z-index: 4;
     max-height: calc(100% - 88px);
@@ -639,13 +640,25 @@
 
   @media (max-width: 620px) {
     .table {
+      grid-template-areas:
+        "stats"
+        "player-one"
+        "board"
+        "player-two"
+        "controls";
+      grid-template-rows: auto auto minmax(140px, 1fr) auto minmax(72px, auto);
       min-height: 780px;
       padding: 12px;
     }
 
+    .stats {
+      grid-area: stats;
+    }
+
     .stats-content {
+      top: 60px;
       right: 12px;
-      bottom: 60px;
+      bottom: 12px;
       left: 12px;
     }
   }
