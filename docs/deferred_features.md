@@ -138,6 +138,12 @@ git show dcbadfc^:<path>
   and probabilities over a deterministic corpus before deleting the TypeScript
   implementations.
 
+### Reveal a winning bot hand
+
+- **Status:** Deferred until the next poker-table UI pass.
+- **Desired behavior:** Reveal the bot's hole cards whenever it wins, including
+  pots won after the player folds. Showdown hands are already revealed.
+
 ## Diagnostics and operational telemetry
 
 ### Browser statistics cleanup
