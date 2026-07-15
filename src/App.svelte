@@ -221,9 +221,8 @@
       "player-one"
       "board"
       "player-two"
-      "controls"
-      "stats";
-    grid-template-rows: auto minmax(140px, 1fr) auto minmax(72px, auto) auto;
+      "bottom";
+    grid-template-rows: auto minmax(140px, 1fr) auto minmax(72px, auto);
     gap: 12px;
     min-height: calc(100dvh - 16px);
     padding: 16px;
@@ -420,22 +419,23 @@
 
   .thinking {
     min-height: 44px;
-    text-align: center;
+    text-align: right;
   }
 
   .controls {
-    grid-area: controls;
+    grid-area: bottom;
+    z-index: 2;
     align-self: end;
-    justify-self: center;
-    width: min(720px, calc(100% - 24px));
+    justify-self: end;
+    width: min(720px, calc(100% - 220px));
     min-height: 72px;
-    text-align: center;
+    text-align: right;
   }
 
   .actions {
     display: flex;
     flex-wrap: wrap;
-    justify-content: center;
+    justify-content: flex-end;
     gap: 8px;
   }
 
@@ -494,9 +494,10 @@
   }
 
   .stats {
-    grid-area: stats;
+    grid-area: bottom;
     z-index: 5;
-    justify-self: center;
+    align-self: end;
+    justify-self: start;
   }
 
   .stats summary {
@@ -635,6 +636,27 @@
     color: rgb(247 243 232 / 0.65);
     font-size: 12px;
     text-transform: uppercase;
+  }
+
+  @media (max-width: 760px) {
+    .table {
+      grid-template-areas:
+        "player-one"
+        "board"
+        "player-two"
+        "stats"
+        "controls";
+      grid-template-rows: auto minmax(140px, 1fr) auto auto minmax(72px, auto);
+    }
+
+    .controls {
+      grid-area: controls;
+      width: min(720px, calc(100% - 24px));
+    }
+
+    .stats {
+      grid-area: stats;
+    }
   }
 
   @media (max-width: 620px) {
