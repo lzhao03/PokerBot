@@ -12,6 +12,8 @@ struct ValueEstimate {
   double standard_error = 0.0;
   uint64_t policy_lookups = 0;
   uint64_t missing_policy_lookups = 0;
+  double weighted_policy_lookups = 0.0;
+  double weighted_missing_policy_lookups = 0.0;
 };
 
 struct BestResponseConfig {

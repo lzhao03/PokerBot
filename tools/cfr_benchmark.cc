@@ -261,7 +261,11 @@ int main(int argc, char** argv) {
                 << '\n'
                 << "policy_lookups\t" << profile->policy_lookups << '\n'
                 << "missing_policy_lookups\t"
-                << profile->missing_policy_lookups << '\n';
+                << profile->missing_policy_lookups << '\n'
+                << "weighted_policy_lookups\t"
+                << profile->weighted_policy_lookups << '\n'
+                << "weighted_missing_policy_lookups\t"
+                << profile->weighted_missing_policy_lookups << '\n';
     }
     const uint64_t response_iterations =
         absl::GetFlag(FLAGS_best_response_iterations);

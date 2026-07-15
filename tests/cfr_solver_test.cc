@@ -423,17 +423,23 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
   REQUIRE(repeated.ok());
   CHECK(std::isfinite(evaluated->mean));
   CHECK(evaluated->policy_lookups > 0);
+  CHECK(evaluated->weighted_policy_lookups > 0.0);
   CHECK(evaluated->mean == repeated->mean);
   CHECK(evaluated->standard_error == repeated->standard_error);
   CHECK(evaluated->policy_lookups == repeated->policy_lookups);
   CHECK(evaluated->missing_policy_lookups ==
         repeated->missing_policy_lookups);
+  CHECK(evaluated->weighted_policy_lookups ==
+        repeated->weighted_policy_lookups);
+  CHECK(evaluated->weighted_missing_policy_lookups ==
+        repeated->weighted_missing_policy_lookups);
 
   Policy empty;
   empty.model = policy.model;
   const auto fallback = EstimateExpectedValue(*solver, empty, empty, 2, 17);
   REQUIRE(fallback.ok());
   CHECK(fallback->missing_policy_lookups > 0);
+  CHECK(fallback->weighted_missing_policy_lookups > 0.0);
 
   auto different = MakeSolver(Config(), R(kB), R(kA));
   CHECK_FALSE(EstimateExpectedValue(*different, policy, policy, 1, 17).ok());

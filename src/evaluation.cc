@@ -23,6 +23,8 @@ struct EvaluationFrame {
 struct EvaluationCounters {
   std::array<uint64_t, kPlayerCount> lookups = {};
   std::array<uint64_t, kPlayerCount> missing = {};
+  std::array<double, kPlayerCount> weighted_lookups = {};
+  std::array<double, kPlayerCount> weighted_missing = {};
 };
 
 struct ProfileEstimate {
@@ -92,7 +94,8 @@ double TraverseProfile(const CFRSolver& game,
                        const EvaluationFrame& frame,
                        const Deal& deal,
                        std::mt19937& rng,
-                       EvaluationCounters& counters) {
+                       EvaluationCounters& counters,
+                       double reach) {
   const HistoryTree& history = game.history_tree();
   const HistoryNode& node = history.nodes[Index(position.history)];
   if (const auto* state = std::get_if<FoldTerminalState>(&node.state)) {
@@ -111,7 +114,7 @@ double TraverseProfile(const CFRSolver& game,
       EvaluationFrame child_frame = frame;
       AdvancePrivateObservations(game, child_frame, child, deal);
       value += TraverseProfile(game, policies, child, child_frame, deal,
-                               rng, counters);
+                               rng, counters, reach);
     }
     return value / samples;
   }
@@ -123,15 +126,18 @@ double TraverseProfile(const CFRSolver& game,
       frame.private_observations[player]};
   absl::InlinedVector<float, 8> probabilities(node.child_count, 0.0f);
   ++counters.lookups[player];
+  counters.weighted_lookups[player] += reach;
   if (!policies[player]->strategy(key, absl::MakeSpan(probabilities))) {
     ++counters.missing[player];
+    counters.weighted_missing[player] += reach;
   }
   double value = 0.0;
   for (uint8_t action = 0; action < node.child_count; ++action) {
     Position child = position;
     child.history = history.children[node.children_begin + action];
     value += probabilities[action] * TraverseProfile(
-        game, policies, child, frame, deal, rng, counters);
+        game, policies, child, frame, deal, rng, counters,
+        reach * probabilities[action]);
   }
   return value;
 }
@@ -153,7 +159,7 @@ ProfileEstimate EstimateProfile(
     const Deal deal = game.deal_distribution().sample(rng);
     const EvaluationFrame frame = InitialFrame(game, root, deal);
     const double value = TraverseProfile(
-        game, policies, root, frame, deal, rng, counters);
+        game, policies, root, frame, deal, rng, counters, 1.0);
     const double delta = value - mean;
     mean += delta / (sample + 1);
     squared_error += delta * (value - mean);
@@ -164,7 +170,13 @@ ProfileEstimate EstimateProfile(
       : 0.0;
   const uint64_t lookups = counters.lookups[0] + counters.lookups[1];
   const uint64_t missing = counters.missing[0] + counters.missing[1];
-  return {{mean, standard_error, lookups, missing}, counters};
+  const double weighted_lookups =
+      counters.weighted_lookups[0] + counters.weighted_lookups[1];
+  const double weighted_missing =
+      counters.weighted_missing[0] + counters.weighted_missing[1];
+  return {{mean, standard_error, lookups, missing,
+           weighted_lookups, weighted_missing},
+          counters};
 }
 
 struct ResponseTrainingContext {
