@@ -1,0 +1,21 @@
+{
+  "name": "poker-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "check": "svelte-check --config ./svelte.config.js --tsconfig ./tsconfig.json",
+    "test": "node --import tsx src/poker.test.ts"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "5.1.1",
+    "@types/node": "18.19.130",
+    "svelte": "5.56.4",
+    "svelte-check": "4.7.2",
+    "tsx": "4.23.0",
+    "typescript": "5.9.3",
+    "vite": "6.4.3"
+  }
+}
