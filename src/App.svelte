@@ -341,15 +341,17 @@
     align-items: center;
     gap: 6px;
     color: #f1cf73;
+    font-size: 18px;
     font-weight: 800;
     font-variant-numeric: tabular-nums;
+    line-height: 1;
     transform: translateX(-50%);
     text-shadow: 0 2px 3px #000;
   }
 
   .committed-bet span {
-    width: 14px;
-    height: 14px;
+    width: 17px;
+    height: 17px;
     border: 2px dashed #5f4b19;
     border-radius: 50%;
     background: #e7c766;
