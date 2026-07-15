@@ -81,7 +81,6 @@
             {#if game.dealer === seat}<span class="dealer" title="Dealer button">D</span>{/if}
           </h2>
           <p><span>Stack</span><strong>${game.stacks[seat]}</strong></p>
-          <p class="bet"><span>Street bet</span><strong>${game.bets[seat]}</strong></p>
         </header>
         <div class="cards">
           {#each game.holes[seat] as card}
@@ -92,15 +91,17 @@
             {/if}
           {/each}
         </div>
+        {#if game.bets[seat] > 0}
+          <p class="committed-bet" aria-label={`${seat === 0 ? "Your" : "Computer"} outstanding bet: $${game.bets[seat]}`}>
+            <span aria-hidden="true"></span><strong>${game.bets[seat]}</strong>
+          </p>
+        {/if}
       </article>
     {/each}
 
     <section class="board" aria-label="Board">
       <div class="table-totals">
         <p class="pot"><span>Pot</span><strong>${game.pot}</strong></p>
-        {#if game.currentBet > 0}
-          <p class="current-bet"><span>Current bet</span><strong>${game.currentBet}</strong></p>
-        {/if}
       </div>
       <div class="cards">
         {#each game.board as card}
@@ -249,6 +250,7 @@
   }
 
   article {
+    position: relative;
     padding: 10px;
     border: 1px solid rgb(255 255 255 / 0.14);
     border-radius: 6px;
@@ -269,7 +271,7 @@
 
   .player-info {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 12px;
   }
@@ -311,14 +313,6 @@
     line-height: 1;
   }
 
-  .player-info .bet {
-    text-align: right;
-  }
-
-  .player-info .bet strong {
-    color: #f1cf73;
-  }
-
   .dealer {
     display: inline-grid;
     width: 22px;
@@ -340,6 +334,36 @@
     grid-area: player-one;
   }
 
+  .committed-bet {
+    position: absolute;
+    left: 50%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #f1cf73;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    transform: translateX(-50%);
+    text-shadow: 0 2px 3px #000;
+  }
+
+  .committed-bet span {
+    width: 14px;
+    height: 14px;
+    border: 2px dashed #5f4b19;
+    border-radius: 50%;
+    background: #e7c766;
+    box-shadow: 0 0 0 2px #f8e8aa inset, 0 2px 4px #000;
+  }
+
+  article:first-of-type .committed-bet {
+    top: -27px;
+  }
+
+  article:nth-of-type(2) .committed-bet {
+    bottom: -27px;
+  }
+
   .board {
     grid-area: board;
     place-self: center;
@@ -353,8 +377,7 @@
     gap: 8px;
   }
 
-  .pot,
-  .current-bet {
+  .pot {
     display: inline-flex;
     align-items: baseline;
     gap: 10px;
@@ -369,14 +392,6 @@
     color: #f7f8f7;
     font-size: 25px;
     line-height: 1;
-  }
-
-  .current-bet {
-    border-color: #9a8149;
-  }
-
-  .current-bet strong {
-    color: #f1cf73;
   }
 
   .board .cards {
@@ -662,15 +677,4 @@
     }
   }
 
-  @media (max-width: 360px) {
-    .player-info {
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 6px 10px;
-    }
-
-    .player-info .bet {
-      grid-column: 1 / -1;
-      justify-self: end;
-    }
-  }
 </style>
