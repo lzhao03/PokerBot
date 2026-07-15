@@ -129,6 +129,9 @@ git show dcbadfc^:<path>
   TypeScript.
 - **Possible endpoint:** Move game transitions into the same WASM boundary so
   TypeScript only renders state and submits a selected action.
+- **Constraint:** Do not add more poker, abstraction, or policy semantics to
+  TypeScript; extend the WASM boundary instead so C++ remains the source of
+  truth.
 - **Restore when:** The browser becomes a supported policy consumer or another
   model/rules change would require manually porting C++ semantics again.
 - **Verification:** Compare C++ and browser history IDs, observations, actions,
@@ -136,6 +139,16 @@ git show dcbadfc^:<path>
   implementations.
 
 ## Diagnostics and operational telemetry
+
+### Browser statistics cleanup
+
+- **Status:** Deferred until the core game and policy experience is stable.
+- **Current behavior:** `App.svelte` presents persisted session results and a
+  dense per-street action table backed by `stats.ts`.
+- **Cleanup:** Revisit which metrics earn space, tighten naming and layout, and
+  make the expanded statistics view work cleanly on mobile without adding more
+  logic to `App.svelte`.
+- **Restore when:** The demo is ready for a dedicated usability pass.
 
 ### Per-run serial/parallel training results
 
@@ -173,6 +186,17 @@ git show dcbadfc^:<path>
   request/configuration that produced them.
 
 ## Experimental and build-time features
+
+### Full Bazel web build
+
+- **Status:** Deferred while the Vercel build remains small and reliable.
+- **Current behavior:** `web/vercel-build.sh` builds only the WASM target with
+  Bazel, then invokes Vite directly.
+- **Desired endpoint:** One deliberate Bazel build verifies the full C++ tree
+  and produces the deployable web artifacts, without duplicating build logic in
+  shell scripts and package scripts.
+- **Restore when:** CI reproducibility or another web artifact justifies owning
+  the additional Bazel JavaScript integration.
 
 ### Sampled CFR traversal variants
 
