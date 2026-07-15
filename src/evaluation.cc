@@ -5,8 +5,10 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <random>
+#include <vector>
 
 #include "absl/container/inlined_vector.h"
 #include "absl/status/status.h"
@@ -25,6 +27,8 @@ struct EvaluationCounters {
   std::array<uint64_t, kPlayerCount> missing = {};
   std::array<double, kPlayerCount> weighted_lookups = {};
   std::array<double, kPlayerCount> weighted_missing = {};
+  absl::flat_hash_map<InfoSetKey, double> reach_by_info_set;
+  bool measure_reach_coverage = false;
 };
 
 struct ProfileEstimate {
@@ -124,6 +128,9 @@ double TraverseProfile(const CFRSolver& game,
   const InfoSetKey key{
       position.public_state.observation(), position.history,
       frame.private_observations[player]};
+  if (counters.measure_reach_coverage && reach > 0.0) {
+    counters.reach_by_info_set[key] += reach;
+  }
   absl::InlinedVector<float, 8> probabilities(node.child_count, 0.0f);
   ++counters.lookups[player];
   counters.weighted_lookups[player] += reach;
@@ -147,12 +154,14 @@ ProfileEstimate EstimateProfile(
     const Policy& player_a,
     const Policy& player_b,
     uint64_t samples,
-    uint64_t seed) {
+    uint64_t seed,
+    bool measure_reach_coverage = false) {
   std::mt19937 rng = MakeEvaluationRng(seed);
   const Position root = RootPosition(game);
   const std::array<const Policy*, kPlayerCount> policies = {
       &player_a, &player_b};
   EvaluationCounters counters;
+  counters.measure_reach_coverage = measure_reach_coverage;
   double mean = 0.0;
   double squared_error = 0.0;
   for (uint64_t sample = 0; sample < samples; ++sample) {
@@ -174,8 +183,23 @@ ProfileEstimate EstimateProfile(
       counters.weighted_lookups[0] + counters.weighted_lookups[1];
   const double weighted_missing =
       counters.weighted_missing[0] + counters.weighted_missing[1];
+  std::vector<double> reaches;
+  reaches.reserve(counters.reach_by_info_set.size());
+  for (const auto& [key, reach] : counters.reach_by_info_set) {
+    (void)key;
+    reaches.push_back(reach);
+  }
+  counters.reach_by_info_set = {};
+  std::ranges::sort(reaches, std::greater<>());
+  size_t rows_for_99_percent = 0;
+  double covered_reach = 0.0;
+  while (rows_for_99_percent < reaches.size() &&
+         covered_reach < 0.99 * weighted_lookups) {
+    covered_reach += reaches[rows_for_99_percent++];
+  }
   return {{mean, standard_error, lookups, missing,
-           weighted_lookups, weighted_missing},
+           weighted_lookups, weighted_missing,
+           reaches.size(), rows_for_99_percent},
           counters};
 }
 
@@ -270,7 +294,8 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const Policy& player_a,
     const Policy& player_b,
     uint64_t samples,
-    uint64_t seed) {
+    uint64_t seed,
+    bool measure_reach_coverage) {
   if (samples == 0) {
     return absl::InvalidArgumentError("evaluation samples must be positive");
   }
@@ -279,7 +304,8 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     return absl::FailedPreconditionError(
         "policy model does not match game");
   }
-  return EstimateProfile(game, player_a, player_b, samples, seed).value;
+  return EstimateProfile(game, player_a, player_b, samples, seed,
+                         measure_reach_coverage).value;
 }
 
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(

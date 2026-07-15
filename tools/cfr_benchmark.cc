@@ -43,6 +43,8 @@ ABSL_FLAG(bool, external_sampling, false,
 ABSL_FLAG(int, threads, 1, "training worker threads");
 ABSL_FLAG(uint64_t, progress_interval, 0,
           "log progress after this many iterations; 0 disables logging");
+ABSL_FLAG(bool, reach_coverage, false,
+          "measure infosets needed to cover 99% of policy reach");
 ABSL_FLAG(std::string, policy_output, "", "optional policy output path");
 
 namespace {
@@ -254,7 +256,8 @@ int main(int argc, char** argv) {
     const auto profile = poker::EstimateExpectedValue(
         *solver, *policy, *policy,
         static_cast<uint64_t>(absl::GetFlag(FLAGS_eval_samples)),
-        absl::GetFlag(FLAGS_evaluation_seed));
+        absl::GetFlag(FLAGS_evaluation_seed),
+        absl::GetFlag(FLAGS_reach_coverage));
     if (profile.ok()) {
       std::cout << "policy_ev\t" << profile->mean << '\n'
                 << "policy_standard_error\t" << profile->standard_error
@@ -266,6 +269,12 @@ int main(int argc, char** argv) {
                 << profile->weighted_policy_lookups << '\n'
                 << "weighted_missing_policy_lookups\t"
                 << profile->weighted_missing_policy_lookups << '\n';
+      if (absl::GetFlag(FLAGS_reach_coverage)) {
+        std::cout << "observed_info_sets\t"
+                  << profile->observed_info_sets << '\n'
+                  << "info_sets_for_99_percent_reach\t"
+                  << profile->info_sets_for_99_percent_reach << '\n';
+      }
     }
     const uint64_t response_iterations =
         absl::GetFlag(FLAGS_best_response_iterations);

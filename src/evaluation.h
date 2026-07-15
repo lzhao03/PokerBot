@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "absl/status/statusor.h"
@@ -14,6 +15,8 @@ struct ValueEstimate {
   uint64_t missing_policy_lookups = 0;
   double weighted_policy_lookups = 0.0;
   double weighted_missing_policy_lookups = 0.0;
+  size_t observed_info_sets = 0;
+  size_t info_sets_for_99_percent_reach = 0;
 };
 
 struct BestResponseConfig {
@@ -42,7 +45,8 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const Policy& player_a,
     const Policy& player_b,
     uint64_t samples,
-    uint64_t seed);
+    uint64_t seed,
+    bool measure_reach_coverage = false);
 
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     const CFRSolver& game,

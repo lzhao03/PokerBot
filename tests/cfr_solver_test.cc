@@ -417,13 +417,17 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
     CHECK(probability == doctest::Approx(1.0 / missing.size()));
   }
 
-  const auto evaluated = EstimateExpectedValue(*solver, policy, policy, 4, 17);
+  const auto evaluated =
+      EstimateExpectedValue(*solver, policy, policy, 4, 17, true);
   const auto repeated = EstimateExpectedValue(*solver, policy, policy, 4, 17);
   REQUIRE(evaluated.ok());
   REQUIRE(repeated.ok());
   CHECK(std::isfinite(evaluated->mean));
   CHECK(evaluated->policy_lookups > 0);
   CHECK(evaluated->weighted_policy_lookups > 0.0);
+  CHECK(evaluated->observed_info_sets > 0);
+  CHECK(evaluated->info_sets_for_99_percent_reach <=
+        evaluated->observed_info_sets);
   CHECK(evaluated->mean == repeated->mean);
   CHECK(evaluated->standard_error == repeated->standard_error);
   CHECK(evaluated->policy_lookups == repeated->policy_lookups);
