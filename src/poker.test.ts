@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { act, bestHand, botAction, compareHands, legalActions, newHand, nextHand, type Card } from "./poker";
 import { policyActions, policyHistoryNodeCount, privateObservation, publicObservation } from "./policy";
-import { bbPer100, emptyStats, recordHand, variance } from "./stats";
+import { bbPer100, emptyStats, recordHand, stdDevPer100 } from "./stats";
 
 const cards = (text: string): Card[] => text.split(" ") as Card[];
 
@@ -118,7 +118,7 @@ assert.equal(stats.threeBetOpportunities, 1);
 assert.equal(stats.threeBets, 1);
 assert.equal(stats.streets.preflop.raise.raise, 1);
 assert.equal(bbPer100(stats), 150);
-assert.equal(variance(stats), 0.5);
+assert.equal(stdDevPer100(stats), Math.sqrt(50));
 
 game = newHand([200, 200], 0);
 game = act(game, "call");

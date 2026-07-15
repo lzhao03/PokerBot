@@ -2,7 +2,7 @@
   import { onDestroy, onMount } from "svelte";
   import { act, legalActions, nextHand, newHand, type Action, type Card, type Street, type Suit } from "./poker";
   import { loadPolicy, policyActions, policyMove, type Policy } from "./policy";
-  import { FACINGS, STAT_ACTIONS, STREETS, bbPer100, emptyStats, loadStats, rate, recordHand, saveStats, variance, type PokerStats } from "./stats";
+  import { FACINGS, STAT_ACTIONS, STREETS, bbPer100, emptyStats, loadStats, rate, recordHand, saveStats, stdDevPer100, type PokerStats } from "./stats";
 
   let game = newHand();
   let stats: PokerStats = emptyStats();
@@ -142,7 +142,7 @@
           <div><dt>Hands</dt><dd>{stats.hands}</dd></div>
           <div><dt>Net</dt><dd>{stats.netBb.toFixed(1)} BB</dd></div>
           <div><dt>Est. BB/100</dt><dd>{estimate(bbPer100(stats))}</dd></div>
-          <div><dt>Est. variance</dt><dd>{estimate(variance(stats), " BB²/hand")}</dd></div>
+          <div><dt>Est. std dev</dt><dd>{estimate(stdDevPer100(stats), " BB/100")}</dd></div>
           <div><dt>VPIP</dt><dd>{percent(stats.vpipHands, stats.hands)}</dd></div>
           <div><dt>PFR</dt><dd>{percent(stats.pfrHands, stats.hands)}</dd></div>
           <div><dt>3-bet</dt><dd>{percent(stats.threeBets, stats.threeBetOpportunities)}</dd></div>

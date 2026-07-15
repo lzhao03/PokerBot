@@ -94,8 +94,8 @@ export function recordHand(current: PokerStats, game: Game): PokerStats {
 
 export const rate = (value: number, total: number): number | null => total > 0 ? value / total : null;
 export const bbPer100 = (stats: PokerStats): number | null => rate(stats.netBb * 100, stats.hands);
-export const variance = (stats: PokerStats): number | null => stats.hands > 1
-  ? Math.max(0, (stats.squaredBb - stats.netBb * stats.netBb / stats.hands) / (stats.hands - 1))
+export const stdDevPer100 = (stats: PokerStats): number | null => stats.hands > 1
+  ? Math.sqrt(100 * Math.max(0, (stats.squaredBb - stats.netBb * stats.netBb / stats.hands) / (stats.hands - 1)))
   : null;
 
 export function loadStats(): PokerStats {
