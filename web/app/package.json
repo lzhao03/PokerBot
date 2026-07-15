@@ -3,7 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:decoder": "cd ../.. && bazel build -c opt //web:policy_decoder_wasm",
+    "predev": "npm run build:decoder",
     "dev": "vite --host 127.0.0.1",
+    "prebuild": "npm run build:decoder",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "check": "svelte-check --config ./svelte.config.js --tsconfig ./tsconfig.json",

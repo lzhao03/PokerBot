@@ -274,7 +274,7 @@ export function privateObservation(hand: Card[], board: Card[]): number {
 }
 
 export async function loadPolicy(url = "/pokerbot.policy"): Promise<Policy> {
-  const decoderPromise: Promise<Decoder> = import("./policy_decoder.js")
+  const decoderPromise: Promise<Decoder> = import("@poker/policy_decoder")
     .then(async (module) => (await module.default()) as Decoder);
   const [decoder, response] = await Promise.all([
     decoderPromise,

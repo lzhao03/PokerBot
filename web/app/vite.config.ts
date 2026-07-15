@@ -1,10 +1,13 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { brotliDecompressSync } from "node:zlib";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig, type Plugin } from "vite";
 
-const policy = brotliDecompressSync(readFileSync(new URL("./models/pokerbot.policy.br", import.meta.url)));
+const repository = fileURLToPath(new URL("../..", import.meta.url));
+const decoder = resolve(repository, "bazel-bin/web/policy_decoder.js");
+const policy = brotliDecompressSync(readFileSync(resolve(repository, "models/compact_texture_16-16-64_small_betting_h36_current_100bb_550k_100m.policy.br")));
 
 function pokerPolicy(): Plugin {
   let output = resolve("dist/pokerbot.policy");
@@ -24,5 +27,7 @@ function pokerPolicy(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [svelte(), pokerPolicy()]
+  plugins: [svelte(), pokerPolicy()],
+  resolve: { alias: { "@poker/policy_decoder": decoder } },
+  server: { fs: { allow: [repository] } }
 });

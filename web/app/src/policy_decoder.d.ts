@@ -1,3 +1,5 @@
-declare function createPolicyDecoder(): Promise<unknown>;
+declare module "@poker/policy_decoder" {
+  function createPolicyDecoder(): Promise<unknown>;
 
-export default createPolicyDecoder;
+  export default createPolicyDecoder;
+}
