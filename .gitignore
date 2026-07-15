@@ -6,3 +6,4 @@ equilibrium_strategy.txt
 __pycache__/
 source_bundle.txt
 test_bundle.txt
+/scripts/
