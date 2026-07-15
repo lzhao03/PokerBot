@@ -28,6 +28,8 @@ ABSL_FLAG(std::string, private_abstraction, "handcrafted36",
           "exact or handcrafted36");
 ABSL_FLAG(std::string, private_recall, "auto",
           "auto, current, or history");
+ABSL_FLAG(std::string, betting_abstraction, "default",
+          "default or small_betting");
 ABSL_FLAG(uint64_t, evaluation_seed, 1, "policy evaluation seed");
 ABSL_FLAG(uint64_t, best_response_iterations, 0,
           "approximate best-response iterations; 0 disables it");
@@ -70,6 +72,12 @@ absl::StatusOr<poker::SolverConfig> BenchmarkConfig() {
   options.accumulate_average_strategy =
       absl::GetFlag(FLAGS_accumulate_average_strategy);
   options.external_sampling = absl::GetFlag(FLAGS_external_sampling);
+  const std::string betting = absl::GetFlag(FLAGS_betting_abstraction);
+  if (betting == "small_betting") {
+    options.bet_abstraction = poker::SmallBettingConfig();
+  } else if (betting != "default") {
+    return absl::InvalidArgumentError("invalid betting abstraction");
+  }
   const std::string kind = absl::GetFlag(FLAGS_private_abstraction);
   if (kind == "exact") {
     options.card_abstraction.private_kind =

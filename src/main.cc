@@ -34,9 +34,10 @@ ABSL_FLAG(std::string, private_abstraction, "handcrafted36",
           "exact or handcrafted36");
 ABSL_FLAG(std::string, private_recall, "auto",
           "auto, current, or history");
-ABSL_FLAG(std::vector<std::string>, pot_fractions,
-          std::vector<std::string>({"0.25", "0.5", "1.0"}),
-          "pot fractions after calling for every street");
+ABSL_FLAG(std::string, betting_abstraction, "default",
+          "default or small_betting");
+ABSL_FLAG(std::vector<std::string>, pot_fractions, {},
+          "override pot fractions after calling for every street");
 ABSL_FLAG(std::vector<std::string>, preflop_pot_fractions, {},
           "preflop pot fractions after calling");
 ABSL_FLAG(std::vector<std::string>, flop_pot_fractions, {},
@@ -113,12 +114,19 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
           ? poker::RecallMode::BucketHistory
           : poker::RecallMode::CurrentBucketOnly;
 
-  const auto fractions =
-      ParsePotFractions(absl::GetFlag(FLAGS_pot_fractions));
-  if (!fractions.ok()) {
-    return fractions.status();
+  const std::string betting_abstraction =
+      absl::GetFlag(FLAGS_betting_abstraction);
+  if (betting_abstraction == "small_betting") {
+    config.bet_abstraction = poker::SmallBettingConfig();
+  } else if (betting_abstraction != "default") {
+    return absl::InvalidArgumentError("invalid betting abstraction");
   }
-  config.bet_abstraction.pot_fractions.fill(*fractions);
+  const auto global_fractions = absl::GetFlag(FLAGS_pot_fractions);
+  if (!global_fractions.empty()) {
+    const auto fractions = ParsePotFractions(global_fractions);
+    if (!fractions.ok()) return fractions.status();
+    config.bet_abstraction.pot_fractions.fill(*fractions);
+  }
   const std::array overrides = {
       absl::GetFlag(FLAGS_preflop_pot_fractions),
       absl::GetFlag(FLAGS_flop_pot_fractions),

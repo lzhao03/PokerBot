@@ -12,6 +12,15 @@ namespace {
 
 using S = Suit;
 
+TEST_CASE("small betting uses half-pot and pot-sized actions") {
+  const BetAbstractionConfig config = SmallBettingConfig();
+  for (const auto& fractions : config.pot_fractions) {
+    REQUIRE(fractions.size() == 2);
+    CHECK(fractions[0] == 0.5);
+    CHECK(fractions[1] == 1.0);
+  }
+}
+
 Card C(int rank, S suit) { return Card(static_cast<Rank>(rank - 2), suit); }
 
 BettingData& B(BettingState& state) {

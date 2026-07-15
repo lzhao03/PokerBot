@@ -6,6 +6,12 @@
 
 namespace poker {
 
+BetAbstractionConfig SmallBettingConfig() {
+  BetAbstractionConfig config;
+  config.pot_fractions.fill({0.5, 1.0});
+  return config;
+}
+
 AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
                                       const DecisionState& state) {
   const BettingData& data = state.data;

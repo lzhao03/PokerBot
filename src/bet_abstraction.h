@@ -20,6 +20,8 @@ struct BetAbstractionConfig {
   }};
 };
 
+BetAbstractionConfig SmallBettingConfig();
+
 using AbstractActions =
     absl::InlinedVector<GameAction, kMaxActionsPerNode>;
 
