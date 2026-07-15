@@ -1,18 +1,4 @@
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
-
-cc_library(
-    name = "hand_evaluator_table_builder",
-    srcs = ["hand_evaluator_table_builder.cc"],
-    hdrs = ["hand_evaluator_table_builder.h"],
-    deps = ["//src:poker"],
-    visibility = ["//tests:__pkg__"],
-)
-
-cc_binary(
-    name = "generate_hand_evaluator",
-    srcs = ["generate_hand_evaluator.cc"],
-    deps = [":hand_evaluator_table_builder"],
-)
+load("@rules_cc//cc:defs.bzl", "cc_binary")
 
 cc_binary(
     name = "cfr_benchmark",

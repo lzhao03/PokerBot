@@ -29,7 +29,6 @@ cc_test(
     deps = DOCTEST_DEPS + [
         "//src:bet_abstraction",
         "//src:solver",
-        "//tools:hand_evaluator_table_builder",
     ],
 )
 

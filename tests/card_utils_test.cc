@@ -3,12 +3,13 @@
 #include "src/hand_evaluator.h"
 #include "src/poker.h"
 #include "src/solver.h"
-#include "tools/hand_evaluator_table_builder.h"
 
 #include "doctest/doctest.h"
 
 #include <algorithm>
 #include <array>
+#include <compare>
+#include <functional>
 #include <initializer_list>
 #include <random>
 #include <set>
@@ -18,8 +19,107 @@ namespace poker {
 namespace {
 
 using S = Suit;
-using hand_evaluator_generation::EvaluationScore;
-using hand_evaluator_generation::HandRank;
+
+enum class HandRank {
+  HighCard,
+  Pair,
+  TwoPair,
+  ThreeOfAKind,
+  Straight,
+  Flush,
+  FullHouse,
+  FourOfAKind,
+  StraightFlush,
+};
+
+struct EvaluationScore {
+  HandRank rank = HandRank::HighCard;
+  std::array<int, 5> kickers = {};
+
+  friend auto operator<=>(const EvaluationScore&,
+                          const EvaluationScore&) = default;
+};
+
+template <typename... Kickers>
+EvaluationScore Score(HandRank rank, Kickers... kickers) {
+  return {rank, {static_cast<int>(kickers)...}};
+}
+
+EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards) {
+  std::array<int, 5> ranks;
+  std::array<int, 15> rank_counts = {};
+  for (size_t index = 0; index < cards.size(); ++index) {
+    ranks[index] = PokerRank(cards[index]);
+    ++rank_counts[ranks[index]];
+  }
+  std::ranges::sort(ranks, std::greater{});
+
+  const bool flush = std::ranges::all_of(
+      cards, [&](Card card) { return card.suit() == cards[0].suit(); });
+  int straight_high = -1;
+  for (int high = 14; high >= 6 && straight_high < 0; --high) {
+    bool straight = true;
+    for (int rank = high - 4; rank <= high; ++rank) {
+      straight &= rank_counts[rank] != 0;
+    }
+    if (straight) straight_high = high;
+  }
+  if (straight_high < 0 && rank_counts[14] && rank_counts[5] &&
+      rank_counts[4] && rank_counts[3] && rank_counts[2]) {
+    straight_high = 5;
+  }
+  if (flush && straight_high >= 0) {
+    return Score(HandRank::StraightFlush, straight_high);
+  }
+
+  int four = -1;
+  int three = -1;
+  std::array<int, 2> pairs = {-1, -1};
+  size_t pair_count = 0;
+  for (int rank = 14; rank >= 2; --rank) {
+    if (rank_counts[rank] == 4) four = rank;
+    if (rank_counts[rank] == 3) three = rank;
+    if (rank_counts[rank] == 2) pairs[pair_count++] = rank;
+  }
+  if (four >= 0) {
+    const int kicker = ranks[0] == four ? ranks[4] : ranks[0];
+    return Score(HandRank::FourOfAKind, four, kicker);
+  }
+  if (three >= 0 && pair_count > 0) {
+    return Score(HandRank::FullHouse, three, pairs[0]);
+  }
+  if (flush) {
+    return Score(HandRank::Flush, ranks[0], ranks[1], ranks[2], ranks[3],
+                 ranks[4]);
+  }
+  if (straight_high >= 0) {
+    return Score(HandRank::Straight, straight_high);
+  }
+  if (three >= 0) {
+    std::array<int, 2> kickers;
+    size_t count = 0;
+    for (int rank : ranks) {
+      if (rank != three) kickers[count++] = rank;
+    }
+    return Score(HandRank::ThreeOfAKind, three, kickers[0], kickers[1]);
+  }
+  if (pair_count == 2) {
+    const int kicker = *std::ranges::find_if(
+        ranks, [&](int rank) { return rank != pairs[0] && rank != pairs[1]; });
+    return Score(HandRank::TwoPair, pairs[0], pairs[1], kicker);
+  }
+  if (pair_count == 1) {
+    std::array<int, 3> kickers;
+    size_t count = 0;
+    for (int rank : ranks) {
+      if (rank != pairs[0]) kickers[count++] = rank;
+    }
+    return Score(HandRank::Pair, pairs[0], kickers[0], kickers[1],
+                 kickers[2]);
+  }
+  return Score(HandRank::HighCard, ranks[0], ranks[1], ranks[2], ranks[3],
+               ranks[4]);
+}
 
 Card C(int rank, S suit) { return Card(static_cast<Rank>(rank - 2), suit); }
 ComboId H(Card a, Card b) { return CardsToComboId(a, b); }
@@ -56,7 +156,7 @@ EvaluationScore ReferenceBest(ComboId hand, const Board& board) {
         for (size_t d = c + 1; d + 1 < count; ++d)
           for (size_t e = d + 1; e < count; ++e)
             best = std::max(
-                best, hand_evaluator_generation::EvaluateFiveCardScore(
+                best, EvaluateFiveCardScore(
                           {cards[a], cards[b], cards[c], cards[d], cards[e]}));
   return best;
 }
@@ -107,7 +207,7 @@ TEST_CASE("combo ids are an exhaustive canonical bijection") {
 }
 
 TEST_CASE("hand evaluator matches an independent five-card oracle") {
-  const auto wheel = hand_evaluator_generation::EvaluateFiveCardScore(
+  const auto wheel = EvaluateFiveCardScore(
       std::array<Card, 5>{C(14, S::Hearts), C(5, S::Diamonds),
                           C(4, S::Clubs), C(3, S::Spades),
                           C(2, S::Hearts)});

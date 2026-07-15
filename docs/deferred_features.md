@@ -67,7 +67,7 @@ git show dcbadfc^:<path>
 
 ### Semantic hand evaluation
 
-- **Status:** Deferred from the runtime API; retained privately in table tools.
+- **Status:** Deferred from the runtime API; retained only as a test oracle.
 - **Removed:** Runtime `HandRank`, `HandEvaluation`, `EvaluateFiveCards()`, and
   raw `HandValue()`.
 - **Previous behavior:** Returned named hand categories, kickers, comparisons,
@@ -75,12 +75,11 @@ git show dcbadfc^:<path>
 - **Why removed:** The solver only needs `CompareHands()`; semantic evaluation
   was otherwise used by tests and the table generator.
 - **What remains:** Seven-card showdown comparison and an independent
-  five-card scoring model in `tools/hand_evaluator_table_builder.*`.
+  five-card scoring model in `tests/card_utils_test.cc`.
 - **Restore when:** A UI, hand-history inspector, debugging tool, or public API
   needs names, kickers, or stable raw values.
-- **Recovery locations:** `src/hand_evaluator.*`, generator tooling, and the
-  removed `kCactusScores` records in `generated/hand_evaluator_tables.h` from
-  `dcbadfc^`.
+- **Recovery locations:** `src/hand_evaluator.*` and the removed generator
+  tooling from `dcbadfc^`.
 
 ### Direct history-edge action metadata
 
