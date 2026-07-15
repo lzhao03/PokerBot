@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <cmath>
 #include <concepts>
-#include <fstream>
 #include <optional>
 #include <thread>
 #include <type_traits>
@@ -98,31 +97,6 @@ ModelFingerprint FingerprintModel(const SolveSpec& spec) noexcept {
   AddBoard(bytes, spec.root.board);
   for (const ComboRange& range : spec.ranges) AddRange(bytes, range);
   return Fingerprint(bytes);
-}
-
-absl::Status WriteBytes(const std::filesystem::path& path,
-                        absl::Span<const uint8_t> bytes) {
-  std::filesystem::path temporary = path;
-  temporary += ".tmp";
-  std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-  if (!output) {
-    return absl::UnavailableError("could not open output file");
-  }
-  output.write(reinterpret_cast<const char*>(bytes.data()),
-               static_cast<std::streamsize>(bytes.size()));
-  output.close();
-  if (!output) {
-    std::error_code ignored;
-    std::filesystem::remove(temporary, ignored);
-    return absl::DataLossError("could not write output file");
-  }
-  std::error_code error;
-  std::filesystem::rename(temporary, path, error);
-  if (error) {
-    std::filesystem::remove(temporary, error);
-    return absl::UnavailableError("could not replace output file");
-  }
-  return absl::OkStatus();
 }
 
 enum class HandShape {
@@ -479,79 +453,6 @@ bool Policy::strategy(InfoSetKey key, absl::Span<float> output) const {
   std::copy_n(probabilities.data() + offset,
               output.size(), output.begin());
   return true;
-}
-
-namespace {
-
-absl::Status ValidatePolicy(const Policy& policy) {
-  std::vector<size_t> rows;
-  rows.reserve(policy.rows.size());
-  for (const auto& row : policy.rows) rows.push_back(row.second);
-  std::ranges::sort(rows);
-  if (rows.empty()) {
-    return policy.probabilities.empty()
-               ? absl::OkStatus()
-               : absl::DataLossError("policy probabilities have no rows");
-  }
-  if (rows.front() != 0) {
-    return absl::DataLossError("policy rows are not contiguous");
-  }
-  for (size_t index = 0; index < rows.size(); ++index) {
-    const size_t begin = rows[index];
-    const size_t end = index + 1 < rows.size()
-                           ? rows[index + 1]
-                           : policy.probabilities.size();
-    if (begin >= end || end > policy.probabilities.size() ||
-        end - begin > kMaxActionsPerNode) {
-      return absl::DataLossError("invalid policy row span");
-    }
-    double sum = 0.0;
-    for (size_t action = begin; action < end; ++action) {
-      const float probability = policy.probabilities[action];
-      if (!std::isfinite(probability) || probability < 0.0f ||
-          probability > 1.0f) {
-        return absl::DataLossError("invalid policy probability");
-      }
-      sum += probability;
-    }
-    if (std::abs(sum - 1.0) > 1e-5) {
-      return absl::DataLossError("policy row is not normalized");
-    }
-  }
-  return absl::OkStatus();
-}
-
-constexpr std::array<uint8_t, 8> kPolicyMagic = {
-    'P', 'K', 'P', 'O', 'L', 'C', 'Y', '3'};
-
-}  // namespace
-
-absl::Status SavePolicy(const Policy& policy,
-                        const std::filesystem::path& path) {
-  const absl::Status valid = ValidatePolicy(policy);
-  if (!valid.ok()) return valid;
-
-  std::vector<std::pair<InfoSetKey, size_t>> rows(
-      policy.rows.begin(), policy.rows.end());
-  std::ranges::sort(rows);
-
-  std::vector<uint8_t> bytes;
-  bytes.insert(bytes.end(), kPolicyMagic.begin(), kPolicyMagic.end());
-  AppendInteger<uint32_t>(bytes, 3);
-  AppendInteger(bytes, std::to_underlying(policy.model));
-  AppendInteger<uint64_t>(bytes, rows.size());
-  AppendInteger<uint64_t>(bytes, policy.probabilities.size());
-  for (const auto& [key, offset] : rows) {
-    AppendInteger(bytes, std::to_underlying(key.history));
-    AppendInteger(bytes, std::to_underlying(key.public_observation));
-    AppendInteger<uint64_t>(
-        bytes, std::to_underlying(key.private_observation));
-    AppendInteger<uint64_t>(bytes, offset);
-  }
-  for (float probability : policy.probabilities) {
-    AppendInteger(bytes, std::bit_cast<uint32_t>(probability));
-  }
-  return WriteBytes(path, bytes);
 }
 
 absl::StatusOr<SolverConfig> SolverConfig::Create(SolverConfig config) {

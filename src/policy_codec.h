@@ -2,10 +2,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
+#include "src/solver.h"
 
 namespace poker {
 
@@ -26,5 +28,12 @@ absl::Status DecodeActionProbabilities(
     uint64_t code,
     absl::Span<float> probabilities,
     PolicyCodecConfig config = {});
+
+// Uniform rows are omitted and use Policy::strategy's existing fallback.
+absl::StatusOr<std::vector<uint8_t>> EncodePolicy(
+    const Policy& policy,
+    PolicyCodecConfig config = {});
+
+absl::StatusOr<Policy> DecodePolicy(absl::Span<const uint8_t> bytes);
 
 }  // namespace poker

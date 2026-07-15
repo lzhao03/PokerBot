@@ -173,19 +173,6 @@ git show dcbadfc^:<path>
   exploitability versus nodes touched and wall time, and first validate the
   single-threaded uncapped perfect-recall implementation.
 
-### Compact experimental policy encoding
-
-- **Status:** Deferred experiment.
-- **Removed:** `EncodeExperimentalPolicy()`, its Bazel target, and tests.
-- **Previous behavior:** Emitted deterministic `PKX1` bytes using sorted and
-  delta-varint infoset keys plus 8-bit action probabilities summing to 255.
-  It had no decoder and was not used by production persistence.
-- **Why removed:** It was explicitly unstable, isolated, and test-only.
-- **Restore when:** Measurements show float policy files are a material storage
-  or bandwidth problem and an end-to-end encoded format is planned.
-- **Recovery locations:** `src/experimental_policy_encoder.*` and
-  `tests/experimental_policy_encoder_test.cc` in `dcbadfc^`.
-
 ### Separate production benchmark target
 
 - **Status:** Not planned for restoration.

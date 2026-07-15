@@ -1,0 +1,48 @@
+load("@emsdk//emscripten_toolchain:wasm_rules.bzl", "wasm_cc_binary")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_test")
+
+cc_binary(
+    name = "policy_decoder",
+    srcs = [
+        "policy_decoder_wasm.cc",
+        "policy_decoder_wasm.h",
+    ],
+    copts = ["-Oz"],
+    features = ["optimized_for_size"],
+    linkopts = [
+        "-Oz",
+        "--no-entry",
+        "-sALLOW_MEMORY_GROWTH=1",
+        "-sASSERTIONS=0",
+        "-sENVIRONMENT=web",
+        "-sEXPORT_ES6=1",
+        "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','HEAPF32']",
+        "-sFILESYSTEM=0",
+        "-sMALLOC=emmalloc",
+        "-sMODULARIZE=1",
+    ],
+    tags = ["manual"],
+)
+
+wasm_cc_binary(
+    name = "policy_decoder_wasm",
+    cc_target = ":policy_decoder",
+    outputs = [
+        "policy_decoder.js",
+        "policy_decoder.wasm",
+    ],
+    tags = ["manual"],
+)
+
+cc_test(
+    name = "policy_decoder_test",
+    srcs = [
+        "policy_decoder_wasm.cc",
+        "policy_decoder_wasm.h",
+        "policy_decoder_wasm_test.cc",
+    ],
+    deps = [
+        "//src:solver",
+        "@doctest//:main",
+    ],
+)
