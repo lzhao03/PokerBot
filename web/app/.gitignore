@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.svelte-kit/
+.vite/
+coverage/
+
+.env
+.env.*
+!.env.example
+*.log
+*.policy
+.DS_Store
