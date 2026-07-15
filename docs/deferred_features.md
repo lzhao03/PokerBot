@@ -114,6 +114,27 @@ git show dcbadfc^:<path>
   stable access to intermediate features and buckets. Prefer a tool-facing API
   rather than making solver internals public again.
 
+### WASM-owned browser poker semantics
+
+- **Status:** Deferred while the web application remains experimental.
+- **Current duplication:** `web/app/src/policy.ts` reconstructs the abstract
+  betting tree, public texture history, and private bucket used by C++ policy
+  lookup. `web/app/src/poker.ts` separately implements browser game rules and
+  hand evaluation.
+- **Risk:** A C++ rules, action-abstraction, or card-abstraction change can make
+  the browser query a valid but incorrect policy row without an obvious error.
+- **Initial migration:** Add one narrow WASM query accepting the action history,
+  hole cards, and board, and returning legal abstract actions plus policy
+  probabilities. Keep rendering, random selection, and statistics in
+  TypeScript.
+- **Possible endpoint:** Move game transitions into the same WASM boundary so
+  TypeScript only renders state and submits a selected action.
+- **Restore when:** The browser becomes a supported policy consumer or another
+  model/rules change would require manually porting C++ semantics again.
+- **Verification:** Compare C++ and browser history IDs, observations, actions,
+  and probabilities over a deterministic corpus before deleting the TypeScript
+  implementations.
+
 ## Diagnostics and operational telemetry
 
 ### Per-run serial/parallel training results
