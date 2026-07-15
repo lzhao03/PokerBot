@@ -24,6 +24,8 @@ ABSL_FLAG(double, training_seconds, 0.0,
           "train for this wall-clock duration; 0 uses iterations");
 ABSL_FLAG(uint64_t, prefill_iterations, 0,
           "single-thread iterations before timed training");
+ABSL_FLAG(std::string, public_abstraction, "texture",
+          "exact, texture, or compact_texture");
 ABSL_FLAG(std::string, private_abstraction, "handcrafted36",
           "exact or handcrafted36");
 ABSL_FLAG(std::string, private_recall, "auto",
@@ -74,6 +76,16 @@ absl::StatusOr<poker::SolverConfig> BenchmarkConfig() {
   options.accumulate_average_strategy =
       absl::GetFlag(FLAGS_accumulate_average_strategy);
   options.external_sampling = absl::GetFlag(FLAGS_external_sampling);
+  const std::string public_mode = absl::GetFlag(FLAGS_public_abstraction);
+  if (public_mode == "exact") {
+    options.card_abstraction.public_mode =
+        poker::PublicCardMode::ExactCanonical;
+  } else if (public_mode == "compact_texture") {
+    options.card_abstraction.public_mode =
+        poker::PublicCardMode::CompactTexture;
+  } else if (public_mode != "texture") {
+    return absl::InvalidArgumentError("invalid public abstraction");
+  }
   const std::string betting = absl::GetFlag(FLAGS_betting_abstraction);
   if (betting == "small_betting") {
     options.bet_abstraction = poker::SmallBettingConfig();

@@ -15,6 +15,10 @@ inline constexpr int kPublicObservationBitsPerStreet = 7;
 inline constexpr int kSuitBucketCount = 4;
 inline constexpr int kStraightBucketCount = 3;
 inline constexpr int kHighBucketCount = 3;
+inline constexpr uint64_t kTextureBucketCount =
+    3 * kSuitBucketCount * kStraightBucketCount * kHighBucketCount;
+inline constexpr std::array<uint64_t, 3> kTextureBuckets = {108, 108, 108};
+inline constexpr std::array<uint64_t, 3> kCompactTextureBuckets = {16, 16, 64};
 inline constexpr std::array<uint32_t, 4> kPrivateObservationPlaces = {
     1, 37, 37 * 37, 37 * 37 * 37};
 
@@ -144,14 +148,19 @@ uint16_t Handcrafted36Bucket(
       made_bucket * 9 + draw_bucket * 3 + strength_bucket);
 }
 
-PublicObservationId EncodeBoardTextureHistory(const Board& board) noexcept {
+PublicObservationId EncodeBoardTextureHistory(
+    const Board& board,
+    const std::array<uint64_t, 3>& buckets_per_street) noexcept {
   uint64_t observation = 0;
   BoardFeatures features;
   const auto cards = board.cards();
   for (size_t index = 0; index < cards.size(); ++index) {
     AddCard(features, cards[index]);
     if (index >= 2) {
-      observation |= (BoardTextureBucket(features) + 1)
+      const uint64_t bucket = BoardTextureBucket(features) *
+                              buckets_per_street[index - 2] /
+                              kTextureBucketCount;
+      observation |= (bucket + 1)
                      << ((index - 2) * kPublicObservationBitsPerStreet);
     }
   }
@@ -197,7 +206,9 @@ PublicObservationId ObservePublic(const CardAbstractionConfig& config,
     case PublicCardMode::ExactCanonical:
       return CanonicalPublicObservation(board);
     case PublicCardMode::Texture:
-      return EncodeBoardTextureHistory(board);
+      return EncodeBoardTextureHistory(board, kTextureBuckets);
+    case PublicCardMode::CompactTexture:
+      return EncodeBoardTextureHistory(board, kCompactTextureBuckets);
   }
 }
 

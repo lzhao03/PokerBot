@@ -8,6 +8,7 @@ namespace poker {
 enum class PublicCardMode : uint8_t {
   ExactCanonical,
   Texture,
+  CompactTexture,
 };
 
 enum class PrivateAbstractionKind : uint8_t {

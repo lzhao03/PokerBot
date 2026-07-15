@@ -329,7 +329,7 @@ CfrState::CfrState(const SolverConfig& config,
     : max_info_sets_(static_cast<size_t>(config.max_info_sets)),
       accumulate_average_strategy_(accumulate_average_strategy) {
   const CardAbstractionConfig& cards = config.card_abstraction;
-  packed_keys_ = cards.public_mode == PublicCardMode::Texture;
+  packed_keys_ = cards.public_mode != PublicCardMode::ExactCanonical;
   if (packed_keys_) {
     private_bits_ = cards.private_kind == PrivateAbstractionKind::ExactCanonical
                         ? 11

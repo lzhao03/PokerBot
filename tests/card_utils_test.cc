@@ -228,6 +228,29 @@ TEST_CASE("handcrafted 36 mappings remain stable") {
         PrivateObservationId(7));
 }
 
+TEST_CASE("compact public texture keeps the complete street history") {
+  const CardAbstractionConfig config{
+      PublicCardMode::CompactTexture,
+      PrivateAbstractionKind::Handcrafted36};
+  const Board flop = B({C(14, S::Hearts), C(9, S::Hearts),
+                        C(4, S::Clubs)});
+  const Board turn =
+      DealCards(flop, std::array<Card, 1>{C(7, S::Diamonds)});
+  const Board river =
+      DealCards(turn, std::array<Card, 1>{C(2, S::Spades)});
+
+  constexpr uint64_t kStreetMask = (1ULL << 7) - 1;
+  const uint64_t flop_id = std::to_underlying(ObservePublic(config, flop));
+  const uint64_t turn_id = std::to_underlying(ObservePublic(config, turn));
+  const uint64_t river_id = std::to_underlying(ObservePublic(config, river));
+
+  CHECK((turn_id & kStreetMask) == flop_id);
+  CHECK((river_id & ((1ULL << 14) - 1)) == turn_id);
+  CHECK((flop_id & kStreetMask) <= 16);
+  CHECK(((turn_id >> 7) & kStreetMask) <= 16);
+  CHECK(((river_id >> 14) & kStreetMask) <= 64);
+}
+
 TEST_CASE("canonical observations preserve card relationships and order") {
   const Board monotone = B({C(14, S::Hearts), C(13, S::Hearts),
                             C(12, S::Hearts)});

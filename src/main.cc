@@ -30,6 +30,8 @@ ABSL_FLAG(bool, accumulate_average_strategy, true,
           "store the average strategy");
 ABSL_FLAG(bool, external_sampling, false,
           "sample opponent actions during training");
+ABSL_FLAG(std::string, public_abstraction, "texture",
+          "exact, texture, or compact_texture");
 ABSL_FLAG(std::string, private_abstraction, "handcrafted36",
           "exact or handcrafted36");
 ABSL_FLAG(std::string, private_recall, "auto",
@@ -90,6 +92,18 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
   config.accumulate_average_strategy =
       absl::GetFlag(FLAGS_accumulate_average_strategy);
   config.external_sampling = absl::GetFlag(FLAGS_external_sampling);
+
+  const std::string public_abstraction =
+      absl::GetFlag(FLAGS_public_abstraction);
+  if (public_abstraction == "exact") {
+    config.card_abstraction.public_mode =
+        poker::PublicCardMode::ExactCanonical;
+  } else if (public_abstraction == "compact_texture") {
+    config.card_abstraction.public_mode =
+        poker::PublicCardMode::CompactTexture;
+  } else if (public_abstraction != "texture") {
+    return absl::InvalidArgumentError("invalid public abstraction");
+  }
 
   const std::string private_abstraction =
       absl::GetFlag(FLAGS_private_abstraction);
