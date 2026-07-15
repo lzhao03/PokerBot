@@ -112,17 +112,8 @@
     </section>
 
     <section class="controls" aria-label="Game controls">
-      <div class="status-line">
-        <p class="message">{game.message}</p>
-        {#if !game.winner && game.toAct === 0 && legal.toCall > 0}
-          <div class="call-summary" aria-label={`Facing ${game.currentBet}; ${legal.toCall} to call`}>
-            <p><span>Facing</span><strong>${game.currentBet}</strong></p>
-            <p class="to-call"><span>To call</span><strong>${legal.toCall}</strong></p>
-          </div>
-        {/if}
-      </div>
-
       {#if game.winner}
+        <p class="message">{game.message}</p>
         <button class="next-action" on:click={next}>{busted ? "Reset game" : "Next hand"}</button>
       {:else if game.toAct === 0}
         <div class="actions">
@@ -301,8 +292,7 @@
   }
 
   .player-info p > span,
-  .table-totals span,
-  .call-summary span {
+  .table-totals span {
     color: #9ca8a3;
     font-size: 10px;
     font-weight: 750;
@@ -313,7 +303,6 @@
 
   .player-info strong,
   .table-totals strong,
-  .call-summary strong,
   .actions strong {
     font-variant-numeric: tabular-nums;
   }
@@ -419,6 +408,7 @@
     width: fit-content;
     max-width: 100%;
     min-height: 20px;
+    margin: 0 auto 10px;
     padding: 7px 12px;
     box-sizing: border-box;
     border: 1px solid rgb(255 255 255 / 0.12);
@@ -426,46 +416,6 @@
     color: #dfe5e2;
     background: rgb(8 13 11 / 0.82);
     text-align: center;
-  }
-
-  .status-line {
-    display: flex;
-    min-height: 36px;
-    align-items: center;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 10px;
-  }
-
-  .call-summary {
-    display: flex;
-    width: fit-content;
-    overflow: hidden;
-    border: 1px solid rgb(255 255 255 / 0.16);
-    border-radius: 6px;
-    background: rgb(8 13 11 / 0.9);
-  }
-
-  .call-summary p {
-    display: flex;
-    align-items: baseline;
-    gap: 9px;
-    padding: 7px 12px;
-  }
-
-  .call-summary p + p {
-    border-left: 1px solid rgb(255 255 255 / 0.14);
-  }
-
-  .call-summary strong {
-    color: #f7f8f7;
-    font-size: 20px;
-    line-height: 1;
-  }
-
-  .call-summary .to-call strong {
-    color: #f1cf73;
   }
 
   .thinking {
