@@ -83,7 +83,7 @@
             </h2>
             <p><span>Stack</span><strong>${game.stacks[seat]}</strong></p>
           </div>
-          <p class="bet"><span>Bet</span><strong>${game.bets[seat]}</strong></p>
+          <p class="bet"><span>Street bet</span><strong>${game.bets[seat]}</strong></p>
         </header>
         <div class="cards">
           {#each game.holes[seat] as card}
@@ -98,7 +98,12 @@
     {/each}
 
     <section class="board" aria-label="Board">
-      <p class="pot"><span>Pot</span><strong>${game.pot}</strong></p>
+      <div class="table-totals">
+        <p class="pot"><span>Pot</span><strong>${game.pot}</strong></p>
+        {#if game.currentBet > 0}
+          <p class="current-bet"><span>Current bet</span><strong>${game.currentBet}</strong></p>
+        {/if}
+      </div>
       <div class="cards">
         {#each game.board as card}
           <img class="card" src={cardImage(card)} alt={`${card[0]} of ${suitName(card)}`} />
@@ -107,7 +112,15 @@
     </section>
 
     <section class="controls" aria-label="Game controls">
-      <p class="message">{game.message}</p>
+      <div class="status-line">
+        <p class="message">{game.message}</p>
+        {#if !game.winner && game.toAct === 0 && legal.toCall > 0}
+          <div class="call-summary" aria-label={`Facing ${game.currentBet}; ${legal.toCall} to call`}>
+            <p><span>Facing</span><strong>${game.currentBet}</strong></p>
+            <p class="to-call"><span>To call</span><strong>${legal.toCall}</strong></p>
+          </div>
+        {/if}
+      </div>
 
       {#if game.winner}
         <button class="next-action" on:click={next}>{busted ? "Reset game" : "Next hand"}</button>
@@ -288,7 +301,8 @@
   }
 
   .player-info p > span,
-  .pot span {
+  .table-totals span,
+  .call-summary span {
     color: #9ca8a3;
     font-size: 10px;
     font-weight: 750;
@@ -298,7 +312,8 @@
   }
 
   .player-info strong,
-  .pot strong,
+  .table-totals strong,
+  .call-summary strong,
   .actions strong {
     font-variant-numeric: tabular-nums;
   }
@@ -345,7 +360,14 @@
     text-align: center;
   }
 
-  .pot {
+  .table-totals {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .pot,
+  .current-bet {
     display: inline-flex;
     align-items: baseline;
     gap: 10px;
@@ -356,10 +378,18 @@
     box-shadow: 0 6px 20px rgb(0 0 0 / 0.22);
   }
 
-  .pot strong {
+  .table-totals strong {
     color: #f7f8f7;
     font-size: 25px;
     line-height: 1;
+  }
+
+  .current-bet {
+    border-color: #9a8149;
+  }
+
+  .current-bet strong {
+    color: #f1cf73;
   }
 
   .board .cards {
@@ -389,7 +419,6 @@
     width: fit-content;
     max-width: 100%;
     min-height: 20px;
-    margin: 0 auto 10px;
     padding: 7px 12px;
     box-sizing: border-box;
     border: 1px solid rgb(255 255 255 / 0.12);
@@ -397,6 +426,46 @@
     color: #dfe5e2;
     background: rgb(8 13 11 / 0.82);
     text-align: center;
+  }
+
+  .status-line {
+    display: flex;
+    min-height: 36px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .call-summary {
+    display: flex;
+    width: fit-content;
+    overflow: hidden;
+    border: 1px solid rgb(255 255 255 / 0.16);
+    border-radius: 6px;
+    background: rgb(8 13 11 / 0.9);
+  }
+
+  .call-summary p {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    padding: 7px 12px;
+  }
+
+  .call-summary p + p {
+    border-left: 1px solid rgb(255 255 255 / 0.14);
+  }
+
+  .call-summary strong {
+    color: #f7f8f7;
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .call-summary .to-call strong {
+    color: #f1cf73;
   }
 
   .thinking {
