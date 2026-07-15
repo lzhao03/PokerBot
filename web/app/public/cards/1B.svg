@@ -1,2 +1,13 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg xmlns="http://www.w3.org/2000/svg" class="card" face="1B" height="3.5in" preserveAspectRatio="none" viewBox="-120 -168 240 336" width="2.5in"><defs><pattern id="B1" width="6" height="6" patternUnits="userSpaceOnUse"><path d="M3 0L6 3L3 6L0 3Z" fill="black"></path></pattern></defs><rect width="239" height="335" x="-119.5" y="-167.5" rx="12" ry="12" fill="white" stroke="black"></rect><rect fill="url(#B1)" width="216" height="312" x="-108" y="-156" rx="12" ry="12"></rect></svg>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 336" preserveAspectRatio="none">
+  <defs>
+    <pattern id="lattice" width="16" height="16" patternUnits="userSpaceOnUse">
+      <path d="M8 0 16 8 8 16 0 8Z" fill="none" stroke="#edcf9a" stroke-width="1"/>
+      <circle cx="8" cy="8" r="1.25" fill="#f7e5bd"/>
+    </pattern>
+  </defs>
+  <rect x=".5" y=".5" width="239" height="335" rx="12" fill="#fff" stroke="#171b19"/>
+  <rect x="10" y="10" width="220" height="316" rx="8" fill="#8f2030"/>
+  <rect x="14" y="14" width="212" height="308" rx="6" fill="url(#lattice)" stroke="#f5e8cc" stroke-width="2"/>
+  <rect x="20" y="20" width="200" height="296" rx="4" fill="none" stroke="#f5e8cc"/>
+</svg>
