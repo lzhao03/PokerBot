@@ -1,21 +1,25 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
-  import { act, botAction, legalActions, nextHand, newHand, type Action, type Card, type Street, type Suit } from "./poker";
+  import { act, legalActions, nextHand, newHand, type Action, type Card, type Street, type Suit } from "./poker";
+  import { loadPolicy, policyActions, policyMove, type Policy } from "./policy";
   import { FACINGS, STAT_ACTIONS, STREETS, bbPer100, emptyStats, loadStats, rate, recordHand, saveStats, variance, type PokerStats } from "./stats";
 
   let game = newHand();
   let stats: PokerStats = emptyStats();
   let selectedStreet: Street = "preflop";
   let botTimer: ReturnType<typeof setTimeout>;
+  let policy: Policy | null = null;
+  let policyReady = false;
+  const debug = new URLSearchParams(location.search).get("debug") === "1";
   $: legal = legalActions(game);
-  $: raiseTo = legal.minRaiseTo;
+  $: raiseOptions = game.winner ? [] : policyActions(game).filter((option) => option.action === "raise");
   $: busted = game.stacks.some((stack) => stack === 0);
   $: {
     clearTimeout(botTimer);
-    if (!game.winner && game.toAct === 1) {
+    if (!game.winner && game.toAct === 1 && policyReady) {
       botTimer = setTimeout(() => {
-        const action = botAction(game);
-        play(action, action === "raise" ? legalActions(game).minRaiseTo ?? undefined : undefined);
+        const move = policyMove(policy, game);
+        play(move.action, move.raiseTo);
       }, 500);
     }
   }
@@ -57,7 +61,13 @@
   })[facing];
   const suitName = (card: Card) => suits[card[1] as Suit];
   const cardImage = (card: Card) => `/cards/${card}.svg`;
-  onMount(() => (stats = loadStats()));
+  onMount(() => {
+    stats = loadStats();
+    void loadPolicy()
+      .then((loaded) => (policy = loaded))
+      .catch((error: unknown) => console.error("Could not load poker policy; using uniform actions.", error))
+      .finally(() => (policyReady = true));
+  });
   onDestroy(() => clearTimeout(botTimer));
 </script>
 
@@ -65,11 +75,19 @@
   <section class="table">
     {#each [0, 1] as seat}
       <article class:active={!game.winner && game.toAct === seat}>
-        <h2>{seat === 0 ? "You" : "Computer"}{game.dealer === seat ? " (button)" : ""}</h2>
-        <p>${game.stacks[seat]} stack / ${game.bets[seat]} bet</p>
+        <header class="player-info">
+          <div>
+            <h2>
+              {seat === 0 ? "You" : "Computer"}
+              {#if game.dealer === seat}<span class="dealer" title="Dealer button">D</span>{/if}
+            </h2>
+            <p><span>Stack</span><strong>${game.stacks[seat]}</strong></p>
+          </div>
+          <p class="bet"><span>Bet</span><strong>${game.bets[seat]}</strong></p>
+        </header>
         <div class="cards">
           {#each game.holes[seat] as card}
-            {#if seat === 1 && !game.showdown}
+            {#if seat === 1 && !game.showdown && !debug}
               <img class="card" src="/cards/1B.svg" alt="Hidden card" />
             {:else}
               <img class="card" src={cardImage(card)} alt={`${card[0]} of ${suitName(card)}`} />
@@ -80,7 +98,7 @@
     {/each}
 
     <section class="board" aria-label="Board">
-      <h2>Pot ${game.pot}</h2>
+      <p class="pot"><span>Pot</span><strong>${game.pot}</strong></p>
       <div class="cards">
         {#each game.board as card}
           <img class="card" src={cardImage(card)} alt={`${card[0]} of ${suitName(card)}`} />
@@ -92,15 +110,21 @@
       <p class="message">{game.message}</p>
 
       {#if game.winner}
-        <button on:click={next}>{busted ? "Reset game" : "Next hand"}</button>
+        <button class="next-action" on:click={next}>{busted ? "Reset game" : "Next hand"}</button>
       {:else if game.toAct === 0}
         <div class="actions">
-          {#if legal.canFold}<button on:click={() => play("fold")}>Fold</button>{/if}
-          {#if legal.canCheck}<button on:click={() => play("check")}>Check</button>{/if}
-          {#if legal.canCall}<button on:click={() => play("call")}>Call ${legal.toCall}</button>{/if}
-          {#if raiseTo !== null}
-            <button on:click={() => play("raise", raiseTo!)}>{game.currentBet ? `Raise to $${raiseTo}` : `Bet $${raiseTo}`}</button>
-          {/if}
+          {#if legal.canFold}<button class="fold-action" on:click={() => play("fold")}>Fold</button>{/if}
+          {#if legal.canCheck}<button class="check-action" on:click={() => play("check")}>Check</button>{/if}
+          {#if legal.canCall}<button class="wager-action" on:click={() => play("call")}>Call <strong>${legal.toCall}</strong></button>{/if}
+          {#each raiseOptions as option}
+            <button class="wager-action" on:click={() => play("raise", option.raiseTo)}>
+              {#if option.allIn}
+                All In
+              {:else}
+                {game.currentBet ? "Raise to" : "Bet"} <strong>${option.raiseTo}</strong>
+              {/if}
+            </button>
+          {/each}
         </div>
       {:else}
         <p class="thinking">Computer is thinking...</p>
@@ -165,7 +189,7 @@
     margin: 0;
     min-width: 320px;
     color: #f7f3e8;
-    background: #122018;
+    background: #0b0f0d;
     font-family: system-ui, sans-serif;
   }
 
@@ -181,7 +205,8 @@
   }
 
   h2 {
-    font-size: 16px;
+    font-size: 14px;
+    letter-spacing: 0;
     text-transform: capitalize;
   }
 
@@ -199,25 +224,110 @@
     min-height: calc(100dvh - 16px);
     padding: 16px;
     overflow: hidden;
+    isolation: isolate;
     box-sizing: border-box;
     border-radius: 8px;
-    background: #08100c url("/poker-table.png") center / 100% 100% no-repeat;
+    background: #080c0a;
+    box-shadow: inset 0 0 100px rgb(0 0 0 / 0.45);
+  }
+
+  .table::before {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    content: "";
+    pointer-events: none;
+    background: url("/poker-table.png") center / 100% 100% no-repeat;
+    filter: brightness(0.52) saturate(0.72);
+  }
+
+  .table > article,
+  .board,
+  .controls {
+    z-index: 1;
   }
 
   article {
     padding: 12px;
-    border: 1px solid rgb(255 255 255 / 0.18);
-    border-radius: 8px;
-    background: rgb(0 0 0 / 0.16);
+    border: 1px solid rgb(255 255 255 / 0.14);
+    border-radius: 6px;
+    background: rgb(10 14 12 / 0.88);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.28);
   }
 
   article.active {
-    outline: 3px solid #f4ce68;
+    border-color: #e7c766;
+    box-shadow: 0 0 0 2px #e7c766, 0 8px 28px rgb(0 0 0 / 0.42);
   }
 
   article {
-    width: min(260px, calc(100% - 24px));
+    width: min(300px, calc(100% - 24px));
     justify-self: center;
+    box-sizing: border-box;
+  }
+
+  .player-info {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    gap: 16px;
+  }
+
+  .player-info h2 {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 7px;
+    color: #c9d0cd;
+  }
+
+  .player-info p {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .player-info p > span,
+  .pot span {
+    color: #9ca8a3;
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: 0;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+
+  .player-info strong,
+  .pot strong,
+  .actions strong {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .player-info strong {
+    color: #f6f8f7;
+    font-size: 22px;
+    line-height: 1;
+  }
+
+  .player-info .bet {
+    text-align: right;
+  }
+
+  .player-info .bet strong {
+    color: #f1cf73;
+  }
+
+  .dealer {
+    display: inline-grid;
+    width: 22px;
+    height: 22px;
+    place-items: center;
+    border-radius: 50%;
+    color: #17201d;
+    background: #e8ecea;
+    font-size: 11px;
+    font-weight: 850;
+    line-height: 1;
   }
 
   article:first-of-type {
@@ -233,6 +343,23 @@
     place-self: center;
     width: min(680px, calc(100% - 24px));
     text-align: center;
+  }
+
+  .pot {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 7px 18px;
+    border: 1px solid rgb(255 255 255 / 0.14);
+    border-radius: 6px;
+    background: rgb(8 14 11 / 0.82);
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.22);
+  }
+
+  .pot strong {
+    color: #f7f8f7;
+    font-size: 25px;
+    line-height: 1;
   }
 
   .board .cards {
@@ -255,11 +382,20 @@
     width: 112px;
     height: 140px;
     border-radius: 6px;
+    filter: drop-shadow(0 5px 5px rgb(0 0 0 / 0.34));
   }
 
   .message {
-    min-height: 24px;
-    margin-bottom: 10px;
+    width: fit-content;
+    max-width: 100%;
+    min-height: 20px;
+    margin: 0 auto 10px;
+    padding: 7px 12px;
+    box-sizing: border-box;
+    border: 1px solid rgb(255 255 255 / 0.12);
+    border-radius: 6px;
+    color: #dfe5e2;
+    background: rgb(8 13 11 / 0.82);
     text-align: center;
   }
 
@@ -287,17 +423,55 @@
   button {
     min-width: 112px;
     min-height: 44px;
-    border: 0;
+    border: 1px solid #66726d;
     border-radius: 6px;
-    color: #111;
-    background: #f4ce68;
+    color: #f2f5f3;
+    background: #151b18;
     font: inherit;
     font-weight: 800;
     cursor: pointer;
   }
 
   button:hover {
-    background: #ffe08a;
+    background: #232c28;
+  }
+
+  .actions button {
+    min-width: 124px;
+    min-height: 54px;
+    padding: 7px 14px;
+    line-height: 1.1;
+  }
+
+  .actions strong {
+    display: block;
+    margin-top: 3px;
+    font-size: 17px;
+  }
+
+  .fold-action {
+    border-color: #a84d47;
+    color: #ff9088;
+  }
+
+  .check-action {
+    border-color: #4d9b70;
+    color: #8cddb0;
+  }
+
+  .wager-action {
+    border-color: #b7974e;
+    color: #f1cf73;
+  }
+
+  .next-action {
+    border-color: #e7c766;
+    color: #171b19;
+    background: #e7c766;
+  }
+
+  .next-action:hover {
+    background: #f4d878;
   }
 
   .stats {
@@ -313,7 +487,8 @@
     padding: 8px 12px;
     cursor: pointer;
     border-radius: 6px;
-    background: rgb(8 16 12 / 0.72);
+    border: 1px solid rgb(255 255 255 / 0.12);
+    background: rgb(8 13 11 / 0.84);
     font-size: 16px;
     font-weight: 750;
   }
@@ -336,7 +511,7 @@
     overflow: auto;
     border: 1px solid rgb(255 255 255 / 0.24);
     border-radius: 6px;
-    background: rgb(8 16 12 / 0.96);
+    background: rgb(8 13 11 / 0.98);
   }
 
   .stats-header {
@@ -396,6 +571,7 @@
     min-width: 88px;
     min-height: 36px;
     padding: 0 12px;
+    border: 0;
     border-right: 1px solid rgb(255 255 255 / 0.18);
     border-radius: 0;
     color: #f7f3e8;
