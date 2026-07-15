@@ -76,13 +76,11 @@
     {#each [0, 1] as seat}
       <article class:active={!game.winner && game.toAct === seat}>
         <header class="player-info">
-          <div>
-            <h2>
-              {seat === 0 ? "You" : "Computer"}
-              {#if game.dealer === seat}<span class="dealer" title="Dealer button">D</span>{/if}
-            </h2>
-            <p><span>Stack</span><strong>${game.stacks[seat]}</strong></p>
-          </div>
+          <h2>
+            {seat === 0 ? "You" : "Computer"}
+            {#if game.dealer === seat}<span class="dealer" title="Dealer button">D</span>{/if}
+          </h2>
+          <p><span>Stack</span><strong>${game.stacks[seat]}</strong></p>
           <p class="bet"><span>Street bet</span><strong>${game.bets[seat]}</strong></p>
         </header>
         <div class="cards">
@@ -251,7 +249,7 @@
   }
 
   article {
-    padding: 12px;
+    padding: 10px;
     border: 1px solid rgb(255 255 255 / 0.14);
     border-radius: 6px;
     background: rgb(10 14 12 / 0.88);
@@ -271,23 +269,24 @@
 
   .player-info {
     display: grid;
-    grid-template-columns: 1fr auto;
-    align-items: end;
-    gap: 16px;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 12px;
   }
 
   .player-info h2 {
     display: flex;
     align-items: center;
     gap: 7px;
-    margin-bottom: 7px;
     color: #c9d0cd;
+    white-space: nowrap;
   }
 
   .player-info p {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    align-items: baseline;
+    gap: 5px;
+    white-space: nowrap;
   }
 
   .player-info p > span,
@@ -308,7 +307,7 @@
 
   .player-info strong {
     color: #f6f8f7;
-    font-size: 22px;
+    font-size: 18px;
     line-height: 1;
   }
 
@@ -660,6 +659,18 @@
       right: 12px;
       bottom: 12px;
       left: 12px;
+    }
+  }
+
+  @media (max-width: 360px) {
+    .player-info {
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px 10px;
+    }
+
+    .player-info .bet {
+      grid-column: 1 / -1;
+      justify-self: end;
     }
   }
 </style>
