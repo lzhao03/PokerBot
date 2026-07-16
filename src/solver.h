@@ -231,44 +231,13 @@ class CFRSolver {
 
   CFRSolver(SolveSpec spec, DealDistribution deals);
 
-  struct TraversalFrame {
-    std::array<double, kPlayerCount> reach = {1.0, 1.0};
-    std::array<PrivateObservationId, kPlayerCount> private_observations = {};
-    std::optional<int8_t> showdown_comparison;
+  enum class EvaluationMode : uint8_t {
+    Current,
+    Average,
   };
 
-  enum class TraversalMode : uint8_t {
-    Train,
-    EvaluateCurrent,
-    EvaluateAverage,
-  };
-
-  struct TraversalContext {
-    const Deal& deal;
-    TraversalMode mode;
-    uint64_t iteration;
-    std::mt19937& rng;
-    SolverStats& stats;
-    bool may_create_infosets;
-    bool concurrent_updates;
-  };
-
-  Position root_position() const;
-  Position sample_chance_child(const HistoryNode& node,
-                               const PublicPosition& public_state,
-                               const Deal& deal,
-                               std::mt19937& rng);
-  TraversalFrame initial_frame(const Deal& deal,
-                               const Position& position) const;
-  void advance_private_observations(TraversalFrame& frame,
-                                    const Deal& deal,
-                                    const Position& child) const;
-  double traverse(HistoryId history,
-                  const PublicPosition& public_state,
-                  const TraversalFrame& frame,
-                  TraversalContext& context);
-  double evaluate_deal(const Deal& deal, TraversalMode mode);
-  double evaluate_deals(int samples, TraversalMode mode);
+  double evaluate_deal(const Deal& deal, EvaluationMode mode);
+  double evaluate_deals(int samples, EvaluationMode mode);
   SolveSpec spec_;
   DealDistribution deals_;
   std::mt19937 rng_;

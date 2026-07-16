@@ -59,6 +59,7 @@ cc_library(
     ],
     hdrs = [
         "card_abstraction.h",
+        "cfr_traversal.h",
         "evaluation.h",
         "policy_codec.h",
         "solver.h",

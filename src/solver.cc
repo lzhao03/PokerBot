@@ -16,6 +16,7 @@
 
 #include "absl/status/status.h"
 #include "absl/types/span.h"
+#include "src/cfr_traversal.h"
 #include "src/hand_evaluator.h"
 
 namespace poker {
@@ -440,6 +441,52 @@ std::optional<size_t> CfrState::find_or_create(
                       : insert(full_rows_, key);
 }
 
+namespace {
+
+struct TabularLearner {
+  CfrState& state;
+  bool accumulate_average_strategy;
+  bool may_create_infosets;
+  bool concurrent_updates;
+
+  std::optional<size_t> strategy(const internal::DecisionView& decision,
+                                 internal::StrategySource source,
+                                 bool learning,
+                                 absl::Span<float> probabilities) {
+    const std::optional<size_t> offset =
+        learning && may_create_infosets
+            ? state.find_or_create(decision.key, decision.action_count)
+            : state.find(decision.key);
+    const std::vector<float>& values =
+        source == internal::StrategySource::Average ? state.strategy_sum
+                                                    : state.regret_sum;
+    state.strategy(values, offset, probabilities, concurrent_updates);
+    return offset;
+  }
+
+  bool can_update(const std::optional<size_t>& offset) const {
+    return offset.has_value();
+  }
+
+  void observe_regrets(const internal::DecisionView&,
+                       const std::optional<size_t>& offset,
+                       absl::Span<const float> regrets) {
+    for (size_t action = 0; action < regrets.size(); ++action) {
+      state.add_regret(*offset, action, regrets[action], concurrent_updates);
+    }
+  }
+
+  void observe_strategy(const internal::DecisionView&,
+                        const std::optional<size_t>& offset,
+                        absl::Span<const float> probabilities,
+                        double weight) {
+    if (!accumulate_average_strategy || !offset) return;
+    state.add_strategy(*offset, probabilities, weight, concurrent_updates);
+  }
+};
+
+}  // namespace
+
 bool Policy::strategy(InfoSetKey key, absl::Span<float> output) const {
   const auto found = rows.find(key);
   if (found == rows.end() ||
@@ -572,32 +619,35 @@ absl::StatusOr<CFRSolver> CFRSolver::Create(SolveSpec spec) {
   return CFRSolver(std::move(spec), std::move(*deals));
 }
 
-Position CFRSolver::root_position() const {
+Position internal::RootPosition(const SolveSpec& spec) {
   return {HistoryId{},
-          PublicPosition(card_abstraction(), spec_.root.board)};
+          PublicPosition(spec.config.card_abstraction, spec.root.board)};
 }
 
-Position CFRSolver::sample_chance_child(const HistoryNode& node,
-                                        const PublicPosition& public_state,
-                                        const Deal& deal,
-                                        std::mt19937& rng) {
+Position internal::SampleChanceChild(const SolveSpec& spec,
+                                     const HistoryTree& history,
+                                     const HistoryNode& node,
+                                     const PublicPosition& public_state,
+                                     const Deal& deal,
+                                     std::mt19937& rng) {
   const ChanceState& chance = std::get<ChanceState>(node.state);
   const auto sampled = SampleStreetCards(
       chance.data.street, public_state.board(), deal.blocked_mask(), rng);
   assert(sampled.ok());
   return {
-      history_.children[node.children_begin],
-      PublicPosition(card_abstraction(),
+      history.children[node.children_begin],
+      PublicPosition(spec.config.card_abstraction,
                      DealCards(public_state.board(), *sampled))};
 }
 
-CFRSolver::TraversalFrame CFRSolver::initial_frame(
+internal::TraversalFrame internal::InitialTraversalFrame(
+    const SolveSpec& spec,
     const Deal& deal,
-    const Position& position) const {
-  TraversalFrame frame;
+    const Position& position) {
+  internal::TraversalFrame frame;
   for (Player player : {Player::A, Player::B}) {
     frame.private_observations[Index(player)] =
-        ObservePrivate(card_abstraction(), deal.hand(player),
+        ObservePrivate(spec.config.card_abstraction, deal.hand(player),
                        position.public_state.board());
   }
   if (position.public_state.board().count() == kMaxBoardCards) {
@@ -608,150 +658,43 @@ CFRSolver::TraversalFrame CFRSolver::initial_frame(
   return frame;
 }
 
-void CFRSolver::advance_private_observations(
-    TraversalFrame& frame,
+void internal::AdvancePrivateObservations(
+    const SolveSpec& spec,
+    const HistoryTree& history,
+    internal::TraversalFrame& frame,
     const Deal& deal,
-    const Position& child) const {
-  const HistoryNode& child_node = history_.nodes[Index(child.history)];
+    const Position& child) {
+  const HistoryNode& child_node = history.nodes[Index(child.history)];
   if (!std::holds_alternative<DecisionState>(child_node.state)) return;
   for (Player player : {Player::A, Player::B}) {
     frame.private_observations[Index(player)] =
-        ObservePrivate(card_abstraction(), deal.hand(player),
+        ObservePrivate(spec.config.card_abstraction, deal.hand(player),
                        child.public_state.board(),
                        frame.private_observations[Index(player)]);
-  }
-}
-
-double CFRSolver::traverse(HistoryId history,
-                           const PublicPosition& public_state,
-                           const TraversalFrame& frame,
-                           TraversalContext& context) {
-  const Deal& deal = context.deal;
-  while (true) {
-    const HistoryNode& history_node = history_.nodes[Index(history)];
-    const BettingState& betting_state = history_node.state;
-    if (const auto* fold = std::get_if<FoldTerminalState>(&betting_state)) {
-      ++context.stats.terminal_visits;
-      return TerminalUtility(*fold, Player::A);
-    }
-    if (const auto* showdown = std::get_if<ShowdownState>(&betting_state)) {
-      ++context.stats.terminal_visits;
-      assert(frame.showdown_comparison.has_value());
-      return TerminalUtilityFromComparison(
-          *showdown, *frame.showdown_comparison, Player::A);
-    }
-    if (std::holds_alternative<ChanceState>(betting_state)) {
-      const int samples = spec_.config.chance_samples;
-      context.stats.chance_samples += static_cast<uint64_t>(samples);
-      double value = 0.0;
-      for (int sample = 0; sample < samples; ++sample) {
-        const Position child =
-            sample_chance_child(history_node, public_state, deal, context.rng);
-        TraversalFrame child_frame = frame;
-        if (child.public_state.board().count() == kMaxBoardCards) {
-          child_frame.showdown_comparison = static_cast<int8_t>(
-              CompareHands(deal.hand(Player::A), deal.hand(Player::B),
-                           child.public_state.board()));
-        }
-        advance_private_observations(child_frame, deal, child);
-        value +=
-            traverse(child.history, child.public_state, child_frame, context);
-      }
-      return value / samples;
-    }
-
-    const Player player = std::get<DecisionState>(betting_state).actor;
-    const size_t player_index = Index(player);
-    const uint8_t action_count = history_node.child_count;
-    const InfoSetKey key{public_state.observation(), history,
-                         frame.private_observations[player_index]};
-    const bool training = context.mode == TraversalMode::Train;
-    const bool external_sampling = training && spec_.config.external_sampling;
-    const bool updates_regrets =
-        training && context.iteration % kPlayerCount == player_index;
-    std::optional<size_t> offset;
-    if ((updates_regrets || external_sampling) && context.may_create_infosets) {
-      offset = state_.find_or_create(key, action_count);
-    } else {
-      offset = state_.find(key);
-    }
-    std::array<float, kMaxActionsPerNode> probabilities;
-    std::array<double, kMaxActionsPerNode> action_values;
-    const absl::Span<float> probability_span(probabilities.data(),
-                                             action_count);
-    if (context.mode == TraversalMode::EvaluateAverage) {
-      state_.strategy(state_.strategy_sum, offset, probability_span,
-                      context.concurrent_updates);
-    } else {
-      state_.strategy(state_.regret_sum, offset, probability_span,
-                      context.concurrent_updates);
-    }
-    if (training) ++context.stats.decision_visits;
-    if (external_sampling && !updates_regrets) {
-      if (offset && spec_.config.accumulate_average_strategy) {
-        state_.add_strategy(*offset, probability_span, 1.0,
-                            context.concurrent_updates);
-      }
-      float sample = std::uniform_real_distribution<float>{}(context.rng);
-      uint8_t sampled_action = 0;
-      while (sampled_action + 1 < action_count &&
-             sample >= probabilities[sampled_action]) {
-        sample -= probabilities[sampled_action];
-        ++sampled_action;
-      }
-      // Continue in place instead of creating another recursive stack frame.
-      history = history_.children[history_node.children_begin + sampled_action];
-      continue;
-    }
-
-    double node_value = 0.0;
-    TraversalFrame child_frame = frame;
-    for (uint8_t action = 0; action < action_count; ++action) {
-      if (training && !external_sampling) {
-        child_frame.reach[player_index] =
-            frame.reach[player_index] * probabilities[action];
-      }
-      const HistoryId child =
-          history_.children[history_node.children_begin + action];
-      action_values[action] =
-          traverse(child, public_state, child_frame, context);
-      node_value += probabilities[action] * action_values[action];
-    }
-    if (!training) return node_value;
-
-    if (!updates_regrets || !offset) return node_value;
-
-    const double utility_sign = player == Player::A ? 1.0 : -1.0;
-    const double opponent_reach =
-        external_sampling ? 1.0 : frame.reach[Index(Opponent(player))];
-    for (uint8_t action = 0; action < action_count; ++action) {
-      const double regret =
-          opponent_reach * utility_sign * (action_values[action] - node_value);
-      state_.add_regret(*offset, action, static_cast<float>(regret),
-                        context.concurrent_updates);
-    }
-    if (spec_.config.accumulate_average_strategy && !external_sampling) {
-      const double weight = frame.reach[player_index] * (context.iteration + 1);
-      state_.add_strategy(
-          *offset, absl::Span<const float>(probabilities.data(), action_count),
-          weight, context.concurrent_updates);
-    }
-    return node_value;
   }
 }
 
 void CFRSolver::run(uint64_t iterations, int threads) {
   if (iterations == 0) return;
 
-  const Position root = root_position();
+  const Position root = internal::RootPosition(spec_);
   auto run_iteration = [&](uint64_t iteration, std::mt19937& rng,
                            SolverStats& stats, bool concurrent) {
     const Deal deal = deals_.sample(rng);
-    const TraversalFrame frame = initial_frame(deal, root);
-    TraversalContext context{
-        deal, TraversalMode::Train, iteration, rng, stats,
-        !state_.at_capacity(), concurrent};
-    return traverse(root.history, root.public_state, frame, context);
+    const internal::TraversalFrame frame =
+        internal::InitialTraversalFrame(spec_, deal, root);
+    internal::TraversalContext context{
+        .deal = deal,
+        .mode = internal::TraversalMode::Train,
+        .update_player = (iteration & 1) == 0 ? Player::A : Player::B,
+        .iteration = iteration,
+        .rng = rng,
+        .stats = stats,
+    };
+    TabularLearner learner{state_, spec_.config.accumulate_average_strategy,
+                           !state_.at_capacity(), concurrent};
+    return internal::Traverse(spec_, history_, root.history, root.public_state,
+                              frame, context, learner);
   };
 
   uint64_t serial_iterations = 0;
@@ -800,14 +743,27 @@ void CFRSolver::run(uint64_t iterations, int threads) {
   }
 }
 
-double CFRSolver::evaluate_deal(const Deal& deal, TraversalMode mode) {
-  const Position root = root_position();
-  const TraversalFrame frame = initial_frame(deal, root);
-  TraversalContext context{deal, mode, 0, rng_, stats_, false, false};
-  return traverse(root.history, root.public_state, frame, context);
+double CFRSolver::evaluate_deal(const Deal& deal, EvaluationMode mode) {
+  const Position root = internal::RootPosition(spec_);
+  const internal::TraversalFrame frame =
+      internal::InitialTraversalFrame(spec_, deal, root);
+  internal::TraversalContext context{
+      .deal = deal,
+      .mode = mode == EvaluationMode::Average
+                  ? internal::TraversalMode::EvaluateAverage
+                  : internal::TraversalMode::EvaluateCurrent,
+      .update_player = Player::A,
+      .iteration = 0,
+      .rng = rng_,
+      .stats = stats_,
+  };
+  TabularLearner learner{state_, spec_.config.accumulate_average_strategy,
+                         false, false};
+  return internal::Traverse(spec_, history_, root.history, root.public_state,
+                            frame, context, learner);
 }
 
-double CFRSolver::evaluate_deals(int samples, TraversalMode mode) {
+double CFRSolver::evaluate_deals(int samples, EvaluationMode mode) {
   if (samples <= 0) return 0.0;
   double value = 0.0;
   for (int sample = 0; sample < samples; ++sample) {
@@ -818,11 +774,11 @@ double CFRSolver::evaluate_deals(int samples, TraversalMode mode) {
 
 double CFRSolver::evaluate_current(ComboId player_a, ComboId player_b) {
   const Deal deal{{player_a, player_b}};
-  return evaluate_deal(deal, TraversalMode::EvaluateCurrent);
+  return evaluate_deal(deal, EvaluationMode::Current);
 }
 
 double CFRSolver::evaluate_current(int samples) {
-  return evaluate_deals(samples, TraversalMode::EvaluateCurrent);
+  return evaluate_deals(samples, EvaluationMode::Current);
 }
 
 absl::StatusOr<double> CFRSolver::evaluate_average(
@@ -833,7 +789,7 @@ absl::StatusOr<double> CFRSolver::evaluate_average(
         "average strategy accumulation is disabled");
   }
   const Deal deal{{player_a, player_b}};
-  return evaluate_deal(deal, TraversalMode::EvaluateAverage);
+  return evaluate_deal(deal, EvaluationMode::Average);
 }
 
 absl::StatusOr<double> CFRSolver::evaluate_average(int samples) {
@@ -841,7 +797,7 @@ absl::StatusOr<double> CFRSolver::evaluate_average(int samples) {
     return absl::FailedPreconditionError(
         "average strategy accumulation is disabled");
   }
-  return evaluate_deals(samples, TraversalMode::EvaluateAverage);
+  return evaluate_deals(samples, EvaluationMode::Average);
 }
 
 absl::StatusOr<Policy> ExtractAveragePolicy(
