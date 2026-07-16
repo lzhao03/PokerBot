@@ -20,10 +20,9 @@ enum class TraversalMode : uint8_t {
   EvaluateAverage,
 };
 
-enum class RecordKind : uint8_t {
-  None,
-  Regret,
-  Strategy,
+enum class StrategyAccess : uint8_t {
+  ReadOnly,
+  Writable,
 };
 
 struct TraversalFrame {
@@ -44,8 +43,6 @@ struct TraversalContext {
 struct DecisionView {
   InfoSetKey key;
   const DecisionState& state;
-  const PublicPosition& public_state;
-  ComboId hand;
   uint8_t action_count;
   uint64_t iteration;
 };
@@ -53,12 +50,12 @@ struct DecisionView {
 template <typename Backend>
 concept CfrBackend = requires(Backend& backend,
                               const DecisionView& decision,
-                              RecordKind record,
+                              StrategyAccess access,
                               absl::Span<float> probabilities,
                               typename Backend::UpdateHandle handle,
                               absl::Span<const float> regrets,
                               double weight) {
-  { backend.current_strategy(decision, record, probabilities) }
+  { backend.current_strategy(decision, access, probabilities) }
       -> std::same_as<std::optional<typename Backend::UpdateHandle>>;
   { backend.average_strategy(decision, probabilities) } -> std::same_as<void>;
   { backend.record_regrets(decision, handle, regrets) } -> std::same_as<void>;
@@ -135,8 +132,6 @@ double Traverse(const SolveSpec& spec,
         {public_state.observation(), history,
          frame.private_observations[player_index]},
         decision,
-        public_state,
-        context.deal.hand(player),
         action_count,
         context.iteration,
     };
@@ -144,18 +139,15 @@ double Traverse(const SolveSpec& spec,
     std::array<double, kMaxActionsPerNode> action_values;
     const absl::Span<float> probability_span(probabilities.data(),
                                              action_count);
-    RecordKind record = RecordKind::None;
-    if (training) {
-      record = updates_regrets
-                   ? RecordKind::Regret
-                   : (external_sampling ? RecordKind::Strategy
-                                        : RecordKind::None);
-    }
+    const StrategyAccess access =
+        training && (updates_regrets || external_sampling)
+            ? StrategyAccess::Writable
+            : StrategyAccess::ReadOnly;
     std::optional<typename Backend::UpdateHandle> handle;
     if (context.mode == TraversalMode::EvaluateAverage) {
       backend.average_strategy(view, probability_span);
     } else {
-      handle = backend.current_strategy(view, record, probability_span);
+      handle = backend.current_strategy(view, access, probability_span);
     }
     if (training) ++context.stats.decision_visits;
 

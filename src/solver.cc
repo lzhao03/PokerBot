@@ -453,15 +453,16 @@ struct TabularBackend {
 
   std::optional<size_t> current_strategy(
       const internal::DecisionView& decision,
-      internal::RecordKind record,
+      internal::StrategyAccess access,
       absl::Span<float> probabilities) {
     const std::optional<size_t> offset =
-        record != internal::RecordKind::None && may_create_infosets
+        access == internal::StrategyAccess::Writable && may_create_infosets
             ? state.find_or_create(decision.key, decision.action_count)
             : state.find(decision.key);
     state.strategy(state.regret_sum, offset, probabilities,
                    concurrent_updates);
-    return record == internal::RecordKind::None ? std::nullopt : offset;
+    return access == internal::StrategyAccess::ReadOnly ? std::nullopt
+                                                        : offset;
   }
 
   void average_strategy(const internal::DecisionView& decision,

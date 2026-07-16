@@ -251,7 +251,7 @@ struct DeepCfrSolver::Impl {
 
   std::optional<UpdateHandle> current_strategy(
       const internal::DecisionView& decision,
-      internal::RecordKind record,
+      internal::StrategyAccess access,
       absl::Span<float> probabilities) {
     const size_t player = Index(decision.state.actor);
     if (!advantage_trained[player]) {
@@ -261,7 +261,7 @@ struct DeepCfrSolver::Impl {
           advantage_network[player], advantage_cache[player], decision);
       RegretMatch(values, probabilities);
     }
-    return record == internal::RecordKind::None
+    return access == internal::StrategyAccess::ReadOnly
                ? std::nullopt
                : std::optional<UpdateHandle>{std::in_place};
   }
