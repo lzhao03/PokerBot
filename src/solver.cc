@@ -595,20 +595,13 @@ ComboRange SingleComboRange(ComboId combo, float weight) {
   return range;
 }
 
-CFRSolver::CFRSolver(SolveSpec spec, DealDistribution deals)
-    : spec_(std::move(spec)),
-      deals_(std::move(deals)),
+CFRSolver::CFRSolver(internal::CfrGame game)
+    : game_(std::move(game)),
       rng_(12345),
-      state_(spec_.config,
-             spec_.config.accumulate_average_strategy) {
-  history_.nodes.reserve(4096);
-  history_.children.reserve(4096);
-  AppendHistory(history_, spec_.root.betting,
-                spec_.config.betting_rules, spec_.config);
-  model_ = FingerprintModel(spec_);
-}
+      state_(game_.spec.config,
+             game_.spec.config.accumulate_average_strategy) {}
 
-absl::StatusOr<CFRSolver> CFRSolver::Create(SolveSpec spec) {
+absl::StatusOr<internal::CfrGame> internal::CompileCfrGame(SolveSpec spec) {
   auto config = SolverConfig::Create(std::move(spec.config));
   if (!config.ok()) return config.status();
   spec.config = std::move(*config);
@@ -618,7 +611,19 @@ absl::StatusOr<CFRSolver> CFRSolver::Create(SolveSpec spec) {
   auto deals = DealDistribution::Create(spec.ranges[Index(Player::A)],
                                         spec.ranges[Index(Player::B)]);
   if (!deals.ok()) return deals.status();
-  return CFRSolver(std::move(spec), std::move(*deals));
+  internal::CfrGame game{std::move(spec), std::move(*deals)};
+  game.history.nodes.reserve(4096);
+  game.history.children.reserve(4096);
+  AppendHistory(game.history, game.spec.root.betting,
+                game.spec.config.betting_rules, game.spec.config);
+  game.model = FingerprintModel(game.spec);
+  return game;
+}
+
+absl::StatusOr<CFRSolver> CFRSolver::Create(SolveSpec spec) {
+  auto game = internal::CompileCfrGame(std::move(spec));
+  if (!game.ok()) return game.status();
+  return CFRSolver(std::move(*game));
 }
 
 Position internal::RootPosition(const SolveSpec& spec) {
@@ -679,12 +684,12 @@ void internal::AdvancePrivateObservations(
 void CFRSolver::run(uint64_t iterations, int threads) {
   if (iterations == 0) return;
 
-  const Position root = internal::RootPosition(spec_);
+  const Position root = internal::RootPosition(game_.spec);
   auto run_iteration = [&](uint64_t iteration, std::mt19937& rng,
                            SolverStats& stats, bool concurrent) {
-    const Deal deal = deals_.sample(rng);
+    const Deal deal = game_.deals.sample(rng);
     const internal::TraversalFrame frame =
-        internal::InitialTraversalFrame(spec_, deal, root);
+        internal::InitialTraversalFrame(game_.spec, deal, root);
     internal::TraversalContext context{
         .deal = deal,
         .mode = internal::TraversalMode::Train,
@@ -693,10 +698,11 @@ void CFRSolver::run(uint64_t iterations, int threads) {
         .rng = rng,
         .stats = stats,
     };
-    TabularBackend backend{state_, spec_.config.accumulate_average_strategy,
+    TabularBackend backend{state_,
+                           game_.spec.config.accumulate_average_strategy,
                            !state_.at_capacity(), concurrent};
-    return internal::Traverse(spec_, history_, root.history, root.public_state,
-                              frame, context, backend);
+    return internal::Traverse(game_.spec, game_.history, root.history,
+                              root.public_state, frame, context, backend);
   };
 
   uint64_t serial_iterations = 0;
@@ -746,9 +752,9 @@ void CFRSolver::run(uint64_t iterations, int threads) {
 }
 
 double CFRSolver::evaluate_deal(const Deal& deal, EvaluationMode mode) {
-  const Position root = internal::RootPosition(spec_);
+  const Position root = internal::RootPosition(game_.spec);
   const internal::TraversalFrame frame =
-      internal::InitialTraversalFrame(spec_, deal, root);
+      internal::InitialTraversalFrame(game_.spec, deal, root);
   internal::TraversalContext context{
       .deal = deal,
       .mode = mode == EvaluationMode::Average
@@ -759,17 +765,17 @@ double CFRSolver::evaluate_deal(const Deal& deal, EvaluationMode mode) {
       .rng = rng_,
       .stats = stats_,
   };
-  TabularBackend backend{state_, spec_.config.accumulate_average_strategy,
+  TabularBackend backend{state_, game_.spec.config.accumulate_average_strategy,
                          false, false};
-  return internal::Traverse(spec_, history_, root.history, root.public_state,
-                            frame, context, backend);
+  return internal::Traverse(game_.spec, game_.history, root.history,
+                            root.public_state, frame, context, backend);
 }
 
 double CFRSolver::evaluate_deals(int samples, EvaluationMode mode) {
   if (samples <= 0) return 0.0;
   double value = 0.0;
   for (int sample = 0; sample < samples; ++sample) {
-    value += evaluate_deal(deals_.sample(rng_), mode);
+    value += evaluate_deal(game_.deals.sample(rng_), mode);
   }
   return value / samples;
 }
@@ -786,7 +792,7 @@ double CFRSolver::evaluate_current(int samples) {
 absl::StatusOr<double> CFRSolver::evaluate_average(
     ComboId player_a,
     ComboId player_b) {
-  if (!spec_.config.accumulate_average_strategy) {
+  if (!game_.spec.config.accumulate_average_strategy) {
     return absl::FailedPreconditionError(
         "average strategy accumulation is disabled");
   }
@@ -795,7 +801,7 @@ absl::StatusOr<double> CFRSolver::evaluate_average(
 }
 
 absl::StatusOr<double> CFRSolver::evaluate_average(int samples) {
-  if (!spec_.config.accumulate_average_strategy) {
+  if (!game_.spec.config.accumulate_average_strategy) {
     return absl::FailedPreconditionError(
         "average strategy accumulation is disabled");
   }
@@ -847,11 +853,11 @@ absl::StatusOr<Policy> ExtractAveragePolicy(
 }
 
 absl::StatusOr<Policy> CFRSolver::extract_average_policy() const {
-  if (!spec_.config.accumulate_average_strategy) {
+  if (!game_.spec.config.accumulate_average_strategy) {
     return absl::FailedPreconditionError(
         "average strategy accumulation is disabled");
   }
-  return ExtractAveragePolicy(state_, history_, model_);
+  return ExtractAveragePolicy(state_, game_.history, game_.model);
 }
 
 double CFRSolver::get_expected_value(Player player) const {

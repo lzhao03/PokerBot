@@ -189,6 +189,19 @@ class DealDistribution {
   std::array<std::vector<float>, kPlayerCount> cumulative_weights_;
 };
 
+namespace internal {
+
+struct CfrGame {
+  SolveSpec spec;
+  DealDistribution deals;
+  HistoryTree history;
+  ModelFingerprint model{};
+};
+
+absl::StatusOr<CfrGame> CompileCfrGame(SolveSpec spec);
+
+}  // namespace internal
+
 struct CFRSolverTestAccess;
 
 class CFRSolver {
@@ -207,21 +220,21 @@ class CFRSolver {
   double get_expected_value(Player player) const;
   uint64_t get_iterations_run() const { return state_.iterations; }
   size_t get_info_set_count() const { return state_.row_count(); }
-  size_t get_history_count() const { return history_.nodes.size(); }
+  size_t get_history_count() const { return game_.history.nodes.size(); }
   size_t get_regret_bytes() const {
     return state_.regret_sum.size() * sizeof(float);
   }
   size_t get_strategy_bytes() const {
     return state_.strategy_sum.size() * sizeof(float);
   }
-  ModelFingerprint model_fingerprint() const noexcept { return model_; }
-  const SolveSpec& solve_spec() const noexcept { return spec_; }
-  const HistoryTree& history_tree() const noexcept { return history_; }
+  ModelFingerprint model_fingerprint() const noexcept { return game_.model; }
+  const SolveSpec& solve_spec() const noexcept { return game_.spec; }
+  const HistoryTree& history_tree() const noexcept { return game_.history; }
   const DealDistribution& deal_distribution() const noexcept {
-    return deals_;
+    return game_.deals;
   }
   const CardAbstractionConfig& card_abstraction() const noexcept {
-    return spec_.config.card_abstraction;
+    return game_.spec.config.card_abstraction;
   }
   SolverStats get_stats() const { return stats_; }
   void reset_stats() { stats_ = {}; }
@@ -229,7 +242,7 @@ class CFRSolver {
  private:
   friend struct CFRSolverTestAccess;
 
-  CFRSolver(SolveSpec spec, DealDistribution deals);
+  explicit CFRSolver(internal::CfrGame game);
 
   enum class EvaluationMode : uint8_t {
     Current,
@@ -238,11 +251,8 @@ class CFRSolver {
 
   double evaluate_deal(const Deal& deal, EvaluationMode mode);
   double evaluate_deals(int samples, EvaluationMode mode);
-  SolveSpec spec_;
-  DealDistribution deals_;
+  internal::CfrGame game_;
   std::mt19937 rng_;
-  HistoryTree history_;
-  ModelFingerprint model_{};
   CfrState state_;
   SolverStats stats_;
 };
