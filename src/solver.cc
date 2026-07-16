@@ -596,13 +596,13 @@ ComboRange SingleComboRange(ComboId combo, float weight) {
   return range;
 }
 
-CFRSolver::CFRSolver(internal::CfrGame game)
+CFRSolver::CFRSolver(internal::CompiledGame game)
     : game_(std::move(game)),
       rng_(12345),
       state_(game_.spec.config,
              game_.spec.config.accumulate_average_strategy) {}
 
-absl::StatusOr<internal::CfrGame> internal::CompileCfrGame(SolveSpec spec) {
+absl::StatusOr<internal::CompiledGame> internal::CompileGame(SolveSpec spec) {
   auto config = SolverConfig::Create(std::move(spec.config));
   if (!config.ok()) return config.status();
   spec.config = std::move(*config);
@@ -612,7 +612,7 @@ absl::StatusOr<internal::CfrGame> internal::CompileCfrGame(SolveSpec spec) {
   auto deals = DealDistribution::Create(spec.ranges[Index(Player::A)],
                                         spec.ranges[Index(Player::B)]);
   if (!deals.ok()) return deals.status();
-  internal::CfrGame game{std::move(spec), std::move(*deals)};
+  internal::CompiledGame game{std::move(spec), std::move(*deals)};
   game.history.nodes.reserve(4096);
   game.history.children.reserve(4096);
   AppendHistory(game.history, game.spec.root.betting,
@@ -622,18 +622,18 @@ absl::StatusOr<internal::CfrGame> internal::CompileCfrGame(SolveSpec spec) {
 }
 
 absl::StatusOr<CFRSolver> CFRSolver::Create(SolveSpec spec) {
-  auto game = internal::CompileCfrGame(std::move(spec));
+  auto game = internal::CompileGame(std::move(spec));
   if (!game.ok()) return game.status();
   return CFRSolver(std::move(*game));
 }
 
-Position internal::RootPosition(const internal::CfrGame& game) {
+Position internal::RootPosition(const internal::CompiledGame& game) {
   return {HistoryId{},
           PublicPosition(game.spec.config.card_abstraction,
                          game.spec.root.board)};
 }
 
-Position internal::SampleChanceChild(const internal::CfrGame& game,
+Position internal::SampleChanceChild(const internal::CompiledGame& game,
                                      const HistoryNode& node,
                                      const PublicPosition& public_state,
                                      const Deal& deal,
@@ -649,7 +649,7 @@ Position internal::SampleChanceChild(const internal::CfrGame& game,
 }
 
 internal::TraversalFrame internal::InitialTraversalFrame(
-    const internal::CfrGame& game,
+    const internal::CompiledGame& game,
     const Deal& deal,
     const Position& position) {
   internal::TraversalFrame frame;
@@ -667,7 +667,7 @@ internal::TraversalFrame internal::InitialTraversalFrame(
 }
 
 void internal::AdvancePrivateObservations(
-    const internal::CfrGame& game,
+    const internal::CompiledGame& game,
     internal::TraversalFrame& frame,
     const Deal& deal,
     const Position& child) {

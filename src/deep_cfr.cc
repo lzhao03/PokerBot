@@ -229,7 +229,7 @@ absl::Status TorchError(const std::exception& error) {
 struct DeepCfrSolver::Impl {
   using UpdateHandle = std::monostate;
 
-  Impl(internal::CfrGame compiled_game, DeepCfrConfig deep_config)
+  Impl(internal::CompiledGame compiled_game, DeepCfrConfig deep_config)
       : game(std::move(compiled_game)),
         config(deep_config),
         advantage_memory{
@@ -452,7 +452,7 @@ struct DeepCfrSolver::Impl {
     return value / samples;
   }
 
-  internal::CfrGame game;
+  internal::CompiledGame game;
   DeepCfrConfig config;
   std::array<Reservoir<NetworkSample>, kPlayerCount> advantage_memory;
   Reservoir<NetworkSample> strategy_memory;
@@ -481,7 +481,7 @@ absl::StatusOr<DeepCfrSolver> DeepCfrSolver::Create(
     DeepCfrConfig config) {
   const absl::Status config_status = ValidateConfig(config);
   if (!config_status.ok()) return config_status;
-  auto game = internal::CompileCfrGame(std::move(spec));
+  auto game = internal::CompileGame(std::move(spec));
   if (!game.ok()) return game.status();
   try {
     torch::manual_seed(config.seed);

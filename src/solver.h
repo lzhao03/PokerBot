@@ -191,14 +191,14 @@ class DealDistribution {
 
 namespace internal {
 
-struct CfrGame {
+struct CompiledGame {
   SolveSpec spec;
   DealDistribution deals;
   HistoryTree history;
   ModelFingerprint model{};
 };
 
-absl::StatusOr<CfrGame> CompileCfrGame(SolveSpec spec);
+absl::StatusOr<CompiledGame> CompileGame(SolveSpec spec);
 
 }  // namespace internal
 
@@ -242,7 +242,7 @@ class CFRSolver {
  private:
   friend struct CFRSolverTestAccess;
 
-  explicit CFRSolver(internal::CfrGame game);
+  explicit CFRSolver(internal::CompiledGame game);
 
   enum class EvaluationMode : uint8_t {
     Current,
@@ -251,7 +251,7 @@ class CFRSolver {
 
   double evaluate_deal(const Deal& deal, EvaluationMode mode);
   double evaluate_deals(int samples, EvaluationMode mode);
-  internal::CfrGame game_;
+  internal::CompiledGame game_;
   std::mt19937 rng_;
   CfrState state_;
   SolverStats stats_;

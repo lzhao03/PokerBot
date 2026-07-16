@@ -64,22 +64,22 @@ concept CfrBackend = requires(Backend& backend,
       -> std::same_as<void>;
 };
 
-Position RootPosition(const CfrGame& game);
-TraversalFrame InitialTraversalFrame(const CfrGame& game,
+Position RootPosition(const CompiledGame& game);
+TraversalFrame InitialTraversalFrame(const CompiledGame& game,
                                      const Deal& deal,
                                      const Position& position);
-Position SampleChanceChild(const CfrGame& game,
+Position SampleChanceChild(const CompiledGame& game,
                            const HistoryNode& node,
                            const PublicPosition& public_state,
                            const Deal& deal,
                            std::mt19937& rng);
-void AdvancePrivateObservations(const CfrGame& game,
+void AdvancePrivateObservations(const CompiledGame& game,
                                 TraversalFrame& frame,
                                 const Deal& deal,
                                 const Position& child);
 
 template <CfrBackend Backend>
-double TraverseNode(const CfrGame& game,
+double TraverseNode(const CompiledGame& game,
                     HistoryId history,
                     const PublicPosition& public_state,
                     const TraversalFrame& frame,
@@ -202,7 +202,7 @@ double TraverseNode(const CfrGame& game,
 }
 
 template <CfrBackend Backend>
-double Traverse(const CfrGame& game,
+double Traverse(const CompiledGame& game,
                 TraversalContext& context,
                 Backend& backend) {
   const Position root = RootPosition(game);
