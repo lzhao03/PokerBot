@@ -291,6 +291,7 @@ void CfrState::add_strategy(size_t offset,
                             absl::Span<const float> probabilities,
                             double weight,
                             bool concurrent) {
+  if (!accumulate_average_strategy_) return;
   for (size_t action = 0; action < probabilities.size(); ++action) {
     const size_t index = offset + action;
     float& sum = strategy_sum[index];
@@ -447,7 +448,6 @@ struct TabularBackend {
   using UpdateHandle = size_t;
 
   CfrState& state;
-  bool accumulate_average_strategy;
   bool may_create_infosets;
   bool concurrent_updates;
 
@@ -483,7 +483,6 @@ struct TabularBackend {
                        size_t offset,
                        absl::Span<const float> probabilities,
                        double weight) {
-    if (!accumulate_average_strategy) return;
     state.add_strategy(offset, probabilities, weight, concurrent_updates);
   }
 };
@@ -696,9 +695,7 @@ void CFRSolver::run(uint64_t iterations, int threads) {
         .rng = rng,
         .stats = stats,
     };
-    TabularBackend backend{state_,
-                           game_.spec.config.accumulate_average_strategy,
-                           !state_.at_capacity(), concurrent};
+    TabularBackend backend{state_, !state_.at_capacity(), concurrent};
     return internal::Traverse(game_, context, backend);
   };
 
@@ -760,8 +757,7 @@ double CFRSolver::evaluate_deal(const Deal& deal, EvaluationMode mode) {
       .rng = rng_,
       .stats = stats_,
   };
-  TabularBackend backend{state_, game_.spec.config.accumulate_average_strategy,
-                         false, false};
+  TabularBackend backend{state_, false, false};
   return internal::Traverse(game_, context, backend);
 }
 
