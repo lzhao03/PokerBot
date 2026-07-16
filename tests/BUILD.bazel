@@ -37,3 +37,10 @@ cc_test(
     srcs = ["strict_abstraction_test.cc"],
     deps = DOCTEST_DEPS + ["//src:solver"],
 )
+
+cc_test(
+    name = "deep_cfr_test",
+    srcs = ["deep_cfr_test.cc"],
+    tags = ["manual"],
+    deps = DOCTEST_DEPS + ["//src:deep_cfr"],
+)

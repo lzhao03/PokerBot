@@ -14,11 +14,8 @@ cc_binary(
 )
 
 cc_binary(
-    name = "deep_cfr_smoke",
-    srcs = ["deep_cfr_smoke.cc"],
+    name = "deep_cfr_train",
+    srcs = ["deep_cfr_train.cc"],
     tags = ["manual"],
-    deps = [
-        "//src:solver",
-        "@libtorch_macos_arm64//:torch",
-    ],
+    deps = ["//src:deep_cfr"],
 )

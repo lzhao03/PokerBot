@@ -78,6 +78,28 @@ cc_library(
     visibility = ["//visibility:public"],
 )
 
+cc_library(
+    name = "deep_cfr",
+    srcs = ["deep_cfr.cc"],
+    hdrs = ["deep_cfr.h"],
+    copts = [
+        "-Werror=return-type",
+        "-Wswitch-enum",
+        "-Wconversion",
+        "-Wsign-conversion",
+    ],
+    tags = ["manual"],
+    deps = [
+        ":solver",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/status:status",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/types:span",
+        "@libtorch_macos_arm64//:torch",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 cc_binary(
     name = "poker_solver",
     srcs = ["main.cc"],
