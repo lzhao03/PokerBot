@@ -443,45 +443,44 @@ std::optional<size_t> CfrState::find_or_create(
 
 namespace {
 
-struct TabularLearner {
+struct TabularBackend {
+  using DecisionToken = size_t;
+
   CfrState& state;
   bool accumulate_average_strategy;
   bool may_create_infosets;
   bool concurrent_updates;
 
   std::optional<size_t> strategy(const internal::DecisionView& decision,
-                                 internal::StrategySource source,
-                                 bool learning,
+                                 internal::DecisionRole role,
                                  absl::Span<float> probabilities) {
+    const bool may_insert = role == internal::DecisionRole::UpdatePlayer ||
+                            role == internal::DecisionRole::SampledOpponent;
     const std::optional<size_t> offset =
-        learning && may_create_infosets
+        may_insert && may_create_infosets
             ? state.find_or_create(decision.key, decision.action_count)
             : state.find(decision.key);
     const std::vector<float>& values =
-        source == internal::StrategySource::Average ? state.strategy_sum
-                                                    : state.regret_sum;
+        role == internal::DecisionRole::EvaluateAverage ? state.strategy_sum
+                                                        : state.regret_sum;
     state.strategy(values, offset, probabilities, concurrent_updates);
     return offset;
   }
 
-  bool can_update(const std::optional<size_t>& offset) const {
-    return offset.has_value();
-  }
-
   void observe_regrets(const internal::DecisionView&,
-                       const std::optional<size_t>& offset,
+                       size_t offset,
                        absl::Span<const float> regrets) {
     for (size_t action = 0; action < regrets.size(); ++action) {
-      state.add_regret(*offset, action, regrets[action], concurrent_updates);
+      state.add_regret(offset, action, regrets[action], concurrent_updates);
     }
   }
 
   void observe_strategy(const internal::DecisionView&,
-                        const std::optional<size_t>& offset,
+                        size_t offset,
                         absl::Span<const float> probabilities,
                         double weight) {
-    if (!accumulate_average_strategy || !offset) return;
-    state.add_strategy(*offset, probabilities, weight, concurrent_updates);
+    if (!accumulate_average_strategy) return;
+    state.add_strategy(offset, probabilities, weight, concurrent_updates);
   }
 };
 
@@ -691,10 +690,10 @@ void CFRSolver::run(uint64_t iterations, int threads) {
         .rng = rng,
         .stats = stats,
     };
-    TabularLearner learner{state_, spec_.config.accumulate_average_strategy,
+    TabularBackend backend{state_, spec_.config.accumulate_average_strategy,
                            !state_.at_capacity(), concurrent};
     return internal::Traverse(spec_, history_, root.history, root.public_state,
-                              frame, context, learner);
+                              frame, context, backend);
   };
 
   uint64_t serial_iterations = 0;
@@ -757,10 +756,10 @@ double CFRSolver::evaluate_deal(const Deal& deal, EvaluationMode mode) {
       .rng = rng_,
       .stats = stats_,
   };
-  TabularLearner learner{state_, spec_.config.accumulate_average_strategy,
+  TabularBackend backend{state_, spec_.config.accumulate_average_strategy,
                          false, false};
   return internal::Traverse(spec_, history_, root.history, root.public_state,
-                            frame, context, learner);
+                            frame, context, backend);
 }
 
 double CFRSolver::evaluate_deals(int samples, EvaluationMode mode) {

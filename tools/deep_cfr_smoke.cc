@@ -6,7 +6,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <optional>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <torch/torch.h>
@@ -63,23 +65,26 @@ struct RegretSample {
   std::array<float, kMaxActionsPerNode> mask{};
 };
 
-struct DeepLearner {
+struct DeepCfrBackend {
+  using DecisionToken = std::monostate;
+
   AdvantageNet network;
   std::vector<RegretSample> samples;
 
-  bool strategy(const internal::DecisionView&,
-                internal::StrategySource,
-                bool learning,
-                absl::Span<float> probabilities) {
+  std::optional<DecisionToken> strategy(const internal::DecisionView&,
+                                        internal::DecisionRole role,
+                                        absl::Span<float> probabilities) {
     std::fill(probabilities.begin(), probabilities.end(),
               1.0f / static_cast<float>(probabilities.size()));
-    return learning;
+    if (role != internal::DecisionRole::UpdatePlayer &&
+        role != internal::DecisionRole::SampledOpponent) {
+      return std::nullopt;
+    }
+    return DecisionToken{};
   }
 
-  bool can_update(bool handle) const { return handle; }
-
   void observe_regrets(const internal::DecisionView& decision,
-                       bool,
+                       DecisionToken,
                        absl::Span<const float> regrets) {
     RegretSample sample{Features(decision)};
     std::copy(regrets.begin(), regrets.end(), sample.regrets.begin());
@@ -88,7 +93,7 @@ struct DeepLearner {
   }
 
   void observe_strategy(const internal::DecisionView&,
-                        bool,
+                        DecisionToken,
                         absl::Span<const float>,
                         double) {}
 
@@ -167,7 +172,7 @@ int main() {
   const poker::Position position = poker::internal::RootPosition(spec);
   std::mt19937 rng(7);
   poker::SolverStats stats;
-  poker::DeepLearner learner;
+  poker::DeepCfrBackend backend;
   constexpr uint64_t kTraversals = 256;
   for (uint64_t iteration = 0; iteration < kTraversals; ++iteration) {
     const poker::Deal deal = game->deal_distribution().sample(rng);
@@ -183,15 +188,15 @@ int main() {
         .stats = stats,
     };
     poker::internal::Traverse(spec, history, position.history,
-                              position.public_state, frame, context, learner);
+                              position.public_state, frame, context, backend);
   }
 
-  if (learner.samples.empty()) {
+  if (backend.samples.empty()) {
     std::cerr << "no regret samples collected\n";
     return 1;
   }
-  const auto [before, after] = learner.train(100);
-  std::cout << "regret_samples=" << learner.samples.size() << '\n'
+  const auto [before, after] = backend.train(100);
+  std::cout << "regret_samples=" << backend.samples.size() << '\n'
             << "decision_visits=" << stats.decision_visits << '\n'
             << "loss_before=" << before << '\n'
             << "loss_after=" << after << '\n';

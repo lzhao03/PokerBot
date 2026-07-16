@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cassert>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -19,9 +20,12 @@ enum class TraversalMode : uint8_t {
   EvaluateAverage,
 };
 
-enum class StrategySource : uint8_t {
-  Current,
-  Average,
+enum class DecisionRole : uint8_t {
+  UpdatePlayer,
+  SampledOpponent,
+  TraversedOpponent,
+  EvaluateCurrent,
+  EvaluateAverage,
 };
 
 struct TraversalFrame {
@@ -48,6 +52,21 @@ struct DecisionView {
   uint64_t iteration;
 };
 
+template <typename Backend>
+concept CfrBackend = requires(Backend& backend,
+                              const DecisionView& decision,
+                              DecisionRole role,
+                              absl::Span<float> probabilities,
+                              typename Backend::DecisionToken token,
+                              absl::Span<const float> regrets,
+                              double weight) {
+  { backend.strategy(decision, role, probabilities) }
+      -> std::same_as<std::optional<typename Backend::DecisionToken>>;
+  { backend.observe_regrets(decision, token, regrets) } -> std::same_as<void>;
+  { backend.observe_strategy(decision, token, probabilities, weight) }
+      -> std::same_as<void>;
+};
+
 Position RootPosition(const SolveSpec& spec);
 TraversalFrame InitialTraversalFrame(const SolveSpec& spec,
                                      const Deal& deal,
@@ -64,14 +83,14 @@ void AdvancePrivateObservations(const SolveSpec& spec,
                                 const Deal& deal,
                                 const Position& child);
 
-template <typename Learner>
+template <CfrBackend Backend>
 double Traverse(const SolveSpec& spec,
                 const HistoryTree& tree,
                 HistoryId history,
                 const PublicPosition& public_state,
                 const TraversalFrame& frame,
                 TraversalContext& context,
-                Learner& learner) {
+                Backend& backend) {
   while (true) {
     const HistoryNode& history_node = tree.nodes[Index(history)];
     const BettingState& betting_state = history_node.state;
@@ -101,7 +120,7 @@ double Traverse(const SolveSpec& spec,
         AdvancePrivateObservations(spec, tree, child_frame, context.deal,
                                    child);
         value += Traverse(spec, tree, child.history, child.public_state,
-                          child_frame, context, learner);
+                          child_frame, context, backend);
       }
       return value / samples;
     }
@@ -126,16 +145,22 @@ double Traverse(const SolveSpec& spec,
     std::array<double, kMaxActionsPerNode> action_values;
     const absl::Span<float> probability_span(probabilities.data(),
                                              action_count);
-    const StrategySource source =
-        context.mode == TraversalMode::EvaluateAverage
-            ? StrategySource::Average
-            : StrategySource::Current;
-    const auto handle = learner.strategy(
-        view, source, updates_regrets || external_sampling, probability_span);
+    DecisionRole role = DecisionRole::EvaluateCurrent;
+    if (training) {
+      role = updates_regrets ? DecisionRole::UpdatePlayer
+                             : (external_sampling
+                                    ? DecisionRole::SampledOpponent
+                                    : DecisionRole::TraversedOpponent);
+    } else if (context.mode == TraversalMode::EvaluateAverage) {
+      role = DecisionRole::EvaluateAverage;
+    }
+    const auto token = backend.strategy(view, role, probability_span);
     if (training) ++context.stats.decision_visits;
 
     if (external_sampling && !updates_regrets) {
-      learner.observe_strategy(view, handle, probability_span, 1.0);
+      if (token) {
+        backend.observe_strategy(view, *token, probability_span, 1.0);
+      }
       float sample = std::uniform_real_distribution<float>{}(context.rng);
       uint8_t sampled_action = 0;
       while (sampled_action + 1 < action_count &&
@@ -157,10 +182,10 @@ double Traverse(const SolveSpec& spec,
       const HistoryId child =
           tree.children[history_node.children_begin + action];
       action_values[action] = Traverse(spec, tree, child, public_state,
-                                       child_frame, context, learner);
+                                       child_frame, context, backend);
       node_value += probabilities[action] * action_values[action];
     }
-    if (!training || !updates_regrets || !learner.can_update(handle)) {
+    if (!training || !updates_regrets || !token) {
       return node_value;
     }
 
@@ -173,11 +198,11 @@ double Traverse(const SolveSpec& spec,
           opponent_reach * utility_sign *
           (action_values[action] - node_value));
     }
-    learner.observe_regrets(
-        view, handle, absl::Span<const float>(regrets.data(), action_count));
+    backend.observe_regrets(
+        view, *token, absl::Span<const float>(regrets.data(), action_count));
     if (!external_sampling) {
       const double weight = frame.reach[player_index] * (context.iteration + 1);
-      learner.observe_strategy(view, handle, probability_span, weight);
+      backend.observe_strategy(view, *token, probability_span, weight);
     }
     return node_value;
   }
