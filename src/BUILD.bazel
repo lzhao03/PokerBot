@@ -88,7 +88,6 @@ cc_library(
         "-Wconversion",
         "-Wsign-conversion",
     ],
-    tags = ["manual"],
     deps = [
         ":solver",
         "@abseil-cpp//absl/container:flat_hash_map",
@@ -104,6 +103,7 @@ cc_binary(
     name = "poker_solver",
     srcs = ["main.cc"],
     deps = [
+        ":deep_cfr",
         ":solver",
         "@abseil-cpp//absl/flags:flag",
         "@abseil-cpp//absl/flags:parse",

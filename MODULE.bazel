@@ -22,8 +22,7 @@ http_archive = use_repo_rule(
     "http_archive",
 )
 
-# Optional Apple Silicon Deep CFR dependency. It is fetched only when a manual
-# neural target is built.
+# Apple Silicon Deep CFR dependency used by the unified solver CLI.
 http_archive(
     name = "libtorch_macos_arm64",
     build_file = "//third_party:libtorch.BUILD.bazel",

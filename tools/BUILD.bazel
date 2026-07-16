@@ -12,15 +12,3 @@ cc_binary(
         "@abseil-cpp//absl/status:statusor",
     ],
 )
-
-cc_binary(
-    name = "deep_cfr_train",
-    srcs = ["deep_cfr_train.cc"],
-    tags = ["manual"],
-    deps = [
-        "//src:deep_cfr",
-        "@abseil-cpp//absl/flags:flag",
-        "@abseil-cpp//absl/flags:parse",
-        "@abseil-cpp//absl/flags:usage",
-    ],
-)

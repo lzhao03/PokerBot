@@ -1,3 +1,4 @@
+#include "src/deep_cfr.h"
 #include "src/solver.h"
 
 #include "absl/status/statusor.h"
@@ -9,6 +10,7 @@
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -18,6 +20,7 @@
 #include <vector>
 
 ABSL_FLAG(int, iterations, 100, "CFR iterations");
+ABSL_FLAG(std::string, algorithm, "tabular", "tabular or deep");
 ABSL_FLAG(int, starting_stack, 100, "starting stack in chips");
 ABSL_FLAG(int, small_blind, 1, "small blind in chips");
 ABSL_FLAG(int, big_blind, 2, "big blind in chips");
@@ -48,6 +51,21 @@ ABSL_FLAG(std::vector<std::string>, turn_pot_fractions, {},
           "turn pot fractions after calling");
 ABSL_FLAG(std::vector<std::string>, river_pot_fractions, {},
           "river pot fractions after calling");
+ABSL_FLAG(int, deep_traversals_per_player, 64,
+          "Deep CFR traversals per player and iteration");
+ABSL_FLAG(int, deep_training_steps, 50,
+          "Deep CFR optimizer steps per network fit");
+ABSL_FLAG(int, deep_batch_size, 128, "Deep CFR neural training batch size");
+ABSL_FLAG(int, deep_hidden_size, 32,
+          "Deep CFR width of both hidden layers");
+ABSL_FLAG(double, deep_learning_rate, 1e-3, "Deep CFR Adam learning rate");
+ABSL_FLAG(uint64_t, deep_memory_capacity, 4096,
+          "Deep CFR capacity of each reservoir");
+ABSL_FLAG(uint64_t, deep_cache_capacity, 4096,
+          "Deep CFR maximum cached neural strategies");
+ABSL_FLAG(int, deep_evaluation_samples, 64,
+          "Deals sampled for Deep CFR average-policy evaluation");
+ABSL_FLAG(uint64_t, deep_seed, 1, "Deep CFR training seed");
 
 namespace {
 
@@ -180,11 +198,89 @@ void PrintRunSummary(const poker::CFRSolver& solver,
   }
 }
 
+int RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads) {
+  auto solver = poker::CFRSolver::Create(std::move(spec));
+  if (!solver.ok()) {
+    std::cerr << "Error: " << solver.status() << "\n";
+    return 1;
+  }
+  const auto start = std::chrono::steady_clock::now();
+  solver->run(iterations, threads);
+  const std::chrono::duration<double> elapsed =
+      std::chrono::steady_clock::now() - start;
+
+  PrintRunSummary(*solver, solver->solve_spec().config, elapsed.count());
+  std::cout << "threads=" << threads << "\n";
+  return 0;
+}
+
+int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
+  poker::DeepCfrConfig config;
+  config.seed = absl::GetFlag(FLAGS_deep_seed);
+  config.advantage_memory_capacity =
+      absl::GetFlag(FLAGS_deep_memory_capacity);
+  config.strategy_memory_capacity =
+      absl::GetFlag(FLAGS_deep_memory_capacity);
+  config.inference_cache_capacity =
+      absl::GetFlag(FLAGS_deep_cache_capacity);
+  config.traversals_per_player =
+      absl::GetFlag(FLAGS_deep_traversals_per_player);
+  config.training_steps = absl::GetFlag(FLAGS_deep_training_steps);
+  config.batch_size = absl::GetFlag(FLAGS_deep_batch_size);
+  config.hidden_size = absl::GetFlag(FLAGS_deep_hidden_size);
+  config.learning_rate = absl::GetFlag(FLAGS_deep_learning_rate);
+
+  auto solver = poker::DeepCfrSolver::Create(std::move(spec), config);
+  if (!solver.ok()) {
+    std::cerr << "Error: " << solver.status() << '\n';
+    return 1;
+  }
+  const auto start = std::chrono::steady_clock::now();
+  const absl::Status trained = solver->run(iterations);
+  if (!trained.ok()) {
+    std::cerr << "Error: " << trained << '\n';
+    return 1;
+  }
+  const auto value =
+      solver->evaluate_average(absl::GetFlag(FLAGS_deep_evaluation_samples));
+  if (!value.ok()) {
+    std::cerr << "Error: " << value.status() << '\n';
+    return 1;
+  }
+  const std::chrono::duration<double> elapsed =
+      std::chrono::steady_clock::now() - start;
+
+  const poker::DeepCfrStats& stats = solver->stats();
+  std::cout << "iterations=" << stats.iterations << '\n'
+            << "traversals=" << stats.traversals << '\n'
+            << "advantage_samples_a=" << stats.advantage_samples[0] << '\n'
+            << "advantage_samples_b=" << stats.advantage_samples[1] << '\n'
+            << "strategy_samples=" << stats.strategy_samples << '\n'
+            << "advantage_loss_a=" << stats.advantage_loss[0] << '\n'
+            << "advantage_loss_b=" << stats.advantage_loss[1] << '\n'
+            << "strategy_loss=" << stats.strategy_loss << '\n'
+            << "network_evaluations=" << stats.network_evaluations << '\n'
+            << "cache_hits=" << stats.cache_hits << '\n'
+            << "average_value=" << *value << '\n'
+            << "seconds=" << elapsed.count() << '\n';
+  return std::isfinite(*value) ? 0 : 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
-  absl::SetProgramUsageMessage("Train the heads-up poker CFR solver.");
+  absl::SetProgramUsageMessage("Train the heads-up poker solver.");
   absl::ParseCommandLine(argc, argv);
+  const std::string algorithm = absl::GetFlag(FLAGS_algorithm);
+  if (algorithm != "tabular" && algorithm != "deep") {
+    std::cerr << "Error: --algorithm must be tabular or deep\n";
+    return 1;
+  }
+  const int iterations = absl::GetFlag(FLAGS_iterations);
+  if (iterations <= 0) {
+    std::cerr << "Error: --iterations must be positive\n";
+    return 1;
+  }
   const int64_t memory_limit_mb = absl::GetFlag(FLAGS_max_memory_mb);
   if (memory_limit_mb < 0) {
     std::cerr << "Error: --max_memory_mb must be non-negative\n";
@@ -193,6 +289,10 @@ int main(int argc, char** argv) {
   const int threads = absl::GetFlag(FLAGS_threads);
   if (threads <= 0) {
     std::cerr << "Error: --threads must be positive\n";
+    return 1;
+  }
+  if (algorithm == "deep" && threads != 1) {
+    std::cerr << "Error: Deep CFR currently requires --threads=1\n";
     return 1;
   }
   const auto config = ConfigFromFlags();
@@ -207,18 +307,8 @@ int main(int argc, char** argv) {
       config->betting_rules, {stack, stack},
       {small_blind, config->betting_rules.minimum_bet});
   SetMemoryLimit(memory_limit_mb);
-  auto solver = poker::CFRSolver::Create(
-      {*config, root, {range, range}});
-  if (!solver.ok()) {
-    std::cerr << "Error: " << solver.status() << "\n";
-    return 1;
-  }
-  const auto start = std::chrono::steady_clock::now();
-  solver->run(absl::GetFlag(FLAGS_iterations), threads);
-  const auto end = std::chrono::steady_clock::now();
-
-  const std::chrono::duration<double> elapsed = end - start;
-  PrintRunSummary(*solver, *config, elapsed.count());
-  std::cout << "threads=" << threads << "\n";
-  return 0;
+  poker::SolveSpec spec{*config, root, {range, range}};
+  return algorithm == "deep"
+      ? RunDeep(std::move(spec), static_cast<uint64_t>(iterations))
+      : RunTabular(std::move(spec), static_cast<uint64_t>(iterations), threads);
 }

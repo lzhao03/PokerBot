@@ -193,6 +193,16 @@ git show dcbadfc^:<path>
 
 ## Experimental and build-time features
 
+### Lightweight tabular-only CLI binary
+
+- **Status:** Deferred while one CLI is simpler to operate.
+- **Current behavior:** `//src:poker_solver` selects tabular or Deep CFR with
+  `--algorithm` and therefore links LibTorch even for tabular runs.
+- **Desired endpoint:** Keep the shared CLI parsing and solve-spec construction,
+  but offer a lightweight tabular target that does not fetch or link LibTorch.
+- **Restore when:** LibTorch download size, link time, or deployment size becomes
+  a practical problem for tabular-only use.
+
 ### Full Bazel web build
 
 - **Status:** Deferred while the Vercel build remains small and reliable.

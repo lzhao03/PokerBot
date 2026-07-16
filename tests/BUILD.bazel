@@ -41,6 +41,5 @@ cc_test(
 cc_test(
     name = "deep_cfr_test",
     srcs = ["deep_cfr_test.cc"],
-    tags = ["manual"],
     deps = DOCTEST_DEPS + ["//src:deep_cfr"],
 )
