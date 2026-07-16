@@ -387,9 +387,6 @@ struct DeepCfrSolver::Impl {
   double traverse(const Deal& deal,
                   Player update_player,
                   uint64_t iteration) {
-    const Position root = internal::RootPosition(game.spec);
-    const internal::TraversalFrame frame =
-        internal::InitialTraversalFrame(game.spec, deal, root);
     internal::TraversalContext context{
         .deal = deal,
         .mode = internal::TraversalMode::Train,
@@ -398,8 +395,7 @@ struct DeepCfrSolver::Impl {
         .rng = game_rng,
         .stats = stats.traversal,
     };
-    return internal::Traverse(game.spec, game.history, root.history,
-                              root.public_state, frame, context, *this);
+    return internal::Traverse(game, context, *this);
   }
 
   void run(uint64_t iterations) {
@@ -437,13 +433,10 @@ struct DeepCfrSolver::Impl {
   }
 
   double evaluate(int samples, internal::TraversalMode mode) {
-    const Position root = internal::RootPosition(game.spec);
     SolverStats evaluation_stats;
     double value = 0.0;
     for (int sample = 0; sample < samples; ++sample) {
       const Deal deal = game.deals.sample(evaluation_rng);
-      const internal::TraversalFrame frame =
-          internal::InitialTraversalFrame(game.spec, deal, root);
       internal::TraversalContext context{
           .deal = deal,
           .mode = mode,
@@ -452,8 +445,7 @@ struct DeepCfrSolver::Impl {
           .rng = evaluation_rng,
           .stats = evaluation_stats,
       };
-      value += internal::Traverse(game.spec, game.history, root.history,
-                                  root.public_state, frame, context, *this);
+      value += internal::Traverse(game, context, *this);
     }
     return value / samples;
   }

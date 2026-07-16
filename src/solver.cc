@@ -627,13 +627,13 @@ absl::StatusOr<CFRSolver> CFRSolver::Create(SolveSpec spec) {
   return CFRSolver(std::move(*game));
 }
 
-Position internal::RootPosition(const SolveSpec& spec) {
+Position internal::RootPosition(const internal::CfrGame& game) {
   return {HistoryId{},
-          PublicPosition(spec.config.card_abstraction, spec.root.board)};
+          PublicPosition(game.spec.config.card_abstraction,
+                         game.spec.root.board)};
 }
 
-Position internal::SampleChanceChild(const SolveSpec& spec,
-                                     const HistoryTree& history,
+Position internal::SampleChanceChild(const internal::CfrGame& game,
                                      const HistoryNode& node,
                                      const PublicPosition& public_state,
                                      const Deal& deal,
@@ -643,19 +643,19 @@ Position internal::SampleChanceChild(const SolveSpec& spec,
       chance.data.street, public_state.board(), deal.blocked_mask(), rng);
   assert(sampled.ok());
   return {
-      history.children[node.children_begin],
-      PublicPosition(spec.config.card_abstraction,
+      game.history.children[node.children_begin],
+      PublicPosition(game.spec.config.card_abstraction,
                      DealCards(public_state.board(), *sampled))};
 }
 
 internal::TraversalFrame internal::InitialTraversalFrame(
-    const SolveSpec& spec,
+    const internal::CfrGame& game,
     const Deal& deal,
     const Position& position) {
   internal::TraversalFrame frame;
   for (Player player : {Player::A, Player::B}) {
     frame.private_observations[Index(player)] =
-        ObservePrivate(spec.config.card_abstraction, deal.hand(player),
+        ObservePrivate(game.spec.config.card_abstraction, deal.hand(player),
                        position.public_state.board());
   }
   if (position.public_state.board().count() == kMaxBoardCards) {
@@ -667,16 +667,15 @@ internal::TraversalFrame internal::InitialTraversalFrame(
 }
 
 void internal::AdvancePrivateObservations(
-    const SolveSpec& spec,
-    const HistoryTree& history,
+    const internal::CfrGame& game,
     internal::TraversalFrame& frame,
     const Deal& deal,
     const Position& child) {
-  const HistoryNode& child_node = history.nodes[Index(child.history)];
+  const HistoryNode& child_node = game.history.nodes[Index(child.history)];
   if (!std::holds_alternative<DecisionState>(child_node.state)) return;
   for (Player player : {Player::A, Player::B}) {
     frame.private_observations[Index(player)] =
-        ObservePrivate(spec.config.card_abstraction, deal.hand(player),
+        ObservePrivate(game.spec.config.card_abstraction, deal.hand(player),
                        child.public_state.board(),
                        frame.private_observations[Index(player)]);
   }
@@ -685,12 +684,9 @@ void internal::AdvancePrivateObservations(
 void CFRSolver::run(uint64_t iterations, int threads) {
   if (iterations == 0) return;
 
-  const Position root = internal::RootPosition(game_.spec);
   auto run_iteration = [&](uint64_t iteration, std::mt19937& rng,
                            SolverStats& stats, bool concurrent) {
     const Deal deal = game_.deals.sample(rng);
-    const internal::TraversalFrame frame =
-        internal::InitialTraversalFrame(game_.spec, deal, root);
     internal::TraversalContext context{
         .deal = deal,
         .mode = internal::TraversalMode::Train,
@@ -702,8 +698,7 @@ void CFRSolver::run(uint64_t iterations, int threads) {
     TabularBackend backend{state_,
                            game_.spec.config.accumulate_average_strategy,
                            !state_.at_capacity(), concurrent};
-    return internal::Traverse(game_.spec, game_.history, root.history,
-                              root.public_state, frame, context, backend);
+    return internal::Traverse(game_, context, backend);
   };
 
   uint64_t serial_iterations = 0;
@@ -753,9 +748,6 @@ void CFRSolver::run(uint64_t iterations, int threads) {
 }
 
 double CFRSolver::evaluate_deal(const Deal& deal, EvaluationMode mode) {
-  const Position root = internal::RootPosition(game_.spec);
-  const internal::TraversalFrame frame =
-      internal::InitialTraversalFrame(game_.spec, deal, root);
   internal::TraversalContext context{
       .deal = deal,
       .mode = mode == EvaluationMode::Average
@@ -768,8 +760,7 @@ double CFRSolver::evaluate_deal(const Deal& deal, EvaluationMode mode) {
   };
   TabularBackend backend{state_, game_.spec.config.accumulate_average_strategy,
                          false, false};
-  return internal::Traverse(game_.spec, game_.history, root.history,
-                            root.public_state, frame, context, backend);
+  return internal::Traverse(game_, context, backend);
 }
 
 double CFRSolver::evaluate_deals(int samples, EvaluationMode mode) {

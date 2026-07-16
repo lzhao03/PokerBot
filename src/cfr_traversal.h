@@ -63,30 +63,29 @@ concept CfrBackend = requires(Backend& backend,
       -> std::same_as<void>;
 };
 
-Position RootPosition(const SolveSpec& spec);
-TraversalFrame InitialTraversalFrame(const SolveSpec& spec,
+Position RootPosition(const CfrGame& game);
+TraversalFrame InitialTraversalFrame(const CfrGame& game,
                                      const Deal& deal,
                                      const Position& position);
-Position SampleChanceChild(const SolveSpec& spec,
-                           const HistoryTree& history,
+Position SampleChanceChild(const CfrGame& game,
                            const HistoryNode& node,
                            const PublicPosition& public_state,
                            const Deal& deal,
                            std::mt19937& rng);
-void AdvancePrivateObservations(const SolveSpec& spec,
-                                const HistoryTree& history,
+void AdvancePrivateObservations(const CfrGame& game,
                                 TraversalFrame& frame,
                                 const Deal& deal,
                                 const Position& child);
 
 template <CfrBackend Backend>
-double Traverse(const SolveSpec& spec,
-                const HistoryTree& tree,
-                HistoryId history,
-                const PublicPosition& public_state,
-                const TraversalFrame& frame,
-                TraversalContext& context,
-                Backend& backend) {
+double TraverseNode(const CfrGame& game,
+                    HistoryId history,
+                    const PublicPosition& public_state,
+                    const TraversalFrame& frame,
+                    TraversalContext& context,
+                    Backend& backend) {
+  const SolveSpec& spec = game.spec;
+  const HistoryTree& tree = game.history;
   while (true) {
     const HistoryNode& history_node = tree.nodes[Index(history)];
     const BettingState& betting_state = history_node.state;
@@ -106,17 +105,16 @@ double Traverse(const SolveSpec& spec,
       double value = 0.0;
       for (int sample = 0; sample < samples; ++sample) {
         const Position child = SampleChanceChild(
-            spec, tree, history_node, public_state, context.deal, context.rng);
+            game, history_node, public_state, context.deal, context.rng);
         TraversalFrame child_frame = frame;
         if (child.public_state.board().count() == kMaxBoardCards) {
           child_frame.showdown_comparison = static_cast<int8_t>(CompareHands(
               context.deal.hand(Player::A), context.deal.hand(Player::B),
               child.public_state.board()));
         }
-        AdvancePrivateObservations(spec, tree, child_frame, context.deal,
-                                   child);
-        value += Traverse(spec, tree, child.history, child.public_state,
-                          child_frame, context, backend);
+        AdvancePrivateObservations(game, child_frame, context.deal, child);
+        value += TraverseNode(game, child.history, child.public_state,
+                              child_frame, context, backend);
       }
       return value / samples;
     }
@@ -175,8 +173,8 @@ double Traverse(const SolveSpec& spec,
       }
       const HistoryId child =
           tree.children[history_node.children_begin + action];
-      action_values[action] = Traverse(spec, tree, child, public_state,
-                                       child_frame, context, backend);
+      action_values[action] = TraverseNode(
+          game, child, public_state, child_frame, context, backend);
       node_value += probabilities[action] * action_values[action];
     }
     if (!training || !updates_regrets || !handle) {
@@ -200,6 +198,17 @@ double Traverse(const SolveSpec& spec,
     }
     return node_value;
   }
+}
+
+template <CfrBackend Backend>
+double Traverse(const CfrGame& game,
+                TraversalContext& context,
+                Backend& backend) {
+  const Position root = RootPosition(game);
+  const TraversalFrame frame =
+      InitialTraversalFrame(game, context.deal, root);
+  return TraverseNode(game, root.history, root.public_state, frame, context,
+                      backend);
 }
 
 }  // namespace poker::internal
