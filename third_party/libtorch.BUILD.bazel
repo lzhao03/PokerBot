@@ -1,0 +1,37 @@
+load("@rules_cc//cc:defs.bzl", "cc_import", "cc_library")
+
+cc_import(
+    name = "c10",
+    shared_library = "lib/libc10.dylib",
+)
+
+cc_import(
+    name = "omp",
+    shared_library = "lib/libomp.dylib",
+)
+
+cc_import(
+    name = "torch_cpu",
+    shared_library = "lib/libtorch_cpu.dylib",
+)
+
+cc_import(
+    name = "torch_dylib",
+    shared_library = "lib/libtorch.dylib",
+)
+
+cc_library(
+    name = "torch",
+    hdrs = glob(["include/**/*.h"]),
+    includes = [
+        "include",
+        "include/torch/csrc/api/include",
+    ],
+    deps = [
+        ":c10",
+        ":omp",
+        ":torch_cpu",
+        ":torch_dylib",
+    ],
+    visibility = ["//visibility:public"],
+)

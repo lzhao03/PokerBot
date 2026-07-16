@@ -12,3 +12,13 @@ cc_binary(
         "@abseil-cpp//absl/status:statusor",
     ],
 )
+
+cc_binary(
+    name = "deep_cfr_smoke",
+    srcs = ["deep_cfr_smoke.cc"],
+    tags = ["manual"],
+    deps = [
+        "//src:solver",
+        "@libtorch_macos_arm64//:torch",
+    ],
+)

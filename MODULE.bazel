@@ -16,3 +16,22 @@ git_override(
     commit = "f5fbd4cee671d8d908f37c83abaf70fba5928fc7",
     remote = "https://github.com/hedronvision/bazel-compile-commands-extractor.git",
 )
+
+http_archive = use_repo_rule(
+    "@bazel_tools//tools/build_defs/repo:http.bzl",
+    "http_archive",
+)
+
+# Experimental Apple Silicon training dependency. It is fetched only when a
+# manual LibTorch target is built.
+http_archive(
+    name = "libtorch_macos_arm64",
+    build_file = "//third_party:libtorch.BUILD.bazel",
+    patch_cmds = [
+        "install_name_tool -id @rpath/libomp.dylib lib/libomp.dylib",
+        "codesign --force --sign - lib/libomp.dylib",
+    ],
+    sha256 = "1e10c6c4dc2764150c9fb2ad28e1889191302734e7f939108e5d2f22f21a06f8",
+    strip_prefix = "libtorch",
+    urls = ["https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.13.0.zip"],
+)
