@@ -20,12 +20,10 @@ enum class TraversalMode : uint8_t {
   EvaluateAverage,
 };
 
-enum class DecisionRole : uint8_t {
-  UpdatePlayer,
-  SampledOpponent,
-  TraversedOpponent,
-  EvaluateCurrent,
-  EvaluateAverage,
+enum class RecordKind : uint8_t {
+  None,
+  Regret,
+  Strategy,
 };
 
 struct TraversalFrame {
@@ -55,15 +53,16 @@ struct DecisionView {
 template <typename Backend>
 concept CfrBackend = requires(Backend& backend,
                               const DecisionView& decision,
-                              DecisionRole role,
+                              RecordKind record,
                               absl::Span<float> probabilities,
-                              typename Backend::DecisionToken token,
+                              typename Backend::UpdateHandle handle,
                               absl::Span<const float> regrets,
                               double weight) {
-  { backend.strategy(decision, role, probabilities) }
-      -> std::same_as<std::optional<typename Backend::DecisionToken>>;
-  { backend.observe_regrets(decision, token, regrets) } -> std::same_as<void>;
-  { backend.observe_strategy(decision, token, probabilities, weight) }
+  { backend.current_strategy(decision, record, probabilities) }
+      -> std::same_as<std::optional<typename Backend::UpdateHandle>>;
+  { backend.average_strategy(decision, probabilities) } -> std::same_as<void>;
+  { backend.record_regrets(decision, handle, regrets) } -> std::same_as<void>;
+  { backend.record_strategy(decision, handle, probabilities, weight) }
       -> std::same_as<void>;
 };
 
@@ -145,21 +144,24 @@ double Traverse(const SolveSpec& spec,
     std::array<double, kMaxActionsPerNode> action_values;
     const absl::Span<float> probability_span(probabilities.data(),
                                              action_count);
-    DecisionRole role = DecisionRole::EvaluateCurrent;
+    RecordKind record = RecordKind::None;
     if (training) {
-      role = updates_regrets ? DecisionRole::UpdatePlayer
-                             : (external_sampling
-                                    ? DecisionRole::SampledOpponent
-                                    : DecisionRole::TraversedOpponent);
-    } else if (context.mode == TraversalMode::EvaluateAverage) {
-      role = DecisionRole::EvaluateAverage;
+      record = updates_regrets
+                   ? RecordKind::Regret
+                   : (external_sampling ? RecordKind::Strategy
+                                        : RecordKind::None);
     }
-    const auto token = backend.strategy(view, role, probability_span);
+    std::optional<typename Backend::UpdateHandle> handle;
+    if (context.mode == TraversalMode::EvaluateAverage) {
+      backend.average_strategy(view, probability_span);
+    } else {
+      handle = backend.current_strategy(view, record, probability_span);
+    }
     if (training) ++context.stats.decision_visits;
 
     if (external_sampling && !updates_regrets) {
-      if (token) {
-        backend.observe_strategy(view, *token, probability_span, 1.0);
+      if (handle) {
+        backend.record_strategy(view, *handle, probability_span, 1.0);
       }
       float sample = std::uniform_real_distribution<float>{}(context.rng);
       uint8_t sampled_action = 0;
@@ -185,7 +187,7 @@ double Traverse(const SolveSpec& spec,
                                        child_frame, context, backend);
       node_value += probabilities[action] * action_values[action];
     }
-    if (!training || !updates_regrets || !token) {
+    if (!training || !updates_regrets || !handle) {
       return node_value;
     }
 
@@ -198,11 +200,11 @@ double Traverse(const SolveSpec& spec,
           opponent_reach * utility_sign *
           (action_values[action] - node_value));
     }
-    backend.observe_regrets(
-        view, *token, absl::Span<const float>(regrets.data(), action_count));
+    backend.record_regrets(
+        view, *handle, absl::Span<const float>(regrets.data(), action_count));
     if (!external_sampling) {
       const double weight = frame.reach[player_index] * (context.iteration + 1);
-      backend.observe_strategy(view, *token, probability_span, weight);
+      backend.record_strategy(view, *handle, probability_span, weight);
     }
     return node_value;
   }

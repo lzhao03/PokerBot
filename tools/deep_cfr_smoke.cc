@@ -66,36 +66,41 @@ struct RegretSample {
 };
 
 struct DeepCfrBackend {
-  using DecisionToken = std::monostate;
+  using UpdateHandle = std::monostate;
 
   AdvantageNet network;
   std::vector<RegretSample> samples;
 
-  std::optional<DecisionToken> strategy(const internal::DecisionView&,
-                                        internal::DecisionRole role,
-                                        absl::Span<float> probabilities) {
+  std::optional<UpdateHandle> current_strategy(
+      const internal::DecisionView&,
+      internal::RecordKind record,
+      absl::Span<float> probabilities) {
     std::fill(probabilities.begin(), probabilities.end(),
               1.0f / static_cast<float>(probabilities.size()));
-    if (role != internal::DecisionRole::UpdatePlayer &&
-        role != internal::DecisionRole::SampledOpponent) {
-      return std::nullopt;
-    }
-    return DecisionToken{};
+    return record == internal::RecordKind::None
+               ? std::nullopt
+               : std::optional<UpdateHandle>{std::in_place};
   }
 
-  void observe_regrets(const internal::DecisionView& decision,
-                       DecisionToken,
-                       absl::Span<const float> regrets) {
+  void average_strategy(const internal::DecisionView&,
+                        absl::Span<float> probabilities) {
+    std::fill(probabilities.begin(), probabilities.end(),
+              1.0f / static_cast<float>(probabilities.size()));
+  }
+
+  void record_regrets(const internal::DecisionView& decision,
+                      UpdateHandle,
+                      absl::Span<const float> regrets) {
     RegretSample sample{Features(decision)};
     std::copy(regrets.begin(), regrets.end(), sample.regrets.begin());
     std::fill_n(sample.mask.begin(), regrets.size(), 1.0f);
     samples.push_back(sample);
   }
 
-  void observe_strategy(const internal::DecisionView&,
-                        DecisionToken,
-                        absl::Span<const float>,
-                        double) {}
+  void record_strategy(const internal::DecisionView&,
+                       UpdateHandle,
+                       absl::Span<const float>,
+                       double) {}
 
   std::pair<float, float> train(int steps) {
     std::vector<float> inputs;

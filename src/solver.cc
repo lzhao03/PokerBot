@@ -444,41 +444,44 @@ std::optional<size_t> CfrState::find_or_create(
 namespace {
 
 struct TabularBackend {
-  using DecisionToken = size_t;
+  using UpdateHandle = size_t;
 
   CfrState& state;
   bool accumulate_average_strategy;
   bool may_create_infosets;
   bool concurrent_updates;
 
-  std::optional<size_t> strategy(const internal::DecisionView& decision,
-                                 internal::DecisionRole role,
-                                 absl::Span<float> probabilities) {
-    const bool may_insert = role == internal::DecisionRole::UpdatePlayer ||
-                            role == internal::DecisionRole::SampledOpponent;
+  std::optional<size_t> current_strategy(
+      const internal::DecisionView& decision,
+      internal::RecordKind record,
+      absl::Span<float> probabilities) {
     const std::optional<size_t> offset =
-        may_insert && may_create_infosets
+        record != internal::RecordKind::None && may_create_infosets
             ? state.find_or_create(decision.key, decision.action_count)
             : state.find(decision.key);
-    const std::vector<float>& values =
-        role == internal::DecisionRole::EvaluateAverage ? state.strategy_sum
-                                                        : state.regret_sum;
-    state.strategy(values, offset, probabilities, concurrent_updates);
-    return offset;
+    state.strategy(state.regret_sum, offset, probabilities,
+                   concurrent_updates);
+    return record == internal::RecordKind::None ? std::nullopt : offset;
   }
 
-  void observe_regrets(const internal::DecisionView&,
-                       size_t offset,
-                       absl::Span<const float> regrets) {
+  void average_strategy(const internal::DecisionView& decision,
+                        absl::Span<float> probabilities) {
+    state.strategy(state.strategy_sum, state.find(decision.key), probabilities,
+                   concurrent_updates);
+  }
+
+  void record_regrets(const internal::DecisionView&,
+                      size_t offset,
+                      absl::Span<const float> regrets) {
     for (size_t action = 0; action < regrets.size(); ++action) {
       state.add_regret(offset, action, regrets[action], concurrent_updates);
     }
   }
 
-  void observe_strategy(const internal::DecisionView&,
-                        size_t offset,
-                        absl::Span<const float> probabilities,
-                        double weight) {
+  void record_strategy(const internal::DecisionView&,
+                       size_t offset,
+                       absl::Span<const float> probabilities,
+                       double weight) {
     if (!accumulate_average_strategy) return;
     state.add_strategy(offset, probabilities, weight, concurrent_updates);
   }
