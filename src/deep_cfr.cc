@@ -392,6 +392,7 @@ struct DeepCfrSolver::Impl {
         .mode = internal::TraversalMode::Train,
         .update_player = update_player,
         .iteration = iteration,
+        .external_sampling = true,
         .rng = game_rng,
         .stats = stats.traversal,
     };
@@ -442,6 +443,7 @@ struct DeepCfrSolver::Impl {
           .mode = mode,
           .update_player = Player::A,
           .iteration = stats.iterations,
+          .external_sampling = false,
           .rng = evaluation_rng,
           .stats = evaluation_stats,
       };
@@ -479,8 +481,6 @@ absl::StatusOr<DeepCfrSolver> DeepCfrSolver::Create(
     DeepCfrConfig config) {
   const absl::Status config_status = ValidateConfig(config);
   if (!config_status.ok()) return config_status;
-  spec.config.external_sampling = true;
-  spec.config.accumulate_average_strategy = false;
   auto game = internal::CompileCfrGame(std::move(spec));
   if (!game.ok()) return game.status();
   try {

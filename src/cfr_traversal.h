@@ -36,6 +36,7 @@ struct TraversalContext {
   TraversalMode mode;
   Player update_player;
   uint64_t iteration;
+  bool external_sampling;
   std::mt19937& rng;
   SolverStats& stats;
 };
@@ -124,7 +125,7 @@ double TraverseNode(const CfrGame& game,
     const size_t player_index = Index(player);
     const uint8_t action_count = history_node.child_count;
     const bool training = context.mode == TraversalMode::Train;
-    const bool external_sampling = training && spec.config.external_sampling;
+    const bool external_sampling = training && context.external_sampling;
     const bool updates_regrets = training && context.update_player == player;
     const DecisionView view{
         {public_state.observation(), history,

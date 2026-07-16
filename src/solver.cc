@@ -692,6 +692,7 @@ void CFRSolver::run(uint64_t iterations, int threads) {
         .mode = internal::TraversalMode::Train,
         .update_player = (iteration & 1) == 0 ? Player::A : Player::B,
         .iteration = iteration,
+        .external_sampling = game_.spec.config.external_sampling,
         .rng = rng,
         .stats = stats,
     };
@@ -755,6 +756,7 @@ double CFRSolver::evaluate_deal(const Deal& deal, EvaluationMode mode) {
                   : internal::TraversalMode::EvaluateCurrent,
       .update_player = Player::A,
       .iteration = 0,
+      .external_sampling = false,
       .rng = rng_,
       .stats = stats_,
   };

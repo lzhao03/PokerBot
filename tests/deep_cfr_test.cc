@@ -33,6 +33,8 @@ SolveSpec TinySolveSpec() {
 TEST_CASE("Deep CFR trains bounded neural memories") {
   auto solver = DeepCfrSolver::Create(TinySolveSpec(), TinyDeepConfig());
   REQUIRE(solver.ok());
+  CHECK_FALSE(solver->solve_spec().config.external_sampling);
+  CHECK(solver->solve_spec().config.accumulate_average_strategy);
   REQUIRE(solver->run(2).ok());
 
   const DeepCfrStats& stats = solver->stats();
