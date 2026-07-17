@@ -24,7 +24,12 @@ namespace poker {
 namespace {
 
 constexpr size_t kIdentityFeatureCount = 32 + 64 + 32;
-constexpr size_t kFeatureCount = kIdentityFeatureCount + 15;
+constexpr std::array<size_t, 3> kCompactPublicBuckets = {16, 16, 64};
+constexpr size_t kCompactPublicFeatureCount = 16 + 16 + 64;
+constexpr size_t kPrivateFeatureCount = 36;
+constexpr size_t kFeatureCount =
+    kIdentityFeatureCount + kCompactPublicFeatureCount +
+    kPrivateFeatureCount + 15;
 
 using FeatureVector = std::array<float, kFeatureCount>;
 using ActionVector = std::array<float, kMaxActionsPerNode>;
@@ -40,7 +45,9 @@ struct NetworkSample {
   float weight = 1.0f;
 };
 
-FeatureVector Features(InfoSetKey key, const HistoryNode& node) {
+FeatureVector Features(InfoSetKey key,
+                       const HistoryNode& node,
+                       const SolverConfig& config) {
   const DecisionState& decision = std::get<DecisionState>(node.state);
   const BettingData& betting = decision.data;
   FeatureVector features = {};
@@ -53,6 +60,30 @@ FeatureVector Features(InfoSetKey key, const HistoryNode& node) {
   append_bits(std::to_underlying(key.history));
   append_bits(std::to_underlying(key.public_observation));
   append_bits(std::to_underlying(key.private_observation));
+
+  if (config.card_abstraction.public_mode == PublicCardMode::CompactTexture) {
+    const uint64_t observation = std::to_underlying(key.public_observation);
+    size_t bucket_offset = 0;
+    for (size_t street = 0; street < kCompactPublicBuckets.size(); ++street) {
+      const uint64_t bucket = (observation >> (street * 7)) & 0x7f;
+      if (bucket != 0) {
+        features[output + bucket_offset + bucket - 1] = 1.0f;
+      }
+      bucket_offset += kCompactPublicBuckets[street];
+    }
+  }
+  output += kCompactPublicFeatureCount;
+
+  if (config.card_abstraction.private_kind ==
+      PrivateAbstractionKind::Handcrafted36) {
+    constexpr std::array<uint32_t, 4> places = {
+        1, 37, 37 * 37, 37 * 37 * 37};
+    const size_t street = std::to_underlying(betting.street);
+    const uint32_t bucket =
+        (std::to_underlying(key.private_observation) / places[street]) % 37;
+    if (bucket != 0) features[output + bucket - 1] = 1.0f;
+  }
+  output += kPrivateFeatureCount;
 
   features[output++] = decision.actor == Player::B ? 1.0f : 0.0f;
   features[output++] =
@@ -183,7 +214,7 @@ ActionVector Predict(CfrNet& network,
                      const CompiledGame& game,
                      InfoSetKey key) {
   const FeatureVector features =
-      Features(key, game.history.nodes[Index(key.history)]);
+      Features(key, game.history.nodes[Index(key.history)], game.config);
   torch::NoGradGuard no_grad;
   const torch::Tensor tensor = torch::from_blob(
       const_cast<float*>(features.data()), {1, kFeatureCount}, torch::kFloat32);
@@ -411,7 +442,8 @@ struct DeepCfrSolver::Impl {
         const NetworkSample& sample = memory[sample_index(batch_rng)];
         const HistoryNode& node =
             game.history.nodes[Index(sample.key.history)];
-        const FeatureVector features = Features(sample.key, node);
+        const FeatureVector features =
+            Features(sample.key, node, game.config);
         std::copy(features.begin(), features.end(),
                   inputs.data() + row * kFeatureCount);
         std::copy(sample.target.begin(), sample.target.end(),
