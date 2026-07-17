@@ -42,7 +42,7 @@ cc_test(
         "policy_decoder_wasm_test.cc",
     ],
     deps = [
-        "//src:solver",
+        "//src:policy_codec",
         "@doctest//:main",
     ],
 )

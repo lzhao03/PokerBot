@@ -28,6 +28,8 @@ cc_test(
     ],
     deps = DOCTEST_DEPS + [
         "//src:bet_abstraction",
+        "//src:evaluation",
+        "//src:policy_codec",
         "//src:solver",
     ],
 )

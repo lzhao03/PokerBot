@@ -53,15 +53,11 @@ cc_library(
     name = "solver",
     srcs = [
         "card_abstraction.cc",
-        "evaluation.cc",
-        "policy_codec.cc",
         "solver.cc",
     ],
     hdrs = [
         "card_abstraction.h",
         "cfr_traversal.h",
-        "evaluation.h",
-        "policy_codec.h",
         "solver.h",
     ],
     copts = CORE_COPTS,
@@ -71,6 +67,36 @@ cc_library(
         ":poker",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:inlined_vector",
+        "@abseil-cpp//absl/status:status",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/types:span",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "evaluation",
+    srcs = ["evaluation.cc"],
+    hdrs = ["evaluation.h"],
+    copts = CORE_COPTS,
+    deps = [
+        ":solver",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/status:status",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/types:span",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "policy_codec",
+    srcs = ["policy_codec.cc"],
+    hdrs = ["policy_codec.h"],
+    copts = CORE_COPTS,
+    deps = [
+        ":bet_abstraction",
+        ":solver",
         "@abseil-cpp//absl/status:status",
         "@abseil-cpp//absl/status:statusor",
         "@abseil-cpp//absl/types:span",

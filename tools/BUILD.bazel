@@ -4,6 +4,8 @@ cc_binary(
     name = "cfr_benchmark",
     srcs = ["cfr_benchmark.cc"],
     deps = [
+        "//src:evaluation",
+        "//src:policy_codec",
         "//src:solver",
         "@abseil-cpp//absl/flags:flag",
         "@abseil-cpp//absl/flags:parse",
