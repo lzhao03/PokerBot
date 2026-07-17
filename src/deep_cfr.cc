@@ -212,7 +212,8 @@ absl::Status ValidateConfig(const DeepCfrConfig& config) {
     return absl::InvalidArgumentError("Deep CFR memories must be nonempty");
   }
   if (config.traversals_per_player <= 0 || config.training_steps <= 0 ||
-      config.batch_size <= 0 || config.hidden_size <= 0) {
+      config.policy_training_steps <= 0 || config.batch_size <= 0 ||
+      config.hidden_size <= 0) {
     return absl::InvalidArgumentError("Deep CFR sizes must be positive");
   }
   if (!std::isfinite(config.learning_rate) || config.learning_rate <= 0.0) {
@@ -379,7 +380,8 @@ struct DeepCfrSolver::Impl {
   float train_network(CfrNet& network,
                       const Reservoir& memory,
                       uint64_t seed,
-                      NetworkTarget target_kind) {
+                      NetworkTarget target_kind,
+                      int training_steps) {
     if (memory.size() == 0) return 0.0f;
 
     torch::manual_seed(seed);
@@ -400,7 +402,7 @@ struct DeepCfrSolver::Impl {
     std::mt19937 batch_rng = MakeRng(seed);
     float final_loss = 0.0f;
 
-    for (int step = 0; step < config.training_steps; ++step) {
+    for (int step = 0; step < training_steps; ++step) {
       std::fill(masks.begin(), masks.end(), 0.0f);
       for (size_t row = 0; row < batch_size; ++row) {
         const NetworkSample& sample = memory[sample_index(batch_rng)];
@@ -476,7 +478,7 @@ struct DeepCfrSolver::Impl {
         stats.advantage_loss[index] = train_network(
             advantage_network[index], advantage_memory[index],
             NetworkSeed(config.seed, iteration, index),
-            NetworkTarget::Advantage);
+            NetworkTarget::Advantage, config.training_steps);
         advantage_trained[index] = true;
         advantage_cache[index].clear();
       }
@@ -486,7 +488,7 @@ struct DeepCfrSolver::Impl {
     stats.strategy_loss = train_network(
         policy_network, strategy_memory,
         NetworkSeed(config.seed, stats.iterations, kPlayerCount),
-        NetworkTarget::Policy);
+        NetworkTarget::Policy, config.policy_training_steps);
     policy_trained = strategy_memory.size() > 0;
     policy_cache.clear();
     for (size_t player = 0; player < kPlayerCount; ++player) {

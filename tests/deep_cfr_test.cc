@@ -15,6 +15,7 @@ DeepCfrConfig TinyDeepConfig() {
   config.inference_cache_capacity = 128;
   config.traversals_per_player = 8;
   config.training_steps = 4;
+  config.policy_training_steps = 4;
   config.batch_size = 16;
   config.hidden_size = 16;
   return config;

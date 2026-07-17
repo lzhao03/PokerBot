@@ -56,6 +56,8 @@ ABSL_FLAG(int, deep_traversals_per_player, 64,
           "Deep CFR traversals per player and iteration");
 ABSL_FLAG(int, deep_training_steps, 50,
           "Deep CFR optimizer steps per network fit");
+ABSL_FLAG(int, deep_policy_training_steps, 500,
+          "Deep CFR optimizer steps for the final average policy");
 ABSL_FLAG(int, deep_batch_size, 128, "Deep CFR neural training batch size");
 ABSL_FLAG(int, deep_hidden_size, 32,
           "Deep CFR width of both hidden layers");
@@ -233,6 +235,8 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
   config.traversals_per_player =
       absl::GetFlag(FLAGS_deep_traversals_per_player);
   config.training_steps = absl::GetFlag(FLAGS_deep_training_steps);
+  config.policy_training_steps =
+      absl::GetFlag(FLAGS_deep_policy_training_steps);
   config.batch_size = absl::GetFlag(FLAGS_deep_batch_size);
   config.hidden_size = absl::GetFlag(FLAGS_deep_hidden_size);
   config.learning_rate = absl::GetFlag(FLAGS_deep_learning_rate);
