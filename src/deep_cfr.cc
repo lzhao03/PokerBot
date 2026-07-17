@@ -23,14 +23,12 @@
 namespace poker {
 namespace {
 
-constexpr size_t kIdentityFeatureCount = 64 + 32;
-constexpr size_t kActionHistoryFeatureCount = 8 * 9;
+constexpr size_t kIdentityFeatureCount = 32 + 64 + 32;
 constexpr std::array<size_t, 3> kCompactPublicBuckets = {16, 16, 64};
 constexpr size_t kCompactPublicFeatureCount = 16 + 16 + 64;
 constexpr size_t kPrivateFeatureCount = 36;
 constexpr size_t kFeatureCount =
-    kIdentityFeatureCount + kActionHistoryFeatureCount +
-    kCompactPublicFeatureCount +
+    kIdentityFeatureCount + kCompactPublicFeatureCount +
     kPrivateFeatureCount + 15;
 
 using FeatureVector = std::array<float, kFeatureCount>;
@@ -59,17 +57,9 @@ FeatureVector Features(InfoSetKey key,
       features[output++] = static_cast<float>((value >> bit) & 1);
     }
   };
+  append_bits(std::to_underlying(key.history));
   append_bits(std::to_underlying(key.public_observation));
   append_bits(std::to_underlying(key.private_observation));
-
-  for (size_t position = 0; position < 8; ++position) {
-    const uint32_t action =
-        (node.recent_actions >> (position * 4)) & 0x0f;
-    if (action != 0) {
-      features[output + position * 9 + action - 1] = 1.0f;
-    }
-  }
-  output += kActionHistoryFeatureCount;
 
   if (config.card_abstraction.public_mode == PublicCardMode::CompactTexture) {
     const uint64_t observation = std::to_underlying(key.public_observation);
