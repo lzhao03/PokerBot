@@ -490,12 +490,23 @@ TEST_CASE("approximate responses are reproducible and respect infosets") {
       game->game(), Player::A, *opponent, config);
   const auto second = TrainApproximateBestResponse(
       game->game(), Player::A, *opponent, config);
+  const StrategyLookup lookup = [&opponent](
+      InfoSetKey key, std::span<float> output) {
+    return opponent->strategy(key, output);
+  };
+  const auto generic = TrainApproximateBestResponse(
+      game->game(), Player::A, lookup, config);
   REQUIRE(first.ok());
   REQUIRE(second.ok());
+  REQUIRE(generic.ok());
   CHECK(first->response_policy.rows == second->response_policy.rows);
   CHECK(first->response_policy.probabilities ==
         second->response_policy.probabilities);
+  CHECK(first->response_policy.rows == generic->response_policy.rows);
+  CHECK(first->response_policy.probabilities ==
+        generic->response_policy.probabilities);
   CHECK(first->value == second->value);
+  CHECK(first->value == generic->value);
   CHECK(first->standard_error == second->standard_error);
   CHECK(first->opponent_policy_lookups > 0);
 

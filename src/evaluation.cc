@@ -30,10 +30,16 @@ struct ProfileEstimate {
   EvaluationCounters counters;
 };
 
+StrategyLookup LookupPolicy(const Policy& policy) {
+  return [&policy](InfoSetKey key, std::span<float> output) {
+    return policy.strategy(key, output);
+  };
+}
+
 struct PolicyBackend {
   using UpdateHandle = size_t;
 
-  const std::array<const Policy*, kPlayerCount>& policies;
+  const std::array<const StrategyLookup*, kPlayerCount>& policies;
   EvaluationCounters& counters;
 
   std::optional<size_t> current_strategy(
@@ -47,7 +53,7 @@ struct PolicyBackend {
     }
     ++counters.lookups[player];
     counters.weighted_lookups[player] += reach;
-    if (!policies[player]->strategy(decision.key, probabilities)) {
+    if (!(*policies[player])(decision.key, probabilities)) {
       ++counters.missing[player];
       counters.weighted_missing[player] += reach;
     }
@@ -78,13 +84,13 @@ std::mt19937 MakeEvaluationRng(uint64_t seed) {
 
 ProfileEstimate EstimateProfile(
     const CompiledGame& game,
-    const Policy& player_a,
-    const Policy& player_b,
+    const StrategyLookup& player_a,
+    const StrategyLookup& player_b,
     uint64_t samples,
     uint64_t seed,
     bool measure_reach_coverage = false) {
   std::mt19937 rng = MakeEvaluationRng(seed);
-  const std::array<const Policy*, kPlayerCount> policies = {
+  const std::array<const StrategyLookup*, kPlayerCount> policies = {
       &player_a, &player_b};
   EvaluationCounters counters;
   counters.measure_reach_coverage = measure_reach_coverage;
@@ -142,7 +148,7 @@ struct ResponseBackend {
   using UpdateHandle = uint32_t;
 
   Player responder;
-  const Policy& opponent;
+  const StrategyLookup& opponent;
   CfrState& response;
   uint64_t opponent_lookups = 0;
   uint64_t missing_opponent_lookups = 0;
@@ -153,7 +159,7 @@ struct ResponseBackend {
       std::span<float> probabilities) {
     if (decision.state.actor != responder) {
       ++opponent_lookups;
-      if (!opponent.strategy(decision.key, probabilities)) {
+      if (!opponent(decision.key, probabilities)) {
         ++missing_opponent_lookups;
       }
       return std::nullopt;
@@ -193,36 +199,43 @@ struct ResponseBackend {
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const CompiledGame& game,
-    const Policy& player_a,
-    const Policy& player_b,
+    const StrategyLookup& player_a,
+    const StrategyLookup& player_b,
     uint64_t samples,
     uint64_t seed,
     bool measure_reach_coverage) {
   if (samples == 0) {
     return absl::InvalidArgumentError("evaluation samples must be positive");
   }
+  return EstimateProfile(game, player_a, player_b, samples, seed,
+                         measure_reach_coverage).value;
+}
+
+absl::StatusOr<ValueEstimate> EstimateExpectedValue(
+    const CompiledGame& game,
+    const Policy& player_a,
+    const Policy& player_b,
+    uint64_t samples,
+    uint64_t seed,
+    bool measure_reach_coverage) {
   if (player_a.model != game.model || player_b.model != game.model) {
     return absl::FailedPreconditionError(
         "policy model does not match game");
   }
-  return EstimateProfile(game, player_a, player_b, samples, seed,
-                         measure_reach_coverage).value;
+  return EstimateExpectedValue(
+      game, LookupPolicy(player_a), LookupPolicy(player_b),
+      samples, seed, measure_reach_coverage);
 }
 
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     const CompiledGame& game,
     Player responder,
-    const Policy& opponent,
+    const StrategyLookup& opponent,
     const BestResponseConfig& config) {
   if (config.training_iterations == 0 || config.evaluation_samples == 0) {
     return absl::InvalidArgumentError(
         "best-response iteration counts must be positive");
   }
-  if (opponent.model != game.model) {
-    return absl::FailedPreconditionError(
-        "opponent policy model does not match game");
-  }
-
   CfrState response_state(game.config, game.history.nodes.size(), true);
   std::mt19937 rng = MakeEvaluationRng(config.seed);
   ResponseBackend backend{responder, opponent, response_state};
@@ -249,12 +262,14 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
   if (!response.ok()) return response.status();
   result.response_policy = std::move(*response);
   const uint64_t evaluation_seed = config.seed ^ 0x9e3779b97f4a7c15ULL;
-  const Policy& player_a = responder == Player::A
-                               ? result.response_policy
-                               : opponent;
-  const Policy& player_b = responder == Player::B
-                               ? result.response_policy
-                               : opponent;
+  const StrategyLookup response_lookup = [&result](
+      InfoSetKey key, std::span<float> output) {
+    return result.response_policy.strategy(key, output);
+  };
+  const StrategyLookup& player_a =
+      responder == Player::A ? response_lookup : opponent;
+  const StrategyLookup& player_b =
+      responder == Player::B ? response_lookup : opponent;
   const ProfileEstimate estimate = EstimateProfile(
       game, player_a, player_b, config.evaluation_samples, evaluation_seed);
   result.value = responder == Player::A
@@ -270,9 +285,22 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
   return result;
 }
 
+absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
+    const CompiledGame& game,
+    Player responder,
+    const Policy& opponent,
+    const BestResponseConfig& config) {
+  if (opponent.model != game.model) {
+    return absl::FailedPreconditionError(
+        "opponent policy model does not match game");
+  }
+  return TrainApproximateBestResponse(
+      game, responder, LookupPolicy(opponent), config);
+}
+
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
     const CompiledGame& game,
-    const Policy& policy,
+    const StrategyLookup& policy,
     const BestResponseConfig& config) {
   auto player_a = TrainApproximateBestResponse(
       game, Player::A, policy, config);
@@ -288,6 +316,17 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
   return ExploitabilityEstimate{
       std::move(*player_a), std::move(*player_b),
       nash_conv, 0.5 * nash_conv};
+}
+
+absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
+    const CompiledGame& game,
+    const Policy& policy,
+    const BestResponseConfig& config) {
+  if (policy.model != game.model) {
+    return absl::FailedPreconditionError(
+        "policy model does not match game");
+  }
+  return EstimateExploitability(game, LookupPolicy(policy), config);
 }
 
 }  // namespace poker

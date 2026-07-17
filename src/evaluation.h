@@ -2,11 +2,16 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <span>
 
 #include "absl/status/statusor.h"
 #include "src/solver.h"
 
 namespace poker {
+
+using StrategyLookup =
+    std::function<bool(InfoSetKey, std::span<float>)>;
 
 struct ValueEstimate {
   double mean = 0.0;
@@ -42,6 +47,14 @@ struct ExploitabilityEstimate {
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const CompiledGame& game,
+    const StrategyLookup& player_a,
+    const StrategyLookup& player_b,
+    uint64_t samples,
+    uint64_t seed,
+    bool measure_reach_coverage = false);
+
+absl::StatusOr<ValueEstimate> EstimateExpectedValue(
+    const CompiledGame& game,
     const Policy& player_a,
     const Policy& player_b,
     uint64_t samples,
@@ -51,7 +64,18 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     const CompiledGame& game,
     Player responder,
+    const StrategyLookup& opponent,
+    const BestResponseConfig& config);
+
+absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
+    const CompiledGame& game,
+    Player responder,
     const Policy& opponent,
+    const BestResponseConfig& config);
+
+absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
+    const CompiledGame& game,
+    const StrategyLookup& policy,
     const BestResponseConfig& config);
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
