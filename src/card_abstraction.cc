@@ -210,11 +210,6 @@ PrivateObservationId HandcraftedObservation(
 
 }  // namespace
 
-PublicObservationId ObservePublic(const CardAbstractionConfig& config,
-                                  const Board& board) noexcept {
-  return ObservePublicImpl(config, board, nullptr);
-}
-
 PrivateObservationId ObservePrivate(ComboId hand,
                                     const PublicPosition& position,
                                     PrivateObservationId previous) noexcept {

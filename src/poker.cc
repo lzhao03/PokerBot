@@ -244,12 +244,6 @@ ExactPublicState MakeInitialState(
   return ExactPublicState{DecisionState{betting, Player::A}, Board{}};
 }
 
-bool IsTerminal(const ExactPublicState& state) {
-  return std::holds_alternative<FoldTerminalState>(state.betting) ||
-         (std::holds_alternative<ShowdownState>(state.betting) &&
-          state.board.count() == kMaxBoardCards);
-}
-
 bool IsLegalAction(const DecisionState& state,
                    const GameAction& action) noexcept {
   const BettingData& data = state.data;

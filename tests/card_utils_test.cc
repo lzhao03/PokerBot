@@ -145,6 +145,11 @@ Board B(std::initializer_list<Card> cards) {
   return Runout(absl::Span<const Card>(cards.begin(), cards.size()));
 }
 
+PublicObservationId PublicId(const CardAbstractionConfig& config,
+                             const Board& board) {
+  return PublicPosition(config, board).observation();
+}
+
 EvaluationScore ReferenceBest(ComboId hand, const Board& board) {
   std::array<Card, 7> cards = {};
   const auto hole_cards = hand.cards();
@@ -257,7 +262,7 @@ TEST_CASE("sampling and card abstractions preserve identity") {
     }
     const Board reversed = Runout(
         absl::Span<const Card>(permuted.data(), board.count()));
-    CHECK(ObservePublic(current, reversed) == ObservePublic(current, board));
+    CHECK(PublicId(current, reversed) == PublicId(current, board));
     const PublicPosition position(current, board);
     const PrivateObservationId private_observation =
         ObservePrivate(hand, position);
@@ -268,8 +273,7 @@ TEST_CASE("sampling and card abstractions preserve identity") {
         S::Hearts, S::Diamonds, S::Clubs, S::Spades};
     std::shuffle(suits.begin(), suits.end(), rng);
     const Board renamed_board = Rename(board, suits);
-    CHECK(ObservePublic(current, renamed_board) ==
-          ObservePublic(current, board));
+    CHECK(PublicId(current, renamed_board) == PublicId(current, board));
 
     const auto sampled_result =
         SampleStreetCards(street, board, hand.mask(), rng);
@@ -346,9 +350,9 @@ TEST_CASE("compact public texture keeps the complete street history") {
       DealCards(turn, std::array<Card, 1>{C(2, S::Spades)});
 
   constexpr uint64_t kStreetMask = (1ULL << 7) - 1;
-  const uint64_t flop_id = std::to_underlying(ObservePublic(config, flop));
-  const uint64_t turn_id = std::to_underlying(ObservePublic(config, turn));
-  const uint64_t river_id = std::to_underlying(ObservePublic(config, river));
+  const uint64_t flop_id = std::to_underlying(PublicId(config, flop));
+  const uint64_t turn_id = std::to_underlying(PublicId(config, turn));
+  const uint64_t river_id = std::to_underlying(PublicId(config, river));
 
   CHECK((turn_id & kStreetMask) == flop_id);
   CHECK((river_id & ((1ULL << 14) - 1)) == turn_id);
@@ -439,8 +443,7 @@ TEST_CASE("all abstraction modes preserve observation history") {
         ObservePrivate(hand, PublicPosition(config, Board{}));
     for (const Board& board : {flop, turn, river}) {
       const PublicPosition position(config, board);
-      CHECK(position.observation() ==
-            ObservePublic(config, board));
+      CHECK(position.observation() == PublicId(config, board));
       private_id = ObservePrivate(hand, position, private_id);
       CHECK(private_id == ObservePrivate(hand, position));
     }

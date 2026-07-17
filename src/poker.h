@@ -317,6 +317,4 @@ inline double TerminalUtilityFromComparison(
   return evaluated_player == Player::A ? player_a_utility
                                         : -player_a_utility;
 }
-bool IsTerminal(const ExactPublicState& state);
-
 }  // namespace poker

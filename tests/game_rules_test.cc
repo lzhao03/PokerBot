@@ -32,6 +32,11 @@ const BettingData& B(const ExactPublicState& state) {
   return Data(state.betting);
 }
 
+bool IsTerminal(const ExactPublicState& state) {
+  return std::holds_alternative<FoldTerminalState>(state.betting) ||
+         std::holds_alternative<ShowdownState>(state.betting);
+}
+
 ComboId H(int first_rank,
           S first_suit,
           int second_rank,

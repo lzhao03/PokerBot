@@ -59,8 +59,6 @@ class PublicPosition {
       PrivateObservationId previous) noexcept;
 };
 
-PublicObservationId ObservePublic(const CardAbstractionConfig& config,
-                                  const Board& board) noexcept;
 PrivateObservationId ObservePrivate(ComboId hand,
                                     const PublicPosition& position,
                                     PrivateObservationId previous = {}) noexcept;

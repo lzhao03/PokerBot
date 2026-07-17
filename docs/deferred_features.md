@@ -108,7 +108,7 @@ git show dcbadfc^:<path>
 - **Why removed:** They expose the current heuristic implementation rather than
   the Poker/CFR observation contract.
 - **What remains:** Exact/texture public observations, exact/handcrafted private
-  observations, and both recall modes through `ObservePublic()` and
+  observations, and both recall modes through `PublicPosition` and
   `ObservePrivate()`.
 - **Restore when:** Abstraction analysis or model-building tools genuinely need
   stable access to intermediate features and buckets. Prefer a tool-facing API
