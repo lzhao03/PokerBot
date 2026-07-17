@@ -65,6 +65,22 @@ TEST_CASE("Deep CFR trains bounded neural memories") {
       std::filesystem::temp_directory_path() / "poker_deep_cfr_test.pt";
   REQUIRE(solver->save_average_model(path).ok());
   CHECK(std::filesystem::file_size(path) > 0);
+
+  auto loaded = DeepCfrSolver::Create(TinySolveSpec(), TinyDeepConfig());
+  REQUIRE(loaded.ok());
+  REQUIRE(loaded->load_average_model(path).ok());
+  const auto loaded_value = loaded->evaluate_average(4);
+  REQUIRE(loaded_value.ok());
+  CHECK(std::isfinite(*loaded_value));
+
+  Policy uniform;
+  uniform.model = loaded->game().model;
+  const auto match = loaded->evaluate_average_against_policy(
+      Player::A, uniform, 4);
+  REQUIRE(match.ok());
+  CHECK(std::isfinite(match->policy_player_value));
+  CHECK(match->opponent_policy_lookups > 0);
+  CHECK(match->missing_opponent_lookups == match->opponent_policy_lookups);
   std::filesystem::remove(path);
 }
 

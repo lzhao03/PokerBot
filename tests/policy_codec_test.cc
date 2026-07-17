@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <initializer_list>
 #include <limits>
 #include <vector>
@@ -164,6 +165,15 @@ TEST_CASE("compact policies preserve quantized strategy behavior") {
   const auto reencoded = EncodePolicy(reordered, config);
   REQUIRE(reencoded.ok());
   CHECK(*reencoded == *encoded);
+
+  const auto path =
+      std::filesystem::temp_directory_path() / "poker_policy_codec_test.bin";
+  REQUIRE(SavePolicy(policy, path).ok());
+  const auto loaded = LoadPolicy(path);
+  REQUIRE(loaded.ok());
+  CHECK(loaded->model == policy.model);
+  CHECK(loaded->rows.size() == decoded->rows.size());
+  std::filesystem::remove(path);
 }
 
 TEST_CASE("compact policy encoding omits uniform rows and rejects damage") {

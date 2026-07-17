@@ -1,4 +1,5 @@
 #include "src/deep_cfr.h"
+#include "src/policy_codec.h"
 #include "src/solver.h"
 
 #include "absl/status/statusor.h"
@@ -68,6 +69,10 @@ ABSL_FLAG(int, deep_evaluation_samples, 64,
 ABSL_FLAG(uint64_t, deep_seed, 1, "Deep CFR training seed");
 ABSL_FLAG(std::string, deep_model_output, "",
           "output path for the trained Deep CFR average model");
+ABSL_FLAG(std::string, deep_model_input, "",
+          "trained Deep CFR average model to load");
+ABSL_FLAG(std::string, deep_opponent_policy, "",
+          "tabular policy to evaluate against the Deep CFR model");
 
 namespace {
 
@@ -237,11 +242,21 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
     std::cerr << "Error: " << solver.status() << '\n';
     return 1;
   }
+  const std::string model_input = absl::GetFlag(FLAGS_deep_model_input);
+  if (!model_input.empty()) {
+    const absl::Status loaded = solver->load_average_model(model_input);
+    if (!loaded.ok()) {
+      std::cerr << "Error: " << loaded << '\n';
+      return 1;
+    }
+  }
   const auto start = std::chrono::steady_clock::now();
-  const absl::Status trained = solver->run(iterations);
-  if (!trained.ok()) {
-    std::cerr << "Error: " << trained << '\n';
-    return 1;
+  if (iterations > 0) {
+    const absl::Status trained = solver->run(iterations);
+    if (!trained.ok()) {
+      std::cerr << "Error: " << trained << '\n';
+      return 1;
+    }
   }
   const auto value =
       solver->evaluate_average(absl::GetFlag(FLAGS_deep_evaluation_samples));
@@ -264,6 +279,41 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
       std::cerr << "Error: " << saved << '\n';
       return 1;
     }
+  }
+  const std::string opponent_path =
+      absl::GetFlag(FLAGS_deep_opponent_policy);
+  if (!opponent_path.empty()) {
+    const auto opponent = poker::LoadPolicy(opponent_path);
+    if (!opponent.ok()) {
+      std::cerr << "Error: " << opponent.status() << '\n';
+      return 1;
+    }
+    const auto as_a = solver->evaluate_average_against_policy(
+        poker::Player::A, *opponent,
+        absl::GetFlag(FLAGS_deep_evaluation_samples));
+    const auto as_b = solver->evaluate_average_against_policy(
+        poker::Player::B, *opponent,
+        absl::GetFlag(FLAGS_deep_evaluation_samples));
+    if (!as_a.ok() || !as_b.ok()) {
+      std::cerr << "Error: tabular opponent evaluation failed\n";
+      return 1;
+    }
+    std::cout << "average_vs_tabular_as_a=" << as_a->policy_player_value
+              << '\n'
+              << "average_vs_tabular_as_a_se=" << as_a->standard_error
+              << '\n'
+              << "average_vs_tabular_as_b=" << as_b->policy_player_value
+              << '\n'
+              << "average_vs_tabular_as_b_se=" << as_b->standard_error
+              << '\n'
+              << "tabular_policy_lookups="
+              << as_a->opponent_policy_lookups +
+                     as_b->opponent_policy_lookups
+              << '\n'
+              << "missing_tabular_policy_lookups="
+              << as_a->missing_opponent_lookups +
+                     as_b->missing_opponent_lookups
+              << '\n';
   }
   const std::chrono::duration<double> elapsed =
       std::chrono::steady_clock::now() - start;
@@ -298,8 +348,12 @@ int main(int argc, char** argv) {
     return 1;
   }
   const int iterations = absl::GetFlag(FLAGS_iterations);
-  if (iterations <= 0) {
-    std::cerr << "Error: --iterations must be positive\n";
+  if (iterations < 0 ||
+      (iterations == 0 &&
+       (algorithm != "deep" ||
+        absl::GetFlag(FLAGS_deep_model_input).empty()))) {
+    std::cerr << "Error: --iterations must be positive unless loading a Deep "
+                 "CFR model\n";
     return 1;
   }
   const int64_t memory_limit_mb = absl::GetFlag(FLAGS_max_memory_mb);

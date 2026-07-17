@@ -231,6 +231,13 @@ absl::Status TorchError(const std::exception& error) {
 struct DeepCfrSolver::Impl {
   struct UpdateHandle {};
 
+  struct EvaluationResult {
+    double mean = 0.0;
+    double standard_error = 0.0;
+    uint64_t opponent_policy_lookups = 0;
+    uint64_t missing_opponent_lookups = 0;
+  };
+
   Impl(CompiledGame compiled_game, DeepCfrConfig deep_config)
       : game(std::move(compiled_game)),
         config(deep_config),
@@ -287,18 +294,13 @@ struct DeepCfrSolver::Impl {
         const internal::DecisionView& decision,
         internal::StrategyAccess access,
         std::span<float> probabilities) {
-      if (uniform_player == decision.state.actor) {
-        FillUniform(probabilities);
-        return std::nullopt;
-      }
+      if (fixed_strategy(decision, probabilities)) return std::nullopt;
       return model.current_strategy(decision, access, probabilities);
     }
 
     void average_strategy(const internal::DecisionView& decision,
                           std::span<float> probabilities) {
-      if (uniform_player == decision.state.actor) {
-        FillUniform(probabilities);
-      } else {
+      if (!fixed_strategy(decision, probabilities)) {
         model.average_strategy(decision, probabilities);
       }
     }
@@ -311,8 +313,28 @@ struct DeepCfrSolver::Impl {
                          std::span<const float>,
                          double) {}
 
+    bool fixed_strategy(const internal::DecisionView& decision,
+                        std::span<float> probabilities) {
+      if (uniform_player == decision.state.actor) {
+        FillUniform(probabilities);
+        return true;
+      }
+      if (opponent == nullptr || opponent_player != decision.state.actor) {
+        return false;
+      }
+      ++opponent_policy_lookups;
+      if (!opponent->strategy(decision.key, probabilities)) {
+        ++missing_opponent_lookups;
+      }
+      return true;
+    }
+
     Impl& model;
     std::optional<Player> uniform_player;
+    const Policy* opponent = nullptr;
+    Player opponent_player = Player::A;
+    uint64_t opponent_policy_lookups = 0;
+    uint64_t missing_opponent_lookups = 0;
   };
 
   void record_regrets(const internal::DecisionView& decision,
@@ -473,12 +495,17 @@ struct DeepCfrSolver::Impl {
     stats.strategy_samples = strategy_memory.size();
   }
 
-  double evaluate(int samples,
-                  internal::TraversalMode mode,
-                  std::optional<Player> uniform_player = std::nullopt) {
+  EvaluationResult evaluate(
+      int samples,
+      internal::TraversalMode mode,
+      std::optional<Player> uniform_player = std::nullopt,
+      const Policy* opponent = nullptr,
+      Player opponent_player = Player::A) {
     SolverStats evaluation_stats;
-    EvaluationBackend backend{*this, uniform_player};
-    double value = 0.0;
+    EvaluationBackend backend{
+        *this, uniform_player, opponent, opponent_player};
+    double mean = 0.0;
+    double squared_error = 0.0;
     for (int sample = 0; sample < samples; ++sample) {
       const Deal deal = game.deals.sample(evaluation_rng);
       internal::TraversalContext context{
@@ -490,9 +517,16 @@ struct DeepCfrSolver::Impl {
           .rng = evaluation_rng,
           .stats = evaluation_stats,
       };
-      value += internal::Traverse(game, context, backend);
+      const double value = internal::Traverse(game, context, backend);
+      const double delta = value - mean;
+      mean += delta / (sample + 1);
+      squared_error += delta * (value - mean);
     }
-    return value / samples;
+    const double standard_error = samples > 1
+        ? std::sqrt(squared_error / (samples - 1) / samples)
+        : 0.0;
+    return {mean, standard_error, backend.opponent_policy_lookups,
+            backend.missing_opponent_lookups};
   }
 
   CompiledGame game;
@@ -550,7 +584,8 @@ absl::StatusOr<double> DeepCfrSolver::evaluate_current(int samples) {
     return absl::InvalidArgumentError("evaluation samples must be positive");
   }
   try {
-    return impl_->evaluate(samples, internal::TraversalMode::EvaluateCurrent);
+    return impl_->evaluate(samples, internal::TraversalMode::EvaluateCurrent)
+        .mean;
   } catch (const std::exception& error) {
     return TorchError(error);
   }
@@ -561,7 +596,8 @@ absl::StatusOr<double> DeepCfrSolver::evaluate_average(int samples) {
     return absl::InvalidArgumentError("evaluation samples must be positive");
   }
   try {
-    return impl_->evaluate(samples, internal::TraversalMode::EvaluateAverage);
+    return impl_->evaluate(samples, internal::TraversalMode::EvaluateAverage)
+        .mean;
   } catch (const std::exception& error) {
     return TorchError(error);
   }
@@ -576,8 +612,46 @@ absl::StatusOr<double> DeepCfrSolver::evaluate_average_against_uniform(
   try {
     const double player_a_value = impl_->evaluate(
         samples, internal::TraversalMode::EvaluateAverage,
-        Opponent(policy_player));
+        Opponent(policy_player)).mean;
     return policy_player == Player::A ? player_a_value : -player_a_value;
+  } catch (const std::exception& error) {
+    return TorchError(error);
+  }
+}
+
+absl::StatusOr<DeepCfrMatchResult>
+DeepCfrSolver::evaluate_average_against_policy(
+    Player policy_player,
+    const Policy& opponent,
+    int samples) {
+  if (samples <= 0) {
+    return absl::InvalidArgumentError("evaluation samples must be positive");
+  }
+  if (opponent.model != impl_->game.model) {
+    return absl::FailedPreconditionError("policy model does not match game");
+  }
+  try {
+    const Impl::EvaluationResult result = impl_->evaluate(
+        samples, internal::TraversalMode::EvaluateAverage, std::nullopt,
+        &opponent, Opponent(policy_player));
+    const double sign = policy_player == Player::A ? 1.0 : -1.0;
+    return DeepCfrMatchResult{
+        sign * result.mean, result.standard_error,
+        result.opponent_policy_lookups,
+        result.missing_opponent_lookups};
+  } catch (const std::exception& error) {
+    return TorchError(error);
+  }
+}
+
+absl::Status DeepCfrSolver::load_average_model(
+    const std::filesystem::path& path) {
+  try {
+    torch::load(impl_->policy_network, path.string());
+    impl_->policy_network->eval();
+    impl_->policy_trained = true;
+    impl_->policy_cache.clear();
+    return absl::OkStatus();
   } catch (const std::exception& error) {
     return TorchError(error);
   }

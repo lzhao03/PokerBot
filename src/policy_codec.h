@@ -39,5 +39,6 @@ absl::StatusOr<Policy> DecodePolicy(std::span<const uint8_t> bytes);
 
 absl::Status SavePolicy(const Policy& policy,
                         const std::filesystem::path& path);
+absl::StatusOr<Policy> LoadPolicy(const std::filesystem::path& path);
 
 }  // namespace poker

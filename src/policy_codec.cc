@@ -439,4 +439,20 @@ absl::Status SavePolicy(const Policy& policy,
   return bytes.ok() ? WriteBytes(path, *bytes) : bytes.status();
 }
 
+absl::StatusOr<Policy> LoadPolicy(const std::filesystem::path& path) {
+  std::ifstream input(path, std::ios::binary | std::ios::ate);
+  if (!input) return absl::NotFoundError("policy file not found");
+  const std::streampos end = input.tellg();
+  if (end < 0 || end > std::numeric_limits<std::streamsize>::max()) {
+    return absl::DataLossError("invalid policy file size");
+  }
+  std::vector<uint8_t> bytes(static_cast<size_t>(end));
+  input.seekg(0);
+  if (!input.read(reinterpret_cast<char*>(bytes.data()),
+                  static_cast<std::streamsize>(bytes.size()))) {
+    return absl::DataLossError("failed to read policy file");
+  }
+  return DecodePolicy(bytes);
+}
+
 }  // namespace poker
