@@ -32,22 +32,17 @@ git show dcbadfc^:<path>
 - **Recovery locations:** `src/solver.h`, `src/solver.cc`, and
   `tests/cfr_solver_test.cc` in `dcbadfc^`. The old file magic was `PKCHECK1`.
 
-### Policy loading and artifact compatibility
+### Policy decoding and artifact compatibility
 
-- **Status:** Deferred; likely needed when policies are consumed by this repo.
-- **Removed:** `LoadPolicy()`, `ByteReader`, and `ReadBytes()`.
-- **Previous behavior:** Loaded `PKPOLCY1` files and rejected invalid magic,
-  versions, truncation, duplicate rows, trailing bytes, bad spans, nonfinite
-  probabilities, and non-normalized rows.
-- **Why removed:** Only a round-trip test called the loader; executables only
-  wrote policies.
-- **What remains:** Atomic `SavePolicy()` using the smaller `PKPOLCY2` format.
-- **Restore when:** Evaluation, serving, inspection, or continued training must
-  consume a saved policy.
-- **Recovery locations:** `src/solver.h`, `src/solver.cc`, and the policy
-  round-trip test in `tests/cfr_solver_test.cc` from `dcbadfc^`.
-- **Compatibility note:** A restored loader should make an explicit decision
-  about reading v1 and v2. Model fingerprints also changed to schema 2.
+- **Status:** Restored as the compact `PKCODEC1` codec.
+- **Current behavior:** `EncodePolicy()` and `DecodePolicy()` validate compact
+  policy buffers; `SavePolicy()` atomically replaces files. Uniform rows are
+  omitted and use the policy's uniform fallback.
+- **What remains deferred:** A filesystem `LoadPolicy()` convenience function.
+  Callers that need it can read bytes and use `DecodePolicy()` without adding a
+  second serialization path.
+- **Compatibility note:** Legacy `PKPOLCY1` and `PKPOLCY2` artifacts are not
+  accepted by the compact codec.
 
 ### Byte-budgeted policy export
 
@@ -266,9 +261,9 @@ git show dcbadfc^:<path>
 
 ## Compatibility and reproducibility notes
 
-- Policy files changed from `PKPOLCY1` to `PKPOLCY2`; v2 omits the stored action
-  count and no loader currently exists.
-- Model fingerprints changed to schema 2. Old policies/checkpoints are not
+- Compact policy files use `PKCODEC1`; legacy `PKPOLCY1` and `PKPOLCY2`
+  artifacts are not accepted.
+- Model fingerprints use schema 4. Old policies/checkpoints are not
   compatible without an explicit migration path.
 - Street-specific board types were replaced by one `Board`. Poker behavior is
   preserved, but invalid street transitions are now checked at runtime instead
