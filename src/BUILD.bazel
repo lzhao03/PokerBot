@@ -65,7 +65,6 @@ cc_library(
         ":card_canonicalization",
         ":poker",
         "@abseil-cpp//absl/container:flat_hash_map",
-        "@abseil-cpp//absl/container:inlined_vector",
         "@abseil-cpp//absl/status:status",
         "@abseil-cpp//absl/status:statusor",
     ],

@@ -18,7 +18,6 @@
 
 #include "absl/status/status.h"
 #include "src/cfr_traversal.h"
-#include "src/hand_evaluator.h"
 
 namespace poker {
 namespace {
