@@ -334,6 +334,7 @@ CfrState::CfrState(const SolverConfig& config,
       accumulate_average_strategy_(accumulate_average_strategy) {
   assert(history_count > 0);
   const CardAbstractionConfig& cards = config.card_abstraction;
+  bool use_packed_keys = false;
   if (cards.public_mode != PublicCardMode::ExactCanonical) {
     private_bits_ = cards.private_kind == PrivateAbstractionKind::ExactCanonical
                         ? 11
@@ -343,16 +344,16 @@ CfrState::CfrState(const SolverConfig& config,
     const uint8_t required_history_bits =
         static_cast<uint8_t>(std::bit_width(history_count - 1));
     history_bits_ = std::min<uint8_t>(32, 43 - private_bits_);
-    packed_keys_ = required_history_bits <= history_bits_;
+    use_packed_keys = required_history_bits <= history_bits_;
   }
   size_t max_actions = 3;
   for (const auto& fractions : config.bet_abstraction.pot_fractions) {
     max_actions = std::max(max_actions, fractions.size() + 3);
   }
-  if (packed_keys_) {
-    packed_rows_.reserve(max_info_sets_);
+  if (use_packed_keys) {
+    rows_.emplace<PackedRows>().reserve(max_info_sets_);
   } else {
-    full_rows_.reserve(max_info_sets_);
+    rows_.emplace<FullRows>().reserve(max_info_sets_);
   }
   regret_sum.reserve(max_info_sets_ * max_actions);
   if (accumulate_average_strategy) {
@@ -377,29 +378,31 @@ InfoSetKey CfrState::unpack(uint64_t key) const {
 }
 
 size_t CfrState::row_count() const {
-  return packed_keys_ ? packed_rows_.size() : full_rows_.size();
+  return std::visit([](const auto& rows) { return rows.size(); }, rows_);
 }
 
 std::optional<uint32_t> CfrState::find(InfoSetKey key) const {
-  if (packed_keys_) {
-    const auto found = packed_rows_.find(pack(key));
-    return found == packed_rows_.end() ? std::nullopt
-                                       : std::optional(found->second);
+  if (const auto* rows = std::get_if<PackedRows>(&rows_)) {
+    const auto found = rows->find(pack(key));
+    return found == rows->end() ? std::nullopt
+                                : std::optional(found->second);
   }
-  const auto found = full_rows_.find(key);
-  return found == full_rows_.end() ? std::nullopt
-                                    : std::optional(found->second);
+  const auto& rows = std::get<FullRows>(rows_);
+  const auto found = rows.find(key);
+  return found == rows.end() ? std::nullopt
+                             : std::optional(found->second);
 }
 
 std::vector<std::pair<InfoSetKey, uint32_t>> CfrState::row_entries() const {
   std::vector<std::pair<InfoSetKey, uint32_t>> entries;
   entries.reserve(row_count());
-  if (packed_keys_) {
-    for (const auto& [key, offset] : packed_rows_) {
+  if (const auto* rows = std::get_if<PackedRows>(&rows_)) {
+    for (const auto& [key, offset] : *rows) {
       entries.emplace_back(unpack(key), offset);
     }
   } else {
-    entries.assign(full_rows_.begin(), full_rows_.end());
+    const auto& full_rows = std::get<FullRows>(rows_);
+    entries.assign(full_rows.begin(), full_rows.end());
   }
   std::ranges::sort(entries);
   return entries;
@@ -423,8 +426,10 @@ std::optional<uint32_t> CfrState::find_or_create(
     }
     return offset;
   };
-  return packed_keys_ ? insert(packed_rows_, pack(key))
-                      : insert(full_rows_, key);
+  if (auto* rows = std::get_if<PackedRows>(&rows_)) {
+    return insert(*rows, pack(key));
+  }
+  return insert(std::get<FullRows>(rows_), key);
 }
 
 namespace {

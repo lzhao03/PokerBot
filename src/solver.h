@@ -8,6 +8,7 @@
 #include <random>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -127,16 +128,17 @@ struct CfrState {
       uint8_t action_count);
 
  private:
+  using PackedRows = absl::flat_hash_map<uint64_t, uint32_t>;
+  using FullRows = absl::flat_hash_map<InfoSetKey, uint32_t>;
+
   uint64_t pack(InfoSetKey key) const;
   InfoSetKey unpack(uint64_t key) const;
 
-  absl::flat_hash_map<uint64_t, uint32_t> packed_rows_;
-  absl::flat_hash_map<InfoSetKey, uint32_t> full_rows_;
+  std::variant<PackedRows, FullRows> rows_;
   size_t max_info_sets_;
   bool accumulate_average_strategy_;
   uint8_t private_bits_ = 0;
   uint8_t history_bits_ = 0;
-  bool packed_keys_ = false;
 };
 
 struct Policy {
