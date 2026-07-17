@@ -24,13 +24,12 @@ inline constexpr auto kComboCards = [] {
   return combos;
 }();
 
-void CommitChips(BettingData& state, Player player, Chips requested) {
-  assert(requested > 0);
+void CommitChips(BettingData& state, Player player, Chips amount) {
   const size_t index = Index(player);
-  const Chips committed = std::min(requested, state.stack[index]);
-  state.stack[index] -= committed;
-  state.total_committed[index] += committed;
-  state.street_committed[index] += committed;
+  assert(amount > 0 && amount <= state.stack[index]);
+  state.stack[index] -= amount;
+  state.total_committed[index] += amount;
+  state.street_committed[index] += amount;
 }
 
 void RefundUnmatchedCommitment(BettingData& state) {
@@ -259,8 +258,7 @@ bool IsLegalAction(const DecisionState& state,
       std::min(highest_to, current_to + data.stack[player]);
   const Chips all_in_to =
       current_to + MaxContestableAdditional(data, state.actor);
-  const Chips min_full_raise_to =
-      (highest_to > 0 ? highest_to : current_to) + data.last_full_raise;
+  const Chips min_full_raise_to = highest_to + data.last_full_raise;
   const Chips target = action.target_street_commitment;
   switch (action.kind) {
     case ActionKind::Fold:
