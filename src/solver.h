@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <random>
+#include <span>
 #include <string_view>
 #include <utility>
 #include <variant>
@@ -107,16 +108,16 @@ struct CfrState {
   uint64_t iterations = 0;
   double cumulative_root_utility = 0.0;
 
-  void strategy(absl::Span<const float> values,
+  void strategy(std::span<const float> values,
                 std::optional<uint32_t> offset,
-                absl::Span<float> probabilities,
+                std::span<float> probabilities,
                 bool concurrent = false) const;
   void add_regret(uint32_t offset,
                   size_t action,
                   float delta,
                   bool concurrent = false);
   void add_strategy(uint32_t offset,
-                    absl::Span<const float> probabilities,
+                    std::span<const float> probabilities,
                     double weight,
                     bool concurrent = false);
   size_t row_count() const;
@@ -146,7 +147,7 @@ struct Policy {
   std::vector<float> probabilities;
   ModelFingerprint model{};
 
-  bool strategy(InfoSetKey key, absl::Span<float> output) const;
+  bool strategy(InfoSetKey key, std::span<float> output) const;
 };
 
 absl::StatusOr<Policy> ExtractAveragePolicy(

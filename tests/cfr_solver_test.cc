@@ -6,6 +6,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -53,7 +54,7 @@ BettingState Apply(const BettingState& state, GameAction action) {
 }
 
 ExactPublicState DealChance(const ExactPublicState& state,
-                            absl::Span<const Card> cards,
+                            std::span<const Card> cards,
                             const BettingRules& rules) {
   const auto child = TryApplyChance(state, cards, rules);
   if (!child.ok()) {

@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cmath>
+#include <span>
 #include <stdexcept>
 #include <string>
 
@@ -27,7 +28,7 @@ BettingState Apply(const BettingState& state, GameAction action) {
 }
 
 ExactPublicState DealChance(const ExactPublicState& state,
-                            absl::Span<const Card> cards,
+                            std::span<const Card> cards,
                             const BettingRules& rules) {
   const auto child = TryApplyChance(state, cards, rules);
   if (!child.ok()) {

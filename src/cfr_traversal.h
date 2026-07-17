@@ -7,8 +7,8 @@
 #include <cstdint>
 #include <optional>
 #include <random>
+#include <span>
 
-#include "absl/types/span.h"
 #include "src/hand_evaluator.h"
 #include "src/solver.h"
 
@@ -53,9 +53,9 @@ template <typename Backend>
 concept CfrBackend = requires(Backend& backend,
                               const DecisionView& decision,
                               StrategyAccess access,
-                              absl::Span<float> probabilities,
+                              std::span<float> probabilities,
                               typename Backend::UpdateHandle handle,
-                              absl::Span<const float> regrets,
+                              std::span<const float> regrets,
                               double weight) {
   { backend.current_strategy(decision, access, probabilities) }
       -> std::same_as<std::optional<typename Backend::UpdateHandle>>;
@@ -137,8 +137,8 @@ double TraverseNode(const CompiledGame& game,
     };
     std::array<float, kMaxActionsPerNode> probabilities;
     std::array<double, kMaxActionsPerNode> action_values;
-    const absl::Span<float> probability_span(probabilities.data(),
-                                             action_count);
+    const std::span<float> probability_span(probabilities.data(),
+                                            action_count);
     const StrategyAccess access =
         training && (updates_regrets || external_sampling)
             ? StrategyAccess::Writable
@@ -193,7 +193,7 @@ double TraverseNode(const CompiledGame& game,
           (action_values[action] - node_value));
     }
     backend.record_regrets(
-        view, *handle, absl::Span<const float>(regrets.data(), action_count));
+        view, *handle, std::span<const float>(regrets.data(), action_count));
     if (!external_sampling) {
       const double weight = frame.reach[player_index] * (context.iteration + 1);
       backend.record_strategy(view, *handle, probability_span, weight);

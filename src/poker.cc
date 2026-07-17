@@ -107,7 +107,7 @@ BettingState ApplyActionUnchecked(const DecisionState& state,
 
 }  // namespace
 
-Board DealCards(Board board, absl::Span<const Card> cards) noexcept {
+Board DealCards(Board board, std::span<const Card> cards) noexcept {
   assert((board.count() == 0 && cards.size() == 3) ||
          (board.count() >= 3 && board.count() < kMaxBoardCards &&
           cards.size() == 1));
@@ -121,7 +121,7 @@ Board DealCards(Board board, absl::Span<const Card> cards) noexcept {
   return board;
 }
 
-absl::StatusOr<Board> MakeBoard(absl::Span<const Card> cards) {
+absl::StatusOr<Board> MakeBoard(std::span<const Card> cards) {
   if (!(cards.empty() || (cards.size() >= 3 &&
                           cards.size() <= kMaxBoardCards))) {
     return absl::InvalidArgumentError("board must have 0, 3, 4, or 5 cards");
@@ -311,7 +311,7 @@ BettingState AdvanceBettingStreet(const ChanceState& state,
 
 absl::StatusOr<ExactPublicState> TryApplyChance(
     const ExactPublicState& state,
-    absl::Span<const Card> cards,
+    std::span<const Card> cards,
     const BettingRules& rules) {
   const auto* chance = std::get_if<ChanceState>(&state.betting);
   if (chance == nullptr) {

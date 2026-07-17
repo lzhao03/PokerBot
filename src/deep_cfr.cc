@@ -10,6 +10,7 @@
 #include <limits>
 #include <optional>
 #include <random>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -17,7 +18,6 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
-#include "absl/types/span.h"
 #include "src/cfr_traversal.h"
 
 namespace poker {
@@ -135,13 +135,13 @@ struct CfrNetImpl : torch::nn::Module {
 };
 TORCH_MODULE(CfrNet);
 
-void FillUniform(absl::Span<float> probabilities) {
+void FillUniform(std::span<float> probabilities) {
   std::fill(probabilities.begin(), probabilities.end(),
             1.0f / static_cast<float>(probabilities.size()));
 }
 
-void RegretMatch(absl::Span<const float> advantages,
-                 absl::Span<float> probabilities) {
+void RegretMatch(std::span<const float> advantages,
+                 std::span<float> probabilities) {
   float sum = 0.0f;
   for (size_t action = 0; action < probabilities.size(); ++action) {
     probabilities[action] = std::max(0.0f, advantages[action]);
@@ -154,10 +154,10 @@ void RegretMatch(absl::Span<const float> advantages,
   for (float& probability : probabilities) probability /= sum;
 }
 
-void Softmax(absl::Span<const float> logits,
-             absl::Span<float> probabilities) {
-  const float maximum = *std::max_element(
-      logits.begin(), logits.begin() + probabilities.size());
+void Softmax(std::span<const float> logits,
+             std::span<float> probabilities) {
+  const float maximum =
+      std::ranges::max(logits.first(probabilities.size()));
   float sum = 0.0f;
   for (size_t action = 0; action < probabilities.size(); ++action) {
     probabilities[action] = std::exp(logits[action] - maximum);
@@ -245,7 +245,7 @@ struct DeepCfrSolver::Impl {
   std::optional<UpdateHandle> current_strategy(
       const internal::DecisionView& decision,
       internal::StrategyAccess access,
-      absl::Span<float> probabilities) {
+      std::span<float> probabilities) {
     const size_t player = Index(decision.state.actor);
     if (!advantage_trained[player]) {
       FillUniform(probabilities);
@@ -260,7 +260,7 @@ struct DeepCfrSolver::Impl {
   }
 
   void average_strategy(const internal::DecisionView& decision,
-                        absl::Span<float> probabilities) {
+                        std::span<float> probabilities) {
     if (!policy_trained) {
       FillUniform(probabilities);
       return;
@@ -272,7 +272,7 @@ struct DeepCfrSolver::Impl {
 
   void record_regrets(const internal::DecisionView& decision,
                       UpdateHandle,
-                      absl::Span<const float> regrets) {
+                      std::span<const float> regrets) {
     NetworkSample sample{decision.key};
     std::copy(regrets.begin(), regrets.end(), sample.target.begin());
     sample.weight = static_cast<float>(decision.iteration + 1);
@@ -282,7 +282,7 @@ struct DeepCfrSolver::Impl {
 
   void record_strategy(const internal::DecisionView& decision,
                        UpdateHandle,
-                       absl::Span<const float> probabilities,
+                       std::span<const float> probabilities,
                        double weight) {
     NetworkSample sample{decision.key};
     std::copy(probabilities.begin(), probabilities.end(),

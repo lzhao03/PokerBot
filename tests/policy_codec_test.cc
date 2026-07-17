@@ -7,7 +7,6 @@
 #include <limits>
 #include <vector>
 
-#include "absl/types/span.h"
 #include "doctest/doctest.h"
 #include "src/bet_abstraction.h"
 

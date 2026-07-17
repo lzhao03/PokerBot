@@ -74,7 +74,7 @@ void AppendVarint(std::vector<uint8_t>& bytes, uint64_t value) {
 
 class ByteReader {
  public:
-  explicit ByteReader(absl::Span<const uint8_t> bytes) : bytes_(bytes) {}
+  explicit ByteReader(std::span<const uint8_t> bytes) : bytes_(bytes) {}
 
   template <typename Integer>
   std::optional<Integer> read() {
@@ -87,9 +87,9 @@ class ByteReader {
     return static_cast<Integer>(value);
   }
 
-  std::optional<absl::Span<const uint8_t>> take(size_t size) {
+  std::optional<std::span<const uint8_t>> take(size_t size) {
     if (size > remaining()) return std::nullopt;
-    const absl::Span<const uint8_t> result = bytes_.subspan(offset_, size);
+    const std::span<const uint8_t> result = bytes_.subspan(offset_, size);
     offset_ += size;
     return result;
   }
@@ -108,7 +108,7 @@ class ByteReader {
   size_t remaining() const { return bytes_.size() - offset_; }
 
  private:
-  absl::Span<const uint8_t> bytes_;
+  std::span<const uint8_t> bytes_;
   size_t offset_ = 0;
 };
 
@@ -126,7 +126,7 @@ absl::StatusOr<std::vector<EncodedRow>> QuantizedRows(
   uniform.fill(1.0f);
   for (size_t actions = 1; actions <= config.max_actions; ++actions) {
     const auto code = EncodeActionProbabilities(
-        absl::Span<const float>(uniform.data(), actions), config);
+        std::span<const float>(uniform.data(), actions), config);
     if (!code.ok()) return code.status();
     default_codes[actions] = *code;
   }
@@ -152,7 +152,7 @@ absl::StatusOr<std::vector<EncodedRow>> QuantizedRows(
         end - begin > config.max_actions) {
       return absl::InvalidArgumentError("invalid policy row span");
     }
-    const absl::Span<const float> probabilities(
+    const std::span<const float> probabilities(
         policy.probabilities.data() + begin, end - begin);
     double total = 0.0;
     for (float probability : probabilities) {
@@ -176,7 +176,7 @@ absl::StatusOr<std::vector<EncodedRow>> QuantizedRows(
 }
 
 absl::Status WriteBytes(const std::filesystem::path& path,
-                        absl::Span<const uint8_t> bytes) {
+                        std::span<const uint8_t> bytes) {
   std::filesystem::path temporary = path;
   temporary += ".tmp";
   std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
@@ -207,7 +207,7 @@ size_t ActionProbabilityCodeBits(size_t action_count,
 }
 
 absl::StatusOr<uint64_t> EncodeActionProbabilities(
-    absl::Span<const float> probabilities,
+    std::span<const float> probabilities,
     PolicyCodecConfig config) {
   const size_t action_count = probabilities.size();
   if (DistributionCount(action_count, config) == 0) {
@@ -259,7 +259,7 @@ absl::StatusOr<uint64_t> EncodeActionProbabilities(
 
 absl::Status DecodeActionProbabilities(
     uint64_t code,
-    absl::Span<float> probabilities,
+    std::span<float> probabilities,
     PolicyCodecConfig config) {
   const size_t action_count = probabilities.size();
   const uint64_t count = DistributionCount(action_count, config);
@@ -353,7 +353,7 @@ absl::StatusOr<std::vector<uint8_t>> EncodePolicy(
   return bytes;
 }
 
-absl::StatusOr<Policy> DecodePolicy(absl::Span<const uint8_t> bytes) {
+absl::StatusOr<Policy> DecodePolicy(std::span<const uint8_t> bytes) {
   ByteReader reader(bytes);
   const auto magic = reader.take(kPolicyCodecMagic.size());
   const auto model = reader.read<uint64_t>();
@@ -409,7 +409,7 @@ absl::StatusOr<Policy> DecodePolicy(absl::Span<const uint8_t> bytes) {
           PublicObservationId(public_observation),
           HistoryId(static_cast<uint32_t>(history)),
           PrivateObservationId(static_cast<uint32_t>(private_observation))};
-      const absl::Span<float> output(probabilities.data(), action_count);
+      const std::span<float> output(probabilities.data(), action_count);
       const absl::Status decoded =
           DecodeActionProbabilities(*code, output, config);
       if (!decoded.ok()) return decoded;

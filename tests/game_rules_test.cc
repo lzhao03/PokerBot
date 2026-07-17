@@ -8,6 +8,7 @@
 #include <array>
 #include <bit>
 #include <random>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -58,7 +59,7 @@ BettingState Apply(const BettingState& state, GameAction action) {
 }
 
 ExactPublicState DealChance(const ExactPublicState& state,
-                            absl::Span<const Card> cards,
+                            std::span<const Card> cards,
                             const BettingRules& rules) {
   const auto child = TryApplyChance(state, cards, rules);
   if (!child.ok()) {
@@ -74,7 +75,7 @@ std::array<Card, 3> Flop() {
   };
 }
 
-void AddFlop(Board& board, absl::Span<const Card> cards) {
+void AddFlop(Board& board, std::span<const Card> cards) {
   board = DealCards(board, cards);
 }
 
@@ -87,7 +88,7 @@ void AddRiver(Board& board, Card card) {
 }
 
 std::vector<GameAction> ActionsFor(const BettingState& state,
-                                   absl::Span<const double> sizes) {
+                                   std::span<const double> sizes) {
   const auto* decision = std::get_if<DecisionState>(&state);
   if (decision == nullptr) {
     throw std::invalid_argument("expected decision state");
@@ -134,7 +135,7 @@ ExactPublicState ClosedState(StreetKind street) {
 ExactPublicState Showdown(std::array<Card, kMaxBoardCards> cards) {
   ExactPublicState state = ClosedState(StreetKind::River);
   state.board = Board{};
-  AddFlop(state.board, absl::Span<const Card>(cards.data(), 3));
+  AddFlop(state.board, std::span<const Card>(cards.data(), 3));
   AddTurn(state.board, cards[3]);
   AddRiver(state.board, cards[4]);
   return state;
@@ -300,7 +301,7 @@ bool HasAction(const std::vector<GameAction>& menu, GameAction expected) {
 }
 
 void CheckMenu(const BettingState& state,
-               absl::Span<const double> sizes) {
+               std::span<const double> sizes) {
   const std::vector<GameAction> menu = ActionsFor(state, sizes);
   for (const GameAction& action : menu) {
     CHECK_NOTHROW(Apply(state, action));

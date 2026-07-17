@@ -7,10 +7,10 @@
 #include <functional>
 #include <optional>
 #include <random>
+#include <span>
 #include <vector>
 
 #include "absl/status/status.h"
-#include "absl/types/span.h"
 #include "src/cfr_traversal.h"
 
 namespace poker {
@@ -39,7 +39,7 @@ struct PolicyBackend {
   std::optional<size_t> current_strategy(
       const internal::DecisionView& decision,
       internal::StrategyAccess,
-      absl::Span<float> probabilities) {
+      std::span<float> probabilities) {
     const size_t player = Index(decision.state.actor);
     const double reach = decision.reaches[0] * decision.reaches[1];
     if (counters.measure_reach_coverage && reach > 0.0) {
@@ -55,17 +55,17 @@ struct PolicyBackend {
   }
 
   void average_strategy(const internal::DecisionView& decision,
-                        absl::Span<float> probabilities) {
+                        std::span<float> probabilities) {
     current_strategy(decision, internal::StrategyAccess::ReadOnly,
                      probabilities);
   }
 
   void record_regrets(const internal::DecisionView&,
                       size_t,
-                      absl::Span<const float>) {}
+                      std::span<const float>) {}
   void record_strategy(const internal::DecisionView&,
                        size_t,
-                       absl::Span<const float>,
+                       std::span<const float>,
                        double) {}
 };
 
@@ -150,7 +150,7 @@ struct ResponseBackend {
   std::optional<uint32_t> current_strategy(
       const internal::DecisionView& decision,
       internal::StrategyAccess access,
-      absl::Span<float> probabilities) {
+      std::span<float> probabilities) {
     if (decision.state.actor != responder) {
       ++opponent_lookups;
       if (!opponent.strategy(decision.key, probabilities)) {
@@ -168,14 +168,14 @@ struct ResponseBackend {
   }
 
   void average_strategy(const internal::DecisionView& decision,
-                        absl::Span<float> probabilities) {
+                        std::span<float> probabilities) {
     current_strategy(decision, internal::StrategyAccess::ReadOnly,
                      probabilities);
   }
 
   void record_regrets(const internal::DecisionView&,
                       uint32_t offset,
-                      absl::Span<const float> regrets) {
+                      std::span<const float> regrets) {
     for (size_t action = 0; action < regrets.size(); ++action) {
       response.add_regret(offset, action, regrets[action]);
     }
@@ -183,7 +183,7 @@ struct ResponseBackend {
 
   void record_strategy(const internal::DecisionView&,
                        uint32_t offset,
-                       absl::Span<const float> probabilities,
+                       std::span<const float> probabilities,
                        double weight) {
     response.add_strategy(offset, probabilities, weight);
   }

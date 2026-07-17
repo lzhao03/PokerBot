@@ -13,6 +13,7 @@
 #include <initializer_list>
 #include <random>
 #include <set>
+#include <span>
 #include <utility>
 
 namespace poker {
@@ -128,21 +129,21 @@ EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards) {
 Card C(int rank, S suit) { return Card(static_cast<Rank>(rank - 2), suit); }
 ComboId H(Card a, Card b) { return CardsToComboId(a, b); }
 
-Board Runout(absl::Span<const Card> cards) {
+Board Runout(std::span<const Card> cards) {
   if (cards.empty()) {
     return {};
   }
   Board board = DealCards(
-      Board{}, absl::Span<const Card>(cards.data(), 3));
+      Board{}, std::span<const Card>(cards.data(), 3));
   for (size_t index = 3; index < cards.size(); ++index) {
     board = DealCards(
-        board, absl::Span<const Card>(cards.data() + index, 1));
+        board, std::span<const Card>(cards.data() + index, 1));
   }
   return board;
 }
 
 Board B(std::initializer_list<Card> cards) {
-  return Runout(absl::Span<const Card>(cards.begin(), cards.size()));
+  return Runout(std::span<const Card>(cards.begin(), cards.size()));
 }
 
 PublicObservationId PublicId(const CardAbstractionConfig& config,
@@ -187,7 +188,7 @@ Board Rename(const Board& board, const std::array<S, 4>& suits) {
   for (size_t i = 0; i < board_cards.size(); ++i) {
     cards[i] = Rename(board_cards[i], suits);
   }
-  return Runout(absl::Span<const Card>(cards.data(), board.count()));
+  return Runout(std::span<const Card>(cards.data(), board.count()));
 }
 
 ComboId Rename(ComboId hand, const std::array<S, 4>& suits) {
@@ -251,7 +252,7 @@ TEST_CASE("sampling and card abstractions preserve identity") {
     const size_t board_count =
         street == StreetKind::Preflop ? 0 : std::to_underlying(street) + 2;
     const Board board = Runout(
-        absl::Span<const Card>(deck.data(), board_count));
+        std::span<const Card>(deck.data(), board_count));
     const ComboId hand = H(deck[board_count], deck[board_count + 1]);
 
     std::array<Card, kMaxBoardCards> permuted = {};
@@ -261,7 +262,7 @@ TEST_CASE("sampling and card abstractions preserve identity") {
       std::swap(permuted[0], permuted[2]);
     }
     const Board reversed = Runout(
-        absl::Span<const Card>(permuted.data(), board.count()));
+        std::span<const Card>(permuted.data(), board.count()));
     CHECK(PublicId(current, reversed) == PublicId(current, board));
     const PublicPosition position(current, board);
     const PrivateObservationId private_observation =

@@ -3,11 +3,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <span>
 #include <vector>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/types/span.h"
 #include "src/solver.h"
 
 namespace poker {
@@ -22,12 +22,12 @@ size_t ActionProbabilityCodeBits(
     PolicyCodecConfig config = {}) noexcept;
 
 absl::StatusOr<uint64_t> EncodeActionProbabilities(
-    absl::Span<const float> probabilities,
+    std::span<const float> probabilities,
     PolicyCodecConfig config = {});
 
 absl::Status DecodeActionProbabilities(
     uint64_t code,
-    absl::Span<float> probabilities,
+    std::span<float> probabilities,
     PolicyCodecConfig config = {});
 
 // Uniform rows are omitted and use Policy::strategy's existing fallback.
@@ -35,7 +35,7 @@ absl::StatusOr<std::vector<uint8_t>> EncodePolicy(
     const Policy& policy,
     PolicyCodecConfig config = {});
 
-absl::StatusOr<Policy> DecodePolicy(absl::Span<const uint8_t> bytes);
+absl::StatusOr<Policy> DecodePolicy(std::span<const uint8_t> bytes);
 
 absl::Status SavePolicy(const Policy& policy,
                         const std::filesystem::path& path);

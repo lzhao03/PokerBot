@@ -10,13 +10,13 @@
 #include <concepts>
 #include <limits>
 #include <optional>
+#include <span>
 #include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "absl/status/status.h"
-#include "absl/types/span.h"
 #include "src/cfr_traversal.h"
 #include "src/hand_evaluator.h"
 
@@ -36,7 +36,7 @@ void AppendInteger(std::vector<uint8_t>& bytes, Integer value) {
 }
 
 // ponytail: Use a library hash if fingerprints ever cross a hostile boundary.
-ModelFingerprint Fingerprint(absl::Span<const uint8_t> bytes) noexcept {
+ModelFingerprint Fingerprint(std::span<const uint8_t> bytes) noexcept {
   uint64_t hash = 14695981039346656037ULL;
   for (uint8_t byte : bytes) {
     hash = (hash ^ byte) * 1099511628211ULL;
@@ -245,7 +245,7 @@ Deal DealDistribution::sample(std::mt19937& rng) const {
 
 namespace {
 
-void FillUniform(absl::Span<float> probabilities) {
+void FillUniform(std::span<float> probabilities) {
   if (!probabilities.empty()) {
     std::fill(probabilities.begin(), probabilities.end(),
               1.0f / static_cast<float>(probabilities.size()));
@@ -289,14 +289,13 @@ void CfrState::add_regret(uint32_t offset,
 }
 
 void CfrState::add_strategy(uint32_t offset,
-                            absl::Span<const float> probabilities,
+                            std::span<const float> probabilities,
                             double weight,
                             bool concurrent) {
   if (!accumulate_average_strategy_) return;
-  for (size_t action = 0; action < probabilities.size(); ++action) {
-    const size_t index = offset + action;
-    float& sum = strategy_sum[index];
-    const float delta = static_cast<float>(weight * probabilities[action]);
+  for (float probability : probabilities) {
+    float& sum = strategy_sum[offset++];
+    const float delta = static_cast<float>(weight * probability);
     if (concurrent) {
       AtomicAdd(sum, delta);
     } else {
@@ -305,19 +304,19 @@ void CfrState::add_strategy(uint32_t offset,
   }
 }
 
-void CfrState::strategy(absl::Span<const float> values,
+void CfrState::strategy(std::span<const float> values,
                         std::optional<uint32_t> offset,
-                        absl::Span<float> probabilities,
+                        std::span<float> probabilities,
                         bool concurrent) const {
   if (!offset) {
     FillUniform(probabilities);
     return;
   }
   float sum = 0.0f;
-  for (size_t action = 0; action < probabilities.size(); ++action) {
-    probabilities[action] =
-        LoadValue(values[*offset + action], concurrent);
-    sum += probabilities[action];
+  const float* value = values.data() + *offset;
+  for (float& probability : probabilities) {
+    probability = LoadValue(*value++, concurrent);
+    sum += probability;
   }
   if (sum <= 0.0) {
     FillUniform(probabilities);
@@ -443,7 +442,7 @@ struct TabularBackend {
   std::optional<uint32_t> current_strategy(
       const internal::DecisionView& decision,
       internal::StrategyAccess access,
-      absl::Span<float> probabilities) {
+      std::span<float> probabilities) {
     const std::optional<uint32_t> offset =
         access == internal::StrategyAccess::Writable
             ? state.find_or_create(decision.key, decision.action_count)
@@ -455,22 +454,23 @@ struct TabularBackend {
   }
 
   void average_strategy(const internal::DecisionView& decision,
-                        absl::Span<float> probabilities) {
+                        std::span<float> probabilities) {
     state.strategy(state.strategy_sum, state.find(decision.key), probabilities,
                    concurrent_updates);
   }
 
   void record_regrets(const internal::DecisionView&,
                       uint32_t offset,
-                      absl::Span<const float> regrets) {
-    for (size_t action = 0; action < regrets.size(); ++action) {
-      state.add_regret(offset, action, regrets[action], concurrent_updates);
+                      std::span<const float> regrets) {
+    size_t action = 0;
+    for (float regret : regrets) {
+      state.add_regret(offset, action++, regret, concurrent_updates);
     }
   }
 
   void record_strategy(const internal::DecisionView&,
                        uint32_t offset,
-                       absl::Span<const float> probabilities,
+                       std::span<const float> probabilities,
                        double weight) {
     state.add_strategy(offset, probabilities, weight, concurrent_updates);
   }
@@ -478,7 +478,7 @@ struct TabularBackend {
 
 }  // namespace
 
-bool Policy::strategy(InfoSetKey key, absl::Span<float> output) const {
+bool Policy::strategy(InfoSetKey key, std::span<float> output) const {
   const auto found = rows.find(key);
   if (found == rows.end() ||
       found->second + output.size() > probabilities.size()) {
@@ -784,7 +784,7 @@ absl::StatusOr<Policy> ExtractAveragePolicy(
     }
 
     policy.rows.try_emplace(key, output_offset);
-    absl::Span<float> probabilities(
+    std::span<float> probabilities(
         policy.probabilities.data() + output_offset, node.child_count);
     if (mass > 0.0) {
       for (float& probability : probabilities) {

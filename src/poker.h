@@ -7,12 +7,12 @@
 #include <cstdint>
 #include <optional>
 #include <random>
+#include <span>
 #include <utility>
 #include <variant>
 
 #include "absl/container/inlined_vector.h"
 #include "absl/status/statusor.h"
-#include "absl/types/span.h"
 
 namespace poker {
 
@@ -198,8 +198,8 @@ class Board {
  public:
   Board() = default;
 
-  absl::Span<const Card> cards() const noexcept {
-    return absl::Span<const Card>(cards_.data(), count_);
+  std::span<const Card> cards() const noexcept {
+    return std::span<const Card>(cards_.data(), count_);
   }
   CardMask mask() const noexcept {
     CardMask result = 0;
@@ -222,15 +222,15 @@ class Board {
   Board(std::array<Card, kMaxBoardCards> cards, uint8_t count)
       : cards_(cards), count_(count) {}
 
-  friend Board DealCards(Board board, absl::Span<const Card> cards) noexcept;
-  friend absl::StatusOr<Board> MakeBoard(absl::Span<const Card> cards);
+  friend Board DealCards(Board board, std::span<const Card> cards) noexcept;
+  friend absl::StatusOr<Board> MakeBoard(std::span<const Card> cards);
 
   std::array<Card, kMaxBoardCards> cards_ = {};
   uint8_t count_ = 0;
 };
 
-Board DealCards(Board board, absl::Span<const Card> cards) noexcept;
-absl::StatusOr<Board> MakeBoard(absl::Span<const Card> cards);
+Board DealCards(Board board, std::span<const Card> cards) noexcept;
+absl::StatusOr<Board> MakeBoard(std::span<const Card> cards);
 
 struct ExactPublicState {
   BettingState betting;
@@ -289,7 +289,7 @@ BettingState AdvanceBettingStreet(const ChanceState& state,
                                   const BettingRules& rules);
 absl::StatusOr<ExactPublicState> TryApplyChance(
     const ExactPublicState& state,
-    absl::Span<const Card> cards,
+    std::span<const Card> cards,
     const BettingRules& rules);
 inline double TerminalUtility(const FoldTerminalState& state,
                               Player evaluated_player) noexcept {

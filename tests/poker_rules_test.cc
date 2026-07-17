@@ -4,6 +4,7 @@
 #include "doctest/doctest.h"
 
 #include <array>
+#include <span>
 #include <stdexcept>
 #include <string>
 
@@ -43,7 +44,7 @@ BettingState Apply(const BettingState& state, GameAction action) {
 }
 
 ExactPublicState DealChance(const ExactPublicState& state,
-                            absl::Span<const Card> cards,
+                            std::span<const Card> cards,
                             const BettingRules& rules) {
   const auto child = TryApplyChance(state, cards, rules);
   if (!child.ok()) {
@@ -75,8 +76,9 @@ TEST_CASE("boundary actions, chance transitions, and sizing are enforced") {
   CHECK_THROWS(Apply(state.betting, {ActionKind::Raise, 1}));
   state.betting = Apply(state.betting, {ActionKind::Call, 2});
   state.betting = Apply(state.betting, {ActionKind::Check});
-  CHECK_THROWS_AS(DealChance(state, {C(14, S::Spades)}, kRules),
-                  std::invalid_argument);
+  CHECK_THROWS_AS(
+      DealChance(state, std::array{C(14, S::Spades)}, kRules),
+      std::invalid_argument);
 
   ExactPublicState short_call = Root();
   B(short_call).stack = {3, 12};
