@@ -138,10 +138,6 @@ struct GameAction {
   friend bool operator==(const GameAction&, const GameAction&) = default;
 };
 
-inline int PokerRank(Card card) {
-  return 2 + std::to_underlying(card.rank());
-}
-
 inline CardMask CardBit(Card card) {
   return CardMask{1} << card.index();
 }
@@ -257,10 +253,6 @@ inline Chips MaxContestableAdditional(const BettingData& state,
                                       Player player) noexcept {
   return std::min(state.stack[Index(player)],
                   ToCall(state, player) + state.stack[Index(Opponent(player))]);
-}
-
-inline bool AnyPlayerAllIn(const BettingData& state) noexcept {
-  return state.stack[0] == 0 || state.stack[1] == 0;
 }
 
 inline bool IsValidBettingData(const BettingData& state) noexcept {

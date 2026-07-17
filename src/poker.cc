@@ -55,7 +55,7 @@ bool IsBettingRoundOver(const BettingData& state) noexcept {
   if (state.actions_remaining == 0 && commitments_match) {
     return true;
   }
-  if (!AnyPlayerAllIn(state)) {
+  if (state.stack[0] != 0 && state.stack[1] != 0) {
     return false;
   }
   if (state.stack[0] == 0 && state.stack[1] == 0) {
