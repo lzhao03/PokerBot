@@ -645,8 +645,7 @@ internal::TraversalFrame internal::InitialTraversalFrame(
   internal::TraversalFrame frame;
   for (Player player : {Player::A, Player::B}) {
     frame.private_observations[Index(player)] =
-        ObservePrivate(game.config.card_abstraction, deal.hand(player),
-                       position.public_state.board());
+        ObservePrivate(deal.hand(player), position.public_state);
   }
   if (position.public_state.board().count() == kMaxBoardCards) {
     frame.showdown_comparison = static_cast<int8_t>(CompareHands(
@@ -665,8 +664,7 @@ void internal::AdvancePrivateObservations(
   if (!std::holds_alternative<DecisionState>(child_node.state)) return;
   for (Player player : {Player::A, Player::B}) {
     frame.private_observations[Index(player)] =
-        ObservePrivate(game.config.card_abstraction, deal.hand(player),
-                       child.public_state.board(),
+        ObservePrivate(deal.hand(player), child.public_state,
                        frame.private_observations[Index(player)]);
   }
 }

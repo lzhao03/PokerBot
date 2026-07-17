@@ -1,6 +1,8 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
+
 #include "src/poker.h"
 
 namespace poker {
@@ -28,6 +30,14 @@ struct CardAbstractionConfig {
   RecallMode recall_mode = RecallMode::BucketHistory;
 };
 
+struct BoardFeatures {
+  std::array<uint8_t, 13> rank_counts = {};
+  std::array<uint8_t, 4> suit_counts = {};
+  uint16_t rank_mask = 0;
+  uint8_t max_rank_count = 0;
+  uint8_t max_suit_count = 0;
+};
+
 class PublicPosition {
  public:
   PublicPosition(const CardAbstractionConfig& config, const Board& board);
@@ -38,13 +48,21 @@ class PublicPosition {
  private:
   Board board_;
   PublicObservationId observation_;
+  BoardFeatures features_;
+  PrivateAbstractionKind private_kind_ =
+      PrivateAbstractionKind::Handcrafted36;
+  RecallMode recall_mode_ = RecallMode::BucketHistory;
+
+  friend PrivateObservationId ObservePrivate(
+      ComboId hand,
+      const PublicPosition& position,
+      PrivateObservationId previous) noexcept;
 };
 
 PublicObservationId ObservePublic(const CardAbstractionConfig& config,
                                   const Board& board) noexcept;
-PrivateObservationId ObservePrivate(const CardAbstractionConfig& config,
-                                    ComboId hand,
-                                    const Board& board,
+PrivateObservationId ObservePrivate(ComboId hand,
+                                    const PublicPosition& position,
                                     PrivateObservationId previous = {}) noexcept;
 
 }  // namespace poker

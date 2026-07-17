@@ -22,14 +22,6 @@ inline constexpr std::array<uint64_t, 3> kCompactTextureBuckets = {16, 16, 64};
 inline constexpr std::array<uint32_t, 4> kPrivateObservationPlaces = {
     1, 37, 37 * 37, 37 * 37 * 37};
 
-struct BoardFeatures {
-  std::array<uint8_t, 13> rank_counts = {};
-  std::array<uint8_t, 4> suit_counts = {};
-  uint16_t rank_mask = 0;
-  uint8_t max_rank_count = 0;
-  uint8_t max_suit_count = 0;
-};
-
 const auto kStraightCardsByRankMask = [] {
   std::array<uint8_t, 1 << 13> values = {};
   for (size_t rank_mask = 0; rank_mask < values.size(); ++rank_mask) {
@@ -150,7 +142,8 @@ uint16_t Handcrafted36Bucket(
 
 PublicObservationId EncodeBoardTextureHistory(
     const Board& board,
-    const std::array<uint64_t, 3>& buckets_per_street) noexcept {
+    const std::array<uint64_t, 3>& buckets_per_street,
+    BoardFeatures* final_features) noexcept {
   uint64_t observation = 0;
   BoardFeatures features;
   const auto cards = board.cards();
@@ -164,22 +157,39 @@ PublicObservationId EncodeBoardTextureHistory(
                      << ((index - 2) * kPublicObservationBitsPerStreet);
     }
   }
+  if (final_features != nullptr) *final_features = features;
   return PublicObservationId(observation);
 }
 
+PublicObservationId ObservePublicImpl(const CardAbstractionConfig& config,
+                                      const Board& board,
+                                      BoardFeatures* features) noexcept {
+  switch (config.public_mode) {
+    case PublicCardMode::ExactCanonical:
+      if (features != nullptr) *features = BoardFeaturesFor(board);
+      return CanonicalPublicObservation(board);
+    case PublicCardMode::Texture:
+      return EncodeBoardTextureHistory(board, kTextureBuckets, features);
+    case PublicCardMode::CompactTexture:
+      return EncodeBoardTextureHistory(board, kCompactTextureBuckets,
+                                       features);
+  }
+}
+
 PrivateObservationId HandcraftedObservation(
-    const CardAbstractionConfig& config,
+    RecallMode recall_mode,
     ComboId hand,
     const Board& board,
-    PrivateObservationId previous) noexcept {
-  if (config.recall_mode == RecallMode::CurrentBucketOnly) {
+    PrivateObservationId previous,
+    const BoardFeatures& board_features) noexcept {
+  if (recall_mode == RecallMode::CurrentBucketOnly) {
     return PrivateObservationId(
-        Handcrafted36Bucket(hand, BoardFeaturesFor(board)) + 1);
+        Handcrafted36Bucket(hand, board_features) + 1);
   }
   if (previous != PrivateObservationId{} && board.count() >= 3) {
     return PrivateObservationId(
         std::to_underlying(previous) +
-        (uint32_t{Handcrafted36Bucket(hand, BoardFeaturesFor(board))} + 1)
+        (uint32_t{Handcrafted36Bucket(hand, board_features)} + 1)
             * kPrivateObservationPlaces[board.count() - 2]);
   }
 
@@ -202,30 +212,28 @@ PrivateObservationId HandcraftedObservation(
 
 PublicObservationId ObservePublic(const CardAbstractionConfig& config,
                                   const Board& board) noexcept {
-  switch (config.public_mode) {
-    case PublicCardMode::ExactCanonical:
-      return CanonicalPublicObservation(board);
-    case PublicCardMode::Texture:
-      return EncodeBoardTextureHistory(board, kTextureBuckets);
-    case PublicCardMode::CompactTexture:
-      return EncodeBoardTextureHistory(board, kCompactTextureBuckets);
-  }
+  return ObservePublicImpl(config, board, nullptr);
 }
 
-PrivateObservationId ObservePrivate(const CardAbstractionConfig& config,
-                                    ComboId hand,
-                                    const Board& board,
+PrivateObservationId ObservePrivate(ComboId hand,
+                                    const PublicPosition& position,
                                     PrivateObservationId previous) noexcept {
-  switch (config.private_kind) {
+  switch (position.private_kind_) {
     case PrivateAbstractionKind::ExactCanonical:
-      return CanonicalPrivateObservation(hand, board);
+      return CanonicalPrivateObservation(hand, position.board_);
     case PrivateAbstractionKind::Handcrafted36:
-      return HandcraftedObservation(config, hand, board, previous);
+      return HandcraftedObservation(
+          position.recall_mode_, hand, position.board_, previous,
+          position.features_);
   }
 }
 
 PublicPosition::PublicPosition(const CardAbstractionConfig& config,
                                const Board& board)
-    : board_(board), observation_(ObservePublic(config, board_)) {}
+    : board_(board),
+      private_kind_(config.private_kind),
+      recall_mode_(config.recall_mode) {
+  observation_ = ObservePublicImpl(config, board_, &features_);
+}
 
 }  // namespace poker

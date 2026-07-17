@@ -153,7 +153,7 @@ Policy PassiveCallingPolicy(const TabularCfrSolver& game, ComboId hand) {
   policy.model = compiled.model;
   const PublicPosition& position = compiled.root.public_state;
   const PrivateObservationId private_observation = ObservePrivate(
-      compiled.config.card_abstraction, hand, position.board());
+      hand, position);
   for (size_t history = 0; history < compiled.history.nodes.size();
        ++history) {
     const HistoryNode& node = compiled.history.nodes[history];
@@ -355,8 +355,7 @@ TEST_CASE("postflop roots use full observation identity") {
   const CardAbstractionConfig& cards =
       solver->game().config.card_abstraction;
   const PublicPosition public_state(cards, root.board);
-  const PrivateObservationId private_id = ObservePrivate(
-      cards, hand, root.board);
+  const PrivateObservationId private_id = ObservePrivate(hand, public_state);
   CHECK(TabularCfrSolverTestAccess::state(*solver)
             .find({public_state.observation(), HistoryId{}, private_id})
             .has_value());
@@ -540,8 +539,7 @@ TEST_CASE("approximate response learns a profitable shared action") {
   const PublicPosition& position = compiled.root.public_state;
   const InfoSetKey root_key{
       position.observation(), compiled.root.history,
-      ObservePrivate(compiled.config.card_abstraction, kA,
-                     position.board())};
+      ObservePrivate(kA, position)};
   const size_t offset = response->response_policy.rows.at(root_key);
   const HistoryNode& root = compiled.history.nodes[0];
   const AbstractActions actions = SelectAbstractActions(

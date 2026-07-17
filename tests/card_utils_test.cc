@@ -20,6 +20,10 @@ namespace {
 
 using S = Suit;
 
+constexpr int RankValue(Card card) noexcept {
+  return std::to_underlying(card.rank()) + 2;
+}
+
 enum class HandRank {
   HighCard,
   Pair,
@@ -49,7 +53,7 @@ EvaluationScore EvaluateFiveCardScore(const std::array<Card, 5>& cards) {
   std::array<int, 5> ranks;
   std::array<int, 15> rank_counts = {};
   for (size_t index = 0; index < cards.size(); ++index) {
-    ranks[index] = PokerRank(cards[index]);
+    ranks[index] = RankValue(cards[index]);
     ++rank_counts[ranks[index]];
   }
   std::ranges::sort(ranks, std::greater{});
@@ -168,7 +172,7 @@ int ReferenceCompare(ComboId a, ComboId b, const Board& board) {
 }
 
 Card Rename(Card card, const std::array<S, 4>& suits) {
-  return C(PokerRank(card),
+  return C(RankValue(card),
            suits[static_cast<size_t>(card.suit())]);
 }
 
@@ -254,8 +258,9 @@ TEST_CASE("sampling and card abstractions preserve identity") {
     const Board reversed = Runout(
         absl::Span<const Card>(permuted.data(), board.count()));
     CHECK(ObservePublic(current, reversed) == ObservePublic(current, board));
+    const PublicPosition position(current, board);
     const PrivateObservationId private_observation =
-        ObservePrivate(current, hand, board);
+        ObservePrivate(hand, position);
     CHECK(std::to_underlying(private_observation) >= 1);
     CHECK(std::to_underlying(private_observation) <= 36);
 
@@ -311,20 +316,21 @@ TEST_CASE("handcrafted 36 mappings remain stable") {
       PublicCardMode::Texture,
       PrivateAbstractionKind::Handcrafted36,
       RecallMode::CurrentBucketOnly};
+  const PublicPosition preflop(current, Board{});
   CHECK(ObservePrivate(
-            current, H(C(14, S::Hearts), C(14, S::Spades)), Board{}) ==
+            H(C(14, S::Hearts), C(14, S::Spades)), preflop) ==
         PrivateObservationId(1));
   CHECK(ObservePrivate(
-            current, H(C(14, S::Hearts), C(13, S::Hearts)), Board{}) ==
+            H(C(14, S::Hearts), C(13, S::Hearts)), preflop) ==
         PrivateObservationId(13));
   CHECK(ObservePrivate(
-            current, H(C(7, S::Hearts), C(2, S::Spades)), Board{}) ==
+            H(C(7, S::Hearts), C(2, S::Spades)), preflop) ==
         PrivateObservationId(36));
 
   const Board flop = B({C(2, S::Hearts), C(7, S::Hearts),
                         C(12, S::Hearts)});
   const ComboId hand = H(C(14, S::Hearts), C(13, S::Spades));
-  CHECK(ObservePrivate(current, hand, flop) ==
+  CHECK(ObservePrivate(hand, PublicPosition(current, flop)) ==
         PrivateObservationId(7));
 }
 
@@ -429,13 +435,14 @@ TEST_CASE("all abstraction modes preserve observation history") {
   for (const CardAbstractionConfig& config : configs) {
     CAPTURE(static_cast<int>(config.public_mode));
     CAPTURE(static_cast<int>(config.private_kind));
-    PrivateObservationId private_id = ObservePrivate(config, hand, Board{});
+    PrivateObservationId private_id =
+        ObservePrivate(hand, PublicPosition(config, Board{}));
     for (const Board& board : {flop, turn, river}) {
       const PublicPosition position(config, board);
       CHECK(position.observation() ==
             ObservePublic(config, board));
-      private_id = ObservePrivate(config, hand, board, private_id);
-      CHECK(private_id == ObservePrivate(config, hand, board));
+      private_id = ObservePrivate(hand, position, private_id);
+      CHECK(private_id == ObservePrivate(hand, position));
     }
 
     const PublicPosition position(config, river);
@@ -445,7 +452,7 @@ TEST_CASE("all abstraction modes preserve observation history") {
     const ComboId renamed_hand = Rename(hand, renamed_suits);
     const PublicPosition renamed(config, renamed_board);
     CHECK(renamed.observation() == position.observation());
-    CHECK(ObservePrivate(config, renamed_hand, renamed_board) == private_id);
+    CHECK(ObservePrivate(renamed_hand, renamed) == private_id);
   }
 }
 
@@ -465,10 +472,10 @@ TEST_CASE("coarse public exact private keeps relative flush information") {
   const PublicPosition renamed(config, renamed_board);
 
   const InfoSetKey key{position.observation(), HistoryId{7},
-                       ObservePrivate(config, hand, board)};
+                       ObservePrivate(hand, position)};
   const InfoSetKey renamed_key{
       renamed.observation(), HistoryId{7},
-      ObservePrivate(config, renamed_hand, renamed_board)};
+      ObservePrivate(renamed_hand, renamed)};
   CHECK(key == renamed_key);
 }
 
