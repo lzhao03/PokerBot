@@ -323,6 +323,18 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
               << "missing_tabular_policy_lookups="
               << as_a->missing_opponent_lookups +
                      as_b->missing_opponent_lookups
+              << '\n'
+              << "tabular_policy_lookups_when_deep_is_a="
+              << as_a->opponent_policy_lookups
+              << '\n'
+              << "missing_tabular_lookups_when_deep_is_a="
+              << as_a->missing_opponent_lookups
+              << '\n'
+              << "tabular_policy_lookups_when_deep_is_b="
+              << as_b->opponent_policy_lookups
+              << '\n'
+              << "missing_tabular_lookups_when_deep_is_b="
+              << as_b->missing_opponent_lookups
               << '\n';
     if (iterations > 0) {
       const auto current_as_a = solver->evaluate_against_policy(
