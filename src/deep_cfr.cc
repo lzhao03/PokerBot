@@ -656,10 +656,10 @@ absl::StatusOr<double> DeepCfrSolver::evaluate_average_against_uniform(
   }
 }
 
-absl::StatusOr<DeepCfrMatchResult>
-DeepCfrSolver::evaluate_average_against_policy(
+absl::StatusOr<DeepCfrMatchResult> DeepCfrSolver::evaluate_against_policy(
     Player policy_player,
     const Policy& opponent,
+    DeepCfrStrategy strategy,
     int samples) {
   if (samples <= 0) {
     return absl::InvalidArgumentError("evaluation samples must be positive");
@@ -668,9 +668,12 @@ DeepCfrSolver::evaluate_average_against_policy(
     return absl::FailedPreconditionError("policy model does not match game");
   }
   try {
+    const internal::TraversalMode mode =
+        strategy == DeepCfrStrategy::Average
+            ? internal::TraversalMode::EvaluateAverage
+            : internal::TraversalMode::EvaluateCurrent;
     const Impl::EvaluationResult result = impl_->evaluate(
-        samples, internal::TraversalMode::EvaluateAverage, std::nullopt,
-        &opponent, Opponent(policy_player));
+        samples, mode, std::nullopt, &opponent, Opponent(policy_player));
     const double sign = policy_player == Player::A ? 1.0 : -1.0;
     return DeepCfrMatchResult{
         sign * result.mean, result.standard_error,

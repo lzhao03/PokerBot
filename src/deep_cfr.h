@@ -45,6 +45,11 @@ struct DeepCfrMatchResult {
   uint64_t missing_opponent_lookups = 0;
 };
 
+enum class DeepCfrStrategy : uint8_t {
+  Current,
+  Average,
+};
+
 class DeepCfrSolver {
  public:
   static absl::StatusOr<DeepCfrSolver> Create(
@@ -64,9 +69,10 @@ class DeepCfrSolver {
   absl::StatusOr<double> evaluate_average_against_uniform(
       Player policy_player,
       int samples);
-  absl::StatusOr<DeepCfrMatchResult> evaluate_average_against_policy(
+  absl::StatusOr<DeepCfrMatchResult> evaluate_against_policy(
       Player policy_player,
       const Policy& opponent,
+      DeepCfrStrategy strategy,
       int samples);
   absl::Status load_average_model(const std::filesystem::path& path);
   absl::Status save_average_model(const std::filesystem::path& path) const;

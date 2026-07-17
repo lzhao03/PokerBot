@@ -76,8 +76,8 @@ TEST_CASE("Deep CFR trains bounded neural memories") {
 
   Policy uniform;
   uniform.model = loaded->game().model;
-  const auto match = loaded->evaluate_average_against_policy(
-      Player::A, uniform, 4);
+  const auto match = loaded->evaluate_against_policy(
+      Player::A, uniform, DeepCfrStrategy::Average, 4);
   REQUIRE(match.ok());
   CHECK(std::isfinite(match->policy_player_value));
   CHECK(match->opponent_policy_lookups > 0);

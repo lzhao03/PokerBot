@@ -292,11 +292,13 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
       std::cerr << "Error: " << opponent.status() << '\n';
       return 1;
     }
-    const auto as_a = solver->evaluate_average_against_policy(
+    const auto as_a = solver->evaluate_against_policy(
         poker::Player::A, *opponent,
+        poker::DeepCfrStrategy::Average,
         absl::GetFlag(FLAGS_deep_evaluation_samples));
-    const auto as_b = solver->evaluate_average_against_policy(
+    const auto as_b = solver->evaluate_against_policy(
         poker::Player::B, *opponent,
+        poker::DeepCfrStrategy::Average,
         absl::GetFlag(FLAGS_deep_evaluation_samples));
     if (!as_a.ok() || !as_b.ok()) {
       std::cerr << "Error: tabular opponent evaluation failed\n";
@@ -318,6 +320,22 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
               << as_a->missing_opponent_lookups +
                      as_b->missing_opponent_lookups
               << '\n';
+    if (iterations > 0) {
+      const auto current_as_a = solver->evaluate_against_policy(
+          poker::Player::A, *opponent,
+          poker::DeepCfrStrategy::Current,
+          absl::GetFlag(FLAGS_deep_evaluation_samples));
+      const auto current_as_b = solver->evaluate_against_policy(
+          poker::Player::B, *opponent,
+          poker::DeepCfrStrategy::Current,
+          absl::GetFlag(FLAGS_deep_evaluation_samples));
+      if (current_as_a.ok() && current_as_b.ok()) {
+        std::cout << "current_vs_tabular_as_a="
+                  << current_as_a->policy_player_value << '\n'
+                  << "current_vs_tabular_as_b="
+                  << current_as_b->policy_player_value << '\n';
+      }
+    }
   }
   const std::chrono::duration<double> elapsed =
       std::chrono::steady_clock::now() - start;
