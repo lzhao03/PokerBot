@@ -1,5 +1,6 @@
 #include "src/solver.h"
 #include "src/evaluation.h"
+#include "src/policy_codec.h"
 
 #include <algorithm>
 #include <chrono>

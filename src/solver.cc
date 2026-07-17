@@ -589,12 +589,6 @@ ComboRange UniformComboRange() {
   return range;
 }
 
-ComboRange SingleComboRange(ComboId combo, float weight) {
-  ComboRange range;
-  range.add(combo, weight);
-  return range;
-}
-
 TabularCfrSolver::TabularCfrSolver(CompiledGame game)
     : game_(std::move(game)),
       rng_(12345),

@@ -39,7 +39,9 @@ ExactPublicState DealChance(const ExactPublicState& state,
 ComboRange Range(int first_rank, int second_rank, Suit suit) {
   const ComboId combo = CardsToComboId(
       C(first_rank, suit), C(second_rank, suit));
-  return SingleComboRange(combo);
+  ComboRange range;
+  range.add(combo);
+  return range;
 }
 
 TEST_CASE("all card abstraction combinations support history traversal") {

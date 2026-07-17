@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <vector>
 
 #include "absl/status/status.h"
@@ -35,5 +36,8 @@ absl::StatusOr<std::vector<uint8_t>> EncodePolicy(
     PolicyCodecConfig config = {});
 
 absl::StatusOr<Policy> DecodePolicy(absl::Span<const uint8_t> bytes);
+
+absl::Status SavePolicy(const Policy& policy,
+                        const std::filesystem::path& path);
 
 }  // namespace poker

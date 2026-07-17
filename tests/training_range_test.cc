@@ -57,7 +57,6 @@ TEST_CASE("range syntax expands to exact combo weights") {
   CHECK(any->count() == 16);
   CHECK(split->weights == any->weights);
   CHECK(overlap->weights == any->weights);
-  CHECK(SingleComboRange(hand, 2.0f).weight(hand) == 2.0f);
   CHECK_FALSE(ParseRange("89s+").ok());
   CHECK_FALSE(ParseRange("AA,,KK").ok());
   CHECK_FALSE(ParseRange("").ok());
@@ -72,7 +71,8 @@ TEST_CASE("deal sampling rejects incompatible ranges") {
   REQUIRE(config_result.ok());
   const SolverConfig config = *config_result;
 
-  const ComboRange a = SingleComboRange(CardsToComboId(kDeck[0], kDeck[1]));
+  ComboRange a;
+  a.add(CardsToComboId(kDeck[0], kDeck[1]));
   ComboRange b;
   b.add(CardsToComboId(kDeck[0], kDeck[2]));
   b.add(CardsToComboId(kDeck[1], kDeck[3]));
@@ -80,8 +80,8 @@ TEST_CASE("deal sampling rejects incompatible ranges") {
       config.betting_rules, {8, 8}, {1, 2});
   CHECK_FALSE(TabularCfrSolver::Create({config, root, {a, b}}).ok());
 
-  const ComboRange compatible =
-      SingleComboRange(H(12, S::Clubs, 12, S::Diamonds));
+  ComboRange compatible;
+  compatible.add(H(12, S::Clubs, 12, S::Diamonds));
   auto solver = TabularCfrSolver::Create({config, root, {a, compatible}});
   REQUIRE(solver.ok());
   solver->run(1);

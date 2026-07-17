@@ -4,7 +4,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <optional>
 #include <random>
 #include <string_view>
@@ -58,7 +57,6 @@ enum class ModelFingerprint : uint64_t {};
 
 absl::StatusOr<ComboRange> ParseRange(std::string_view text);
 ComboRange UniformComboRange();
-ComboRange SingleComboRange(ComboId combo, float weight = 1.0f);
 
 enum class HistoryId : uint32_t {};
 
@@ -121,7 +119,6 @@ struct CfrState {
                     bool concurrent = false);
   size_t row_count() const;
   std::optional<size_t> find(InfoSetKey key) const;
-  bool contains(InfoSetKey key) const { return find(key).has_value(); }
   std::vector<std::pair<InfoSetKey, size_t>> row_entries() const;
   bool at_capacity() const { return row_count() >= max_info_sets_; }
   std::optional<size_t> find_or_create(
@@ -155,9 +152,6 @@ absl::StatusOr<Policy> ExtractAveragePolicy(
     const CfrState& state,
     const HistoryTree& history,
     ModelFingerprint model);
-
-absl::Status SavePolicy(const Policy& policy,
-                        const std::filesystem::path& path);
 
 struct SolverStats {
   uint64_t decision_visits = 0;

@@ -35,7 +35,9 @@ Card C(int rank, S suit) {
 }
 
 ComboRange R(ComboId hand) {
-  return SingleComboRange(hand);
+  ComboRange range;
+  range.add(hand);
+  return range;
 }
 
 BettingState Apply(const BettingState& state, GameAction action) {
@@ -356,8 +358,9 @@ TEST_CASE("postflop roots use full observation identity") {
   const PublicPosition public_state(cards, root.board);
   const PrivateObservationId private_id = ObservePrivate(
       cards, hand, root.board);
-  CHECK(TabularCfrSolverTestAccess::state(*solver).contains(
-      {public_state.observation(), HistoryId{}, private_id}));
+  CHECK(TabularCfrSolverTestAccess::state(*solver)
+            .find({public_state.observation(), HistoryId{}, private_id})
+            .has_value());
 }
 
 TEST_CASE("training continues after the infoset cap is reached") {
