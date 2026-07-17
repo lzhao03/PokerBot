@@ -545,8 +545,13 @@ TEST_CASE("approximate response learns a profitable shared action") {
   response_config.external_sampling = true;
   const auto response = TrainApproximateBestResponse(
       game->game(), Player::A, opponent, response_config);
+  response_config.external_sampling = false;
+  const auto full_response = TrainApproximateBestResponse(
+      game->game(), Player::A, opponent, response_config);
   REQUIRE(baseline.ok());
   REQUIRE(response.ok());
+  REQUIRE(full_response.ok());
+  CHECK(response->value == doctest::Approx(full_response->value).epsilon(1e-3));
   CHECK(response->value >= baseline->mean);
   CHECK(response->value > 7.5);
 
@@ -556,11 +561,17 @@ TEST_CASE("approximate response learns a profitable shared action") {
       position.observation(), compiled.root.history,
       ObservePrivate(kA, position)};
   const size_t offset = response->response_policy.rows.at(root_key);
+  const size_t full_offset =
+      full_response->response_policy.rows.at(root_key);
   const HistoryNode& root = compiled.history.nodes[0];
   const AbstractActions actions = SelectAbstractActions(
       compiled.config.bet_abstraction,
       std::get<DecisionState>(root.state));
   for (uint8_t action = 0; action < root.child_count; ++action) {
+    CHECK(response->response_policy.probabilities[offset + action] ==
+          doctest::Approx(
+              full_response->response_policy.probabilities[
+                  full_offset + action]));
     const GameAction game_action = actions[action];
     if (game_action.kind == ActionKind::AllIn) {
       CHECK(response->response_policy.probabilities[
