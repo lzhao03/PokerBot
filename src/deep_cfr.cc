@@ -280,6 +280,41 @@ struct DeepCfrSolver::Impl {
     Softmax(logits, probabilities);
   }
 
+  struct EvaluationBackend {
+    using UpdateHandle = Impl::UpdateHandle;
+
+    std::optional<UpdateHandle> current_strategy(
+        const internal::DecisionView& decision,
+        internal::StrategyAccess access,
+        std::span<float> probabilities) {
+      if (uniform_player == decision.state.actor) {
+        FillUniform(probabilities);
+        return std::nullopt;
+      }
+      return model.current_strategy(decision, access, probabilities);
+    }
+
+    void average_strategy(const internal::DecisionView& decision,
+                          std::span<float> probabilities) {
+      if (uniform_player == decision.state.actor) {
+        FillUniform(probabilities);
+      } else {
+        model.average_strategy(decision, probabilities);
+      }
+    }
+
+    void record_regrets(const internal::DecisionView&,
+                        UpdateHandle,
+                        std::span<const float>) {}
+    void record_strategy(const internal::DecisionView&,
+                         UpdateHandle,
+                         std::span<const float>,
+                         double) {}
+
+    Impl& model;
+    std::optional<Player> uniform_player;
+  };
+
   void record_regrets(const internal::DecisionView& decision,
                       UpdateHandle,
                       std::span<const float> regrets) {
@@ -438,8 +473,11 @@ struct DeepCfrSolver::Impl {
     stats.strategy_samples = strategy_memory.size();
   }
 
-  double evaluate(int samples, internal::TraversalMode mode) {
+  double evaluate(int samples,
+                  internal::TraversalMode mode,
+                  std::optional<Player> uniform_player = std::nullopt) {
     SolverStats evaluation_stats;
+    EvaluationBackend backend{*this, uniform_player};
     double value = 0.0;
     for (int sample = 0; sample < samples; ++sample) {
       const Deal deal = game.deals.sample(evaluation_rng);
@@ -452,7 +490,7 @@ struct DeepCfrSolver::Impl {
           .rng = evaluation_rng,
           .stats = evaluation_stats,
       };
-      value += internal::Traverse(game, context, *this);
+      value += internal::Traverse(game, context, backend);
     }
     return value / samples;
   }
@@ -524,6 +562,35 @@ absl::StatusOr<double> DeepCfrSolver::evaluate_average(int samples) {
   }
   try {
     return impl_->evaluate(samples, internal::TraversalMode::EvaluateAverage);
+  } catch (const std::exception& error) {
+    return TorchError(error);
+  }
+}
+
+absl::StatusOr<double> DeepCfrSolver::evaluate_average_against_uniform(
+    Player policy_player,
+    int samples) {
+  if (samples <= 0) {
+    return absl::InvalidArgumentError("evaluation samples must be positive");
+  }
+  try {
+    const double player_a_value = impl_->evaluate(
+        samples, internal::TraversalMode::EvaluateAverage,
+        Opponent(policy_player));
+    return policy_player == Player::A ? player_a_value : -player_a_value;
+  } catch (const std::exception& error) {
+    return TorchError(error);
+  }
+}
+
+absl::Status DeepCfrSolver::save_average_model(
+    const std::filesystem::path& path) const {
+  if (!impl_->policy_trained) {
+    return absl::FailedPreconditionError("average policy has not been trained");
+  }
+  try {
+    torch::save(impl_->policy_network, path.string());
+    return absl::OkStatus();
   } catch (const std::exception& error) {
     return TorchError(error);
   }

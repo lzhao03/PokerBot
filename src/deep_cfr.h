@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 
 #include "absl/status/status.h"
@@ -52,6 +53,10 @@ class DeepCfrSolver {
   absl::Status run(uint64_t iterations);
   absl::StatusOr<double> evaluate_current(int samples);
   absl::StatusOr<double> evaluate_average(int samples);
+  absl::StatusOr<double> evaluate_average_against_uniform(
+      Player policy_player,
+      int samples);
+  absl::Status save_average_model(const std::filesystem::path& path) const;
 
   const DeepCfrStats& stats() const noexcept;
   const CompiledGame& game() const noexcept;

@@ -66,6 +66,8 @@ ABSL_FLAG(uint64_t, deep_cache_capacity, 4096,
 ABSL_FLAG(int, deep_evaluation_samples, 64,
           "Deals sampled for Deep CFR average-policy evaluation");
 ABSL_FLAG(uint64_t, deep_seed, 1, "Deep CFR training seed");
+ABSL_FLAG(std::string, deep_model_output, "",
+          "output path for the trained Deep CFR average model");
 
 namespace {
 
@@ -247,6 +249,22 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
     std::cerr << "Error: " << value.status() << '\n';
     return 1;
   }
+  const auto value_as_a = solver->evaluate_average_against_uniform(
+      poker::Player::A, absl::GetFlag(FLAGS_deep_evaluation_samples));
+  const auto value_as_b = solver->evaluate_average_against_uniform(
+      poker::Player::B, absl::GetFlag(FLAGS_deep_evaluation_samples));
+  if (!value_as_a.ok() || !value_as_b.ok()) {
+    std::cerr << "Error: uniform-opponent evaluation failed\n";
+    return 1;
+  }
+  const std::string model_output = absl::GetFlag(FLAGS_deep_model_output);
+  if (!model_output.empty()) {
+    const absl::Status saved = solver->save_average_model(model_output);
+    if (!saved.ok()) {
+      std::cerr << "Error: " << saved << '\n';
+      return 1;
+    }
+  }
   const std::chrono::duration<double> elapsed =
       std::chrono::steady_clock::now() - start;
 
@@ -263,6 +281,8 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
             << "cache_hits=" << stats.cache_hits << '\n'
             << "policy_parameter_bytes=" << stats.policy_parameter_bytes << '\n'
             << "average_value=" << *value << '\n'
+            << "average_vs_uniform_as_a=" << *value_as_a << '\n'
+            << "average_vs_uniform_as_b=" << *value_as_b << '\n'
             << "seconds=" << elapsed.count() << '\n';
   return std::isfinite(*value) ? 0 : 1;
 }

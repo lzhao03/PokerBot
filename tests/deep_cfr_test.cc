@@ -1,6 +1,7 @@
 #include "src/deep_cfr.h"
 
 #include <cmath>
+#include <filesystem>
 
 #include "doctest/doctest.h"
 
@@ -55,6 +56,16 @@ TEST_CASE("Deep CFR trains bounded neural memories") {
   const auto value = solver->evaluate_average(4);
   REQUIRE(value.ok());
   CHECK(std::isfinite(*value));
+  const auto value_against_uniform =
+      solver->evaluate_average_against_uniform(Player::A, 4);
+  REQUIRE(value_against_uniform.ok());
+  CHECK(std::isfinite(*value_against_uniform));
+
+  const auto path =
+      std::filesystem::temp_directory_path() / "poker_deep_cfr_test.pt";
+  REQUIRE(solver->save_average_model(path).ok());
+  CHECK(std::filesystem::file_size(path) > 0);
+  std::filesystem::remove(path);
 }
 
 TEST_CASE("Deep CFR rejects an empty reservoir") {
