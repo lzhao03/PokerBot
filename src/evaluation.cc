@@ -9,7 +9,6 @@
 #include <random>
 #include <vector>
 
-#include "absl/container/inlined_vector.h"
 #include "absl/status/status.h"
 #include "absl/types/span.h"
 #include "src/cfr_traversal.h"
@@ -31,69 +30,50 @@ struct ProfileEstimate {
   EvaluationCounters counters;
 };
 
+struct PolicyBackend {
+  using UpdateHandle = size_t;
+
+  const std::array<const Policy*, kPlayerCount>& policies;
+  EvaluationCounters& counters;
+
+  std::optional<size_t> current_strategy(
+      const internal::DecisionView& decision,
+      internal::StrategyAccess,
+      absl::Span<float> probabilities) {
+    const size_t player = Index(decision.state.actor);
+    const double reach = decision.reaches[0] * decision.reaches[1];
+    if (counters.measure_reach_coverage && reach > 0.0) {
+      counters.reach_by_info_set[decision.key] += reach;
+    }
+    ++counters.lookups[player];
+    counters.weighted_lookups[player] += reach;
+    if (!policies[player]->strategy(decision.key, probabilities)) {
+      ++counters.missing[player];
+      counters.weighted_missing[player] += reach;
+    }
+    return std::nullopt;
+  }
+
+  void average_strategy(const internal::DecisionView& decision,
+                        absl::Span<float> probabilities) {
+    current_strategy(decision, internal::StrategyAccess::ReadOnly,
+                     probabilities);
+  }
+
+  void record_regrets(const internal::DecisionView&,
+                      size_t,
+                      absl::Span<const float>) {}
+  void record_strategy(const internal::DecisionView&,
+                       size_t,
+                       absl::Span<const float>,
+                       double) {}
+};
+
 std::mt19937 MakeEvaluationRng(uint64_t seed) {
   const std::array<uint32_t, 2> words = {
       static_cast<uint32_t>(seed), static_cast<uint32_t>(seed >> 32)};
   std::seed_seq sequence(words.begin(), words.end());
   return std::mt19937(sequence);
-}
-
-double TraverseProfile(const CompiledGame& game,
-                       const std::array<const Policy*, kPlayerCount>& policies,
-                       Position position,
-                       const internal::TraversalFrame& frame,
-                       const Deal& deal,
-                       std::mt19937& rng,
-                       EvaluationCounters& counters,
-                       double reach) {
-  const HistoryTree& history = game.history;
-  const HistoryNode& node = history.nodes[Index(position.history)];
-  if (const auto* state = std::get_if<FoldTerminalState>(&node.state)) {
-    return TerminalUtility(*state, Player::A);
-  }
-  if (const auto* state = std::get_if<ShowdownState>(&node.state)) {
-    const Board& board = position.public_state.board();
-    return TerminalUtility(*state, board, deal.hand(Player::A),
-                           deal.hand(Player::B));
-  }
-  if (std::holds_alternative<ChanceState>(node.state)) {
-    double value = 0.0;
-    const int samples = game.spec.config.chance_samples;
-    for (int sample = 0; sample < samples; ++sample) {
-      const Position child = internal::SampleChanceChild(
-          game, node, position.public_state, deal, rng);
-      internal::TraversalFrame child_frame = frame;
-      internal::AdvancePrivateObservations(game, child_frame, deal, child);
-      value += TraverseProfile(game, policies, child, child_frame, deal,
-                               rng, counters, reach);
-    }
-    return value / samples;
-  }
-
-  const DecisionState& decision = std::get<DecisionState>(node.state);
-  const size_t player = Index(decision.actor);
-  const InfoSetKey key{
-      position.public_state.observation(), position.history,
-      frame.private_observations[player]};
-  if (counters.measure_reach_coverage && reach > 0.0) {
-    counters.reach_by_info_set[key] += reach;
-  }
-  absl::InlinedVector<float, 8> probabilities(node.child_count, 0.0f);
-  ++counters.lookups[player];
-  counters.weighted_lookups[player] += reach;
-  if (!policies[player]->strategy(key, absl::MakeSpan(probabilities))) {
-    ++counters.missing[player];
-    counters.weighted_missing[player] += reach;
-  }
-  double value = 0.0;
-  for (uint8_t action = 0; action < node.child_count; ++action) {
-    Position child = position;
-    child.history = history.children[node.children_begin + action];
-    value += probabilities[action] * TraverseProfile(
-        game, policies, child, frame, deal, rng, counters,
-        reach * probabilities[action]);
-  }
-  return value;
 }
 
 ProfileEstimate EstimateProfile(
@@ -104,19 +84,26 @@ ProfileEstimate EstimateProfile(
     uint64_t seed,
     bool measure_reach_coverage = false) {
   std::mt19937 rng = MakeEvaluationRng(seed);
-  const Position root = internal::RootPosition(game);
   const std::array<const Policy*, kPlayerCount> policies = {
       &player_a, &player_b};
   EvaluationCounters counters;
   counters.measure_reach_coverage = measure_reach_coverage;
+  PolicyBackend backend{policies, counters};
+  SolverStats stats;
   double mean = 0.0;
   double squared_error = 0.0;
   for (uint64_t sample = 0; sample < samples; ++sample) {
     const Deal deal = game.deals.sample(rng);
-    const internal::TraversalFrame frame =
-        internal::InitialTraversalFrame(game, deal, root);
-    const double value = TraverseProfile(
-        game, policies, root, frame, deal, rng, counters, 1.0);
+    internal::TraversalContext context{
+        .deal = deal,
+        .mode = internal::TraversalMode::EvaluateCurrent,
+        .update_player = Player::A,
+        .iteration = 0,
+        .external_sampling = false,
+        .rng = rng,
+        .stats = stats,
+    };
+    const double value = internal::Traverse(game, context, backend);
     const double delta = value - mean;
     mean += delta / (sample + 1);
     squared_error += delta * (value - mean);

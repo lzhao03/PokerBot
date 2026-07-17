@@ -46,6 +46,7 @@ struct DecisionView {
   const DecisionState& state;
   uint8_t action_count;
   uint64_t iteration;
+  const std::array<double, kPlayerCount>& reaches;
 };
 
 template <typename Backend>
@@ -133,6 +134,7 @@ double TraverseNode(const CompiledGame& game,
         decision,
         action_count,
         context.iteration,
+        frame.reach,
     };
     std::array<float, kMaxActionsPerNode> probabilities;
     std::array<double, kMaxActionsPerNode> action_values;
@@ -168,7 +170,7 @@ double TraverseNode(const CompiledGame& game,
     double node_value = 0.0;
     TraversalFrame child_frame = frame;
     for (uint8_t action = 0; action < action_count; ++action) {
-      if (training && !external_sampling) {
+      if (!external_sampling) {
         child_frame.reach[player_index] =
             frame.reach[player_index] * probabilities[action];
       }
