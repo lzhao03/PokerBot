@@ -295,10 +295,6 @@ absl::StatusOr<BettingState> ApplyAction(const DecisionState& state,
                                          const GameAction& action);
 BettingState AdvanceBettingStreet(const ChanceState& state,
                                   const BettingRules& rules);
-ExactPublicState AdvanceChance(const ChanceState& state,
-                               const Board& board,
-                               absl::Span<const Card> cards,
-                               const BettingRules& rules) noexcept;
 absl::StatusOr<ExactPublicState> TryApplyChance(
     const ExactPublicState& state,
     absl::Span<const Card> cards,

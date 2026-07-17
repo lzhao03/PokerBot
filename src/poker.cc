@@ -315,16 +315,6 @@ BettingState AdvanceBettingStreet(const ChanceState& state,
   return DecisionState{child, Player::B};
 }
 
-ExactPublicState AdvanceChance(const ChanceState& state,
-                               const Board& board,
-                               absl::Span<const Card> cards,
-                               const BettingRules& rules) noexcept {
-  assert(rules.minimum_bet > 0);
-  assert(cards.size() == CardsForNextStreet(state.data.street));
-  assert(board.street() == state.data.street);
-  return {AdvanceBettingStreet(state, rules), DealCards(board, cards)};
-}
-
 absl::StatusOr<ExactPublicState> TryApplyChance(
     const ExactPublicState& state,
     absl::Span<const Card> cards,
@@ -344,7 +334,8 @@ absl::StatusOr<ExactPublicState> TryApplyChance(
     }
     mask |= CardBit(card);
   }
-  return AdvanceChance(*chance, state.board, cards, rules);
+  return ExactPublicState{
+      AdvanceBettingStreet(*chance, rules), DealCards(state.board, cards)};
 }
 
 double TerminalUtility(const ShowdownState& state,
