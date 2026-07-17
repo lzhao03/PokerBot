@@ -30,14 +30,6 @@ struct CardAbstractionConfig {
   RecallMode recall_mode = RecallMode::BucketHistory;
 };
 
-struct BoardFeatures {
-  std::array<uint8_t, 13> rank_counts = {};
-  std::array<uint8_t, 4> suit_counts = {};
-  uint16_t rank_mask = 0;
-  uint8_t max_rank_count = 0;
-  uint8_t max_suit_count = 0;
-};
-
 class PublicPosition {
  public:
   PublicPosition(const CardAbstractionConfig& config, const Board& board);
@@ -48,7 +40,11 @@ class PublicPosition {
  private:
   Board board_;
   PublicObservationId observation_;
-  BoardFeatures features_;
+  std::array<uint8_t, 13> rank_counts_ = {};
+  std::array<uint8_t, 4> suit_counts_ = {};
+  uint16_t rank_mask_ = 0;
+  uint8_t max_rank_count_ = 0;
+  uint8_t max_suit_count_ = 0;
   PrivateAbstractionKind private_kind_ =
       PrivateAbstractionKind::Handcrafted36;
   RecallMode recall_mode_ = RecallMode::BucketHistory;

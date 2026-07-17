@@ -22,6 +22,14 @@ inline constexpr std::array<uint64_t, 3> kCompactTextureBuckets = {16, 16, 64};
 inline constexpr std::array<uint32_t, 4> kPrivateObservationPlaces = {
     1, 37, 37 * 37, 37 * 37 * 37};
 
+struct BoardFeatures {
+  std::array<uint8_t, 13> rank_counts = {};
+  std::array<uint8_t, 4> suit_counts = {};
+  uint16_t rank_mask = 0;
+  uint8_t max_rank_count = 0;
+  uint8_t max_suit_count = 0;
+};
+
 const auto kStraightCardsByRankMask = [] {
   std::array<uint8_t, 1 << 13> values = {};
   for (size_t rank_mask = 0; rank_mask < values.size(); ++rank_mask) {
@@ -219,7 +227,8 @@ PrivateObservationId ObservePrivate(ComboId hand,
     case PrivateAbstractionKind::Handcrafted36:
       return HandcraftedObservation(
           position.recall_mode_, hand, position.board_, previous,
-          position.features_);
+          {position.rank_counts_, position.suit_counts_, position.rank_mask_,
+           position.max_rank_count_, position.max_suit_count_});
   }
 }
 
@@ -228,7 +237,13 @@ PublicPosition::PublicPosition(const CardAbstractionConfig& config,
     : board_(board),
       private_kind_(config.private_kind),
       recall_mode_(config.recall_mode) {
-  observation_ = ObservePublicImpl(config, board_, &features_);
+  BoardFeatures features;
+  observation_ = ObservePublicImpl(config, board_, &features);
+  rank_counts_ = features.rank_counts;
+  suit_counts_ = features.suit_counts;
+  rank_mask_ = features.rank_mask;
+  max_rank_count_ = features.max_rank_count;
+  max_suit_count_ = features.max_suit_count;
 }
 
 }  // namespace poker
