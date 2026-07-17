@@ -303,8 +303,7 @@ struct DeepCfrSolver::Impl {
             CfrNet(config.hidden_size)},
         policy_network(config.hidden_size),
         game_rng(MakeRng(config.seed)),
-        reservoir_rng(MakeRng(config.seed + 1)),
-        evaluation_rng(MakeRng(config.seed + 3)) {
+        reservoir_rng(MakeRng(config.seed + 1)) {
     for (auto& cache : advantage_cache) {
       cache.reserve(config.inference_cache_capacity);
     }
@@ -580,17 +579,18 @@ struct DeepCfrSolver::Impl {
     SolverStats evaluation_stats;
     EvaluationBackend backend{
         *this, uniform_player, opponent, opponent_player};
+    std::mt19937 rng = MakeRng(config.seed + 3);
     double mean = 0.0;
     double squared_error = 0.0;
     for (int sample = 0; sample < samples; ++sample) {
-      const Deal deal = game.deals.sample(evaluation_rng);
+      const Deal deal = game.deals.sample(rng);
       internal::TraversalContext context{
           .deal = deal,
           .mode = mode,
           .update_player = Player::A,
           .iteration = stats.iterations,
           .external_sampling = true,
-          .rng = evaluation_rng,
+          .rng = rng,
           .stats = evaluation_stats,
       };
       const double value = internal::Traverse(game, context, backend);
@@ -618,7 +618,6 @@ struct DeepCfrSolver::Impl {
   absl::flat_hash_map<InfoSetKey, ActionVector> policy_cache;
   std::mt19937 game_rng;
   std::mt19937 reservoir_rng;
-  std::mt19937 evaluation_rng;
   DeepCfrStats stats;
 };
 

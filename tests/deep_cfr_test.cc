@@ -73,6 +73,7 @@ TEST_CASE("Deep CFR trains bounded neural memories") {
   const auto loaded_value = loaded->evaluate_average(4);
   REQUIRE(loaded_value.ok());
   CHECK(std::isfinite(*loaded_value));
+  CHECK(loaded->evaluate_average(4) == loaded_value);
 
   Policy uniform;
   uniform.model = loaded->game().model;
