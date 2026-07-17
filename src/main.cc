@@ -310,6 +310,14 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
         << estimate->player_a_response.opponent_policy_lookups +
                estimate->player_b_response.opponent_policy_lookups
         << '\n'
+        << "deep_response_policy_lookups="
+        << estimate->player_a_response.response_policy_lookups +
+               estimate->player_b_response.response_policy_lookups
+        << '\n'
+        << "deep_missing_response_lookups="
+        << estimate->player_a_response.missing_response_lookups +
+               estimate->player_b_response.missing_response_lookups
+        << '\n'
         << "deep_nash_conv=" << estimate->nash_conv << '\n'
         << "deep_exploitability=" << estimate->exploitability << '\n'
         << "deep_missing_policy_lookups="

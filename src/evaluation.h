@@ -36,6 +36,8 @@ struct BestResponseResult {
   double standard_error = 0.0;
   uint64_t opponent_policy_lookups = 0;
   uint64_t missing_opponent_lookups = 0;
+  uint64_t response_policy_lookups = 0;
+  uint64_t missing_response_lookups = 0;
 };
 
 struct ExploitabilityEstimate {

@@ -509,6 +509,7 @@ TEST_CASE("approximate responses are reproducible and respect infosets") {
   CHECK(first->value == generic->value);
   CHECK(first->standard_error == second->standard_error);
   CHECK(first->opponent_policy_lookups > 0);
+  CHECK(first->response_policy_lookups > 0);
 
   size_t root_rows = 0;
   for (const auto& [key, row] : first->response_policy.rows) {

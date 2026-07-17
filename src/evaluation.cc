@@ -282,6 +282,11 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
   result.missing_opponent_lookups =
       backend.missing_opponent_lookups +
       estimate.counters.missing[opponent_index];
+  const size_t responder_index = Index(responder);
+  result.response_policy_lookups =
+      estimate.counters.lookups[responder_index];
+  result.missing_response_lookups =
+      estimate.counters.missing[responder_index];
   return result;
 }
 
