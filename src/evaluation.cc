@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -152,90 +151,56 @@ ProfileEstimate EstimateProfile(
           counters};
 }
 
-struct ResponseTrainingContext {
+struct ResponseBackend {
+  using UpdateHandle = size_t;
+
   Player responder;
   const Policy& opponent;
   CfrState& response;
   uint64_t opponent_lookups = 0;
   uint64_t missing_opponent_lookups = 0;
+
+  std::optional<size_t> current_strategy(
+      const internal::DecisionView& decision,
+      internal::StrategyAccess access,
+      absl::Span<float> probabilities) {
+    if (decision.state.actor != responder) {
+      ++opponent_lookups;
+      if (!opponent.strategy(decision.key, probabilities)) {
+        ++missing_opponent_lookups;
+      }
+      return std::nullopt;
+    }
+    const std::optional<size_t> offset =
+        access == internal::StrategyAccess::Writable
+            ? response.find_or_create(decision.key, decision.action_count)
+            : response.find(decision.key);
+    response.strategy(response.regret_sum, offset, probabilities);
+    return access == internal::StrategyAccess::Writable ? offset
+                                                        : std::nullopt;
+  }
+
+  void average_strategy(const internal::DecisionView& decision,
+                        absl::Span<float> probabilities) {
+    current_strategy(decision, internal::StrategyAccess::ReadOnly,
+                     probabilities);
+  }
+
+  void record_regrets(const internal::DecisionView&,
+                      size_t offset,
+                      absl::Span<const float> regrets) {
+    for (size_t action = 0; action < regrets.size(); ++action) {
+      response.add_regret(offset, action, regrets[action]);
+    }
+  }
+
+  void record_strategy(const internal::DecisionView&,
+                       size_t offset,
+                       absl::Span<const float> probabilities,
+                       double weight) {
+    response.add_strategy(offset, probabilities, weight);
+  }
 };
-
-double TraverseResponse(const CompiledGame& game,
-                        Position position,
-                        const internal::TraversalFrame& frame,
-                        const Deal& deal,
-                        std::mt19937& rng,
-                        ResponseTrainingContext& context) {
-  const HistoryTree& history = game.history;
-  const HistoryNode& node = history.nodes[Index(position.history)];
-  if (const auto* state = std::get_if<FoldTerminalState>(&node.state)) {
-    return TerminalUtility(*state, Player::A);
-  }
-  if (const auto* state = std::get_if<ShowdownState>(&node.state)) {
-    const Board& board = position.public_state.board();
-    return TerminalUtility(*state, board, deal.hand(Player::A),
-                           deal.hand(Player::B));
-  }
-  if (std::holds_alternative<ChanceState>(node.state)) {
-    double value = 0.0;
-    const int samples = game.spec.config.chance_samples;
-    for (int sample = 0; sample < samples; ++sample) {
-      const Position child = internal::SampleChanceChild(
-          game, node, position.public_state, deal, rng);
-      internal::TraversalFrame child_frame = frame;
-      internal::AdvancePrivateObservations(game, child_frame, deal, child);
-      value += TraverseResponse(game, child, child_frame, deal, rng,
-                                context);
-    }
-    return value / samples;
-  }
-
-  const DecisionState& decision = std::get<DecisionState>(node.state);
-  const Player actor = decision.actor;
-  const size_t player = Index(actor);
-  const InfoSetKey key{
-      position.public_state.observation(), position.history,
-      frame.private_observations[player]};
-  const bool responder_turn = actor == context.responder;
-  std::optional<size_t> offset;
-  absl::InlinedVector<float, 8> probabilities(node.child_count, 0.0f);
-  if (responder_turn) {
-    offset = context.response.find_or_create(key, node.child_count);
-    context.response.strategy(context.response.regret_sum, offset,
-                              absl::MakeSpan(probabilities));
-  } else {
-    ++context.opponent_lookups;
-    if (!context.opponent.strategy(key, absl::MakeSpan(probabilities))) {
-      ++context.missing_opponent_lookups;
-    }
-  }
-
-  absl::InlinedVector<double, 8> action_values(node.child_count, 0.0);
-  double node_value = 0.0;
-  for (uint8_t action = 0; action < node.child_count; ++action) {
-    internal::TraversalFrame child_frame = frame;
-    child_frame.reach[player] *= probabilities[action];
-    Position child = position;
-    child.history = history.children[node.children_begin + action];
-    action_values[action] = TraverseResponse(
-        game, child, child_frame, deal, rng, context);
-    node_value += probabilities[action] * action_values[action];
-  }
-  if (!responder_turn || !offset) return node_value;
-
-  const double utility_sign = actor == Player::A ? 1.0 : -1.0;
-  const double opponent_reach = frame.reach[Index(Opponent(actor))];
-  for (uint8_t action = 0; action < node.child_count; ++action) {
-    const float regret = static_cast<float>(
-        opponent_reach * utility_sign *
-        (action_values[action] - node_value));
-    context.response.add_regret(*offset, action, regret);
-  }
-  context.response.add_strategy(
-      *offset, absl::MakeConstSpan(probabilities),
-      frame.reach[player] * (context.response.iterations + 1));
-  return node_value;
-}
 
 }  // namespace
 
@@ -273,15 +238,21 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
 
   CfrState response_state(game.spec.config, true);
   std::mt19937 rng = MakeEvaluationRng(config.seed);
-  const Position root = internal::RootPosition(game);
-  ResponseTrainingContext context{responder, opponent, response_state};
+  ResponseBackend backend{responder, opponent, response_state};
+  SolverStats stats;
   BestResponseResult result;
   while (response_state.iterations < config.training_iterations) {
     const Deal deal = game.deals.sample(rng);
-    internal::TraversalFrame frame =
-        internal::InitialTraversalFrame(game, deal, root);
-    const double value =
-        TraverseResponse(game, root, frame, deal, rng, context);
+    internal::TraversalContext context{
+        .deal = deal,
+        .mode = internal::TraversalMode::Train,
+        .update_player = responder,
+        .iteration = response_state.iterations,
+        .external_sampling = false,
+        .rng = rng,
+        .stats = stats,
+    };
+    const double value = internal::Traverse(game, context, backend);
     response_state.cumulative_root_utility += value;
     ++response_state.iterations;
   }
@@ -305,9 +276,9 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
   result.standard_error = estimate.value.standard_error;
   const size_t opponent_index = Index(Opponent(responder));
   result.opponent_policy_lookups =
-      context.opponent_lookups + estimate.counters.lookups[opponent_index];
+      backend.opponent_lookups + estimate.counters.lookups[opponent_index];
   result.missing_opponent_lookups =
-      context.missing_opponent_lookups +
+      backend.missing_opponent_lookups +
       estimate.counters.missing[opponent_index];
   return result;
 }
