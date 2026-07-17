@@ -110,6 +110,7 @@ cc_library(
         "-Wsign-conversion",
     ],
     deps = [
+        ":evaluation",
         ":solver",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/status:status",

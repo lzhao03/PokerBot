@@ -61,6 +61,12 @@ TEST_CASE("Deep CFR trains bounded neural memories") {
       solver->evaluate_average_against_uniform(Player::A, 4);
   REQUIRE(value_against_uniform.ok());
   CHECK(std::isfinite(*value_against_uniform));
+  const auto exploitability = solver->estimate_exploitability({2, 2, 19});
+  REQUIRE(exploitability.ok());
+  CHECK(std::isfinite(exploitability->nash_conv));
+  CHECK(std::isfinite(exploitability->exploitability));
+  CHECK(exploitability->player_a_response.missing_opponent_lookups == 0);
+  CHECK(exploitability->player_b_response.missing_opponent_lookups == 0);
 
   const auto path =
       std::filesystem::temp_directory_path() / "poker_deep_cfr_test.pt";

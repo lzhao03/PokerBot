@@ -70,6 +70,8 @@ ABSL_FLAG(uint64_t, deep_cache_capacity, 4096,
           "Deep CFR maximum cached neural strategies");
 ABSL_FLAG(int, deep_evaluation_samples, 64,
           "Deals sampled for Deep CFR average-policy evaluation");
+ABSL_FLAG(uint64_t, deep_best_response_iterations, 0,
+          "One-sided CFR iterations per Deep CFR best response; 0 disables");
 ABSL_FLAG(uint64_t, deep_seed, 1, "Deep CFR training seed");
 ABSL_FLAG(std::string, deep_model_output, "",
           "output path for the trained Deep CFR average model");
@@ -279,6 +281,33 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
   if (!value_as_a.ok() || !value_as_b.ok()) {
     std::cerr << "Error: uniform-opponent evaluation failed\n";
     return 1;
+  }
+  const uint64_t response_iterations =
+      absl::GetFlag(FLAGS_deep_best_response_iterations);
+  if (response_iterations > 0) {
+    const auto estimate = solver->estimate_exploitability({
+        response_iterations,
+        static_cast<uint64_t>(absl::GetFlag(FLAGS_deep_evaluation_samples)),
+        absl::GetFlag(FLAGS_deep_seed)});
+    if (!estimate.ok()) {
+      std::cerr << "Error: " << estimate.status() << '\n';
+      return 1;
+    }
+    std::cout
+        << "deep_best_response_a_value="
+        << estimate->player_a_response.value << '\n'
+        << "deep_best_response_a_se="
+        << estimate->player_a_response.standard_error << '\n'
+        << "deep_best_response_b_value="
+        << estimate->player_b_response.value << '\n'
+        << "deep_best_response_b_se="
+        << estimate->player_b_response.standard_error << '\n'
+        << "deep_nash_conv=" << estimate->nash_conv << '\n'
+        << "deep_exploitability=" << estimate->exploitability << '\n'
+        << "deep_missing_policy_lookups="
+        << estimate->player_a_response.missing_opponent_lookups +
+               estimate->player_b_response.missing_opponent_lookups
+        << '\n';
   }
   const std::string model_output = absl::GetFlag(FLAGS_deep_model_output);
   if (!model_output.empty()) {

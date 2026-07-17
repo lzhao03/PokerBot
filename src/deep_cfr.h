@@ -8,7 +8,7 @@
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "src/solver.h"
+#include "src/evaluation.h"
 
 namespace poker {
 
@@ -75,6 +75,8 @@ class DeepCfrSolver {
       const Policy& opponent,
       DeepCfrStrategy strategy,
       int samples);
+  absl::StatusOr<ExploitabilityEstimate> estimate_exploitability(
+      const BestResponseConfig& config);
   absl::Status load_average_model(const std::filesystem::path& path);
   absl::Status save_average_model(const std::filesystem::path& path) const;
 

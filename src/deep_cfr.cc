@@ -320,7 +320,7 @@ struct DeepCfrSolver::Impl {
       FillUniform(probabilities);
     } else {
       const ActionVector values = cached_prediction(
-          advantage_network[player], advantage_cache[player], decision);
+          advantage_network[player], advantage_cache[player], decision.key);
       RegretMatch(values, probabilities);
     }
     return access == internal::StrategyAccess::ReadOnly
@@ -330,13 +330,19 @@ struct DeepCfrSolver::Impl {
 
   void average_strategy(const internal::DecisionView& decision,
                         std::span<float> probabilities) {
+    policy_strategy(decision.key, probabilities);
+  }
+
+  bool policy_strategy(InfoSetKey key,
+                       std::span<float> probabilities) {
     if (!policy_trained) {
       FillUniform(probabilities);
-      return;
+      return false;
     }
     const ActionVector logits =
-        cached_prediction(policy_network, policy_cache, decision);
+        cached_prediction(policy_network, policy_cache, key);
     Softmax(logits, probabilities);
+    return true;
   }
 
   struct EvaluationBackend {
@@ -417,16 +423,16 @@ struct DeepCfrSolver::Impl {
   ActionVector cached_prediction(
       CfrNet& network,
       absl::flat_hash_map<InfoSetKey, ActionVector>& cache,
-      const internal::DecisionView& decision) {
-    const auto found = cache.find(decision.key);
+      InfoSetKey key) {
+    const auto found = cache.find(key);
     if (found != cache.end()) {
       ++stats.cache_hits;
       return found->second;
     }
     ++stats.network_evaluations;
-    const ActionVector values = Predict(network, game, decision.key);
+    const ActionVector values = Predict(network, game, key);
     if (cache.size() < config.inference_cache_capacity) {
-      cache.emplace(decision.key, values);
+      cache.emplace(key, values);
     }
     return values;
   }
@@ -717,6 +723,24 @@ absl::StatusOr<DeepCfrMatchResult> DeepCfrSolver::evaluate_against_policy(
         sign * result.mean, result.standard_error,
         result.opponent_policy_lookups,
         result.missing_opponent_lookups};
+  } catch (const std::exception& error) {
+    return TorchError(error);
+  }
+}
+
+absl::StatusOr<ExploitabilityEstimate>
+DeepCfrSolver::estimate_exploitability(
+    const BestResponseConfig& config) {
+  if (!impl_->policy_trained) {
+    return absl::FailedPreconditionError(
+        "average policy has not been trained");
+  }
+  try {
+    const StrategyLookup lookup = [this](
+        InfoSetKey key, std::span<float> probabilities) {
+      return impl_->policy_strategy(key, probabilities);
+    };
+    return EstimateExploitability(impl_->game, lookup, config);
   } catch (const std::exception& error) {
     return TorchError(error);
   }
