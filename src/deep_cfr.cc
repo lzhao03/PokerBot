@@ -438,7 +438,7 @@ struct DeepCfrSolver::Impl {
           .mode = mode,
           .update_player = Player::A,
           .iteration = stats.iterations,
-          .external_sampling = false,
+          .external_sampling = true,
           .rng = evaluation_rng,
           .stats = evaluation_stats,
       };

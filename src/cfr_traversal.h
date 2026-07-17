@@ -125,7 +125,8 @@ double TraverseNode(const CompiledGame& game,
     const size_t player_index = Index(player);
     const uint8_t action_count = history_node.child_count;
     const bool training = context.mode == TraversalMode::Train;
-    const bool external_sampling = training && context.external_sampling;
+    const bool sample_actions = context.external_sampling;
+    const bool external_sampling = training && sample_actions;
     const bool updates_regrets = training && context.update_player == player;
     const DecisionView view{
         {public_state.observation(), history,
@@ -151,7 +152,7 @@ double TraverseNode(const CompiledGame& game,
     }
     if (training) ++context.stats.decision_visits;
 
-    if (external_sampling && !updates_regrets) {
+    if (sample_actions && !updates_regrets) {
       if (handle) {
         backend.record_strategy(view, *handle, probability_span, 1.0);
       }
