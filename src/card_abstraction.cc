@@ -44,10 +44,6 @@ const auto kStraightCardsByRankMask = [] {
   return values;
 }();
 
-int MaxStraightCards(uint16_t rank_mask) {
-  return kStraightCardsByRankMask[rank_mask];
-}
-
 void AddCard(BoardFeatures& features, Card card) noexcept {
   const size_t rank = std::to_underlying(card.rank());
   const size_t suit = std::to_underlying(card.suit());
@@ -78,7 +74,7 @@ uint64_t BoardTextureBucket(const BoardFeatures& features) noexcept {
                               : (features.max_suit_count >= 3
                                      ? 2
                                      : (features.max_suit_count == 2 ? 1 : 0));
-  const int straight_cards = MaxStraightCards(features.rank_mask);
+  const int straight_cards = kStraightCardsByRankMask[features.rank_mask];
   const int straight_bucket =
       straight_cards >= 4 ? 2 : (straight_cards >= 3 ? 1 : 0);
   const int high_rank = std::bit_width(features.rank_mask) + 1;
@@ -137,7 +133,7 @@ uint16_t Handcrafted36Bucket(
   const uint16_t rank_mask = static_cast<uint16_t>(
       features.rank_mask | (1u << rank_index0) | (1u << rank_index1));
   const int draw_bucket =
-      flush_draw ? 2 : (MaxStraightCards(rank_mask) >= 4 ? 1 : 0);
+      flush_draw ? 2 : (kStraightCardsByRankMask[rank_mask] >= 4 ? 1 : 0);
 
   const int gap = high - low;
   const int strength_bucket =
