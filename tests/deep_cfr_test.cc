@@ -91,6 +91,17 @@ TEST_CASE("Deep CFR rejects an empty reservoir") {
   CHECK_FALSE(DeepCfrSolver::Create(TinySolveSpec(), config).ok());
 }
 
+TEST_CASE("Deep CFR can distill its final current strategy") {
+  DeepCfrConfig config = TinyDeepConfig();
+  config.distill_current_policy = true;
+  auto solver = DeepCfrSolver::Create(TinySolveSpec(), config);
+  REQUIRE(solver.ok());
+  REQUIRE(solver->run(1).ok());
+  const auto value = solver->evaluate_average(4);
+  REQUIRE(value.ok());
+  CHECK(std::isfinite(*value));
+}
+
 TEST_CASE("Deep CFR run boundaries do not change training") {
   auto whole = DeepCfrSolver::Create(TinySolveSpec(), TinyDeepConfig());
   auto split = DeepCfrSolver::Create(TinySolveSpec(), TinyDeepConfig());

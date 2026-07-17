@@ -36,7 +36,8 @@ using ActionVector = std::array<float, kMaxActionsPerNode>;
 
 enum class NetworkTarget : uint8_t {
   Advantage,
-  Policy,
+  AveragePolicy,
+  CurrentPolicy,
 };
 
 struct NetworkSample {
@@ -435,6 +436,7 @@ struct DeepCfrSolver::Impl {
     std::vector<float> targets(batch_size * kMaxActionsPerNode);
     std::vector<float> masks(batch_size * kMaxActionsPerNode);
     std::vector<float> weights(batch_size);
+    std::vector<float> player_b(batch_size);
     const auto options = torch::TensorOptions().dtype(torch::kFloat32);
     std::uniform_int_distribution<size_t> sample_index(0, memory.size() - 1);
     std::mt19937 batch_rng = MakeRng(seed);
@@ -455,12 +457,13 @@ struct DeepCfrSolver::Impl {
         std::fill_n(masks.data() + row * kMaxActionsPerNode,
                     node.child_count, 1.0f);
         weights[row] = sample.weight;
+        player_b[row] = std::get<DecisionState>(node.state).actor == Player::B;
       }
 
       const torch::Tensor input = torch::from_blob(
           inputs.data(), {static_cast<int64_t>(batch_size), kFeatureCount},
           options);
-      const torch::Tensor target = torch::from_blob(
+      torch::Tensor target = torch::from_blob(
           targets.data(),
           {static_cast<int64_t>(batch_size), kMaxActionsPerNode}, options);
       const torch::Tensor mask = torch::from_blob(
@@ -469,9 +472,23 @@ struct DeepCfrSolver::Impl {
       const torch::Tensor weight = torch::from_blob(
           weights.data(), {static_cast<int64_t>(batch_size)}, options);
 
+      if (target_kind == NetworkTarget::CurrentPolicy) {
+        const torch::Tensor use_player_b = torch::from_blob(
+            player_b.data(), {static_cast<int64_t>(batch_size), 1}, options);
+        torch::NoGradGuard no_grad;
+        const torch::Tensor advantages =
+            advantage_network[0]->forward(input) * (1.0f - use_player_b) +
+            advantage_network[1]->forward(input) * use_player_b;
+        const torch::Tensor positive = torch::relu(advantages) * mask;
+        const torch::Tensor sum = positive.sum(1, true);
+        const torch::Tensor uniform = mask / mask.sum(1, true);
+        target = torch::where(sum > 0.0f, positive / sum.clamp_min(1e-12f),
+                              uniform);
+      }
+
       optimizer.zero_grad();
       torch::Tensor prediction = network->forward(input);
-      if (target_kind == NetworkTarget::Policy) {
+      if (target_kind != NetworkTarget::Advantage) {
         prediction = torch::softmax(
             prediction + (mask - 1.0f) * 1e9f, 1);
       }
@@ -527,7 +544,9 @@ struct DeepCfrSolver::Impl {
     stats.strategy_loss = train_network(
         policy_network, strategy_memory,
         NetworkSeed(config.seed, stats.iterations, kPlayerCount),
-        NetworkTarget::Policy, config.policy_training_steps);
+        config.distill_current_policy ? NetworkTarget::CurrentPolicy
+                                      : NetworkTarget::AveragePolicy,
+        config.policy_training_steps);
     policy_trained = strategy_memory.size() > 0;
     policy_cache.clear();
     for (size_t player = 0; player < kPlayerCount; ++player) {

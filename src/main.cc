@@ -62,6 +62,8 @@ ABSL_FLAG(int, deep_batch_size, 128, "Deep CFR neural training batch size");
 ABSL_FLAG(int, deep_hidden_size, 32,
           "Deep CFR width of both hidden layers");
 ABSL_FLAG(double, deep_learning_rate, 1e-3, "Deep CFR Adam learning rate");
+ABSL_FLAG(bool, deep_distill_current_policy, false,
+          "distill the final current strategy instead of the average");
 ABSL_FLAG(uint64_t, deep_memory_capacity, 4096,
           "Deep CFR capacity of each reservoir");
 ABSL_FLAG(uint64_t, deep_cache_capacity, 4096,
@@ -240,6 +242,8 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
   config.batch_size = absl::GetFlag(FLAGS_deep_batch_size);
   config.hidden_size = absl::GetFlag(FLAGS_deep_hidden_size);
   config.learning_rate = absl::GetFlag(FLAGS_deep_learning_rate);
+  config.distill_current_policy =
+      absl::GetFlag(FLAGS_deep_distill_current_policy);
 
   auto solver = poker::DeepCfrSolver::Create(std::move(spec), config);
   if (!solver.ok()) {

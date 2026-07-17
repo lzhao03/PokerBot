@@ -23,6 +23,7 @@ struct DeepCfrConfig {
   int batch_size = 256;
   int hidden_size = 128;
   double learning_rate = 1e-3;
+  bool distill_current_policy = false;
 };
 
 struct DeepCfrStats {
