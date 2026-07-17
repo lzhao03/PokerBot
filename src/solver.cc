@@ -433,7 +433,6 @@ struct TabularBackend {
   using UpdateHandle = uint32_t;
 
   CfrState& state;
-  bool may_create_infosets;
   bool concurrent_updates;
 
   std::optional<uint32_t> current_strategy(
@@ -441,7 +440,7 @@ struct TabularBackend {
       internal::StrategyAccess access,
       absl::Span<float> probabilities) {
     const std::optional<uint32_t> offset =
-        access == internal::StrategyAccess::Writable && may_create_infosets
+        access == internal::StrategyAccess::Writable
             ? state.find_or_create(decision.key, decision.action_count)
             : state.find(decision.key);
     state.strategy(state.regret_sum, offset, probabilities,
@@ -675,7 +674,7 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
         .rng = rng,
         .stats = stats,
     };
-    TabularBackend backend{state_, !state_.at_capacity(), concurrent};
+    TabularBackend backend{state_, concurrent};
     return internal::Traverse(game_, context, backend);
   };
 
@@ -738,7 +737,7 @@ double TabularCfrSolver::evaluate_deal(const Deal& deal,
       .rng = rng_,
       .stats = stats_,
   };
-  TabularBackend backend{state_, false, false};
+  TabularBackend backend{state_, false};
   return internal::Traverse(game_, context, backend);
 }
 
