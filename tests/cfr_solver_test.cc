@@ -151,17 +151,16 @@ Policy PassiveCallingPolicy(const TabularCfrSolver& game, ComboId hand) {
   const CompiledGame& compiled = game.game();
   Policy policy;
   policy.model = compiled.model;
-  const PublicPosition position(
-      compiled.spec.config.card_abstraction, compiled.spec.root.board);
+  const PublicPosition& position = compiled.root.public_state;
   const PrivateObservationId private_observation = ObservePrivate(
-      compiled.spec.config.card_abstraction, hand, position.board());
+      compiled.config.card_abstraction, hand, position.board());
   for (size_t history = 0; history < compiled.history.nodes.size();
        ++history) {
     const HistoryNode& node = compiled.history.nodes[history];
     const auto* decision = std::get_if<DecisionState>(&node.state);
     if (decision == nullptr || decision->actor != Player::B) continue;
     const AbstractActions actions = SelectAbstractActions(
-        compiled.spec.config.bet_abstraction, *decision);
+        compiled.config.bet_abstraction, *decision);
     const size_t offset = policy.probabilities.size();
     policy.probabilities.resize(offset + node.child_count, 0.0f);
     bool selected = false;
@@ -243,7 +242,7 @@ TEST_CASE("history tree stores direct rule transitions") {
     const HistoryNode& node = tree.nodes[id];
     if (const auto* decision = std::get_if<DecisionState>(&node.state)) {
       const AbstractActions actions = SelectAbstractActions(
-          solver->game().spec.config.bet_abstraction, *decision);
+          solver->game().config.bet_abstraction, *decision);
       REQUIRE(node.child_count == actions.size());
       for (uint8_t action = 0; action < node.child_count; ++action) {
         const HistoryId child = tree.children[node.children_begin + action];
@@ -256,7 +255,7 @@ TEST_CASE("history tree stores direct rule transitions") {
       const HistoryId child = tree.children[node.children_begin];
       REQUIRE(Index(child) < tree.nodes.size());
       CHECK(tree.nodes[Index(child)].state == AdvanceBettingStreet(
-                *chance, solver->game().spec.config.betting_rules));
+                *chance, solver->game().config.betting_rules));
     } else {
       CHECK(node.child_count == 0);
     }
@@ -354,7 +353,7 @@ TEST_CASE("postflop roots use full observation identity") {
   const Player player = std::get<DecisionState>(tree.nodes[0].state).actor;
   const ComboId hand = player == Player::A ? kA : kB;
   const CardAbstractionConfig& cards =
-      solver->game().spec.config.card_abstraction;
+      solver->game().config.card_abstraction;
   const PublicPosition public_state(cards, root.board);
   const PrivateObservationId private_id = ObservePrivate(
       cards, hand, root.board);
@@ -538,16 +537,15 @@ TEST_CASE("approximate response learns a profitable shared action") {
   CHECK(response->value > 7.5);
 
   const CompiledGame& compiled = game->game();
-  const PublicPosition position(
-      compiled.spec.config.card_abstraction, compiled.spec.root.board);
+  const PublicPosition& position = compiled.root.public_state;
   const InfoSetKey root_key{
-      position.observation(), HistoryId{},
-      ObservePrivate(compiled.spec.config.card_abstraction, kA,
+      position.observation(), compiled.root.history,
+      ObservePrivate(compiled.config.card_abstraction, kA,
                      position.board())};
   const size_t offset = response->response_policy.rows.at(root_key);
   const HistoryNode& root = compiled.history.nodes[0];
   const AbstractActions actions = SelectAbstractActions(
-      compiled.spec.config.bet_abstraction,
+      compiled.config.bet_abstraction,
       std::get<DecisionState>(root.state));
   for (uint8_t action = 0; action < root.child_count; ++action) {
     const GameAction game_action = actions[action];

@@ -65,7 +65,6 @@ concept CfrBackend = requires(Backend& backend,
       -> std::same_as<void>;
 };
 
-Position RootPosition(const CompiledGame& game);
 TraversalFrame InitialTraversalFrame(const CompiledGame& game,
                                      const Deal& deal,
                                      const Position& position);
@@ -86,7 +85,6 @@ double TraverseNode(const CompiledGame& game,
                     const TraversalFrame& frame,
                     TraversalContext& context,
                     Backend& backend) {
-  const SolveSpec& spec = game.spec;
   const HistoryTree& tree = game.history;
   while (true) {
     const HistoryNode& history_node = tree.nodes[Index(history)];
@@ -102,7 +100,7 @@ double TraverseNode(const CompiledGame& game,
           *showdown, *frame.showdown_comparison, Player::A);
     }
     if (std::holds_alternative<ChanceState>(betting_state)) {
-      const int samples = spec.config.chance_samples;
+      const int samples = game.config.chance_samples;
       context.stats.chance_samples += static_cast<uint64_t>(samples);
       double value = 0.0;
       for (int sample = 0; sample < samples; ++sample) {
@@ -207,11 +205,10 @@ template <CfrBackend Backend>
 double Traverse(const CompiledGame& game,
                 TraversalContext& context,
                 Backend& backend) {
-  const Position root = RootPosition(game);
   const TraversalFrame frame =
-      InitialTraversalFrame(game, context.deal, root);
-  return TraverseNode(game, root.history, root.public_state, frame, context,
-                      backend);
+      InitialTraversalFrame(game, context.deal, game.root);
+  return TraverseNode(game, game.root.history, game.root.public_state, frame,
+                      context, backend);
 }
 
 }  // namespace poker::internal

@@ -184,9 +184,10 @@ class DealDistribution {
 };
 
 struct CompiledGame {
-  SolveSpec spec;
+  SolverConfig config;
   DealDistribution deals;
   HistoryTree history;
+  Position root;
   ModelFingerprint model{};
 };
 
