@@ -261,6 +261,7 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
             << "strategy_loss=" << stats.strategy_loss << '\n'
             << "network_evaluations=" << stats.network_evaluations << '\n'
             << "cache_hits=" << stats.cache_hits << '\n'
+            << "policy_parameter_bytes=" << stats.policy_parameter_bytes << '\n'
             << "average_value=" << *value << '\n'
             << "seconds=" << elapsed.count() << '\n';
   return std::isfinite(*value) ? 0 : 1;

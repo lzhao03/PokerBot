@@ -32,6 +32,7 @@ struct DeepCfrStats {
   float strategy_loss = 0.0f;
   uint64_t network_evaluations = 0;
   uint64_t cache_hits = 0;
+  size_t policy_parameter_bytes = 0;
   SolverStats traversal;
 };
 

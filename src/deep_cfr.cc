@@ -135,6 +135,15 @@ struct CfrNetImpl : torch::nn::Module {
 };
 TORCH_MODULE(CfrNet);
 
+size_t ParameterBytes(const CfrNet& network) {
+  size_t bytes = 0;
+  for (const torch::Tensor& parameter : network->parameters()) {
+    bytes += static_cast<size_t>(parameter.numel()) *
+             static_cast<size_t>(parameter.element_size());
+  }
+  return bytes;
+}
+
 void FillUniform(std::span<float> probabilities) {
   std::fill(probabilities.begin(), probabilities.end(),
             1.0f / static_cast<float>(probabilities.size()));
@@ -240,6 +249,7 @@ struct DeepCfrSolver::Impl {
       cache.reserve(config.inference_cache_capacity);
     }
     policy_cache.reserve(config.inference_cache_capacity);
+    stats.policy_parameter_bytes = ParameterBytes(policy_network);
   }
 
   std::optional<UpdateHandle> current_strategy(

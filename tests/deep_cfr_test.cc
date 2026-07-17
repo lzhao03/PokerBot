@@ -50,6 +50,7 @@ TEST_CASE("Deep CFR trains bounded neural memories") {
   CHECK(std::isfinite(stats.advantage_loss[1]));
   CHECK(std::isfinite(stats.strategy_loss));
   CHECK(stats.network_evaluations > 0);
+  CHECK(stats.policy_parameter_bytes > 0);
 
   const auto value = solver->evaluate_average(4);
   REQUIRE(value.ok());
