@@ -250,6 +250,8 @@ TEST_CASE("history tree stores direct rule transitions") {
         REQUIRE(Index(child) < tree.nodes.size());
         CHECK(tree.nodes[Index(child)].state ==
               Apply(node.state, actions[action]));
+        CHECK(tree.nodes[Index(child)].recent_actions ==
+              ((node.recent_actions << 4) | (action + 1)));
       }
     } else if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
       REQUIRE(node.child_count == 1);
@@ -257,12 +259,15 @@ TEST_CASE("history tree stores direct rule transitions") {
       REQUIRE(Index(child) < tree.nodes.size());
       CHECK(tree.nodes[Index(child)].state == AdvanceBettingStreet(
                 *chance, solver->game().config.betting_rules));
+      CHECK(tree.nodes[Index(child)].recent_actions ==
+            ((node.recent_actions << 4) | 9));
     } else {
       CHECK(node.child_count == 0);
     }
   }
 
   const HistoryNode& root = tree.nodes[0];
+  CHECK(root.recent_actions == 0);
   REQUIRE(root.child_count >= 2);
   CHECK(tree.children[root.children_begin] !=
         tree.children[root.children_begin + 1]);

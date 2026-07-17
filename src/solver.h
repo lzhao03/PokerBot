@@ -69,6 +69,7 @@ struct HistoryNode {
   BettingState state;
   uint32_t children_begin = 0;
   uint8_t child_count = 0;
+  uint32_t recent_actions = 0;
 };
 
 struct HistoryTree {

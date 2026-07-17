@@ -155,7 +155,8 @@ std::string_view Trim(std::string_view text) {
 HistoryId AppendHistory(HistoryTree& tree,
                         const BettingState& state,
                         const BettingRules& rules,
-                        const SolverConfig& config) {
+                        const SolverConfig& config,
+                        uint32_t recent_actions = 0) {
   const HistoryId id{static_cast<uint32_t>(tree.nodes.size())};
   if (const auto* decision = std::get_if<DecisionState>(&state)) {
     const AbstractActions actions = SelectAbstractActions(
@@ -163,12 +164,14 @@ HistoryId AppendHistory(HistoryTree& tree,
     const uint32_t begin = static_cast<uint32_t>(tree.children.size());
     tree.children.resize(begin + actions.size(), id);
     tree.nodes.push_back(
-        {state, begin, static_cast<uint8_t>(actions.size())});
+        {state, begin, static_cast<uint8_t>(actions.size()), recent_actions});
     for (size_t index = 0; index < actions.size(); ++index) {
       const auto child_state = ApplyAction(*decision, actions[index]);
       assert(child_state.ok());
-      tree.children[begin + index] =
-          AppendHistory(tree, *child_state, rules, config);
+      const uint32_t child_actions =
+          (recent_actions << 4) | static_cast<uint32_t>(index + 1);
+      tree.children[begin + index] = AppendHistory(
+          tree, *child_state, rules, config, child_actions);
     }
     return id;
   }
@@ -176,14 +179,15 @@ HistoryId AppendHistory(HistoryTree& tree,
   if (const auto* chance = std::get_if<ChanceState>(&state)) {
     const uint32_t begin = static_cast<uint32_t>(tree.children.size());
     tree.children.push_back(id);
-    tree.nodes.push_back({state, begin, 1});
+    tree.nodes.push_back({state, begin, 1, recent_actions});
     const BettingState child_state = AdvanceBettingStreet(*chance, rules);
-    tree.children[begin] = AppendHistory(tree, child_state, rules, config);
+    tree.children[begin] = AppendHistory(
+        tree, child_state, rules, config, (recent_actions << 4) | 9);
     return id;
   }
 
   tree.nodes.push_back(
-      {state, static_cast<uint32_t>(tree.children.size()), 0});
+      {state, static_cast<uint32_t>(tree.children.size()), 0, recent_actions});
   return id;
 }
 
