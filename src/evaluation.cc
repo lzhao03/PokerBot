@@ -248,9 +248,10 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
         .mode = internal::TraversalMode::Train,
         .update_player = responder,
         .iteration = response_state.iterations,
-        .external_sampling = false,
+        .external_sampling = config.external_sampling,
         .rng = rng,
         .stats = stats,
+        .accumulate_update_strategy = config.external_sampling,
     };
     const double value = internal::Traverse(game, context, backend);
     response_state.cumulative_root_utility += value;

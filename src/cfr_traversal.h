@@ -39,6 +39,7 @@ struct TraversalContext {
   bool external_sampling;
   std::mt19937& rng;
   SolverStats& stats;
+  bool accumulate_update_strategy = false;
 };
 
 struct DecisionView {
@@ -170,7 +171,7 @@ double TraverseNode(const CompiledGame& game,
     double node_value = 0.0;
     TraversalFrame child_frame = frame;
     for (uint8_t action = 0; action < action_count; ++action) {
-      if (!external_sampling) {
+      if (!external_sampling || context.accumulate_update_strategy) {
         child_frame.reach[player_index] =
             frame.reach[player_index] * probabilities[action];
       }
@@ -195,7 +196,7 @@ double TraverseNode(const CompiledGame& game,
     }
     backend.record_regrets(
         view, *handle, std::span<const float>(regrets.data(), action_count));
-    if (!external_sampling) {
+    if (!external_sampling || context.accumulate_update_strategy) {
       const double weight = frame.reach[player_index] * (context.iteration + 1);
       backend.record_strategy(view, *handle, probability_span, weight);
     }

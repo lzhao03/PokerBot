@@ -541,8 +541,10 @@ TEST_CASE("approximate response learns a profitable shared action") {
   uniform.model = game->game().model;
   const auto baseline = EstimateExpectedValue(
       game->game(), uniform, opponent, 1, 11);
+  BestResponseConfig response_config{100, 1, 11};
+  response_config.external_sampling = true;
   const auto response = TrainApproximateBestResponse(
-      game->game(), Player::A, opponent, BestResponseConfig{100, 1, 11});
+      game->game(), Player::A, opponent, response_config);
   REQUIRE(baseline.ok());
   REQUIRE(response.ok());
   CHECK(response->value >= baseline->mean);

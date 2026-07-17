@@ -72,6 +72,8 @@ ABSL_FLAG(int, deep_evaluation_samples, 64,
           "Deals sampled for Deep CFR average-policy evaluation");
 ABSL_FLAG(uint64_t, deep_best_response_iterations, 0,
           "One-sided CFR iterations per Deep CFR best response; 0 disables");
+ABSL_FLAG(bool, deep_best_response_external_sampling, true,
+          "Sample fixed-opponent actions during Deep CFR best responses");
 ABSL_FLAG(uint64_t, deep_seed, 1, "Deep CFR training seed");
 ABSL_FLAG(std::string, deep_model_output, "",
           "output path for the trained Deep CFR average model");
@@ -285,10 +287,13 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
   const uint64_t response_iterations =
       absl::GetFlag(FLAGS_deep_best_response_iterations);
   if (response_iterations > 0) {
-    const auto estimate = solver->estimate_exploitability({
+    poker::BestResponseConfig response_config{
         response_iterations,
         static_cast<uint64_t>(absl::GetFlag(FLAGS_deep_evaluation_samples)),
-        absl::GetFlag(FLAGS_deep_seed)});
+        absl::GetFlag(FLAGS_deep_seed)};
+    response_config.external_sampling =
+        absl::GetFlag(FLAGS_deep_best_response_external_sampling);
+    const auto estimate = solver->estimate_exploitability(response_config);
     if (!estimate.ok()) {
       std::cerr << "Error: " << estimate.status() << '\n';
       return 1;

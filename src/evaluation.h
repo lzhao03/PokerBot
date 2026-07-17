@@ -28,6 +28,7 @@ struct BestResponseConfig {
   uint64_t training_iterations = 100'000;
   uint64_t evaluation_samples = 100'000;
   uint64_t seed = 1;
+  bool external_sampling = false;
 };
 
 struct BestResponseResult {
