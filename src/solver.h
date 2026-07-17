@@ -107,22 +107,22 @@ struct CfrState {
   double cumulative_root_utility = 0.0;
 
   void strategy(absl::Span<const float> values,
-                std::optional<size_t> offset,
+                std::optional<uint32_t> offset,
                 absl::Span<float> probabilities,
                 bool concurrent = false) const;
-  void add_regret(size_t offset,
+  void add_regret(uint32_t offset,
                   size_t action,
                   float delta,
                   bool concurrent = false);
-  void add_strategy(size_t offset,
+  void add_strategy(uint32_t offset,
                     absl::Span<const float> probabilities,
                     double weight,
                     bool concurrent = false);
   size_t row_count() const;
-  std::optional<size_t> find(InfoSetKey key) const;
-  std::vector<std::pair<InfoSetKey, size_t>> row_entries() const;
+  std::optional<uint32_t> find(InfoSetKey key) const;
+  std::vector<std::pair<InfoSetKey, uint32_t>> row_entries() const;
   bool at_capacity() const { return row_count() >= max_info_sets_; }
-  std::optional<size_t> find_or_create(
+  std::optional<uint32_t> find_or_create(
       InfoSetKey key,
       uint8_t action_count);
 
@@ -130,8 +130,8 @@ struct CfrState {
   uint64_t pack(InfoSetKey key) const;
   InfoSetKey unpack(uint64_t key) const;
 
-  absl::flat_hash_map<uint64_t, size_t> packed_rows_;
-  absl::flat_hash_map<InfoSetKey, size_t> full_rows_;
+  absl::flat_hash_map<uint64_t, uint32_t> packed_rows_;
+  absl::flat_hash_map<InfoSetKey, uint32_t> full_rows_;
   size_t max_info_sets_;
   bool accumulate_average_strategy_;
   uint8_t private_bits_ = 0;
@@ -140,7 +140,7 @@ struct CfrState {
 };
 
 struct Policy {
-  absl::flat_hash_map<InfoSetKey, size_t> rows;
+  absl::flat_hash_map<InfoSetKey, uint32_t> rows;
   std::vector<float> probabilities;
   ModelFingerprint model{};
 

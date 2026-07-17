@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cmath>
 #include <concepts>
+#include <limits>
 #include <optional>
 #include <thread>
 #include <type_traits>
@@ -269,7 +270,7 @@ void AtomicAdd(float& target, float delta) {
 
 }  // namespace
 
-void CfrState::add_regret(size_t offset,
+void CfrState::add_regret(uint32_t offset,
                           size_t action,
                           float delta,
                           bool concurrent) {
@@ -287,7 +288,7 @@ void CfrState::add_regret(size_t offset,
       &regret, &old, &next, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
 }
 
-void CfrState::add_strategy(size_t offset,
+void CfrState::add_strategy(uint32_t offset,
                             absl::Span<const float> probabilities,
                             double weight,
                             bool concurrent) {
@@ -305,7 +306,7 @@ void CfrState::add_strategy(size_t offset,
 }
 
 void CfrState::strategy(absl::Span<const float> values,
-                        std::optional<size_t> offset,
+                        std::optional<uint32_t> offset,
                         absl::Span<float> probabilities,
                         bool concurrent) const {
   if (!offset) {
@@ -379,7 +380,7 @@ size_t CfrState::row_count() const {
   return packed_keys_ ? packed_rows_.size() : full_rows_.size();
 }
 
-std::optional<size_t> CfrState::find(InfoSetKey key) const {
+std::optional<uint32_t> CfrState::find(InfoSetKey key) const {
   if (packed_keys_) {
     const auto found = packed_rows_.find(pack(key));
     return found == packed_rows_.end() ? std::nullopt
@@ -390,8 +391,8 @@ std::optional<size_t> CfrState::find(InfoSetKey key) const {
                                     : std::optional(found->second);
 }
 
-std::vector<std::pair<InfoSetKey, size_t>> CfrState::row_entries() const {
-  std::vector<std::pair<InfoSetKey, size_t>> entries;
+std::vector<std::pair<InfoSetKey, uint32_t>> CfrState::row_entries() const {
+  std::vector<std::pair<InfoSetKey, uint32_t>> entries;
   entries.reserve(row_count());
   if (packed_keys_) {
     for (const auto& [key, offset] : packed_rows_) {
@@ -404,16 +405,16 @@ std::vector<std::pair<InfoSetKey, size_t>> CfrState::row_entries() const {
   return entries;
 }
 
-std::optional<size_t> CfrState::find_or_create(
+std::optional<uint32_t> CfrState::find_or_create(
     InfoSetKey key,
     uint8_t action_count) {
-  auto insert = [&](auto& rows, auto row_key) -> std::optional<size_t> {
+  auto insert = [&](auto& rows, auto row_key) -> std::optional<uint32_t> {
     if (rows.size() >= max_info_sets_) {
       const auto found = rows.find(row_key);
       return found == rows.end() ? std::nullopt
                                  : std::optional(found->second);
     }
-    const size_t offset = regret_sum.size();
+    const uint32_t offset = static_cast<uint32_t>(regret_sum.size());
     const auto [row, inserted] = rows.try_emplace(row_key, offset);
     if (!inserted) return row->second;
     regret_sum.resize(offset + action_count, 0.0f);
@@ -429,17 +430,17 @@ std::optional<size_t> CfrState::find_or_create(
 namespace {
 
 struct TabularBackend {
-  using UpdateHandle = size_t;
+  using UpdateHandle = uint32_t;
 
   CfrState& state;
   bool may_create_infosets;
   bool concurrent_updates;
 
-  std::optional<size_t> current_strategy(
+  std::optional<uint32_t> current_strategy(
       const internal::DecisionView& decision,
       internal::StrategyAccess access,
       absl::Span<float> probabilities) {
-    const std::optional<size_t> offset =
+    const std::optional<uint32_t> offset =
         access == internal::StrategyAccess::Writable && may_create_infosets
             ? state.find_or_create(decision.key, decision.action_count)
             : state.find(decision.key);
@@ -456,7 +457,7 @@ struct TabularBackend {
   }
 
   void record_regrets(const internal::DecisionView&,
-                      size_t offset,
+                      uint32_t offset,
                       absl::Span<const float> regrets) {
     for (size_t action = 0; action < regrets.size(); ++action) {
       state.add_regret(offset, action, regrets[action], concurrent_updates);
@@ -464,7 +465,7 @@ struct TabularBackend {
   }
 
   void record_strategy(const internal::DecisionView&,
-                       size_t offset,
+                       uint32_t offset,
                        absl::Span<const float> probabilities,
                        double weight) {
     state.add_strategy(offset, probabilities, weight, concurrent_updates);
@@ -497,6 +498,11 @@ absl::StatusOr<SolverConfig> SolverConfig::Create(SolverConfig config) {
   }
   if (config.max_info_sets <= 0) {
     return absl::InvalidArgumentError("max_info_sets must be positive");
+  }
+  if (config.max_info_sets >
+      static_cast<int>(std::numeric_limits<uint32_t>::max() /
+                       kMaxActionsPerNode)) {
+    return absl::InvalidArgumentError("max_info_sets is too large");
   }
   for (auto& fractions : config.bet_abstraction.pot_fractions) {
     for (double fraction : fractions) {
@@ -778,7 +784,7 @@ absl::StatusOr<Policy> ExtractAveragePolicy(
     const CfrState& state,
     const HistoryTree& history,
     ModelFingerprint model) {
-  std::vector<std::pair<InfoSetKey, size_t>> rows = state.row_entries();
+  std::vector<std::pair<InfoSetKey, uint32_t>> rows = state.row_entries();
 
   Policy policy;
   policy.model = model;
@@ -792,7 +798,8 @@ absl::StatusOr<Policy> ExtractAveragePolicy(
       return absl::DataLossError("infoset strategy span is invalid");
     }
 
-    const size_t output_offset = policy.probabilities.size();
+    const uint32_t output_offset =
+        static_cast<uint32_t>(policy.probabilities.size());
     double mass = 0.0;
     for (size_t action = 0; action < node.child_count; ++action) {
       const float value = state.strategy_sum[offset + action];

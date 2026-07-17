@@ -131,9 +131,9 @@ absl::StatusOr<std::vector<EncodedRow>> QuantizedRows(
     default_codes[actions] = *code;
   }
 
-  std::vector<std::pair<InfoSetKey, size_t>> rows(policy.rows.begin(),
-                                                  policy.rows.end());
-  std::ranges::sort(rows, {}, &std::pair<InfoSetKey, size_t>::second);
+  std::vector<std::pair<InfoSetKey, uint32_t>> rows(policy.rows.begin(),
+                                                    policy.rows.end());
+  std::ranges::sort(rows, {}, &std::pair<InfoSetKey, uint32_t>::second);
   if (rows.empty()) {
     if (policy.probabilities.empty()) return std::vector<EncodedRow>{};
     return absl::InvalidArgumentError("policy probabilities have no rows");
@@ -413,7 +413,12 @@ absl::StatusOr<Policy> DecodePolicy(absl::Span<const uint8_t> bytes) {
       const absl::Status decoded =
           DecodeActionProbabilities(*code, output, config);
       if (!decoded.ok()) return decoded;
-      const size_t offset = policy.probabilities.size();
+      if (policy.probabilities.size() >
+          std::numeric_limits<uint32_t>::max()) {
+        return absl::ResourceExhaustedError("compact policy is too large");
+      }
+      const uint32_t offset =
+          static_cast<uint32_t>(policy.probabilities.size());
       if (!policy.rows.try_emplace(key, offset).second) {
         return absl::DataLossError("duplicate compact policy row");
       }

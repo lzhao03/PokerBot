@@ -139,7 +139,7 @@ ProfileEstimate EstimateProfile(
 }
 
 struct ResponseBackend {
-  using UpdateHandle = size_t;
+  using UpdateHandle = uint32_t;
 
   Player responder;
   const Policy& opponent;
@@ -147,7 +147,7 @@ struct ResponseBackend {
   uint64_t opponent_lookups = 0;
   uint64_t missing_opponent_lookups = 0;
 
-  std::optional<size_t> current_strategy(
+  std::optional<uint32_t> current_strategy(
       const internal::DecisionView& decision,
       internal::StrategyAccess access,
       absl::Span<float> probabilities) {
@@ -158,7 +158,7 @@ struct ResponseBackend {
       }
       return std::nullopt;
     }
-    const std::optional<size_t> offset =
+    const std::optional<uint32_t> offset =
         access == internal::StrategyAccess::Writable
             ? response.find_or_create(decision.key, decision.action_count)
             : response.find(decision.key);
@@ -174,7 +174,7 @@ struct ResponseBackend {
   }
 
   void record_regrets(const internal::DecisionView&,
-                      size_t offset,
+                      uint32_t offset,
                       absl::Span<const float> regrets) {
     for (size_t action = 0; action < regrets.size(); ++action) {
       response.add_regret(offset, action, regrets[action]);
@@ -182,7 +182,7 @@ struct ResponseBackend {
   }
 
   void record_strategy(const internal::DecisionView&,
-                       size_t offset,
+                       uint32_t offset,
                        absl::Span<const float> probabilities,
                        double weight) {
     response.add_strategy(offset, probabilities, weight);
