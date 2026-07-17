@@ -177,19 +177,21 @@ size_t CardsForNextStreet(StreetKind street) {
   return street == StreetKind::River ? 0 : 1;
 }
 
-absl::StatusOr<absl::InlinedVector<Card, 5>> SampleStreetCards(
+absl::StatusOr<absl::InlinedVector<Card, 3>> SampleStreetCards(
     StreetKind street,
     const Board& board,
     CardMask known_private_cards,
     std::mt19937& rng) {
-  const size_t open_slots = kMaxBoardCards - board.count();
-  const size_t count = std::min(CardsForNextStreet(street), open_slots);
+  if (board.street() != street) {
+    return absl::InvalidArgumentError("board does not match street");
+  }
+  const size_t count = CardsForNextStreet(street);
   if (count == 0) {
-    return absl::InlinedVector<Card, 5>{};
+    return absl::InlinedVector<Card, 3>{};
   }
 
   CardMask blocked = known_private_cards | board.mask();
-  absl::InlinedVector<Card, 5> sampled;
+  absl::InlinedVector<Card, 3> sampled;
   sampled.reserve(count);
   std::uniform_int_distribution<uint32_t> card_dist(0, kDeckCardCount - 1);
   for (size_t attempt = 0;

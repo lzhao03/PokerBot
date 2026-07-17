@@ -292,6 +292,7 @@ TEST_CASE("sampling and card abstractions preserve identity") {
     blocked |= CardBit(kDeck[static_cast<size_t>(i)]);
   CHECK_FALSE(
       SampleStreetCards(StreetKind::Preflop, Board{}, blocked, rng).ok());
+  CHECK_FALSE(SampleStreetCards(StreetKind::Flop, Board{}, 0, rng).ok());
 }
 
 TEST_CASE("exact card observations are invariant under suit renaming") {

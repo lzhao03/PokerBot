@@ -271,7 +271,7 @@ std::optional<ComboId> MaybeCardsToComboId(Card first, Card second);
 ComboId CardsToComboId(Card first, Card second) noexcept;
 
 size_t CardsForNextStreet(StreetKind street);
-absl::StatusOr<absl::InlinedVector<Card, 5>> SampleStreetCards(
+absl::StatusOr<absl::InlinedVector<Card, 3>> SampleStreetCards(
     StreetKind street,
     const Board& board,
     CardMask known_private_cards,
