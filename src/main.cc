@@ -302,6 +302,14 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
         << estimate->player_b_response.value << '\n'
         << "deep_best_response_b_se="
         << estimate->player_b_response.standard_error << '\n'
+        << "deep_best_response_a_info_sets="
+        << estimate->player_a_response.response_policy.rows.size() << '\n'
+        << "deep_best_response_b_info_sets="
+        << estimate->player_b_response.response_policy.rows.size() << '\n'
+        << "deep_policy_lookups="
+        << estimate->player_a_response.opponent_policy_lookups +
+               estimate->player_b_response.opponent_policy_lookups
+        << '\n'
         << "deep_nash_conv=" << estimate->nash_conv << '\n'
         << "deep_exploitability=" << estimate->exploitability << '\n'
         << "deep_missing_policy_lookups="
