@@ -88,7 +88,8 @@ ProfileEstimate EstimateProfile(
     const StrategyLookup& player_b,
     uint64_t samples,
     uint64_t seed,
-    bool measure_reach_coverage = false) {
+    bool measure_reach_coverage = false,
+    bool sample_actions = false) {
   std::mt19937 rng = MakeEvaluationRng(seed);
   const std::array<const StrategyLookup*, kPlayerCount> policies = {
       &player_a, &player_b};
@@ -105,7 +106,7 @@ ProfileEstimate EstimateProfile(
         .mode = internal::TraversalMode::EvaluateCurrent,
         .update_player = Player::A,
         .iteration = 0,
-        .external_sampling = false,
+        .external_sampling = sample_actions,
         .rng = rng,
         .stats = stats,
     };
@@ -285,7 +286,8 @@ absl::StatusOr<BestResponseResult> TrainResponse(
   const StrategyLookup& player_b =
       responder == Player::B ? response_lookup : opponent;
   const ProfileEstimate estimate = EstimateProfile(
-      game, player_a, player_b, config.evaluation_samples, evaluation_seed);
+      game, player_a, player_b, config.evaluation_samples, evaluation_seed,
+      false, config.external_sampling);
   result.value = responder == Player::A
                      ? estimate.value.mean
                      : -estimate.value.mean;
