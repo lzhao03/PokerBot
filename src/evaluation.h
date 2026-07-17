@@ -41,7 +41,7 @@ struct ExploitabilityEstimate {
 };
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
-    const CFRSolver& game,
+    const CompiledGame& game,
     const Policy& player_a,
     const Policy& player_b,
     uint64_t samples,
@@ -49,13 +49,13 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     bool measure_reach_coverage = false);
 
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
-    const CFRSolver& game,
+    const CompiledGame& game,
     Player responder,
     const Policy& opponent,
     const BestResponseConfig& config);
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
-    const CFRSolver& game,
+    const CompiledGame& game,
     const Policy& policy,
     const BestResponseConfig& config);
 

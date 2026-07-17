@@ -209,7 +209,7 @@ int RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads) {
   const std::chrono::duration<double> elapsed =
       std::chrono::steady_clock::now() - start;
 
-  PrintRunSummary(*solver, solver->solve_spec().config, elapsed.count());
+  PrintRunSummary(*solver, solver->game().spec.config, elapsed.count());
   std::cout << "threads=" << threads << "\n";
   return 0;
 }

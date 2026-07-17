@@ -53,8 +53,7 @@ class DeepCfrSolver {
   absl::StatusOr<double> evaluate_average(int samples);
 
   const DeepCfrStats& stats() const noexcept;
-  const SolveSpec& solve_spec() const noexcept;
-  const HistoryTree& history_tree() const noexcept;
+  const CompiledGame& game() const noexcept;
 
  private:
   struct Impl;

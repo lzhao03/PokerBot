@@ -189,8 +189,6 @@ class DealDistribution {
   std::array<std::vector<float>, kPlayerCount> cumulative_weights_;
 };
 
-namespace internal {
-
 struct CompiledGame {
   SolveSpec spec;
   DealDistribution deals;
@@ -199,8 +197,6 @@ struct CompiledGame {
 };
 
 absl::StatusOr<CompiledGame> CompileGame(SolveSpec spec);
-
-}  // namespace internal
 
 struct CFRSolverTestAccess;
 
@@ -227,22 +223,14 @@ class CFRSolver {
   size_t get_strategy_bytes() const {
     return state_.strategy_sum.size() * sizeof(float);
   }
-  ModelFingerprint model_fingerprint() const noexcept { return game_.model; }
-  const SolveSpec& solve_spec() const noexcept { return game_.spec; }
-  const HistoryTree& history_tree() const noexcept { return game_.history; }
-  const DealDistribution& deal_distribution() const noexcept {
-    return game_.deals;
-  }
-  const CardAbstractionConfig& card_abstraction() const noexcept {
-    return game_.spec.config.card_abstraction;
-  }
+  const CompiledGame& game() const noexcept { return game_; }
   SolverStats get_stats() const { return stats_; }
   void reset_stats() { stats_ = {}; }
 
  private:
   friend struct CFRSolverTestAccess;
 
-  explicit CFRSolver(internal::CompiledGame game);
+  explicit CFRSolver(CompiledGame game);
 
   enum class EvaluationMode : uint8_t {
     Current,
@@ -251,7 +239,7 @@ class CFRSolver {
 
   double evaluate_deal(const Deal& deal, EvaluationMode mode);
   double evaluate_deals(int samples, EvaluationMode mode);
-  internal::CompiledGame game_;
+  CompiledGame game_;
   std::mt19937 rng_;
   CfrState state_;
   SolverStats stats_;

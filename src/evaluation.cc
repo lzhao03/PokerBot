@@ -13,14 +13,10 @@
 #include "absl/container/inlined_vector.h"
 #include "absl/status/status.h"
 #include "absl/types/span.h"
+#include "src/cfr_traversal.h"
 
 namespace poker {
 namespace {
-
-struct EvaluationFrame {
-  std::array<double, kPlayerCount> reach = {1.0, 1.0};
-  std::array<PrivateObservationId, kPlayerCount> private_observations = {};
-};
 
 struct EvaluationCounters {
   std::array<uint64_t, kPlayerCount> lookups = {};
@@ -43,64 +39,15 @@ std::mt19937 MakeEvaluationRng(uint64_t seed) {
   return std::mt19937(sequence);
 }
 
-Position RootPosition(const CFRSolver& game) {
-  const SolveSpec& spec = game.solve_spec();
-  return {HistoryId{},
-          PublicPosition(game.card_abstraction(), spec.root.board)};
-}
-
-Position ChanceChild(const CFRSolver& game,
-                     const HistoryNode& node,
-                     Position position,
-                     const Deal& deal,
-                     std::mt19937& rng) {
-  const ChanceState& chance = std::get<ChanceState>(node.state);
-  const auto cards = SampleStreetCards(
-      chance.data.street, position.public_state.board(),
-      deal.blocked_mask(), rng);
-  assert(cards.ok());
-  position.history = game.history_tree().children[node.children_begin];
-  position.public_state = PublicPosition(
-      game.card_abstraction(),
-      DealCards(position.public_state.board(), *cards));
-  return position;
-}
-
-EvaluationFrame InitialFrame(const CFRSolver& game,
-                             const Position& position,
-                             const Deal& deal) {
-  EvaluationFrame frame;
-  for (Player player : {Player::A, Player::B}) {
-    frame.private_observations[Index(player)] =
-        ObservePrivate(game.card_abstraction(), deal.hand(player),
-                       position.public_state.board());
-  }
-  return frame;
-}
-
-void AdvancePrivateObservations(const CFRSolver& game,
-                                EvaluationFrame& frame,
-                                const Position& child,
-                                const Deal& deal) {
-  const HistoryNode& child_node =
-      game.history_tree().nodes[Index(child.history)];
-  if (!std::holds_alternative<DecisionState>(child_node.state)) return;
-  for (Player player : {Player::A, Player::B}) {
-    frame.private_observations[Index(player)] = ObservePrivate(
-        game.card_abstraction(), deal.hand(player), child.public_state.board(),
-        frame.private_observations[Index(player)]);
-  }
-}
-
-double TraverseProfile(const CFRSolver& game,
+double TraverseProfile(const CompiledGame& game,
                        const std::array<const Policy*, kPlayerCount>& policies,
                        Position position,
-                       const EvaluationFrame& frame,
+                       const internal::TraversalFrame& frame,
                        const Deal& deal,
                        std::mt19937& rng,
                        EvaluationCounters& counters,
                        double reach) {
-  const HistoryTree& history = game.history_tree();
+  const HistoryTree& history = game.history;
   const HistoryNode& node = history.nodes[Index(position.history)];
   if (const auto* state = std::get_if<FoldTerminalState>(&node.state)) {
     return TerminalUtility(*state, Player::A);
@@ -112,11 +59,12 @@ double TraverseProfile(const CFRSolver& game,
   }
   if (std::holds_alternative<ChanceState>(node.state)) {
     double value = 0.0;
-    const int samples = game.solve_spec().config.chance_samples;
+    const int samples = game.spec.config.chance_samples;
     for (int sample = 0; sample < samples; ++sample) {
-      const Position child = ChanceChild(game, node, position, deal, rng);
-      EvaluationFrame child_frame = frame;
-      AdvancePrivateObservations(game, child_frame, child, deal);
+      const Position child = internal::SampleChanceChild(
+          game, node, position.public_state, deal, rng);
+      internal::TraversalFrame child_frame = frame;
+      internal::AdvancePrivateObservations(game, child_frame, deal, child);
       value += TraverseProfile(game, policies, child, child_frame, deal,
                                rng, counters, reach);
     }
@@ -150,14 +98,14 @@ double TraverseProfile(const CFRSolver& game,
 }
 
 ProfileEstimate EstimateProfile(
-    const CFRSolver& game,
+    const CompiledGame& game,
     const Policy& player_a,
     const Policy& player_b,
     uint64_t samples,
     uint64_t seed,
     bool measure_reach_coverage = false) {
   std::mt19937 rng = MakeEvaluationRng(seed);
-  const Position root = RootPosition(game);
+  const Position root = internal::RootPosition(game);
   const std::array<const Policy*, kPlayerCount> policies = {
       &player_a, &player_b};
   EvaluationCounters counters;
@@ -165,8 +113,9 @@ ProfileEstimate EstimateProfile(
   double mean = 0.0;
   double squared_error = 0.0;
   for (uint64_t sample = 0; sample < samples; ++sample) {
-    const Deal deal = game.deal_distribution().sample(rng);
-    const EvaluationFrame frame = InitialFrame(game, root, deal);
+    const Deal deal = game.deals.sample(rng);
+    const internal::TraversalFrame frame =
+        internal::InitialTraversalFrame(game, deal, root);
     const double value = TraverseProfile(
         game, policies, root, frame, deal, rng, counters, 1.0);
     const double delta = value - mean;
@@ -211,13 +160,13 @@ struct ResponseTrainingContext {
   uint64_t missing_opponent_lookups = 0;
 };
 
-double TraverseResponse(const CFRSolver& game,
+double TraverseResponse(const CompiledGame& game,
                         Position position,
-                        const EvaluationFrame& frame,
+                        const internal::TraversalFrame& frame,
                         const Deal& deal,
                         std::mt19937& rng,
                         ResponseTrainingContext& context) {
-  const HistoryTree& history = game.history_tree();
+  const HistoryTree& history = game.history;
   const HistoryNode& node = history.nodes[Index(position.history)];
   if (const auto* state = std::get_if<FoldTerminalState>(&node.state)) {
     return TerminalUtility(*state, Player::A);
@@ -229,11 +178,12 @@ double TraverseResponse(const CFRSolver& game,
   }
   if (std::holds_alternative<ChanceState>(node.state)) {
     double value = 0.0;
-    const int samples = game.solve_spec().config.chance_samples;
+    const int samples = game.spec.config.chance_samples;
     for (int sample = 0; sample < samples; ++sample) {
-      const Position child = ChanceChild(game, node, position, deal, rng);
-      EvaluationFrame child_frame = frame;
-      AdvancePrivateObservations(game, child_frame, child, deal);
+      const Position child = internal::SampleChanceChild(
+          game, node, position.public_state, deal, rng);
+      internal::TraversalFrame child_frame = frame;
+      internal::AdvancePrivateObservations(game, child_frame, deal, child);
       value += TraverseResponse(game, child, child_frame, deal, rng,
                                 context);
     }
@@ -263,7 +213,7 @@ double TraverseResponse(const CFRSolver& game,
   absl::InlinedVector<double, 8> action_values(node.child_count, 0.0);
   double node_value = 0.0;
   for (uint8_t action = 0; action < node.child_count; ++action) {
-    EvaluationFrame child_frame = frame;
+    internal::TraversalFrame child_frame = frame;
     child_frame.reach[player] *= probabilities[action];
     Position child = position;
     child.history = history.children[node.children_begin + action];
@@ -290,7 +240,7 @@ double TraverseResponse(const CFRSolver& game,
 }  // namespace
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
-    const CFRSolver& game,
+    const CompiledGame& game,
     const Policy& player_a,
     const Policy& player_b,
     uint64_t samples,
@@ -299,8 +249,7 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
   if (samples == 0) {
     return absl::InvalidArgumentError("evaluation samples must be positive");
   }
-  if (player_a.model != game.model_fingerprint() ||
-      player_b.model != game.model_fingerprint()) {
+  if (player_a.model != game.model || player_b.model != game.model) {
     return absl::FailedPreconditionError(
         "policy model does not match game");
   }
@@ -309,7 +258,7 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
 }
 
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
-    const CFRSolver& game,
+    const CompiledGame& game,
     Player responder,
     const Policy& opponent,
     const BestResponseConfig& config) {
@@ -317,19 +266,20 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     return absl::InvalidArgumentError(
         "best-response iteration counts must be positive");
   }
-  if (opponent.model != game.model_fingerprint()) {
+  if (opponent.model != game.model) {
     return absl::FailedPreconditionError(
         "opponent policy model does not match game");
   }
 
-  CfrState response_state(game.solve_spec().config, true);
+  CfrState response_state(game.spec.config, true);
   std::mt19937 rng = MakeEvaluationRng(config.seed);
-  const Position root = RootPosition(game);
+  const Position root = internal::RootPosition(game);
   ResponseTrainingContext context{responder, opponent, response_state};
   BestResponseResult result;
   while (response_state.iterations < config.training_iterations) {
-    const Deal deal = game.deal_distribution().sample(rng);
-    EvaluationFrame frame = InitialFrame(game, root, deal);
+    const Deal deal = game.deals.sample(rng);
+    internal::TraversalFrame frame =
+        internal::InitialTraversalFrame(game, deal, root);
     const double value =
         TraverseResponse(game, root, frame, deal, rng, context);
     response_state.cumulative_root_utility += value;
@@ -337,7 +287,7 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
   }
 
   auto response = ExtractAveragePolicy(
-      response_state, game.history_tree(), game.model_fingerprint());
+      response_state, game.history, game.model);
   if (!response.ok()) return response.status();
   result.response_policy = std::move(*response);
   const uint64_t evaluation_seed = config.seed ^ 0x9e3779b97f4a7c15ULL;
@@ -363,7 +313,7 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
 }
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
-    const CFRSolver& game,
+    const CompiledGame& game,
     const Policy& policy,
     const BestResponseConfig& config) {
   auto player_a = TrainApproximateBestResponse(

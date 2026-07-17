@@ -146,19 +146,20 @@ const ComboId kB = H(13, S::Clubs, 13, S::Diamonds);
 const ComboId kC = H(12, S::Clubs, 12, S::Diamonds);
 
 Policy PassiveCallingPolicy(const CFRSolver& game, ComboId hand) {
+  const CompiledGame& compiled = game.game();
   Policy policy;
-  policy.model = game.model_fingerprint();
+  policy.model = compiled.model;
   const PublicPosition position(
-      game.card_abstraction(), game.solve_spec().root.board);
+      compiled.spec.config.card_abstraction, compiled.spec.root.board);
   const PrivateObservationId private_observation = ObservePrivate(
-      game.card_abstraction(), hand, position.board());
-  for (size_t history = 0; history < game.history_tree().nodes.size();
+      compiled.spec.config.card_abstraction, hand, position.board());
+  for (size_t history = 0; history < compiled.history.nodes.size();
        ++history) {
-    const HistoryNode& node = game.history_tree().nodes[history];
+    const HistoryNode& node = compiled.history.nodes[history];
     const auto* decision = std::get_if<DecisionState>(&node.state);
     if (decision == nullptr || decision->actor != Player::B) continue;
     const AbstractActions actions = SelectAbstractActions(
-        game.solve_spec().config.bet_abstraction, *decision);
+        compiled.spec.config.bet_abstraction, *decision);
     const size_t offset = policy.probabilities.size();
     policy.probabilities.resize(offset + node.child_count, 0.0f);
     bool selected = false;
@@ -201,7 +202,7 @@ TEST_CASE("external sampling visits only traverser action branches") {
 
   CHECK(sampled->get_stats().decision_visits <
         full->get_stats().decision_visits);
-  CHECK(sampled->model_fingerprint() == full->model_fingerprint());
+  CHECK(sampled->game().model == full->game().model);
   CHECK(sampled->get_iterations_run() == 2);
   CHECK(sampled->extract_average_policy().ok());
 }
@@ -211,11 +212,10 @@ TEST_CASE("model fingerprints are stable and cover solve ranges") {
   auto second = MakeSolver(Config(), R(kA), R(kB));
   auto different_training = MakeSolver(Config(false, 10), R(kA), R(kB));
   auto changed = MakeSolver(Config(), R(kB), R(kA));
-  CHECK(first->model_fingerprint() == second->model_fingerprint());
-  CHECK(first->model_fingerprint() ==
-        different_training->model_fingerprint());
-  CHECK(first->model_fingerprint() != changed->model_fingerprint());
-  CHECK(std::to_underlying(first->model_fingerprint()) ==
+  CHECK(first->game().model == second->game().model);
+  CHECK(first->game().model == different_training->game().model);
+  CHECK(first->game().model != changed->game().model);
+  CHECK(std::to_underlying(first->game().model) ==
         0x9ebae6e5a4064673ULL);
 }
 
@@ -234,14 +234,14 @@ TEST_CASE("private abstraction cannot change terminal utility") {
 
 TEST_CASE("history tree stores direct rule transitions") {
   auto solver = MakeSolver(Config(), R(kA), R(kB));
-  const HistoryTree& tree = solver->history_tree();
+  const HistoryTree& tree = solver->game().history;
   REQUIRE_FALSE(tree.nodes.empty());
 
   for (size_t id = 0; id < tree.nodes.size(); ++id) {
     const HistoryNode& node = tree.nodes[id];
     if (const auto* decision = std::get_if<DecisionState>(&node.state)) {
       const AbstractActions actions = SelectAbstractActions(
-          solver->solve_spec().config.bet_abstraction, *decision);
+          solver->game().spec.config.bet_abstraction, *decision);
       REQUIRE(node.child_count == actions.size());
       for (uint8_t action = 0; action < node.child_count; ++action) {
         const HistoryId child = tree.children[node.children_begin + action];
@@ -254,7 +254,7 @@ TEST_CASE("history tree stores direct rule transitions") {
       const HistoryId child = tree.children[node.children_begin];
       REQUIRE(Index(child) < tree.nodes.size());
       CHECK(tree.nodes[Index(child)].state == AdvanceBettingStreet(
-                *chance, solver->solve_spec().config.betting_rules));
+                *chance, solver->game().spec.config.betting_rules));
     } else {
       CHECK(node.child_count == 0);
     }
@@ -317,7 +317,7 @@ TEST_CASE("infoset action rows are contiguous") {
   rows.reserve(entries.size());
   for (const auto& entry : entries) {
     const HistoryNode& node =
-        solver->history_tree().nodes[Index(entry.first.history)];
+        solver->game().history.nodes[Index(entry.first.history)];
     REQUIRE(std::holds_alternative<DecisionState>(node.state));
     rows.push_back({entry.second, node.child_count});
   }
@@ -347,12 +347,14 @@ TEST_CASE("postflop roots use full observation identity") {
 
   auto solver = MakeSolver(config, R(kA), R(kB), root);
   solver->run(2);
-  const HistoryTree& tree = solver->history_tree();
+  const HistoryTree& tree = solver->game().history;
   const Player player = std::get<DecisionState>(tree.nodes[0].state).actor;
   const ComboId hand = player == Player::A ? kA : kB;
-  const PublicPosition public_state(solver->card_abstraction(), root.board);
+  const CardAbstractionConfig& cards =
+      solver->game().spec.config.card_abstraction;
+  const PublicPosition public_state(cards, root.board);
   const PrivateObservationId private_id = ObservePrivate(
-      solver->card_abstraction(), hand, root.board);
+      cards, hand, root.board);
   CHECK(CFRSolverTestAccess::state(*solver).contains(
       {public_state.observation(), HistoryId{}, private_id}));
 }
@@ -399,7 +401,7 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
   for (const auto& [key, offset] : policy.rows) {
     (void)offset;
     const HistoryNode& node =
-        solver->history_tree().nodes[Index(key.history)];
+        solver->game().history.nodes[Index(key.history)];
     std::vector<float> probabilities(node.child_count);
     CHECK(policy.strategy(key, absl::MakeSpan(probabilities)));
     double sum = 0.0;
@@ -418,8 +420,9 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
   }
 
   const auto evaluated =
-      EstimateExpectedValue(*solver, policy, policy, 4, 17, true);
-  const auto repeated = EstimateExpectedValue(*solver, policy, policy, 4, 17);
+      EstimateExpectedValue(solver->game(), policy, policy, 4, 17, true);
+  const auto repeated =
+      EstimateExpectedValue(solver->game(), policy, policy, 4, 17);
   REQUIRE(evaluated.ok());
   REQUIRE(repeated.ok());
   CHECK(std::isfinite(evaluated->mean));
@@ -440,13 +443,15 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
 
   Policy empty;
   empty.model = policy.model;
-  const auto fallback = EstimateExpectedValue(*solver, empty, empty, 2, 17);
+  const auto fallback =
+      EstimateExpectedValue(solver->game(), empty, empty, 2, 17);
   REQUIRE(fallback.ok());
   CHECK(fallback->missing_policy_lookups > 0);
   CHECK(fallback->weighted_missing_policy_lookups > 0.0);
 
   auto different = MakeSolver(Config(), R(kB), R(kA));
-  CHECK_FALSE(EstimateExpectedValue(*different, policy, policy, 1, 17).ok());
+  CHECK_FALSE(EstimateExpectedValue(
+      different->game(), policy, policy, 1, 17).ok());
 }
 
 TEST_CASE("zero average mass extracts as uniform policy") {
@@ -459,7 +464,7 @@ TEST_CASE("zero average mass extracts as uniform policy") {
   for (const auto& [key, offset] : extracted->rows) {
     (void)offset;
     const HistoryNode& node =
-        solver->history_tree().nodes[Index(key.history)];
+        solver->game().history.nodes[Index(key.history)];
     std::vector<float> probabilities(node.child_count);
     REQUIRE(extracted->strategy(key, absl::MakeSpan(probabilities)));
     for (float probability : probabilities) {
@@ -479,9 +484,9 @@ TEST_CASE("approximate responses are reproducible and respect infosets") {
 
   const BestResponseConfig config{30, 20, 91};
   const auto first = TrainApproximateBestResponse(
-      *game, Player::A, *opponent, config);
+      game->game(), Player::A, *opponent, config);
   const auto second = TrainApproximateBestResponse(
-      *game, Player::A, *opponent, config);
+      game->game(), Player::A, *opponent, config);
   REQUIRE(first.ok());
   REQUIRE(second.ok());
   CHECK(first->response_policy.rows == second->response_policy.rows);
@@ -495,7 +500,7 @@ TEST_CASE("approximate responses are reproducible and respect infosets") {
   for (const auto& [key, row] : first->response_policy.rows) {
     (void)row;
     const HistoryNode& node =
-        game->history_tree().nodes[Index(key.history)];
+        game->game().history.nodes[Index(key.history)];
     REQUIRE(std::holds_alternative<DecisionState>(node.state));
     CHECK(std::get<DecisionState>(node.state).actor == Player::A);
     root_rows += key.history == HistoryId{} ? 1 : 0;
@@ -509,7 +514,7 @@ TEST_CASE("approximate response continues after infoset capacity") {
   const auto opponent = game->extract_average_policy();
   REQUIRE(opponent.ok());
   const auto response = TrainApproximateBestResponse(
-      *game, Player::A, *opponent, BestResponseConfig{10, 2, 7});
+      game->game(), Player::A, *opponent, BestResponseConfig{10, 2, 7});
   REQUIRE(response.ok());
   CHECK(response->response_policy.rows.size() == 1);
 }
@@ -518,25 +523,27 @@ TEST_CASE("approximate response learns a profitable shared action") {
   auto game = MakeSolver(Config(), R(kA), R(kB), WinningRiverRoot());
   const Policy opponent = PassiveCallingPolicy(*game, kB);
   Policy uniform;
-  uniform.model = game->model_fingerprint();
+  uniform.model = game->game().model;
   const auto baseline = EstimateExpectedValue(
-      *game, uniform, opponent, 1, 11);
+      game->game(), uniform, opponent, 1, 11);
   const auto response = TrainApproximateBestResponse(
-      *game, Player::A, opponent, BestResponseConfig{100, 1, 11});
+      game->game(), Player::A, opponent, BestResponseConfig{100, 1, 11});
   REQUIRE(baseline.ok());
   REQUIRE(response.ok());
   CHECK(response->value >= baseline->mean);
   CHECK(response->value > 7.5);
 
+  const CompiledGame& compiled = game->game();
   const PublicPosition position(
-      game->card_abstraction(), game->solve_spec().root.board);
+      compiled.spec.config.card_abstraction, compiled.spec.root.board);
   const InfoSetKey root_key{
       position.observation(), HistoryId{},
-      ObservePrivate(game->card_abstraction(), kA, position.board())};
+      ObservePrivate(compiled.spec.config.card_abstraction, kA,
+                     position.board())};
   const size_t offset = response->response_policy.rows.at(root_key);
-  const HistoryNode& root = game->history_tree().nodes[0];
+  const HistoryNode& root = compiled.history.nodes[0];
   const AbstractActions actions = SelectAbstractActions(
-      game->solve_spec().config.bet_abstraction,
+      compiled.spec.config.bet_abstraction,
       std::get<DecisionState>(root.state));
   for (uint8_t action = 0; action < root.child_count; ++action) {
     const GameAction game_action = actions[action];
@@ -552,14 +559,14 @@ TEST_CASE("exploitability reports both responder perspectives") {
   const auto initial_policy = game->extract_average_policy();
   REQUIRE(initial_policy.ok());
   const auto initial = EstimateExploitability(
-      *game, *initial_policy, BestResponseConfig{200, 2, 23});
+      game->game(), *initial_policy, BestResponseConfig{200, 2, 23});
   REQUIRE(initial.ok());
 
   game->run(200);
   const auto policy = game->extract_average_policy();
   REQUIRE(policy.ok());
   const auto estimate = EstimateExploitability(
-      *game, *policy, BestResponseConfig{200, 2, 23});
+      game->game(), *policy, BestResponseConfig{200, 2, 23});
   REQUIRE(estimate.ok());
   CHECK(estimate->nash_conv == doctest::Approx(
       estimate->player_a_response.value +
