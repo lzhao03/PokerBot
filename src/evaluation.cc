@@ -150,6 +150,7 @@ struct ResponseBackend {
   Player responder;
   const StrategyLookup& opponent;
   CfrState& response;
+  const StrategyLookup* responder_fallback = nullptr;
   uint64_t opponent_lookups = 0;
   uint64_t missing_opponent_lookups = 0;
 
@@ -164,11 +165,15 @@ struct ResponseBackend {
       }
       return std::nullopt;
     }
-    const std::optional<uint32_t> offset =
-        access == internal::StrategyAccess::Writable
-            ? response.find_or_create(decision.key, decision.action_count)
-            : response.find(decision.key);
-    response.strategy(response.regret_sum, offset, probabilities);
+    std::optional<uint32_t> offset = response.find(decision.key);
+    if (!offset && access == internal::StrategyAccess::Writable) {
+      offset = response.find_or_create(decision.key, decision.action_count);
+    }
+    if (offset || responder_fallback == nullptr) {
+      response.strategy(response.regret_sum, offset, probabilities);
+    } else {
+      (*responder_fallback)(decision.key, probabilities);
+    }
     return access == internal::StrategyAccess::Writable ? offset
                                                         : std::nullopt;
   }
@@ -227,10 +232,13 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
       samples, seed, measure_reach_coverage);
 }
 
-absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
+namespace {
+
+absl::StatusOr<BestResponseResult> TrainResponse(
     const CompiledGame& game,
     Player responder,
     const StrategyLookup& opponent,
+    const StrategyLookup* responder_fallback,
     const BestResponseConfig& config) {
   if (config.training_iterations == 0 || config.evaluation_samples == 0) {
     return absl::InvalidArgumentError(
@@ -238,7 +246,8 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
   }
   CfrState response_state(game.config, game.history.nodes.size(), true);
   std::mt19937 rng = MakeEvaluationRng(config.seed);
-  ResponseBackend backend{responder, opponent, response_state};
+  ResponseBackend backend{
+      responder, opponent, response_state, responder_fallback};
   SolverStats stats;
   BestResponseResult result;
   while (response_state.iterations < config.training_iterations) {
@@ -263,9 +272,13 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
   if (!response.ok()) return response.status();
   result.response_policy = std::move(*response);
   const uint64_t evaluation_seed = config.seed ^ 0x9e3779b97f4a7c15ULL;
-  const StrategyLookup response_lookup = [&result](
+  const StrategyLookup response_lookup = [&result, responder_fallback](
       InfoSetKey key, std::span<float> output) {
-    return result.response_policy.strategy(key, output);
+    if (result.response_policy.strategy(key, output)) return true;
+    if (responder_fallback != nullptr) {
+      (*responder_fallback)(key, output);
+    }
+    return false;
   };
   const StrategyLookup& player_a =
       responder == Player::A ? response_lookup : opponent;
@@ -291,6 +304,16 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
   return result;
 }
 
+}  // namespace
+
+absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
+    const CompiledGame& game,
+    Player responder,
+    const StrategyLookup& opponent,
+    const BestResponseConfig& config) {
+  return TrainResponse(game, responder, opponent, nullptr, config);
+}
+
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     const CompiledGame& game,
     Player responder,
@@ -308,14 +331,14 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
     const CompiledGame& game,
     const StrategyLookup& policy,
     const BestResponseConfig& config) {
-  auto player_a = TrainApproximateBestResponse(
-      game, Player::A, policy, config);
+  auto player_a = TrainResponse(
+      game, Player::A, policy, &policy, config);
   if (!player_a.ok()) return player_a.status();
 
   BestResponseConfig player_b_config = config;
   player_b_config.seed ^= 0xd1b54a32d192ed03ULL;
-  auto player_b = TrainApproximateBestResponse(
-      game, Player::B, policy, player_b_config);
+  auto player_b = TrainResponse(
+      game, Player::B, policy, &policy, player_b_config);
   if (!player_b.ok()) return player_b.status();
 
   const double nash_conv = player_a->value + player_b->value;
