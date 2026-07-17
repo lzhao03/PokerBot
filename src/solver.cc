@@ -633,37 +633,6 @@ Position internal::SampleChanceChild(const CompiledGame& game,
                      DealCards(public_state.board(), *sampled))};
 }
 
-internal::TraversalFrame internal::InitialTraversalFrame(
-    const CompiledGame& game,
-    const Deal& deal,
-    const Position& position) {
-  internal::TraversalFrame frame;
-  for (Player player : {Player::A, Player::B}) {
-    frame.private_observations[Index(player)] =
-        ObservePrivate(deal.hand(player), position.public_state);
-  }
-  if (position.public_state.board().count() == kMaxBoardCards) {
-    frame.showdown_comparison = static_cast<int8_t>(CompareHands(
-        deal.hand(Player::A), deal.hand(Player::B),
-        position.public_state.board()));
-  }
-  return frame;
-}
-
-void internal::AdvancePrivateObservations(
-    const CompiledGame& game,
-    internal::TraversalFrame& frame,
-    const Deal& deal,
-    const Position& child) {
-  const HistoryNode& child_node = game.history.nodes[Index(child.history)];
-  if (!std::holds_alternative<DecisionState>(child_node.state)) return;
-  for (Player player : {Player::A, Player::B}) {
-    frame.private_observations[Index(player)] =
-        ObservePrivate(deal.hand(player), child.public_state,
-                       frame.private_observations[Index(player)]);
-  }
-}
-
 void TabularCfrSolver::run(uint64_t iterations, int threads) {
   if (iterations == 0) return;
 

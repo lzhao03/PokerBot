@@ -65,18 +65,11 @@ concept CfrBackend = requires(Backend& backend,
       -> std::same_as<void>;
 };
 
-TraversalFrame InitialTraversalFrame(const CompiledGame& game,
-                                     const Deal& deal,
-                                     const Position& position);
 Position SampleChanceChild(const CompiledGame& game,
                            const HistoryNode& node,
                            const PublicPosition& public_state,
                            const Deal& deal,
                            std::mt19937& rng);
-void AdvancePrivateObservations(const CompiledGame& game,
-                                TraversalFrame& frame,
-                                const Deal& deal,
-                                const Position& child);
 
 template <CfrBackend Backend>
 double TraverseNode(const CompiledGame& game,
@@ -112,7 +105,15 @@ double TraverseNode(const CompiledGame& game,
               context.deal.hand(Player::A), context.deal.hand(Player::B),
               child.public_state.board()));
         }
-        AdvancePrivateObservations(game, child_frame, context.deal, child);
+        const HistoryNode& child_node = tree.nodes[Index(child.history)];
+        if (std::holds_alternative<DecisionState>(child_node.state)) {
+          for (Player player : {Player::A, Player::B}) {
+            auto& observation =
+                child_frame.private_observations[Index(player)];
+            observation = ObservePrivate(context.deal.hand(player),
+                                         child.public_state, observation);
+          }
+        }
         value += TraverseNode(game, child.history, child.public_state,
                               child_frame, context, backend);
       }
@@ -205,8 +206,16 @@ template <CfrBackend Backend>
 double Traverse(const CompiledGame& game,
                 TraversalContext& context,
                 Backend& backend) {
-  const TraversalFrame frame =
-      InitialTraversalFrame(game, context.deal, game.root);
+  TraversalFrame frame;
+  for (Player player : {Player::A, Player::B}) {
+    frame.private_observations[Index(player)] =
+        ObservePrivate(context.deal.hand(player), game.root.public_state);
+  }
+  if (game.root.public_state.board().count() == kMaxBoardCards) {
+    frame.showdown_comparison = static_cast<int8_t>(CompareHands(
+        context.deal.hand(Player::A), context.deal.hand(Player::B),
+        game.root.public_state.board()));
+  }
   return TraverseNode(game, game.root.history, game.root.public_state, frame,
                       context, backend);
 }
