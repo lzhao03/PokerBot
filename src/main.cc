@@ -174,7 +174,7 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
   return poker::SolverConfig::Create(std::move(config));
 }
 
-void PrintRunSummary(const poker::CFRSolver& solver,
+void PrintRunSummary(const poker::TabularCfrSolver& solver,
                      const poker::SolverConfig& config,
                      double seconds) {
   const size_t info_sets = solver.info_set_count();
@@ -199,7 +199,7 @@ void PrintRunSummary(const poker::CFRSolver& solver,
 }
 
 int RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads) {
-  auto solver = poker::CFRSolver::Create(std::move(spec));
+  auto solver = poker::TabularCfrSolver::Create(std::move(spec));
   if (!solver.ok()) {
     std::cerr << "Error: " << solver.status() << "\n";
     return 1;

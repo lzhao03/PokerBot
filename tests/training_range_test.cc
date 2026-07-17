@@ -78,11 +78,11 @@ TEST_CASE("deal sampling rejects incompatible ranges") {
   b.add(CardsToComboId(kDeck[1], kDeck[3]));
   const ExactPublicState root = MakeInitialState(
       config.betting_rules, {8, 8}, {1, 2});
-  CHECK_FALSE(CFRSolver::Create({config, root, {a, b}}).ok());
+  CHECK_FALSE(TabularCfrSolver::Create({config, root, {a, b}}).ok());
 
   const ComboRange compatible =
       SingleComboRange(H(12, S::Clubs, 12, S::Diamonds));
-  auto solver = CFRSolver::Create({config, root, {a, compatible}});
+  auto solver = TabularCfrSolver::Create({config, root, {a, compatible}});
   REQUIRE(solver.ok());
   solver->run(1);
   CHECK(std::isfinite(solver->expected_value(Player::A)));

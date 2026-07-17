@@ -595,7 +595,7 @@ ComboRange SingleComboRange(ComboId combo, float weight) {
   return range;
 }
 
-CFRSolver::CFRSolver(CompiledGame game)
+TabularCfrSolver::TabularCfrSolver(CompiledGame game)
     : game_(std::move(game)),
       rng_(12345),
       state_(game_.spec.config,
@@ -620,10 +620,10 @@ absl::StatusOr<CompiledGame> CompileGame(SolveSpec spec) {
   return game;
 }
 
-absl::StatusOr<CFRSolver> CFRSolver::Create(SolveSpec spec) {
+absl::StatusOr<TabularCfrSolver> TabularCfrSolver::Create(SolveSpec spec) {
   auto game = CompileGame(std::move(spec));
   if (!game.ok()) return game.status();
-  return CFRSolver(std::move(*game));
+  return TabularCfrSolver(std::move(*game));
 }
 
 Position internal::RootPosition(const CompiledGame& game) {
@@ -680,7 +680,7 @@ void internal::AdvancePrivateObservations(
   }
 }
 
-void CFRSolver::run(uint64_t iterations, int threads) {
+void TabularCfrSolver::run(uint64_t iterations, int threads) {
   if (iterations == 0) return;
 
   auto run_iteration = [&](uint64_t iteration, std::mt19937& rng,
@@ -745,7 +745,8 @@ void CFRSolver::run(uint64_t iterations, int threads) {
   }
 }
 
-double CFRSolver::evaluate_deal(const Deal& deal, EvaluationMode mode) {
+double TabularCfrSolver::evaluate_deal(const Deal& deal,
+                                       EvaluationMode mode) {
   internal::TraversalContext context{
       .deal = deal,
       .mode = mode == EvaluationMode::Average
@@ -761,7 +762,7 @@ double CFRSolver::evaluate_deal(const Deal& deal, EvaluationMode mode) {
   return internal::Traverse(game_, context, backend);
 }
 
-double CFRSolver::evaluate_deals(int samples, EvaluationMode mode) {
+double TabularCfrSolver::evaluate_deals(int samples, EvaluationMode mode) {
   if (samples <= 0) return 0.0;
   double value = 0.0;
   for (int sample = 0; sample < samples; ++sample) {
@@ -770,16 +771,17 @@ double CFRSolver::evaluate_deals(int samples, EvaluationMode mode) {
   return value / samples;
 }
 
-double CFRSolver::evaluate_current(ComboId player_a, ComboId player_b) {
+double TabularCfrSolver::evaluate_current(ComboId player_a,
+                                          ComboId player_b) {
   const Deal deal{{player_a, player_b}};
   return evaluate_deal(deal, EvaluationMode::Current);
 }
 
-double CFRSolver::evaluate_current(int samples) {
+double TabularCfrSolver::evaluate_current(int samples) {
   return evaluate_deals(samples, EvaluationMode::Current);
 }
 
-absl::StatusOr<double> CFRSolver::evaluate_average(
+absl::StatusOr<double> TabularCfrSolver::evaluate_average(
     ComboId player_a,
     ComboId player_b) {
   if (!game_.spec.config.accumulate_average_strategy) {
@@ -790,7 +792,7 @@ absl::StatusOr<double> CFRSolver::evaluate_average(
   return evaluate_deal(deal, EvaluationMode::Average);
 }
 
-absl::StatusOr<double> CFRSolver::evaluate_average(int samples) {
+absl::StatusOr<double> TabularCfrSolver::evaluate_average(int samples) {
   if (!game_.spec.config.accumulate_average_strategy) {
     return absl::FailedPreconditionError(
         "average strategy accumulation is disabled");
@@ -842,7 +844,7 @@ absl::StatusOr<Policy> ExtractAveragePolicy(
   return policy;
 }
 
-absl::StatusOr<Policy> CFRSolver::extract_average_policy() const {
+absl::StatusOr<Policy> TabularCfrSolver::extract_average_policy() const {
   if (!game_.spec.config.accumulate_average_strategy) {
     return absl::FailedPreconditionError(
         "average strategy accumulation is disabled");
@@ -850,7 +852,7 @@ absl::StatusOr<Policy> CFRSolver::extract_average_policy() const {
   return ExtractAveragePolicy(state_, game_.history, game_.model);
 }
 
-double CFRSolver::expected_value(Player player) const {
+double TabularCfrSolver::expected_value(Player player) const {
   if (state_.iterations == 0) return 0.0;
   const double player_a_ev = state_.cumulative_root_utility / state_.iterations;
   return player == Player::A ? player_a_ev : -player_a_ev;

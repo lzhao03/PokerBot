@@ -198,11 +198,11 @@ struct CompiledGame {
 
 absl::StatusOr<CompiledGame> CompileGame(SolveSpec spec);
 
-struct CFRSolverTestAccess;
+struct TabularCfrSolverTestAccess;
 
-class CFRSolver {
+class TabularCfrSolver {
  public:
-  static absl::StatusOr<CFRSolver> Create(SolveSpec spec);
+  static absl::StatusOr<TabularCfrSolver> Create(SolveSpec spec);
 
   void run(uint64_t iterations, int threads = 1);
 
@@ -228,9 +228,9 @@ class CFRSolver {
   void reset_stats() { stats_ = {}; }
 
  private:
-  friend struct CFRSolverTestAccess;
+  friend struct TabularCfrSolverTestAccess;
 
-  explicit CFRSolver(CompiledGame game);
+  explicit TabularCfrSolver(CompiledGame game);
 
   enum class EvaluationMode : uint8_t {
     Current,

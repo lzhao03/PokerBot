@@ -77,7 +77,7 @@ TEST_CASE("all card abstraction combinations support history traversal") {
     };
     state = DealChance(state, flop, rules);
 
-    auto solver = CFRSolver::Create(
+    auto solver = TabularCfrSolver::Create(
         {config, state,
          {Range(14, 13, Suit::Hearts),
           Range(12, 11, Suit::Clubs)}});

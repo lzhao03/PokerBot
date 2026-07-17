@@ -157,7 +157,7 @@ int main(int argc, char** argv) {
   std::cout << "case\tseconds\tresult\n";
   Measure("range_expand", [&] { return a_range.count(); });
 
-  std::optional<poker::CFRSolver> solver;
+  std::optional<poker::TabularCfrSolver> solver;
   std::string build_error;
   const uint64_t progress_interval =
       absl::GetFlag(FLAGS_progress_interval);
@@ -168,7 +168,7 @@ int main(int argc, char** argv) {
   }
   if (progress_interval > 0) std::cerr << "building_history\n";
   Measure("build_history", [&] {
-    auto result = poker::CFRSolver::Create(
+    auto result = poker::TabularCfrSolver::Create(
         {config, root, {a_range, b_range}});
     if (!result.ok()) {
       build_error = result.status().ToString();

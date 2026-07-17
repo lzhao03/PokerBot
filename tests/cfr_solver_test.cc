@@ -14,11 +14,11 @@
 
 namespace poker {
 
-struct CFRSolverTestAccess {
-  static const CfrState& state(const CFRSolver& solver) {
+struct TabularCfrSolverTestAccess {
+  static const CfrState& state(const TabularCfrSolver& solver) {
     return solver.state_;
   }
-  static CfrState& state(CFRSolver& solver) { return solver.state_; }
+  static CfrState& state(TabularCfrSolver& solver) { return solver.state_; }
 };
 
 namespace {
@@ -98,17 +98,17 @@ ExactPublicState WinningRiverRoot() {
   return {DecisionState{data, Player::A}, *MakeBoard(board)};
 }
 
-std::unique_ptr<CFRSolver> MakeSolver(
+std::unique_ptr<TabularCfrSolver> MakeSolver(
     const SolverConfig& config,
     const ComboRange& a,
     const ComboRange& b,
     std::optional<ExactPublicState> root = std::nullopt) {
-  auto solver = CFRSolver::Create(
+  auto solver = TabularCfrSolver::Create(
       {config, root.value_or(Root(config)), {a, b}});
   if (!solver.ok()) {
     throw std::invalid_argument(std::string(solver.status().message()));
   }
-  return std::make_unique<CFRSolver>(std::move(*solver));
+  return std::make_unique<TabularCfrSolver>(std::move(*solver));
 }
 
 TEST_CASE("solver configuration rejects invalid boundary values") {
@@ -145,7 +145,7 @@ const ComboId kA = H(14, S::Hearts, 14, S::Spades);
 const ComboId kB = H(13, S::Clubs, 13, S::Diamonds);
 const ComboId kC = H(12, S::Clubs, 12, S::Diamonds);
 
-Policy PassiveCallingPolicy(const CFRSolver& game, ComboId hand) {
+Policy PassiveCallingPolicy(const TabularCfrSolver& game, ComboId hand) {
   const CompiledGame& compiled = game.game();
   Policy policy;
   policy.model = compiled.model;
@@ -276,29 +276,30 @@ TEST_CASE("training mutates only CFR state") {
   CHECK(std::isfinite(solver->expected_value(Player::A)));
   CHECK(solver->history_count() == history_count);
 
-  const CfrState before = CFRSolverTestAccess::state(*solver);
+  const CfrState before = TabularCfrSolverTestAccess::state(*solver);
   const uint64_t updates = solver->stats().decision_visits;
   const auto value = solver->evaluate_average(kA, kB);
   REQUIRE(value.ok());
   CHECK(std::isfinite(*value));
   CHECK(solver->history_count() == history_count);
   CHECK(solver->stats().decision_visits == updates);
-  CHECK(CFRSolverTestAccess::state(*solver).row_entries() ==
+  CHECK(TabularCfrSolverTestAccess::state(*solver).row_entries() ==
         before.row_entries());
-  CHECK(CFRSolverTestAccess::state(*solver).regret_sum == before.regret_sum);
-  CHECK(CFRSolverTestAccess::state(*solver).strategy_sum ==
+  CHECK(TabularCfrSolverTestAccess::state(*solver).regret_sum ==
+        before.regret_sum);
+  CHECK(TabularCfrSolverTestAccess::state(*solver).strategy_sum ==
         before.strategy_sum);
 }
 
 TEST_CASE("training uses preallocated action arrays") {
   auto solver = MakeSolver(Config(), R(kA), R(kB));
-  const CfrState& before = CFRSolverTestAccess::state(*solver);
+  const CfrState& before = TabularCfrSolverTestAccess::state(*solver);
   const size_t regret_capacity = before.regret_sum.capacity();
   const size_t strategy_capacity = before.strategy_sum.capacity();
 
   solver->run(4);
 
-  const CfrState& after = CFRSolverTestAccess::state(*solver);
+  const CfrState& after = TabularCfrSolverTestAccess::state(*solver);
   CHECK(after.regret_sum.capacity() == regret_capacity);
   CHECK(after.strategy_sum.capacity() == strategy_capacity);
 }
@@ -306,7 +307,7 @@ TEST_CASE("training uses preallocated action arrays") {
 TEST_CASE("infoset action rows are contiguous") {
   auto solver = MakeSolver(Config(), R(kA), R(kB));
   solver->run(4);
-  const CfrState& state = CFRSolverTestAccess::state(*solver);
+  const CfrState& state = TabularCfrSolverTestAccess::state(*solver);
 
   struct RowSize {
     size_t offset;
@@ -355,7 +356,7 @@ TEST_CASE("postflop roots use full observation identity") {
   const PublicPosition public_state(cards, root.board);
   const PrivateObservationId private_id = ObservePrivate(
       cards, hand, root.board);
-  CHECK(CFRSolverTestAccess::state(*solver).contains(
+  CHECK(TabularCfrSolverTestAccess::state(*solver).contains(
       {public_state.observation(), HistoryId{}, private_id}));
 }
 
@@ -372,7 +373,7 @@ TEST_CASE("parallel training updates a fixed-capacity table") {
   CHECK(solver->iterations() == 20);
   CHECK(solver->info_set_count() == 1);
   CHECK(solver->stats().decision_visits > 0);
-  const CfrState& state = CFRSolverTestAccess::state(*solver);
+  const CfrState& state = TabularCfrSolverTestAccess::state(*solver);
   CHECK(std::ranges::all_of(state.regret_sum, [](float value) {
     return std::isfinite(value) && value >= 0.0f;
   }));
@@ -386,7 +387,7 @@ TEST_CASE("average strategy storage is optional") {
   auto solver = MakeSolver(config, R(kA), R(kB));
   solver->run(2);
 
-  CHECK(CFRSolverTestAccess::state(*solver).strategy_sum.empty());
+  CHECK(TabularCfrSolverTestAccess::state(*solver).strategy_sum.empty());
   CHECK(std::isfinite(solver->evaluate_current(kA, kB)));
   CHECK_FALSE(solver->evaluate_average(kA, kB).ok());
 }
@@ -457,7 +458,7 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
 TEST_CASE("zero average mass extracts as uniform policy") {
   auto solver = MakeSolver(Config(), R(kA), R(kB));
   solver->run(1);
-  CfrState& state = CFRSolverTestAccess::state(*solver);
+  CfrState& state = TabularCfrSolverTestAccess::state(*solver);
   std::fill(state.strategy_sum.begin(), state.strategy_sum.end(), 0.0f);
   const auto extracted = solver->extract_average_policy();
   REQUIRE(extracted.ok());
