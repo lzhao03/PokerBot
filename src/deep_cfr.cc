@@ -34,25 +34,15 @@ enum class NetworkTarget : uint8_t {
   Policy,
 };
 
-struct NetworkInput {
-  InfoSetKey key;
-  BettingData betting;
-  Player actor;
-  uint8_t action_count;
-};
-
 struct NetworkSample {
-  NetworkInput input;
+  InfoSetKey key;
   ActionVector target = {};
   float weight = 1.0f;
 };
 
-NetworkInput InputFor(const internal::DecisionView& decision) {
-  return {decision.key, decision.state.data, decision.state.actor,
-          decision.action_count};
-}
-
-FeatureVector Features(const NetworkInput& input) {
+FeatureVector Features(InfoSetKey key, const HistoryNode& node) {
+  const DecisionState& decision = std::get<DecisionState>(node.state);
+  const BettingData& betting = decision.data;
   FeatureVector features = {};
   size_t output = 0;
   const auto append_bits = [&](auto value) {
@@ -60,33 +50,33 @@ FeatureVector Features(const NetworkInput& input) {
       features[output++] = static_cast<float>((value >> bit) & 1);
     }
   };
-  append_bits(std::to_underlying(input.key.history));
-  append_bits(std::to_underlying(input.key.public_observation));
-  append_bits(std::to_underlying(input.key.private_observation));
+  append_bits(std::to_underlying(key.history));
+  append_bits(std::to_underlying(key.public_observation));
+  append_bits(std::to_underlying(key.private_observation));
 
-  features[output++] = input.actor == Player::B ? 1.0f : 0.0f;
+  features[output++] = decision.actor == Player::B ? 1.0f : 0.0f;
   features[output++] =
-      static_cast<float>(input.action_count) / kMaxActionsPerNode;
+      static_cast<float>(node.child_count) / kMaxActionsPerNode;
   for (StreetKind street : {StreetKind::Preflop, StreetKind::Flop,
                             StreetKind::Turn, StreetKind::River}) {
-    features[output++] = input.betting.street == street ? 1.0f : 0.0f;
+    features[output++] = betting.street == street ? 1.0f : 0.0f;
   }
 
   const Chips total_chips =
-      Pot(input.betting) + input.betting.stack[0] + input.betting.stack[1];
+      Pot(betting) + betting.stack[0] + betting.stack[1];
   const float chip_scale = 1.0f / std::max(Chips{1}, total_chips);
-  for (Chips value : input.betting.stack) {
+  for (Chips value : betting.stack) {
     features[output++] = value * chip_scale;
   }
-  for (Chips value : input.betting.total_committed) {
+  for (Chips value : betting.total_committed) {
     features[output++] = value * chip_scale;
   }
-  for (Chips value : input.betting.street_committed) {
+  for (Chips value : betting.street_committed) {
     features[output++] = value * chip_scale;
   }
-  features[output++] = input.betting.last_full_raise * chip_scale;
-  features[output++] = input.betting.actions_remaining / 2.0f;
-  features[output++] = Pot(input.betting) * chip_scale;
+  features[output++] = betting.last_full_raise * chip_scale;
+  features[output++] = betting.actions_remaining / 2.0f;
+  features[output++] = Pot(betting) * chip_scale;
   assert(output == features.size());
   return features;
 }
@@ -180,8 +170,11 @@ void Softmax(absl::Span<const float> logits,
   for (float& probability : probabilities) probability /= sum;
 }
 
-ActionVector Predict(CfrNet& network, const NetworkInput& input) {
-  const FeatureVector features = Features(input);
+ActionVector Predict(CfrNet& network,
+                     const CompiledGame& game,
+                     InfoSetKey key) {
+  const FeatureVector features =
+      Features(key, game.history.nodes[Index(key.history)]);
   torch::NoGradGuard no_grad;
   const torch::Tensor tensor = torch::from_blob(
       const_cast<float*>(features.data()), {1, kFeatureCount}, torch::kFloat32);
@@ -280,7 +273,7 @@ struct DeepCfrSolver::Impl {
   void record_regrets(const internal::DecisionView& decision,
                       UpdateHandle,
                       absl::Span<const float> regrets) {
-    NetworkSample sample{InputFor(decision)};
+    NetworkSample sample{decision.key};
     std::copy(regrets.begin(), regrets.end(), sample.target.begin());
     sample.weight = static_cast<float>(decision.iteration + 1);
     advantage_memory[Index(decision.state.actor)].add(
@@ -291,7 +284,7 @@ struct DeepCfrSolver::Impl {
                        UpdateHandle,
                        absl::Span<const float> probabilities,
                        double weight) {
-    NetworkSample sample{InputFor(decision)};
+    NetworkSample sample{decision.key};
     std::copy(probabilities.begin(), probabilities.end(),
               sample.target.begin());
     sample.weight = static_cast<float>(
@@ -309,7 +302,7 @@ struct DeepCfrSolver::Impl {
       return found->second;
     }
     ++stats.network_evaluations;
-    const ActionVector values = Predict(network, InputFor(decision));
+    const ActionVector values = Predict(network, game, decision.key);
     if (cache.size() < config.inference_cache_capacity) {
       cache.emplace(decision.key, values);
     }
@@ -344,13 +337,15 @@ struct DeepCfrSolver::Impl {
       std::fill(masks.begin(), masks.end(), 0.0f);
       for (size_t row = 0; row < batch_size; ++row) {
         const NetworkSample& sample = memory[sample_index(batch_rng)];
-        const FeatureVector features = Features(sample.input);
+        const HistoryNode& node =
+            game.history.nodes[Index(sample.key.history)];
+        const FeatureVector features = Features(sample.key, node);
         std::copy(features.begin(), features.end(),
                   inputs.data() + row * kFeatureCount);
         std::copy(sample.target.begin(), sample.target.end(),
                   targets.data() + row * kMaxActionsPerNode);
         std::fill_n(masks.data() + row * kMaxActionsPerNode,
-                    sample.input.action_count, 1.0f);
+                    node.child_count, 1.0f);
         weights[row] = sample.weight;
       }
 
