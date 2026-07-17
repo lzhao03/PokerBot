@@ -148,6 +148,8 @@ struct CfrNetImpl : torch::nn::Module {
             "hidden1", torch::nn::Linear(kFeatureCount, hidden_size))),
         hidden2(register_module(
             "hidden2", torch::nn::Linear(hidden_size, hidden_size))),
+        hidden3(register_module(
+            "hidden3", torch::nn::Linear(hidden_size, hidden_size))),
         output(register_module(
             "output", torch::nn::Linear(hidden_size, kMaxActionsPerNode))) {
     torch::nn::init::zeros_(output->weight);
@@ -157,11 +159,13 @@ struct CfrNetImpl : torch::nn::Module {
   torch::Tensor forward(torch::Tensor input) {
     input = torch::relu(hidden1->forward(std::move(input)));
     input = torch::relu(hidden2->forward(std::move(input)));
+    input = torch::relu(hidden3->forward(std::move(input)));
     return output->forward(std::move(input));
   }
 
   torch::nn::Linear hidden1;
   torch::nn::Linear hidden2;
+  torch::nn::Linear hidden3;
   torch::nn::Linear output;
 };
 TORCH_MODULE(CfrNet);
