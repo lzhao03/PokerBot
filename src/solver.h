@@ -213,18 +213,18 @@ class CFRSolver {
   absl::StatusOr<double> evaluate_average(int samples);
   absl::StatusOr<Policy> extract_average_policy() const;
 
-  double get_expected_value(Player player) const;
-  uint64_t get_iterations_run() const { return state_.iterations; }
-  size_t get_info_set_count() const { return state_.row_count(); }
-  size_t get_history_count() const { return game_.history.nodes.size(); }
-  size_t get_regret_bytes() const {
+  double expected_value(Player player) const;
+  uint64_t iterations() const noexcept { return state_.iterations; }
+  size_t info_set_count() const { return state_.row_count(); }
+  size_t history_count() const noexcept { return game_.history.nodes.size(); }
+  size_t regret_bytes() const noexcept {
     return state_.regret_sum.size() * sizeof(float);
   }
-  size_t get_strategy_bytes() const {
+  size_t strategy_bytes() const noexcept {
     return state_.strategy_sum.size() * sizeof(float);
   }
   const CompiledGame& game() const noexcept { return game_; }
-  SolverStats get_stats() const { return stats_; }
+  const SolverStats& stats() const noexcept { return stats_; }
   void reset_stats() { stats_ = {}; }
 
  private:

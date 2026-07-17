@@ -85,7 +85,7 @@ TEST_CASE("deal sampling rejects incompatible ranges") {
   auto solver = CFRSolver::Create({config, root, {a, compatible}});
   REQUIRE(solver.ok());
   solver->run(1);
-  CHECK(std::isfinite(solver->get_expected_value(Player::A)));
+  CHECK(std::isfinite(solver->expected_value(Player::A)));
 }
 
 }  // namespace

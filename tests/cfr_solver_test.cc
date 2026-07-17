@@ -185,10 +185,10 @@ TEST_CASE("small exact solver baseline is deterministic") {
       Config(), UniformComboRange(), UniformComboRange());
   solver->run(10);
 
-  CHECK(solver->get_history_count() == 417);
-  CHECK(solver->get_info_set_count() == 720);
-  CHECK(solver->get_stats().decision_visits == 1440);
-  CHECK(solver->get_expected_value(Player::A) ==
+  CHECK(solver->history_count() == 417);
+  CHECK(solver->info_set_count() == 720);
+  CHECK(solver->stats().decision_visits == 1440);
+  CHECK(solver->expected_value(Player::A) ==
         doctest::Approx(-0.737666));
 }
 
@@ -200,10 +200,10 @@ TEST_CASE("external sampling visits only traverser action branches") {
   full->run(2);
   sampled->run(2);
 
-  CHECK(sampled->get_stats().decision_visits <
-        full->get_stats().decision_visits);
+  CHECK(sampled->stats().decision_visits <
+        full->stats().decision_visits);
   CHECK(sampled->game().model == full->game().model);
-  CHECK(sampled->get_iterations_run() == 2);
+  CHECK(sampled->iterations() == 2);
   CHECK(sampled->extract_average_policy().ok());
 }
 
@@ -268,21 +268,21 @@ TEST_CASE("history tree stores direct rule transitions") {
 
 TEST_CASE("training mutates only CFR state") {
   auto solver = MakeSolver(Config(), R(kA), R(kB));
-  const size_t history_count = solver->get_history_count();
+  const size_t history_count = solver->history_count();
   solver->run(4);
-  CHECK(solver->get_iterations_run() == 4);
-  CHECK(solver->get_info_set_count() > 0);
-  CHECK(solver->get_stats().decision_visits > 0);
-  CHECK(std::isfinite(solver->get_expected_value(Player::A)));
-  CHECK(solver->get_history_count() == history_count);
+  CHECK(solver->iterations() == 4);
+  CHECK(solver->info_set_count() > 0);
+  CHECK(solver->stats().decision_visits > 0);
+  CHECK(std::isfinite(solver->expected_value(Player::A)));
+  CHECK(solver->history_count() == history_count);
 
   const CfrState before = CFRSolverTestAccess::state(*solver);
-  const uint64_t updates = solver->get_stats().decision_visits;
+  const uint64_t updates = solver->stats().decision_visits;
   const auto value = solver->evaluate_average(kA, kB);
   REQUIRE(value.ok());
   CHECK(std::isfinite(*value));
-  CHECK(solver->get_history_count() == history_count);
-  CHECK(solver->get_stats().decision_visits == updates);
+  CHECK(solver->history_count() == history_count);
+  CHECK(solver->stats().decision_visits == updates);
   CHECK(CFRSolverTestAccess::state(*solver).row_entries() ==
         before.row_entries());
   CHECK(CFRSolverTestAccess::state(*solver).regret_sum == before.regret_sum);
@@ -362,16 +362,16 @@ TEST_CASE("postflop roots use full observation identity") {
 TEST_CASE("training continues after the infoset cap is reached") {
   auto solver = MakeSolver(Config(true, 1), R(kA), R(kB));
   solver->run(2);
-  CHECK(solver->get_iterations_run() == 2);
-  CHECK(solver->get_info_set_count() == 1);
+  CHECK(solver->iterations() == 2);
+  CHECK(solver->info_set_count() == 1);
 }
 
 TEST_CASE("parallel training updates a fixed-capacity table") {
   auto solver = MakeSolver(Config(true, 1), R(kA), R(kB));
   solver->run(20, 4);
-  CHECK(solver->get_iterations_run() == 20);
-  CHECK(solver->get_info_set_count() == 1);
-  CHECK(solver->get_stats().decision_visits > 0);
+  CHECK(solver->iterations() == 20);
+  CHECK(solver->info_set_count() == 1);
+  CHECK(solver->stats().decision_visits > 0);
   const CfrState& state = CFRSolverTestAccess::state(*solver);
   CHECK(std::ranges::all_of(state.regret_sum, [](float value) {
     return std::isfinite(value) && value >= 0.0f;

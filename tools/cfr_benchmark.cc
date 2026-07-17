@@ -175,21 +175,21 @@ int main(int argc, char** argv) {
       return size_t{0};
     }
     solver = std::move(*result);
-    return solver->get_history_count();
+    return solver->history_count();
   });
   if (!build_error.empty()) {
     std::cerr << "Error: " << build_error << '\n';
     return 1;
   }
   if (progress_interval > 0) {
-    std::cerr << "history_nodes\t" << solver->get_history_count() << '\n';
+    std::cerr << "history_nodes\t" << solver->history_count() << '\n';
   }
   const uint64_t prefill_iterations =
       absl::GetFlag(FLAGS_prefill_iterations);
   if (prefill_iterations > 0) {
     Measure("prefill", [&] {
       solver->run(prefill_iterations);
-      return solver->get_info_set_count();
+      return solver->info_set_count();
     });
     solver->reset_stats();
   }
@@ -201,13 +201,13 @@ int main(int argc, char** argv) {
       if (progress_interval == 0) {
         solver->run(iterations, threads);
       } else {
-        while (solver->get_iterations_run() < iterations) {
+        while (solver->iterations() < iterations) {
           const uint64_t batch = std::min(
               progress_interval,
-              iterations - solver->get_iterations_run());
+              iterations - solver->iterations());
           solver->run(batch, threads);
           std::cerr << "training_iterations\t"
-                    << solver->get_iterations_run() << '\n';
+                    << solver->iterations() << '\n';
         }
       }
     } else {
@@ -216,26 +216,26 @@ int main(int argc, char** argv) {
       while (std::chrono::steady_clock::now() < deadline) {
         solver->run(static_cast<uint64_t>(threads), threads);
         if (progress_interval > 0 &&
-            solver->get_iterations_run() % progress_interval == 0) {
+            solver->iterations() % progress_interval == 0) {
           std::cerr << "training_iterations\t"
-                    << solver->get_iterations_run() << '\n';
+                    << solver->iterations() << '\n';
         }
       }
     }
-    return solver->get_expected_value(poker::Player::A);
+    return solver->expected_value(poker::Player::A);
   });
-  const auto training = solver->get_stats();
-  std::cout << "iterations\t" << solver->get_iterations_run() << '\n'
+  const auto training = solver->stats();
+  std::cout << "iterations\t" << solver->iterations() << '\n'
             << "threads\t" << threads << '\n'
             << "decision_visits\t" << training.decision_visits << '\n'
             << "decision_visits_per_second\t"
             << Rate(training.decision_visits, training_seconds) << '\n'
             << "chance_samples\t" << training.chance_samples << '\n'
             << "terminal_visits\t" << training.terminal_visits << '\n'
-            << "infosets\t" << solver->get_info_set_count() << '\n'
-            << "history_nodes\t" << solver->get_history_count() << '\n'
-            << "regret_bytes\t" << solver->get_regret_bytes() << '\n'
-            << "strategy_bytes\t" << solver->get_strategy_bytes() << '\n';
+            << "infosets\t" << solver->info_set_count() << '\n'
+            << "history_nodes\t" << solver->history_count() << '\n'
+            << "regret_bytes\t" << solver->regret_bytes() << '\n'
+            << "strategy_bytes\t" << solver->strategy_bytes() << '\n';
 
   if (!absl::GetFlag(FLAGS_evaluate)) return 0;
 

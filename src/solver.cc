@@ -850,7 +850,7 @@ absl::StatusOr<Policy> CFRSolver::extract_average_policy() const {
   return ExtractAveragePolicy(state_, game_.history, game_.model);
 }
 
-double CFRSolver::get_expected_value(Player player) const {
+double CFRSolver::expected_value(Player player) const {
   if (state_.iterations == 0) return 0.0;
   const double player_a_ev = state_.cumulative_root_utility / state_.iterations;
   return player == Player::A ? player_a_ev : -player_a_ev;

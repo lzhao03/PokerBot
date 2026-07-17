@@ -177,17 +177,17 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
 void PrintRunSummary(const poker::CFRSolver& solver,
                      const poker::SolverConfig& config,
                      double seconds) {
-  const size_t info_sets = solver.get_info_set_count();
-  const size_t history_nodes = solver.get_history_count();
-  const uint64_t visits = solver.get_stats().decision_visits;
+  const size_t info_sets = solver.info_set_count();
+  const size_t history_nodes = solver.history_count();
+  const uint64_t visits = solver.stats().decision_visits;
 
-  std::cout << "iterations=" << solver.get_iterations_run() << "\n";
+  std::cout << "iterations=" << solver.iterations() << "\n";
   std::cout << "info_sets=" << info_sets << "\n";
   std::cout << "max_info_sets=" << config.max_info_sets << "\n";
   std::cout << "info_set_cap_hit="
             << (info_sets >= static_cast<size_t>(config.max_info_sets))
             << "\n";
-  std::cout << "player_a_ev=" << solver.get_expected_value(poker::Player::A)
+  std::cout << "player_a_ev=" << solver.expected_value(poker::Player::A)
             << "\n";
   std::cout << "seconds=" << seconds << "\n";
   std::cout << "history_nodes=" << history_nodes << "\n";
