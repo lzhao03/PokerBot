@@ -11,7 +11,6 @@
 #include <optional>
 #include <random>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include <torch/torch.h>
@@ -92,14 +91,13 @@ FeatureVector Features(const NetworkInput& input) {
   return features;
 }
 
-template <typename Sample>
 class Reservoir {
  public:
   explicit Reservoir(size_t capacity) : capacity_(capacity) {
     samples_.reserve(capacity);
   }
 
-  void add(Sample sample, std::mt19937& rng) {
+  void add(NetworkSample sample, std::mt19937& rng) {
     const uint64_t index = seen_++;
     if (samples_.size() < capacity_) {
       samples_.push_back(std::move(sample));
@@ -113,12 +111,14 @@ class Reservoir {
   }
 
   size_t size() const noexcept { return samples_.size(); }
-  const Sample& operator[](size_t index) const { return samples_[index]; }
+  const NetworkSample& operator[](size_t index) const {
+    return samples_[index];
+  }
 
  private:
   size_t capacity_;
   uint64_t seen_ = 0;
-  std::vector<Sample> samples_;
+  std::vector<NetworkSample> samples_;
 };
 
 struct CfrNetImpl : torch::nn::Module {
@@ -227,14 +227,14 @@ absl::Status TorchError(const std::exception& error) {
 }  // namespace
 
 struct DeepCfrSolver::Impl {
-  using UpdateHandle = std::monostate;
+  struct UpdateHandle {};
 
   Impl(CompiledGame compiled_game, DeepCfrConfig deep_config)
       : game(std::move(compiled_game)),
         config(deep_config),
         advantage_memory{
-            Reservoir<NetworkSample>(config.advantage_memory_capacity),
-            Reservoir<NetworkSample>(config.advantage_memory_capacity)},
+            Reservoir(config.advantage_memory_capacity),
+            Reservoir(config.advantage_memory_capacity)},
         strategy_memory(config.strategy_memory_capacity),
         advantage_network{
             CfrNet(config.hidden_size),
@@ -317,7 +317,7 @@ struct DeepCfrSolver::Impl {
   }
 
   float train_network(CfrNet& network,
-                      const Reservoir<NetworkSample>& memory,
+                      const Reservoir& memory,
                       uint64_t seed,
                       NetworkTarget target_kind) {
     if (memory.size() == 0) return 0.0f;
@@ -454,8 +454,8 @@ struct DeepCfrSolver::Impl {
 
   CompiledGame game;
   DeepCfrConfig config;
-  std::array<Reservoir<NetworkSample>, kPlayerCount> advantage_memory;
-  Reservoir<NetworkSample> strategy_memory;
+  std::array<Reservoir, kPlayerCount> advantage_memory;
+  Reservoir strategy_memory;
   std::array<CfrNet, kPlayerCount> advantage_network;
   CfrNet policy_network;
   std::array<bool, kPlayerCount> advantage_trained = {};
