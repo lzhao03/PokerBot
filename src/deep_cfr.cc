@@ -342,8 +342,11 @@ struct DeepCfrSolver::Impl {
                       UpdateHandle,
                       std::span<const float> regrets) {
     NetworkSample sample{decision.key};
-    std::copy(regrets.begin(), regrets.end(), sample.target.begin());
-    sample.weight = static_cast<float>(decision.iteration + 1);
+    const BettingData& betting = decision.state.data;
+    const float scale = 1.0f / static_cast<float>(
+        Pot(betting) + betting.stack[0] + betting.stack[1]);
+    std::ranges::transform(regrets, sample.target.begin(),
+                           [scale](float regret) { return regret * scale; });
     advantage_memory[Index(decision.state.actor)].add(
         std::move(sample), reservoir_rng);
   }
