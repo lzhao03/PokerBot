@@ -327,19 +327,22 @@ void CfrState::strategy(absl::Span<const float> values,
 }
 
 CfrState::CfrState(const SolverConfig& config,
+                   size_t history_count,
                    bool accumulate_average_strategy)
     : max_info_sets_(static_cast<size_t>(config.max_info_sets)),
       accumulate_average_strategy_(accumulate_average_strategy) {
+  assert(history_count > 0);
   const CardAbstractionConfig& cards = config.card_abstraction;
-  packed_keys_ = cards.public_mode != PublicCardMode::ExactCanonical;
-  if (packed_keys_) {
+  if (cards.public_mode != PublicCardMode::ExactCanonical) {
     private_bits_ = cards.private_kind == PrivateAbstractionKind::ExactCanonical
                         ? 11
                         : cards.recall_mode == RecallMode::CurrentBucketOnly
                               ? 6
                               : 21;
-    history_bits_ = std::min<uint8_t>(
-        32, static_cast<uint8_t>(43 - private_bits_));
+    const uint8_t required_history_bits =
+        static_cast<uint8_t>(std::bit_width(history_count - 1));
+    history_bits_ = std::min<uint8_t>(32, 43 - private_bits_);
+    packed_keys_ = required_history_bits <= history_bits_;
   }
   size_t max_actions = 3;
   for (const auto& fractions : config.bet_abstraction.pot_fractions) {
@@ -354,14 +357,6 @@ CfrState::CfrState(const SolverConfig& config,
   if (accumulate_average_strategy) {
     strategy_sum.reserve(max_info_sets_ * max_actions);
   }
-}
-
-bool CfrState::can_pack(InfoSetKey key) const {
-  constexpr uint64_t kPublicMask = (uint64_t{1} << 21) - 1;
-  const auto mask = [](uint8_t bits) { return (uint64_t{1} << bits) - 1; };
-  return std::to_underlying(key.public_observation) <= kPublicMask &&
-         std::to_underlying(key.history) <= mask(history_bits_) &&
-         std::to_underlying(key.private_observation) <= mask(private_bits_);
 }
 
 uint64_t CfrState::pack(InfoSetKey key) const {
@@ -380,22 +375,12 @@ InfoSetKey CfrState::unpack(uint64_t key) const {
       PrivateObservationId(static_cast<uint32_t>(key & mask(private_bits_)))};
 }
 
-void CfrState::use_full_keys() {
-  full_rows_.reserve(max_info_sets_);
-  for (const auto& [key, offset] : packed_rows_) {
-    full_rows_.try_emplace(unpack(key), offset);
-  }
-  packed_rows_ = {};
-  packed_keys_ = false;
-}
-
 size_t CfrState::row_count() const {
   return packed_keys_ ? packed_rows_.size() : full_rows_.size();
 }
 
 std::optional<size_t> CfrState::find(InfoSetKey key) const {
   if (packed_keys_) {
-    if (!can_pack(key)) return std::nullopt;
     const auto found = packed_rows_.find(pack(key));
     return found == packed_rows_.end() ? std::nullopt
                                        : std::optional(found->second);
@@ -422,7 +407,6 @@ std::vector<std::pair<InfoSetKey, size_t>> CfrState::row_entries() const {
 std::optional<size_t> CfrState::find_or_create(
     InfoSetKey key,
     uint8_t action_count) {
-  if (packed_keys_ && !can_pack(key)) use_full_keys();
   auto insert = [&](auto& rows, auto row_key) -> std::optional<size_t> {
     if (rows.size() >= max_info_sets_) {
       const auto found = rows.find(row_key);
@@ -592,7 +576,8 @@ ComboRange UniformComboRange() {
 TabularCfrSolver::TabularCfrSolver(CompiledGame game)
     : game_(std::move(game)),
       rng_(12345),
-      state_(game_.config, game_.config.accumulate_average_strategy) {}
+      state_(game_.config, game_.history.nodes.size(),
+             game_.config.accumulate_average_strategy) {}
 
 absl::StatusOr<CompiledGame> CompileGame(SolveSpec spec) {
   auto config = SolverConfig::Create(std::move(spec.config));

@@ -98,6 +98,7 @@ static_assert(sizeof(InfoSetKey) == 16);
 
 struct CfrState {
   CfrState(const SolverConfig& config,
+           size_t history_count,
            bool accumulate_average_strategy);
 
   std::vector<float> regret_sum;
@@ -126,10 +127,8 @@ struct CfrState {
       uint8_t action_count);
 
  private:
-  bool can_pack(InfoSetKey key) const;
   uint64_t pack(InfoSetKey key) const;
   InfoSetKey unpack(uint64_t key) const;
-  void use_full_keys();
 
   absl::flat_hash_map<uint64_t, size_t> packed_rows_;
   absl::flat_hash_map<InfoSetKey, size_t> full_rows_;

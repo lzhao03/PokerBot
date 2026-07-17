@@ -223,7 +223,7 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
         "opponent policy model does not match game");
   }
 
-  CfrState response_state(game.config, true);
+  CfrState response_state(game.config, game.history.nodes.size(), true);
   std::mt19937 rng = MakeEvaluationRng(config.seed);
   ResponseBackend backend{responder, opponent, response_state};
   SolverStats stats;
