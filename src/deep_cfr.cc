@@ -23,12 +23,12 @@
 namespace poker {
 namespace {
 
-constexpr size_t kIdentityFeatureCount = 32 + 64 + 32;
+constexpr size_t kIdentityFeatureCount = 32;
 constexpr std::array<size_t, 3> kCompactPublicBuckets = {16, 16, 64};
-constexpr size_t kCompactPublicFeatureCount = 16 + 16 + 64;
+constexpr size_t kPublicFeatureCount = 16 + 16 + 64;
 constexpr size_t kPrivateFeatureCount = 36;
 constexpr size_t kFeatureCount =
-    kIdentityFeatureCount + kCompactPublicFeatureCount +
+    kIdentityFeatureCount + kPublicFeatureCount +
     kPrivateFeatureCount + 15;
 
 using FeatureVector = std::array<float, kFeatureCount>;
@@ -39,6 +39,20 @@ enum class NetworkTarget : uint8_t {
   AveragePolicy,
   CurrentPolicy,
 };
+
+constexpr uint32_t CurrentPrivateBucket(PrivateObservationId observation,
+                                        StreetKind street,
+                                        RecallMode recall) noexcept {
+  const uint32_t value = std::to_underlying(observation);
+  if (recall == RecallMode::CurrentBucketOnly) return value;
+  constexpr std::array<uint32_t, 4> places = {
+      1, 37, 37 * 37, 37 * 37 * 37};
+  return (value / places[std::to_underlying(street)]) % 37;
+}
+
+static_assert(CurrentPrivateBucket(PrivateObservationId{17},
+                                   StreetKind::River,
+                                   RecallMode::CurrentBucketOnly) == 17);
 
 struct NetworkSample {
   InfoSetKey key;
@@ -59,9 +73,8 @@ FeatureVector Features(InfoSetKey key,
     }
   };
   append_bits(std::to_underlying(key.history));
-  append_bits(std::to_underlying(key.public_observation));
-  append_bits(std::to_underlying(key.private_observation));
 
+  const size_t public_begin = output;
   if (config.card_abstraction.public_mode == PublicCardMode::CompactTexture) {
     const uint64_t observation = std::to_underlying(key.public_observation);
     size_t bucket_offset = 0;
@@ -72,19 +85,22 @@ FeatureVector Features(InfoSetKey key,
       }
       bucket_offset += kCompactPublicBuckets[street];
     }
+  } else {
+    append_bits(std::to_underlying(key.public_observation));
   }
-  output += kCompactPublicFeatureCount;
+  output = public_begin + kPublicFeatureCount;
 
+  const size_t private_begin = output;
   if (config.card_abstraction.private_kind ==
       PrivateAbstractionKind::Handcrafted36) {
-    constexpr std::array<uint32_t, 4> places = {
-        1, 37, 37 * 37, 37 * 37 * 37};
-    const size_t street = std::to_underlying(betting.street);
-    const uint32_t bucket =
-        (std::to_underlying(key.private_observation) / places[street]) % 37;
+    const uint32_t bucket = CurrentPrivateBucket(
+        key.private_observation, betting.street,
+        config.card_abstraction.recall_mode);
     if (bucket != 0) features[output + bucket - 1] = 1.0f;
+  } else {
+    append_bits(std::to_underlying(key.private_observation));
   }
-  output += kPrivateFeatureCount;
+  output = private_begin + kPrivateFeatureCount;
 
   features[output++] = decision.actor == Player::B ? 1.0f : 0.0f;
   features[output++] =
