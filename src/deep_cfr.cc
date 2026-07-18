@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -14,121 +13,13 @@
 #include <utility>
 #include <vector>
 
-#include <Accelerate/Accelerate.h>
-#include <torch/torch.h>
-
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "src/cfr_traversal.h"
+#include "src/neural_policy.h"
 
 namespace poker {
 namespace {
-
-constexpr size_t kIdentityFeatureCount = 32;
-constexpr std::array<size_t, 3> kCompactPublicBuckets = {16, 16, 64};
-constexpr size_t kPublicFeatureCount = 16 + 16 + 64;
-constexpr size_t kPrivateFeatureCount = 36;
-constexpr size_t kFeatureCount =
-    kIdentityFeatureCount + kPublicFeatureCount +
-    kPrivateFeatureCount + 15;
-
-using FeatureVector = std::array<float, kFeatureCount>;
-using ActionVector = std::array<float, kMaxActionsPerNode>;
-
-enum class NetworkTarget : uint8_t {
-  Advantage,
-  AveragePolicy,
-  CurrentPolicy,
-};
-
-constexpr uint32_t CurrentPrivateBucket(PrivateObservationId observation,
-                                        StreetKind street,
-                                        RecallMode recall) noexcept {
-  const uint32_t value = std::to_underlying(observation);
-  if (recall == RecallMode::CurrentBucketOnly) return value;
-  constexpr std::array<uint32_t, 4> places = {
-      1, 37, 37 * 37, 37 * 37 * 37};
-  return (value / places[std::to_underlying(street)]) % 37;
-}
-
-static_assert(CurrentPrivateBucket(PrivateObservationId{17},
-                                   StreetKind::River,
-                                   RecallMode::CurrentBucketOnly) == 17);
-
-struct NetworkSample {
-  InfoSetKey key;
-  ActionVector target = {};
-  float weight = 1.0f;
-};
-
-FeatureVector Features(InfoSetKey key,
-                       const HistoryNode& node,
-                       const SolverConfig& config) {
-  const DecisionState& decision = std::get<DecisionState>(node.state);
-  const BettingData& betting = decision.data;
-  FeatureVector features = {};
-  size_t output = 0;
-  const auto append_bits = [&](auto value) {
-    for (size_t bit = 0; bit < sizeof(value) * 8; ++bit) {
-      features[output++] = static_cast<float>((value >> bit) & 1);
-    }
-  };
-  append_bits(std::to_underlying(key.history));
-
-  const size_t public_begin = output;
-  if (config.card_abstraction.public_mode == PublicCardMode::CompactTexture) {
-    const uint64_t observation = std::to_underlying(key.public_observation);
-    size_t bucket_offset = 0;
-    for (size_t street = 0; street < kCompactPublicBuckets.size(); ++street) {
-      const uint64_t bucket = (observation >> (street * 7)) & 0x7f;
-      if (bucket != 0) {
-        features[output + bucket_offset + bucket - 1] = 1.0f;
-      }
-      bucket_offset += kCompactPublicBuckets[street];
-    }
-  } else {
-    append_bits(std::to_underlying(key.public_observation));
-  }
-  output = public_begin + kPublicFeatureCount;
-
-  const size_t private_begin = output;
-  if (config.card_abstraction.private_kind ==
-      PrivateAbstractionKind::Handcrafted36) {
-    const uint32_t bucket = CurrentPrivateBucket(
-        key.private_observation, betting.street,
-        config.card_abstraction.recall_mode);
-    if (bucket != 0) features[output + bucket - 1] = 1.0f;
-  } else {
-    append_bits(std::to_underlying(key.private_observation));
-  }
-  output = private_begin + kPrivateFeatureCount;
-
-  features[output++] = decision.actor == Player::B ? 1.0f : 0.0f;
-  features[output++] =
-      static_cast<float>(node.child_count) / kMaxActionsPerNode;
-  for (StreetKind street : {StreetKind::Preflop, StreetKind::Flop,
-                            StreetKind::Turn, StreetKind::River}) {
-    features[output++] = betting.street == street ? 1.0f : 0.0f;
-  }
-
-  const Chips total_chips =
-      Pot(betting) + betting.stack[0] + betting.stack[1];
-  const float chip_scale = 1.0f / std::max(Chips{1}, total_chips);
-  for (Chips value : betting.stack) {
-    features[output++] = value * chip_scale;
-  }
-  for (Chips value : betting.total_committed) {
-    features[output++] = value * chip_scale;
-  }
-  for (Chips value : betting.street_committed) {
-    features[output++] = value * chip_scale;
-  }
-  features[output++] = betting.last_full_raise * chip_scale;
-  features[output++] = betting.actions_remaining / 2.0f;
-  features[output++] = Pot(betting) * chip_scale;
-  assert(output == features.size());
-  return features;
-}
 
 class Reservoir {
  public:
@@ -136,7 +27,7 @@ class Reservoir {
     samples_.reserve(capacity);
   }
 
-  void add(NetworkSample sample, std::mt19937& rng) {
+  void add(NeuralSample sample, std::mt19937& rng) {
     const uint64_t index = seen_++;
     if (samples_.size() < capacity_) {
       samples_.push_back(std::move(sample));
@@ -150,121 +41,15 @@ class Reservoir {
   }
 
   size_t size() const noexcept { return samples_.size(); }
-  const NetworkSample& operator[](size_t index) const {
-    return samples_[index];
+  std::span<const NeuralSample> samples() const noexcept {
+    return samples_;
   }
 
  private:
   size_t capacity_;
   uint64_t seen_ = 0;
-  std::vector<NetworkSample> samples_;
+  std::vector<NeuralSample> samples_;
 };
-
-struct CfrNetImpl : torch::nn::Module {
-  explicit CfrNetImpl(int hidden_size)
-      : hidden1(register_module(
-            "hidden1", torch::nn::Linear(kFeatureCount, hidden_size))),
-        hidden2(register_module(
-            "hidden2", torch::nn::Linear(hidden_size, hidden_size))),
-        hidden3(register_module(
-            "hidden3", torch::nn::Linear(hidden_size, hidden_size))),
-        output(register_module(
-            "output", torch::nn::Linear(hidden_size, kMaxActionsPerNode))) {
-    torch::nn::init::zeros_(output->weight);
-    torch::nn::init::zeros_(output->bias);
-  }
-
-  torch::Tensor forward(torch::Tensor input) {
-    input = torch::relu(hidden1->forward(std::move(input)));
-    input = torch::relu(hidden2->forward(std::move(input)));
-    input = torch::relu(hidden3->forward(std::move(input)));
-    return output->forward(std::move(input));
-  }
-
-  torch::nn::Linear hidden1;
-  torch::nn::Linear hidden2;
-  torch::nn::Linear hidden3;
-  torch::nn::Linear output;
-};
-TORCH_MODULE(CfrNet);
-
-size_t ParameterBytes(const CfrNet& network) {
-  size_t bytes = 0;
-  for (const torch::Tensor& parameter : network->parameters()) {
-    bytes += static_cast<size_t>(parameter.numel()) *
-             static_cast<size_t>(parameter.element_size());
-  }
-  return bytes;
-}
-
-void FillUniform(std::span<float> probabilities) {
-  std::fill(probabilities.begin(), probabilities.end(),
-            1.0f / static_cast<float>(probabilities.size()));
-}
-
-void RegretMatch(std::span<const float> advantages,
-                 std::span<float> probabilities) {
-  float sum = 0.0f;
-  for (size_t action = 0; action < probabilities.size(); ++action) {
-    probabilities[action] = std::max(0.0f, advantages[action]);
-    sum += probabilities[action];
-  }
-  if (!std::isfinite(sum) || sum <= 0.0f) {
-    FillUniform(probabilities);
-    return;
-  }
-  for (float& probability : probabilities) probability /= sum;
-}
-
-void Softmax(std::span<const float> logits,
-             std::span<float> probabilities) {
-  const float maximum =
-      std::ranges::max(logits.first(probabilities.size()));
-  float sum = 0.0f;
-  for (size_t action = 0; action < probabilities.size(); ++action) {
-    probabilities[action] = std::exp(logits[action] - maximum);
-    sum += probabilities[action];
-  }
-  if (!std::isfinite(sum) || sum <= 0.0f) {
-    FillUniform(probabilities);
-    return;
-  }
-  for (float& probability : probabilities) probability /= sum;
-}
-
-void Linear(const torch::nn::Linear& layer,
-            std::span<const float> input,
-            std::span<float> output) {
-  assert(layer->weight.size(0) == static_cast<int64_t>(output.size()));
-  assert(layer->weight.size(1) == static_cast<int64_t>(input.size()));
-  std::copy_n(layer->bias.data_ptr<float>(), output.size(), output.begin());
-  cblas_sgemv(CblasRowMajor, CblasNoTrans, static_cast<int>(output.size()),
-              static_cast<int>(input.size()), 1.0f,
-              layer->weight.data_ptr<float>(), static_cast<int>(input.size()),
-              input.data(), 1, 1.0f, output.data(), 1);
-}
-
-void Relu(std::span<float> values) {
-  for (float& value : values) value = std::max(0.0f, value);
-}
-
-ActionVector Predict(CfrNet& network,
-                     const CompiledGame& game,
-                     InfoSetKey key,
-                     std::span<float> hidden_a,
-                     std::span<float> hidden_b) {
-  const FeatureVector features =
-      Features(key, game.history.nodes[Index(key.history)], game.config);
-  Linear(network->hidden1, features, hidden_a);
-  Relu(hidden_a);
-  Linear(network->hidden2, hidden_a, hidden_b);
-  Relu(hidden_b);
-  Linear(network->hidden3, hidden_b, hidden_a);
-  Relu(hidden_a);
-  ActionVector values = {};
-  Linear(network->output, hidden_a, values);
-  return values;
-}
 
 uint64_t NetworkSeed(uint64_t base,
                      uint64_t iteration,
@@ -320,8 +105,8 @@ struct DeepCfrSolver::Impl {
             Reservoir(config.advantage_memory_capacity)},
         strategy_memory(config.strategy_memory_capacity),
         advantage_network{
-            CfrNet(config.hidden_size),
-            CfrNet(config.hidden_size)},
+            NeuralNetwork(config.hidden_size),
+            NeuralNetwork(config.hidden_size)},
         policy_network(config.hidden_size),
         inference_hidden{
             std::vector<float>(static_cast<size_t>(config.hidden_size)),
@@ -331,7 +116,7 @@ struct DeepCfrSolver::Impl {
     for (auto& cache : advantage_cache) {
       cache.reserve(config.inference_cache_capacity);
     }
-    stats.policy_parameter_bytes = ParameterBytes(policy_network);
+    stats.policy_parameter_bytes = NeuralParameterBytes(policy_network);
   }
 
   std::optional<UpdateHandle> current_strategy(
@@ -342,7 +127,7 @@ struct DeepCfrSolver::Impl {
     if (!advantage_trained[player]) {
       FillUniform(probabilities);
     } else {
-      const ActionVector values = cached_prediction(
+      const NeuralActionVector values = cached_prediction(
           advantage_network[player], advantage_cache[player], decision.key,
           inference_hidden, config.inference_cache_capacity,
           stats.network_evaluations, stats.cache_hits);
@@ -368,7 +153,7 @@ struct DeepCfrSolver::Impl {
   bool policy_strategy(
       InfoSetKey key,
       std::span<float> probabilities,
-      absl::flat_hash_map<InfoSetKey, ActionVector>& cache,
+      absl::flat_hash_map<InfoSetKey, NeuralActionVector>& cache,
       std::array<std::vector<float>, 2>& hidden,
       uint64_t& network_evaluations,
       uint64_t& cache_hits) {
@@ -376,7 +161,7 @@ struct DeepCfrSolver::Impl {
       FillUniform(probabilities);
       return false;
     }
-    const ActionVector logits =
+    const NeuralActionVector logits =
         cached_prediction(policy_network, cache, key, hidden,
                           config.policy_cache_capacity,
                           network_evaluations, cache_hits);
@@ -437,7 +222,7 @@ struct DeepCfrSolver::Impl {
   void record_regrets(const internal::DecisionView& decision,
                       UpdateHandle,
                       std::span<const float> regrets) {
-    NetworkSample sample{decision.key};
+    NeuralSample sample{decision.key};
     const BettingData& betting = decision.state.data;
     const float scale = 1.0f / static_cast<float>(
         Pot(betting) + betting.stack[0] + betting.stack[1]);
@@ -451,7 +236,7 @@ struct DeepCfrSolver::Impl {
                        UpdateHandle,
                        std::span<const float> probabilities,
                        double weight) {
-    NetworkSample sample{decision.key};
+    NeuralSample sample{decision.key};
     std::copy(probabilities.begin(), probabilities.end(),
               sample.target.begin());
     sample.weight = static_cast<float>(
@@ -459,9 +244,9 @@ struct DeepCfrSolver::Impl {
     strategy_memory.add(std::move(sample), reservoir_rng);
   }
 
-  ActionVector cached_prediction(
-      CfrNet& network,
-      absl::flat_hash_map<InfoSetKey, ActionVector>& cache,
+  NeuralActionVector cached_prediction(
+      NeuralNetwork& network,
+      absl::flat_hash_map<InfoSetKey, NeuralActionVector>& cache,
       InfoSetKey key,
       std::array<std::vector<float>, 2>& hidden,
       size_t capacity,
@@ -473,100 +258,27 @@ struct DeepCfrSolver::Impl {
       return found->second;
     }
     ++network_evaluations;
-    const ActionVector values = Predict(
-        network, game, key, hidden[0], hidden[1]);
+    const NeuralActionVector values =
+        PredictNeuralNetwork(network, game, key, hidden);
     if (cache.size() < capacity) {
       cache.emplace(key, values);
     }
     return values;
   }
 
-  float train_network(CfrNet& network,
+  float train_network(NeuralNetwork& network,
                       const Reservoir& memory,
                       uint64_t seed,
-                      NetworkTarget target_kind,
+                      NeuralTarget target_kind,
                       int training_steps) {
-    if (memory.size() == 0) return 0.0f;
-
-    torch::manual_seed(seed);
-    network = CfrNet(config.hidden_size);
-    network->train();
-    torch::optim::Adam optimizer(
-        network->parameters(),
-        torch::optim::AdamOptions(config.learning_rate));
-
-    const size_t batch_size = std::min(
-        static_cast<size_t>(config.batch_size), memory.size());
-    std::vector<float> inputs(batch_size * kFeatureCount);
-    std::vector<float> targets(batch_size * kMaxActionsPerNode);
-    std::vector<float> masks(batch_size * kMaxActionsPerNode);
-    std::vector<float> weights(batch_size);
-    std::vector<float> player_b(batch_size);
-    const auto options = torch::TensorOptions().dtype(torch::kFloat32);
-    std::uniform_int_distribution<size_t> sample_index(0, memory.size() - 1);
-    std::mt19937 batch_rng = MakeRng(seed);
-    float final_loss = 0.0f;
-
-    for (int step = 0; step < training_steps; ++step) {
-      std::fill(masks.begin(), masks.end(), 0.0f);
-      for (size_t row = 0; row < batch_size; ++row) {
-        const NetworkSample& sample = memory[sample_index(batch_rng)];
-        const HistoryNode& node =
-            game.history.nodes[Index(sample.key.history)];
-        const FeatureVector features =
-            Features(sample.key, node, game.config);
-        std::copy(features.begin(), features.end(),
-                  inputs.data() + row * kFeatureCount);
-        std::copy(sample.target.begin(), sample.target.end(),
-                  targets.data() + row * kMaxActionsPerNode);
-        std::fill_n(masks.data() + row * kMaxActionsPerNode,
-                    node.child_count, 1.0f);
-        weights[row] = sample.weight;
-        player_b[row] = std::get<DecisionState>(node.state).actor == Player::B;
-      }
-
-      const torch::Tensor input = torch::from_blob(
-          inputs.data(), {static_cast<int64_t>(batch_size), kFeatureCount},
-          options);
-      torch::Tensor target = torch::from_blob(
-          targets.data(),
-          {static_cast<int64_t>(batch_size), kMaxActionsPerNode}, options);
-      const torch::Tensor mask = torch::from_blob(
-          masks.data(),
-          {static_cast<int64_t>(batch_size), kMaxActionsPerNode}, options);
-      const torch::Tensor weight = torch::from_blob(
-          weights.data(), {static_cast<int64_t>(batch_size)}, options);
-
-      if (target_kind == NetworkTarget::CurrentPolicy) {
-        const torch::Tensor use_player_b = torch::from_blob(
-            player_b.data(), {static_cast<int64_t>(batch_size), 1}, options);
-        torch::NoGradGuard no_grad;
-        const torch::Tensor advantages =
-            advantage_network[0]->forward(input) * (1.0f - use_player_b) +
-            advantage_network[1]->forward(input) * use_player_b;
-        const torch::Tensor positive = torch::relu(advantages) * mask;
-        const torch::Tensor sum = positive.sum(1, true);
-        const torch::Tensor uniform = mask / mask.sum(1, true);
-        target = torch::where(sum > 0.0f, positive / sum.clamp_min(1e-12f),
-                              uniform);
-      }
-
-      optimizer.zero_grad();
-      torch::Tensor prediction = network->forward(input);
-      if (target_kind != NetworkTarget::Advantage) {
-        prediction = torch::softmax(
-            prediction + (mask - 1.0f) * 1e9f, 1);
-      }
-      const torch::Tensor squared_error =
-          (prediction - target).square() * mask;
-      const torch::Tensor loss =
-          (squared_error.sum(1) * weight).sum() / weight.sum();
-      loss.backward();
-      optimizer.step();
-      final_loss = loss.item<float>();
-    }
-    network->eval();
-    return final_loss;
+    return FitNeuralNetwork(
+        network, game, memory.samples(),
+        {.seed = seed,
+         .steps = training_steps,
+         .batch_size = config.batch_size,
+         .learning_rate = config.learning_rate},
+        target_kind,
+        {&advantage_network[0], &advantage_network[1]});
   }
 
   double traverse(const Deal& deal,
@@ -599,7 +311,7 @@ struct DeepCfrSolver::Impl {
         stats.advantage_loss[index] = train_network(
             advantage_network[index], advantage_memory[index],
             NetworkSeed(config.seed, iteration, index),
-            NetworkTarget::Advantage, config.training_steps);
+            NeuralTarget::Advantage, config.training_steps);
         advantage_trained[index] = true;
         advantage_cache[index].clear();
       }
@@ -609,8 +321,8 @@ struct DeepCfrSolver::Impl {
     stats.strategy_loss = train_network(
         policy_network, strategy_memory,
         NetworkSeed(config.seed, stats.iterations, kPlayerCount),
-        config.distill_current_policy ? NetworkTarget::CurrentPolicy
-                                      : NetworkTarget::AveragePolicy,
+        config.distill_current_policy ? NeuralTarget::CurrentPolicy
+                                      : NeuralTarget::AveragePolicy,
         config.policy_training_steps);
     policy_trained = strategy_memory.size() > 0;
     policy_cache.clear();
@@ -659,14 +371,14 @@ struct DeepCfrSolver::Impl {
   DeepCfrConfig config;
   std::array<Reservoir, kPlayerCount> advantage_memory;
   Reservoir strategy_memory;
-  std::array<CfrNet, kPlayerCount> advantage_network;
-  CfrNet policy_network;
+  std::array<NeuralNetwork, kPlayerCount> advantage_network;
+  NeuralNetwork policy_network;
   std::array<std::vector<float>, 2> inference_hidden;
   std::array<bool, kPlayerCount> advantage_trained = {};
   bool policy_trained = false;
-  std::array<absl::flat_hash_map<InfoSetKey, ActionVector>, kPlayerCount>
+  std::array<absl::flat_hash_map<InfoSetKey, NeuralActionVector>, kPlayerCount>
       advantage_cache;
-  absl::flat_hash_map<InfoSetKey, ActionVector> policy_cache;
+  absl::flat_hash_map<InfoSetKey, NeuralActionVector> policy_cache;
   std::mt19937 game_rng;
   std::mt19937 reservoir_rng;
   DeepCfrStats stats;
@@ -687,7 +399,7 @@ absl::StatusOr<DeepCfrSolver> DeepCfrSolver::Create(
   auto game = CompileGame(std::move(spec));
   if (!game.ok()) return game.status();
   try {
-    torch::manual_seed(config.seed);
+    SetNeuralSeed(config.seed);
     return DeepCfrSolver(
         std::make_unique<Impl>(std::move(*game), config));
   } catch (const std::exception& error) {
@@ -786,7 +498,7 @@ DeepCfrSolver::estimate_exploitability(
         InfoSetKey key, std::span<float> probabilities) {
       return impl_->policy_strategy(key, probabilities);
     };
-    absl::flat_hash_map<InfoSetKey, ActionVector> player_b_cache;
+    absl::flat_hash_map<InfoSetKey, NeuralActionVector> player_b_cache;
     player_b_cache.reserve(impl_->config.policy_cache_capacity);
     std::array<std::vector<float>, 2> player_b_hidden = {
         std::vector<float>(static_cast<size_t>(impl_->config.hidden_size)),
@@ -817,8 +529,7 @@ DeepCfrSolver::estimate_exploitability(
 absl::Status DeepCfrSolver::load_average_model(
     const std::filesystem::path& path) {
   try {
-    torch::load(impl_->policy_network, path.string());
-    impl_->policy_network->eval();
+    LoadNeuralNetwork(impl_->policy_network, path);
     impl_->policy_trained = true;
     impl_->policy_cache.clear();
     return absl::OkStatus();
@@ -833,7 +544,7 @@ absl::Status DeepCfrSolver::save_average_model(
     return absl::FailedPreconditionError("average policy has not been trained");
   }
   try {
-    torch::save(impl_->policy_network, path.string());
+    SaveNeuralNetwork(impl_->policy_network, path);
     return absl::OkStatus();
   } catch (const std::exception& error) {
     return TorchError(error);
