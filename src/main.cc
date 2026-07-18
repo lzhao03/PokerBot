@@ -8,12 +8,14 @@
 #include "absl/flags/usage.h"
 #include "absl/strings/numbers.h"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <sys/resource.h>
@@ -79,12 +81,22 @@ ABSL_FLAG(bool, deep_best_response_external_sampling, true,
 ABSL_FLAG(uint64_t, deep_seed, 1, "Deep CFR training seed");
 ABSL_FLAG(std::string, deep_model_output, "",
           "output path for the trained Deep CFR average model");
+ABSL_FLAG(uint64_t, deep_checkpoint_interval, 0,
+          "save a numbered Deep CFR model every N iterations; 0 disables");
 ABSL_FLAG(std::string, deep_model_input, "",
           "trained Deep CFR average model to load");
 ABSL_FLAG(std::string, deep_opponent_policy, "",
           "tabular policy to evaluate against the Deep CFR model");
 
 namespace {
+
+std::filesystem::path CheckpointPath(const std::string& output,
+                                     uint64_t iterations) {
+  const std::filesystem::path path(output);
+  return path.parent_path() /
+         (path.stem().string() + "_i" + std::to_string(iterations) +
+          path.extension().string());
+}
 
 void SetMemoryLimit(int64_t megabytes) {
   if (megabytes <= 0) {
@@ -266,12 +278,35 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
       return 1;
     }
   }
+  const std::string model_output = absl::GetFlag(FLAGS_deep_model_output);
+  const uint64_t checkpoint_interval =
+      absl::GetFlag(FLAGS_deep_checkpoint_interval);
+  if (checkpoint_interval > 0 && model_output.empty()) {
+    std::cerr << "Error: --deep_checkpoint_interval requires "
+                 "--deep_model_output\n";
+    return 1;
+  }
   const auto start = std::chrono::steady_clock::now();
-  if (iterations > 0) {
-    const absl::Status trained = solver->run(iterations);
+  uint64_t trained_iterations = 0;
+  while (trained_iterations < iterations) {
+    const uint64_t batch = checkpoint_interval == 0
+                               ? iterations
+                               : std::min(checkpoint_interval,
+                                          iterations - trained_iterations);
+    const absl::Status trained = solver->run(batch);
     if (!trained.ok()) {
       std::cerr << "Error: " << trained << '\n';
       return 1;
+    }
+    trained_iterations += batch;
+    if (checkpoint_interval > 0) {
+      const auto path = CheckpointPath(model_output, trained_iterations);
+      const absl::Status saved = solver->save_average_model(path);
+      if (!saved.ok()) {
+        std::cerr << "Error: " << saved << '\n';
+        return 1;
+      }
+      std::cout << "deep_checkpoint=" << path.string() << '\n' << std::flush;
     }
   }
   const auto value =
@@ -334,8 +369,7 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
                estimate->player_b_response.missing_opponent_lookups
         << '\n';
   }
-  const std::string model_output = absl::GetFlag(FLAGS_deep_model_output);
-  if (!model_output.empty()) {
+  if (!model_output.empty() && checkpoint_interval == 0) {
     const absl::Status saved = solver->save_average_model(model_output);
     if (!saved.ok()) {
       std::cerr << "Error: " << saved << '\n';
