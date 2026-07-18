@@ -67,7 +67,9 @@ ABSL_FLAG(bool, deep_distill_current_policy, false,
 ABSL_FLAG(uint64_t, deep_memory_capacity, 4096,
           "Deep CFR capacity of each reservoir");
 ABSL_FLAG(uint64_t, deep_cache_capacity, 4096,
-          "Deep CFR maximum cached neural strategies");
+          "Deep CFR maximum cached advantage-network predictions");
+ABSL_FLAG(uint64_t, deep_policy_cache_capacity, 2'000'000,
+          "Deep CFR maximum cached policy-network predictions");
 ABSL_FLAG(int, deep_evaluation_samples, 64,
           "Deals sampled for Deep CFR average-policy evaluation");
 ABSL_FLAG(uint64_t, deep_best_response_iterations, 0,
@@ -238,6 +240,8 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
       absl::GetFlag(FLAGS_deep_memory_capacity);
   config.inference_cache_capacity =
       absl::GetFlag(FLAGS_deep_cache_capacity);
+  config.policy_cache_capacity =
+      absl::GetFlag(FLAGS_deep_policy_cache_capacity);
   config.traversals_per_player =
       absl::GetFlag(FLAGS_deep_traversals_per_player);
   config.training_steps = absl::GetFlag(FLAGS_deep_training_steps);

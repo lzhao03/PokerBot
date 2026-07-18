@@ -13,6 +13,7 @@ DeepCfrConfig TinyDeepConfig() {
   config.advantage_memory_capacity = 128;
   config.strategy_memory_capacity = 128;
   config.inference_cache_capacity = 128;
+  config.policy_cache_capacity = 128;
   config.traversals_per_player = 8;
   config.training_steps = 4;
   config.policy_training_steps = 4;

@@ -331,7 +331,6 @@ struct DeepCfrSolver::Impl {
     for (auto& cache : advantage_cache) {
       cache.reserve(config.inference_cache_capacity);
     }
-    policy_cache.reserve(config.inference_cache_capacity);
     stats.policy_parameter_bytes = ParameterBytes(policy_network);
   }
 
@@ -344,7 +343,8 @@ struct DeepCfrSolver::Impl {
       FillUniform(probabilities);
     } else {
       const ActionVector values = cached_prediction(
-          advantage_network[player], advantage_cache[player], decision.key);
+          advantage_network[player], advantage_cache[player], decision.key,
+          config.inference_cache_capacity);
       RegretMatch(values, probabilities);
     }
     return access == internal::StrategyAccess::ReadOnly
@@ -364,7 +364,8 @@ struct DeepCfrSolver::Impl {
       return false;
     }
     const ActionVector logits =
-        cached_prediction(policy_network, policy_cache, key);
+        cached_prediction(policy_network, policy_cache, key,
+                          config.policy_cache_capacity);
     Softmax(logits, probabilities);
     return true;
   }
@@ -447,7 +448,8 @@ struct DeepCfrSolver::Impl {
   ActionVector cached_prediction(
       CfrNet& network,
       absl::flat_hash_map<InfoSetKey, ActionVector>& cache,
-      InfoSetKey key) {
+      InfoSetKey key,
+      size_t capacity) {
     const auto found = cache.find(key);
     if (found != cache.end()) {
       ++stats.cache_hits;
@@ -456,7 +458,7 @@ struct DeepCfrSolver::Impl {
     ++stats.network_evaluations;
     const ActionVector values = Predict(
         network, game, key, inference_hidden[0], inference_hidden[1]);
-    if (cache.size() < config.inference_cache_capacity) {
+    if (cache.size() < capacity) {
       cache.emplace(key, values);
     }
     return values;
@@ -762,6 +764,7 @@ DeepCfrSolver::estimate_exploitability(
         "average policy has not been trained");
   }
   try {
+    impl_->policy_cache.reserve(impl_->config.policy_cache_capacity);
     const StrategyLookup lookup = [this](
         InfoSetKey key, std::span<float> probabilities) {
       return impl_->policy_strategy(key, probabilities);
