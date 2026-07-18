@@ -30,7 +30,6 @@ struct NeuralSample {
 enum class NeuralTarget : uint8_t {
   Advantage,
   AveragePolicy,
-  CurrentPolicy,
 };
 
 struct NeuralTrainingConfig {
@@ -68,8 +67,7 @@ class NeuralNetwork {
       const CompiledGame& game,
       std::span<const NeuralSample> samples,
       const NeuralTrainingConfig& config,
-      NeuralTarget target,
-      const std::array<NeuralNetwork*, kPlayerCount>& current_policy_sources);
+      NeuralTarget target);
   friend void SaveNeuralNetwork(const NeuralNetwork& network,
                                 const std::filesystem::path& path,
                                 ModelFingerprint model);
@@ -104,9 +102,7 @@ float FitNeuralNetwork(
     const CompiledGame& game,
     std::span<const NeuralSample> samples,
     const NeuralTrainingConfig& config,
-    NeuralTarget target,
-    const std::array<NeuralNetwork*, kPlayerCount>& current_policy_sources =
-        {});
+    NeuralTarget target);
 
 void SaveNeuralNetwork(const NeuralNetwork& network,
                        const std::filesystem::path& path,

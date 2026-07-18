@@ -275,8 +275,7 @@ float FitNeuralNetwork(
     const CompiledGame& game,
     std::span<const NeuralSample> samples,
     const NeuralTrainingConfig& config,
-    NeuralTarget target_kind,
-    const std::array<NeuralNetwork*, kPlayerCount>& current_policy_sources) {
+    NeuralTarget target_kind) {
   if (samples.empty()) return 0.0f;
 
   torch::manual_seed(config.seed);
@@ -292,7 +291,6 @@ float FitNeuralNetwork(
   std::vector<float> targets(batch_size * kMaxActionsPerNode);
   std::vector<float> masks(batch_size * kMaxActionsPerNode);
   std::vector<float> weights(batch_size);
-  std::vector<float> player_b(batch_size);
   const auto options = torch::TensorOptions().dtype(torch::kFloat32);
   std::uniform_int_distribution<size_t> sample_index(0, samples.size() - 1);
   std::mt19937 batch_rng = MakeRng(config.seed);
@@ -312,7 +310,6 @@ float FitNeuralNetwork(
       std::fill_n(masks.data() + row * kMaxActionsPerNode,
                   node.child_count, 1.0f);
       weights[row] = sample.weight;
-      player_b[row] = std::get<DecisionState>(node.state).actor == Player::B;
     }
 
     const torch::Tensor input = torch::from_blob(
@@ -326,24 +323,6 @@ float FitNeuralNetwork(
         {static_cast<int64_t>(batch_size), kMaxActionsPerNode}, options);
     const torch::Tensor weight = torch::from_blob(
         weights.data(), {static_cast<int64_t>(batch_size)}, options);
-
-    if (target_kind == NeuralTarget::CurrentPolicy) {
-      assert(current_policy_sources[0] != nullptr &&
-             current_policy_sources[1] != nullptr);
-      const torch::Tensor use_player_b = torch::from_blob(
-          player_b.data(), {static_cast<int64_t>(batch_size), 1}, options);
-      torch::NoGradGuard no_grad;
-      const torch::Tensor advantages =
-          current_policy_sources[0]->impl_->network->forward(input) *
-              (1.0f - use_player_b) +
-          current_policy_sources[1]->impl_->network->forward(input) *
-              use_player_b;
-      const torch::Tensor positive = torch::relu(advantages) * mask;
-      const torch::Tensor sum = positive.sum(1, true);
-      const torch::Tensor uniform = mask / mask.sum(1, true);
-      target = torch::where(sum > 0.0f, positive / sum.clamp_min(1e-12f),
-                            uniform);
-    }
 
     optimizer.zero_grad();
     torch::Tensor prediction = network.impl_->network->forward(input);

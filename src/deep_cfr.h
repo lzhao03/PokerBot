@@ -18,13 +18,12 @@ struct DeepCfrConfig {
   size_t strategy_memory_capacity = 100'000;
   size_t inference_cache_capacity = 100'000;
   size_t policy_cache_capacity = 1'000'000;
-  int traversals_per_player = 100;
-  int training_steps = 100;
-  int policy_training_steps = 100;
+  int traversals_per_player = 1024;
+  int training_steps = 750;
+  int policy_training_steps = 2500;
   int batch_size = 256;
-  int hidden_size = 128;
+  int hidden_size = 256;
   double learning_rate = 1e-3;
-  bool distill_current_policy = false;
 };
 
 struct DeepCfrStats {

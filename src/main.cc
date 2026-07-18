@@ -61,29 +61,20 @@ ABSL_FLAG(std::string, neural_policy_output, "",
           "output path for a fitted neural policy");
 ABSL_FLAG(std::string, neural_policy_input, "",
           "neural policy to load for Deep CFR evaluation");
-ABSL_FLAG(int, neural_steps, 500,
-          "optimizer steps for tabular policy neural approximation");
-ABSL_FLAG(int, neural_batch_size, 128,
-          "batch size for tabular policy neural approximation");
-ABSL_FLAG(int, neural_hidden_size, 32,
-          "hidden width for tabular policy neural approximation");
+ABSL_FLAG(int, neural_steps, 2500,
+          "optimizer steps for fitting the final neural policy");
+ABSL_FLAG(int, neural_batch_size, 256,
+          "batch size for neural training");
+ABSL_FLAG(int, neural_hidden_size, 256,
+          "hidden width for neural models");
 ABSL_FLAG(double, neural_learning_rate, 1e-3,
           "learning rate for tabular policy neural approximation");
-ABSL_FLAG(uint64_t, neural_seed, 1,
-          "random seed for tabular policy neural approximation");
-ABSL_FLAG(int, deep_traversals_per_player, 64,
+ABSL_FLAG(uint64_t, neural_seed, 1, "random seed for neural training");
+ABSL_FLAG(int, deep_traversals_per_player, 1024,
           "Deep CFR traversals per player and iteration");
-ABSL_FLAG(int, deep_training_steps, 50,
+ABSL_FLAG(int, deep_training_steps, 750,
           "Deep CFR optimizer steps per network fit");
-ABSL_FLAG(int, deep_policy_training_steps, 500,
-          "Deep CFR optimizer steps for the final average policy");
-ABSL_FLAG(int, deep_batch_size, 128, "Deep CFR neural training batch size");
-ABSL_FLAG(int, deep_hidden_size, 32,
-          "Deep CFR width of both hidden layers");
-ABSL_FLAG(double, deep_learning_rate, 1e-3, "Deep CFR Adam learning rate");
-ABSL_FLAG(bool, deep_distill_current_policy, false,
-          "distill the final current strategy instead of the average");
-ABSL_FLAG(uint64_t, deep_memory_capacity, 4096,
+ABSL_FLAG(uint64_t, deep_memory_capacity, 100000,
           "Deep CFR capacity of each reservoir");
 ABSL_FLAG(uint64_t, deep_cache_capacity, 4096,
           "Deep CFR maximum cached advantage-network predictions");
@@ -95,7 +86,6 @@ ABSL_FLAG(uint64_t, deep_best_response_iterations, 0,
           "One-sided CFR iterations per Deep CFR best response; 0 disables");
 ABSL_FLAG(bool, deep_best_response_external_sampling, true,
           "Sample fixed-opponent actions during Deep CFR best responses");
-ABSL_FLAG(uint64_t, deep_seed, 1, "Deep CFR training seed");
 ABSL_FLAG(uint64_t, deep_checkpoint_interval, 0,
           "save a numbered Deep CFR model every N iterations; 0 disables");
 ABSL_FLAG(std::string, deep_opponent_policy, "",
@@ -299,7 +289,7 @@ int RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads) {
 
 int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
   poker::DeepCfrConfig config;
-  config.seed = absl::GetFlag(FLAGS_deep_seed);
+  config.seed = absl::GetFlag(FLAGS_neural_seed);
   config.advantage_memory_capacity =
       absl::GetFlag(FLAGS_deep_memory_capacity);
   config.strategy_memory_capacity =
@@ -311,13 +301,10 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
   config.traversals_per_player =
       absl::GetFlag(FLAGS_deep_traversals_per_player);
   config.training_steps = absl::GetFlag(FLAGS_deep_training_steps);
-  config.policy_training_steps =
-      absl::GetFlag(FLAGS_deep_policy_training_steps);
-  config.batch_size = absl::GetFlag(FLAGS_deep_batch_size);
-  config.hidden_size = absl::GetFlag(FLAGS_deep_hidden_size);
-  config.learning_rate = absl::GetFlag(FLAGS_deep_learning_rate);
-  config.distill_current_policy =
-      absl::GetFlag(FLAGS_deep_distill_current_policy);
+  config.policy_training_steps = absl::GetFlag(FLAGS_neural_steps);
+  config.batch_size = absl::GetFlag(FLAGS_neural_batch_size);
+  config.hidden_size = absl::GetFlag(FLAGS_neural_hidden_size);
+  config.learning_rate = absl::GetFlag(FLAGS_neural_learning_rate);
 
   auto solver = poker::DeepCfrSolver::Create(std::move(spec), config);
   if (!solver.ok()) {
@@ -383,7 +370,7 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
     poker::BestResponseConfig response_config{
         response_iterations,
         static_cast<uint64_t>(absl::GetFlag(FLAGS_deep_evaluation_samples)),
-        absl::GetFlag(FLAGS_deep_seed)};
+        absl::GetFlag(FLAGS_neural_seed)};
     response_config.external_sampling =
         absl::GetFlag(FLAGS_deep_best_response_external_sampling);
     const auto estimate = solver->estimate_exploitability(response_config);

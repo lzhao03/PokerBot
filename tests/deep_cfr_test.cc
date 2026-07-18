@@ -28,7 +28,7 @@ SolveSpec TinySolveSpec() {
   SolverConfig config;
   config.bet_abstraction = SmallBettingConfig();
   config.card_abstraction.public_mode = PublicCardMode::CompactTexture;
-  config.card_abstraction.recall_mode = RecallMode::CurrentBucketOnly;
+  config.card_abstraction.recall_mode = RecallMode::BucketHistory;
   const ComboRange range = UniformComboRange();
   const ExactPublicState root = MakeInitialState(
       config.betting_rules, {8, 8}, {1, 2});
@@ -135,15 +135,10 @@ TEST_CASE("neural features preserve private bucket history") {
         EncodeNeuralFeatures(b, node, config));
 }
 
-TEST_CASE("Deep CFR can distill its final current strategy") {
-  DeepCfrConfig config = TinyDeepConfig();
-  config.distill_current_policy = true;
-  auto solver = DeepCfrSolver::Create(TinySolveSpec(), config);
-  REQUIRE(solver.ok());
-  REQUIRE(solver->run(1).ok());
-  const auto value = solver->evaluate_average(4);
-  REQUIRE(value.ok());
-  CHECK(std::isfinite(*value));
+TEST_CASE("Deep CFR rejects current-bucket imperfect recall") {
+  SolveSpec spec = TinySolveSpec();
+  spec.config.card_abstraction.recall_mode = RecallMode::CurrentBucketOnly;
+  CHECK_FALSE(DeepCfrSolver::Create(std::move(spec), TinyDeepConfig()).ok());
 }
 
 TEST_CASE("Deep CFR run boundaries do not change training") {

@@ -230,6 +230,7 @@ struct DeepCfrSolver::Impl {
                       UpdateHandle,
                       std::span<const float> regrets) {
     NeuralSample sample{decision.key};
+    sample.weight = static_cast<float>(decision.iteration + 1);
     const BettingData& betting = decision.state.data;
     const float scale = 1.0f / static_cast<float>(
         Pot(betting) + betting.stack[0] + betting.stack[1]);
@@ -285,8 +286,7 @@ struct DeepCfrSolver::Impl {
          .batch_size = config.batch_size,
          .hidden_size = config.hidden_size,
          .learning_rate = config.learning_rate},
-        target_kind,
-        {&advantage_network[0], &advantage_network[1]});
+        target_kind);
   }
 
   double traverse(const Deal& deal,
@@ -330,8 +330,7 @@ struct DeepCfrSolver::Impl {
     stats.strategy_loss = train_network(
         trained_policy, strategy_memory,
         NetworkSeed(config.seed, stats.iterations, kPlayerCount),
-        config.distill_current_policy ? NeuralTarget::CurrentPolicy
-                                      : NeuralTarget::AveragePolicy,
+        NeuralTarget::AveragePolicy,
         config.policy_training_steps);
     if (strategy_memory.size() > 0) {
       policy.emplace(std::move(trained_policy), game.model);
@@ -407,6 +406,12 @@ absl::StatusOr<DeepCfrSolver> DeepCfrSolver::Create(
     DeepCfrConfig config) {
   const absl::Status config_status = ValidateConfig(config);
   if (!config_status.ok()) return config_status;
+  if (spec.config.card_abstraction.private_kind ==
+          PrivateAbstractionKind::Handcrafted36 &&
+      spec.config.card_abstraction.recall_mode != RecallMode::BucketHistory) {
+    return absl::InvalidArgumentError(
+        "Deep CFR requires private bucket history recall");
+  }
   auto game = CompileGame(std::move(spec));
   if (!game.ok()) return game.status();
   try {
