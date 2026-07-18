@@ -7,6 +7,7 @@
 #include <span>
 
 #include "absl/status/statusor.h"
+#include "src/neural_policy.h"
 #include "src/solver.h"
 
 namespace poker {
@@ -65,6 +66,14 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     uint64_t seed,
     bool measure_reach_coverage = false);
 
+absl::StatusOr<ValueEstimate> EstimateExpectedValue(
+    const CompiledGame& game,
+    const NeuralPolicy& player_a,
+    const NeuralPolicy& player_b,
+    uint64_t samples,
+    uint64_t seed,
+    bool measure_reach_coverage = false);
+
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     const CompiledGame& game,
     Player responder,
@@ -90,6 +99,11 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitabilityParallel(
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
     const CompiledGame& game,
     const Policy& policy,
+    const BestResponseConfig& config);
+
+absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
+    const CompiledGame& game,
+    const NeuralPolicy& policy,
     const BestResponseConfig& config);
 
 }  // namespace poker

@@ -7,6 +7,7 @@
 
 #include "doctest/doctest.h"
 #include "src/bet_abstraction.h"
+#include "src/evaluation.h"
 
 namespace poker {
 namespace {
@@ -54,6 +55,14 @@ TEST_CASE("tabular policies fit the shared neural policy format") {
   CHECK(std::accumulate(probabilities.begin(), probabilities.end(), 0.0f) ==
         doctest::Approx(1.0f));
   CHECK(probabilities.front() > 0.9f);
+  const auto value = EstimateExpectedValue(
+      *game, fitted->policy, fitted->policy, 2, 11);
+  REQUIRE(value.ok());
+  CHECK(std::isfinite(value->mean));
+  const auto exploitability = EstimateExploitability(
+      *game, fitted->policy, {2, 2, 11});
+  REQUIRE(exploitability.ok());
+  CHECK(std::isfinite(exploitability->exploitability));
 
   const auto path =
       std::filesystem::temp_directory_path() / "poker_neural_policy_test.pt";

@@ -1,4 +1,5 @@
 #include "src/deep_cfr.h"
+#include "src/evaluation.h"
 #include "src/neural_policy.h"
 #include "src/policy_codec.h"
 #include "src/solver.h"
@@ -80,12 +81,12 @@ ABSL_FLAG(uint64_t, deep_cache_capacity, 4096,
           "Deep CFR maximum cached advantage-network predictions");
 ABSL_FLAG(uint64_t, deep_policy_cache_capacity, 1'000'000,
           "Deep CFR maximum cached policy-network predictions");
-ABSL_FLAG(int, deep_evaluation_samples, 64,
-          "Deals sampled for Deep CFR average-policy evaluation");
-ABSL_FLAG(uint64_t, deep_best_response_iterations, 0,
-          "One-sided CFR iterations per Deep CFR best response; 0 disables");
-ABSL_FLAG(bool, deep_best_response_external_sampling, true,
-          "Sample fixed-opponent actions during Deep CFR best responses");
+ABSL_FLAG(int, evaluation_samples, 64,
+          "deals sampled for neural policy evaluation");
+ABSL_FLAG(uint64_t, best_response_iterations, 0,
+          "one-sided CFR iterations per neural best response; 0 disables");
+ABSL_FLAG(bool, best_response_external_sampling, true,
+          "sample fixed-opponent actions during neural best responses");
 ABSL_FLAG(uint64_t, deep_checkpoint_interval, 0,
           "save a numbered Deep CFR model every N iterations; 0 disables");
 ABSL_FLAG(std::string, deep_opponent_policy, "",
@@ -283,6 +284,35 @@ int RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads) {
               << "neural_policy_loss=" << fitted->loss << '\n'
               << "neural_policy_parameter_bytes="
               << fitted->policy.parameter_bytes() << '\n';
+    const auto value = poker::EstimateExpectedValue(
+        solver->game(), fitted->policy, fitted->policy,
+        static_cast<uint64_t>(absl::GetFlag(FLAGS_evaluation_samples)),
+        absl::GetFlag(FLAGS_neural_seed));
+    if (!value.ok()) {
+      std::cerr << "Error: " << value.status() << '\n';
+      return 1;
+    }
+    std::cout << "neural_policy_value=" << value->mean << '\n'
+              << "neural_policy_value_se=" << value->standard_error << '\n';
+    const uint64_t response_iterations =
+        absl::GetFlag(FLAGS_best_response_iterations);
+    if (response_iterations > 0) {
+      poker::BestResponseConfig response_config{
+          response_iterations,
+          static_cast<uint64_t>(absl::GetFlag(FLAGS_evaluation_samples)),
+          absl::GetFlag(FLAGS_neural_seed)};
+      response_config.external_sampling =
+          absl::GetFlag(FLAGS_best_response_external_sampling);
+      const auto exploitability = poker::EstimateExploitability(
+          solver->game(), fitted->policy, response_config);
+      if (!exploitability.ok()) {
+        std::cerr << "Error: " << exploitability.status() << '\n';
+        return 1;
+      }
+      std::cout << "neural_nash_conv=" << exploitability->nash_conv << '\n'
+                << "neural_exploitability="
+                << exploitability->exploitability << '\n';
+    }
   }
   return 0;
 }
@@ -351,28 +381,28 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
     }
   }
   const auto value =
-      solver->evaluate_average(absl::GetFlag(FLAGS_deep_evaluation_samples));
+      solver->evaluate_average(absl::GetFlag(FLAGS_evaluation_samples));
   if (!value.ok()) {
     std::cerr << "Error: " << value.status() << '\n';
     return 1;
   }
   const auto value_as_a = solver->evaluate_average_against_uniform(
-      poker::Player::A, absl::GetFlag(FLAGS_deep_evaluation_samples));
+      poker::Player::A, absl::GetFlag(FLAGS_evaluation_samples));
   const auto value_as_b = solver->evaluate_average_against_uniform(
-      poker::Player::B, absl::GetFlag(FLAGS_deep_evaluation_samples));
+      poker::Player::B, absl::GetFlag(FLAGS_evaluation_samples));
   if (!value_as_a.ok() || !value_as_b.ok()) {
     std::cerr << "Error: uniform-opponent evaluation failed\n";
     return 1;
   }
   const uint64_t response_iterations =
-      absl::GetFlag(FLAGS_deep_best_response_iterations);
+      absl::GetFlag(FLAGS_best_response_iterations);
   if (response_iterations > 0) {
     poker::BestResponseConfig response_config{
         response_iterations,
-        static_cast<uint64_t>(absl::GetFlag(FLAGS_deep_evaluation_samples)),
+        static_cast<uint64_t>(absl::GetFlag(FLAGS_evaluation_samples)),
         absl::GetFlag(FLAGS_neural_seed)};
     response_config.external_sampling =
-        absl::GetFlag(FLAGS_deep_best_response_external_sampling);
+        absl::GetFlag(FLAGS_best_response_external_sampling);
     const auto estimate = solver->estimate_exploitability(response_config);
     if (!estimate.ok()) {
       std::cerr << "Error: " << estimate.status() << '\n';
@@ -428,11 +458,11 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
     const auto as_a = solver->evaluate_against_policy(
         poker::Player::A, *opponent,
         poker::DeepCfrStrategy::Average,
-        absl::GetFlag(FLAGS_deep_evaluation_samples));
+        absl::GetFlag(FLAGS_evaluation_samples));
     const auto as_b = solver->evaluate_against_policy(
         poker::Player::B, *opponent,
         poker::DeepCfrStrategy::Average,
-        absl::GetFlag(FLAGS_deep_evaluation_samples));
+        absl::GetFlag(FLAGS_evaluation_samples));
     if (!as_a.ok() || !as_b.ok()) {
       std::cerr << "Error: tabular opponent evaluation failed\n";
       return 1;
@@ -469,11 +499,11 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
       const auto current_as_a = solver->evaluate_against_policy(
           poker::Player::A, *opponent,
           poker::DeepCfrStrategy::Current,
-          absl::GetFlag(FLAGS_deep_evaluation_samples));
+          absl::GetFlag(FLAGS_evaluation_samples));
       const auto current_as_b = solver->evaluate_against_policy(
           poker::Player::B, *opponent,
           poker::DeepCfrStrategy::Current,
-          absl::GetFlag(FLAGS_deep_evaluation_samples));
+          absl::GetFlag(FLAGS_evaluation_samples));
       if (current_as_a.ok() && current_as_b.ok()) {
         std::cout << "current_vs_tabular_as_a="
                   << current_as_a->policy_player_value << '\n'

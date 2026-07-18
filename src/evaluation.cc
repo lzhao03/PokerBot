@@ -38,6 +38,13 @@ StrategyLookup LookupPolicy(const Policy& policy) {
   };
 }
 
+StrategyLookup LookupPolicy(const CompiledGame& game,
+                            const NeuralPolicy& policy) {
+  return [&game, &policy](InfoSetKey key, std::span<float> output) {
+    return policy.strategy(game, key, output);
+  };
+}
+
 struct PolicyBackend {
   using UpdateHandle = size_t;
 
@@ -221,6 +228,22 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const CompiledGame& game,
+    const NeuralPolicy& player_a,
+    const NeuralPolicy& player_b,
+    uint64_t samples,
+    uint64_t seed,
+    bool measure_reach_coverage) {
+  if (player_a.model() != game.model || player_b.model() != game.model) {
+    return absl::FailedPreconditionError(
+        "neural policy model does not match game");
+  }
+  return EstimateExpectedValue(
+      game, LookupPolicy(game, player_a), LookupPolicy(game, player_b),
+      samples, seed, measure_reach_coverage);
+}
+
+absl::StatusOr<ValueEstimate> EstimateExpectedValue(
+    const CompiledGame& game,
     const Policy& player_a,
     const Policy& player_b,
     uint64_t samples,
@@ -387,6 +410,17 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
         "policy model does not match game");
   }
   return EstimateExploitability(game, LookupPolicy(policy), config);
+}
+
+absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
+    const CompiledGame& game,
+    const NeuralPolicy& policy,
+    const BestResponseConfig& config) {
+  if (policy.model() != game.model) {
+    return absl::FailedPreconditionError(
+        "neural policy model does not match game");
+  }
+  return EstimateExploitability(game, LookupPolicy(game, policy), config);
 }
 
 }  // namespace poker
