@@ -17,7 +17,7 @@ struct DeepCfrConfig {
   size_t advantage_memory_capacity = 100'000;
   size_t strategy_memory_capacity = 100'000;
   size_t inference_cache_capacity = 100'000;
-  size_t policy_cache_capacity = 2'000'000;
+  size_t policy_cache_capacity = 1'000'000;
   int traversals_per_player = 100;
   int training_steps = 100;
   int policy_training_steps = 100;

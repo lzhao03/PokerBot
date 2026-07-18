@@ -68,7 +68,7 @@ ABSL_FLAG(uint64_t, deep_memory_capacity, 4096,
           "Deep CFR capacity of each reservoir");
 ABSL_FLAG(uint64_t, deep_cache_capacity, 4096,
           "Deep CFR maximum cached advantage-network predictions");
-ABSL_FLAG(uint64_t, deep_policy_cache_capacity, 2'000'000,
+ABSL_FLAG(uint64_t, deep_policy_cache_capacity, 1'000'000,
           "Deep CFR maximum cached policy-network predictions");
 ABSL_FLAG(int, deep_evaluation_samples, 64,
           "Deals sampled for Deep CFR average-policy evaluation");
