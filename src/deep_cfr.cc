@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include <Accelerate/Accelerate.h>
 #include <torch/torch.h>
 
 #include "absl/container/flat_hash_map.h"
@@ -231,17 +232,37 @@ void Softmax(std::span<const float> logits,
   for (float& probability : probabilities) probability /= sum;
 }
 
+void Linear(const torch::nn::Linear& layer,
+            std::span<const float> input,
+            std::span<float> output) {
+  assert(layer->weight.size(0) == static_cast<int64_t>(output.size()));
+  assert(layer->weight.size(1) == static_cast<int64_t>(input.size()));
+  std::copy_n(layer->bias.data_ptr<float>(), output.size(), output.begin());
+  cblas_sgemv(CblasRowMajor, CblasNoTrans, static_cast<int>(output.size()),
+              static_cast<int>(input.size()), 1.0f,
+              layer->weight.data_ptr<float>(), static_cast<int>(input.size()),
+              input.data(), 1, 1.0f, output.data(), 1);
+}
+
+void Relu(std::span<float> values) {
+  for (float& value : values) value = std::max(0.0f, value);
+}
+
 ActionVector Predict(CfrNet& network,
                      const CompiledGame& game,
-                     InfoSetKey key) {
+                     InfoSetKey key,
+                     std::span<float> hidden_a,
+                     std::span<float> hidden_b) {
   const FeatureVector features =
       Features(key, game.history.nodes[Index(key.history)], game.config);
-  torch::NoGradGuard no_grad;
-  const torch::Tensor tensor = torch::from_blob(
-      const_cast<float*>(features.data()), {1, kFeatureCount}, torch::kFloat32);
-  const torch::Tensor output = network->forward(tensor).contiguous();
+  Linear(network->hidden1, features, hidden_a);
+  Relu(hidden_a);
+  Linear(network->hidden2, hidden_a, hidden_b);
+  Relu(hidden_b);
+  Linear(network->hidden3, hidden_b, hidden_a);
+  Relu(hidden_a);
   ActionVector values = {};
-  std::copy_n(output.data_ptr<float>(), values.size(), values.begin());
+  Linear(network->output, hidden_a, values);
   return values;
 }
 
@@ -302,6 +323,9 @@ struct DeepCfrSolver::Impl {
             CfrNet(config.hidden_size),
             CfrNet(config.hidden_size)},
         policy_network(config.hidden_size),
+        inference_hidden{
+            std::vector<float>(static_cast<size_t>(config.hidden_size)),
+            std::vector<float>(static_cast<size_t>(config.hidden_size))},
         game_rng(MakeRng(config.seed)),
         reservoir_rng(MakeRng(config.seed + 1)) {
     for (auto& cache : advantage_cache) {
@@ -430,7 +454,8 @@ struct DeepCfrSolver::Impl {
       return found->second;
     }
     ++stats.network_evaluations;
-    const ActionVector values = Predict(network, game, key);
+    const ActionVector values = Predict(
+        network, game, key, inference_hidden[0], inference_hidden[1]);
     if (cache.size() < config.inference_cache_capacity) {
       cache.emplace(key, values);
     }
@@ -617,6 +642,7 @@ struct DeepCfrSolver::Impl {
   Reservoir strategy_memory;
   std::array<CfrNet, kPlayerCount> advantage_network;
   CfrNet policy_network;
+  std::array<std::vector<float>, 2> inference_hidden;
   std::array<bool, kPlayerCount> advantage_trained = {};
   bool policy_trained = false;
   std::array<absl::flat_hash_map<InfoSetKey, ActionVector>, kPlayerCount>

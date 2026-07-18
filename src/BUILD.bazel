@@ -104,6 +104,7 @@ cc_library(
     srcs = ["deep_cfr.cc"],
     hdrs = ["deep_cfr.h"],
     copts = [
+        "-DACCELERATE_NEW_LAPACK",
         "-Werror=return-type",
         "-Wswitch-enum",
         "-Wconversion",
@@ -117,6 +118,7 @@ cc_library(
         "@abseil-cpp//absl/status:statusor",
         "@libtorch_macos_arm64//:torch",
     ],
+    linkopts = ["-framework Accelerate"],
     visibility = ["//visibility:public"],
 )
 
