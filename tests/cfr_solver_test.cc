@@ -593,7 +593,19 @@ TEST_CASE("exploitability reports both responder perspectives") {
   REQUIRE(policy.ok());
   const auto estimate = EstimateExploitability(
       game->game(), *policy, BestResponseConfig{200, 2, 23});
+  const StrategyLookup lookup = [&policy](
+      InfoSetKey key, std::span<float> output) {
+    return policy->strategy(key, output);
+  };
+  const std::array<StrategyLookup, kPlayerCount> lookups = {lookup, lookup};
+  const auto parallel = EstimateExploitabilityParallel(
+      game->game(), lookups, BestResponseConfig{200, 2, 23});
   REQUIRE(estimate.ok());
+  REQUIRE(parallel.ok());
+  CHECK(parallel->player_a_response.value ==
+        estimate->player_a_response.value);
+  CHECK(parallel->player_b_response.value ==
+        estimate->player_b_response.value);
   CHECK(estimate->nash_conv == doctest::Approx(
       estimate->player_a_response.value +
       estimate->player_b_response.value));

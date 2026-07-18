@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <functional>
 #include <optional>
 #include <random>
 #include <span>
+#include <thread>
 #include <vector>
 
 #include "absl/status/status.h"
@@ -346,6 +348,33 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
   const double nash_conv = player_a->value + player_b->value;
   return ExploitabilityEstimate{
       std::move(*player_a), std::move(*player_b),
+      nash_conv, 0.5 * nash_conv};
+}
+
+absl::StatusOr<ExploitabilityEstimate> EstimateExploitabilityParallel(
+    const CompiledGame& game,
+    const std::array<StrategyLookup, kPlayerCount>& policies,
+    const BestResponseConfig& config) {
+  std::optional<absl::StatusOr<BestResponseResult>> player_a;
+  std::thread player_a_thread([&] {
+    player_a.emplace(TrainResponse(
+        game, Player::A, policies[Index(Player::A)],
+        &policies[Index(Player::A)], config));
+  });
+
+  BestResponseConfig player_b_config = config;
+  player_b_config.seed ^= 0xd1b54a32d192ed03ULL;
+  auto player_b = TrainResponse(
+      game, Player::B, policies[Index(Player::B)],
+      &policies[Index(Player::B)], player_b_config);
+  player_a_thread.join();
+  assert(player_a.has_value());
+  if (!player_a->ok()) return player_a->status();
+  if (!player_b.ok()) return player_b.status();
+
+  const double nash_conv = (*player_a)->value + player_b->value;
+  return ExploitabilityEstimate{
+      std::move(**player_a), std::move(*player_b),
       nash_conv, 0.5 * nash_conv};
 }
 

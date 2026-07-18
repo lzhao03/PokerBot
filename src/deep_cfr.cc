@@ -344,7 +344,8 @@ struct DeepCfrSolver::Impl {
     } else {
       const ActionVector values = cached_prediction(
           advantage_network[player], advantage_cache[player], decision.key,
-          config.inference_cache_capacity);
+          inference_hidden, config.inference_cache_capacity,
+          stats.network_evaluations, stats.cache_hits);
       RegretMatch(values, probabilities);
     }
     return access == internal::StrategyAccess::ReadOnly
@@ -359,13 +360,26 @@ struct DeepCfrSolver::Impl {
 
   bool policy_strategy(InfoSetKey key,
                        std::span<float> probabilities) {
+    return policy_strategy(
+        key, probabilities, policy_cache, inference_hidden,
+        stats.network_evaluations, stats.cache_hits);
+  }
+
+  bool policy_strategy(
+      InfoSetKey key,
+      std::span<float> probabilities,
+      absl::flat_hash_map<InfoSetKey, ActionVector>& cache,
+      std::array<std::vector<float>, 2>& hidden,
+      uint64_t& network_evaluations,
+      uint64_t& cache_hits) {
     if (!policy_trained) {
       FillUniform(probabilities);
       return false;
     }
     const ActionVector logits =
-        cached_prediction(policy_network, policy_cache, key,
-                          config.policy_cache_capacity);
+        cached_prediction(policy_network, cache, key, hidden,
+                          config.policy_cache_capacity,
+                          network_evaluations, cache_hits);
     Softmax(logits, probabilities);
     return true;
   }
@@ -449,15 +463,18 @@ struct DeepCfrSolver::Impl {
       CfrNet& network,
       absl::flat_hash_map<InfoSetKey, ActionVector>& cache,
       InfoSetKey key,
-      size_t capacity) {
+      std::array<std::vector<float>, 2>& hidden,
+      size_t capacity,
+      uint64_t& network_evaluations,
+      uint64_t& cache_hits) {
     const auto found = cache.find(key);
     if (found != cache.end()) {
-      ++stats.cache_hits;
+      ++cache_hits;
       return found->second;
     }
-    ++stats.network_evaluations;
+    ++network_evaluations;
     const ActionVector values = Predict(
-        network, game, key, inference_hidden[0], inference_hidden[1]);
+        network, game, key, hidden[0], hidden[1]);
     if (cache.size() < capacity) {
       cache.emplace(key, values);
     }
@@ -765,11 +782,33 @@ DeepCfrSolver::estimate_exploitability(
   }
   try {
     impl_->policy_cache.reserve(impl_->config.policy_cache_capacity);
-    const StrategyLookup lookup = [this](
+    const StrategyLookup player_a_lookup = [this](
         InfoSetKey key, std::span<float> probabilities) {
       return impl_->policy_strategy(key, probabilities);
     };
-    return EstimateExploitability(impl_->game, lookup, config);
+    absl::flat_hash_map<InfoSetKey, ActionVector> player_b_cache;
+    player_b_cache.reserve(impl_->config.policy_cache_capacity);
+    std::array<std::vector<float>, 2> player_b_hidden = {
+        std::vector<float>(static_cast<size_t>(impl_->config.hidden_size)),
+        std::vector<float>(static_cast<size_t>(impl_->config.hidden_size))};
+    uint64_t network_evaluations = 0;
+    uint64_t cache_hits = 0;
+    const StrategyLookup player_b_lookup = [this, &player_b_cache,
+                                             &player_b_hidden,
+                                             &network_evaluations,
+                                             &cache_hits](
+        InfoSetKey key, std::span<float> probabilities) {
+      return impl_->policy_strategy(
+          key, probabilities, player_b_cache, player_b_hidden,
+          network_evaluations, cache_hits);
+    };
+    const std::array<StrategyLookup, kPlayerCount> lookups = {
+        player_a_lookup, player_b_lookup};
+    auto result = EstimateExploitabilityParallel(
+        impl_->game, lookups, config);
+    impl_->stats.network_evaluations += network_evaluations;
+    impl_->stats.cache_hits += cache_hits;
+    return result;
   } catch (const std::exception& error) {
     return TorchError(error);
   }

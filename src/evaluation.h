@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -79,6 +80,11 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
     const CompiledGame& game,
     const StrategyLookup& policy,
+    const BestResponseConfig& config);
+
+absl::StatusOr<ExploitabilityEstimate> EstimateExploitabilityParallel(
+    const CompiledGame& game,
+    const std::array<StrategyLookup, kPlayerCount>& policies,
     const BestResponseConfig& config);
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
