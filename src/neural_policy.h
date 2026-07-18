@@ -12,7 +12,9 @@
 
 namespace poker {
 
-inline constexpr size_t kNeuralFeatureCount = 32 + 16 + 16 + 64 + 36 + 15;
+inline constexpr uint32_t kNeuralFeatureSchemaVersion = 2;
+inline constexpr size_t kNeuralFeatureCount =
+    32 + 16 + 16 + 64 + 4 * 36 + 15;
 
 using NeuralFeatureVector = std::array<float, kNeuralFeatureCount>;
 using NeuralActionVector = std::array<float, kMaxActionsPerNode>;
@@ -66,9 +68,11 @@ class NeuralNetwork {
       NeuralTarget target,
       const std::array<NeuralNetwork*, kPlayerCount>& current_policy_sources);
   friend void SaveNeuralNetwork(const NeuralNetwork& network,
-                                const std::filesystem::path& path);
+                                const std::filesystem::path& path,
+                                ModelFingerprint model);
   friend void LoadNeuralNetwork(NeuralNetwork& network,
-                                const std::filesystem::path& path);
+                                const std::filesystem::path& path,
+                                ModelFingerprint expected_model);
 };
 
 void SetNeuralSeed(uint64_t seed);
@@ -102,8 +106,10 @@ float FitNeuralNetwork(
         {});
 
 void SaveNeuralNetwork(const NeuralNetwork& network,
-                       const std::filesystem::path& path);
+                       const std::filesystem::path& path,
+                       ModelFingerprint model);
 void LoadNeuralNetwork(NeuralNetwork& network,
-                       const std::filesystem::path& path);
+                       const std::filesystem::path& path,
+                       ModelFingerprint expected_model);
 
 }  // namespace poker

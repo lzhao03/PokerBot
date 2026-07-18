@@ -529,7 +529,7 @@ DeepCfrSolver::estimate_exploitability(
 absl::Status DeepCfrSolver::load_average_model(
     const std::filesystem::path& path) {
   try {
-    LoadNeuralNetwork(impl_->policy_network, path);
+    LoadNeuralNetwork(impl_->policy_network, path, impl_->game.model);
     impl_->policy_trained = true;
     impl_->policy_cache.clear();
     return absl::OkStatus();
@@ -544,7 +544,7 @@ absl::Status DeepCfrSolver::save_average_model(
     return absl::FailedPreconditionError("average policy has not been trained");
   }
   try {
-    SaveNeuralNetwork(impl_->policy_network, path);
+    SaveNeuralNetwork(impl_->policy_network, path, impl_->game.model);
     return absl::OkStatus();
   } catch (const std::exception& error) {
     return TorchError(error);

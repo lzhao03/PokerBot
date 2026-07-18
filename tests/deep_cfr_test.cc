@@ -2,8 +2,10 @@
 
 #include <cmath>
 #include <filesystem>
+#include <utility>
 
 #include "doctest/doctest.h"
+#include "src/neural_policy.h"
 
 namespace poker {
 namespace {
@@ -90,6 +92,14 @@ TEST_CASE("Deep CFR trains bounded neural memories") {
   CHECK(std::isfinite(match->policy_player_value));
   CHECK(match->opponent_policy_lookups > 0);
   CHECK(match->missing_opponent_lookups == match->opponent_policy_lookups);
+
+  SolveSpec mismatched_spec = TinySolveSpec();
+  mismatched_spec.root = MakeInitialState(
+      mismatched_spec.config.betting_rules, {9, 9}, {1, 2});
+  auto mismatched =
+      DeepCfrSolver::Create(std::move(mismatched_spec), TinyDeepConfig());
+  REQUIRE(mismatched.ok());
+  CHECK_FALSE(mismatched->load_average_model(path).ok());
   std::filesystem::remove(path);
 }
 
@@ -97,6 +107,32 @@ TEST_CASE("Deep CFR rejects an empty reservoir") {
   DeepCfrConfig config = TinyDeepConfig();
   config.advantage_memory_capacity = 0;
   CHECK_FALSE(DeepCfrSolver::Create(TinySolveSpec(), config).ok());
+}
+
+TEST_CASE("neural features preserve private bucket history") {
+  SolverConfig config;
+  config.card_abstraction.public_mode = PublicCardMode::CompactTexture;
+  config.card_abstraction.private_kind =
+      PrivateAbstractionKind::Handcrafted36;
+  config.card_abstraction.recall_mode = RecallMode::BucketHistory;
+  BettingData betting;
+  betting.stack = {100, 100};
+  betting.last_full_raise = 2;
+  betting.street = StreetKind::Turn;
+  const HistoryNode node{DecisionState{betting, Player::A}, 0, 2};
+  constexpr uint32_t kPreflop = 2;
+  constexpr uint32_t kFlopA = 5;
+  constexpr uint32_t kFlopB = 9;
+  constexpr uint32_t kTurn = 12;
+  const InfoSetKey a{
+      PublicObservationId{}, HistoryId{},
+      PrivateObservationId{kPreflop + 37 * kFlopA + 37 * 37 * kTurn}};
+  const InfoSetKey b{
+      PublicObservationId{}, HistoryId{},
+      PrivateObservationId{kPreflop + 37 * kFlopB + 37 * 37 * kTurn}};
+
+  CHECK(EncodeNeuralFeatures(a, node, config) !=
+        EncodeNeuralFeatures(b, node, config));
 }
 
 TEST_CASE("Deep CFR can distill its final current strategy") {

@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <random>
 #include <span>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -19,21 +21,10 @@ namespace {
 
 constexpr std::array<size_t, 3> kCompactPublicBuckets = {16, 16, 64};
 constexpr size_t kPublicFeatureCount = 16 + 16 + 64;
-constexpr size_t kPrivateFeatureCount = 36;
-
-constexpr uint32_t CurrentPrivateBucket(PrivateObservationId observation,
-                                        StreetKind street,
-                                        RecallMode recall) noexcept {
-  const uint32_t value = std::to_underlying(observation);
-  if (recall == RecallMode::CurrentBucketOnly) return value;
-  constexpr std::array<uint32_t, 4> places = {
-      1, 37, 37 * 37, 37 * 37 * 37};
-  return (value / places[std::to_underlying(street)]) % 37;
-}
-
-static_assert(CurrentPrivateBucket(PrivateObservationId{17},
-                                   StreetKind::River,
-                                   RecallMode::CurrentBucketOnly) == 17);
+constexpr size_t kPrivateBucketCount = 36;
+constexpr size_t kPrivateFeatureCount = 4 * kPrivateBucketCount;
+constexpr std::array<uint32_t, 4> kPrivateObservationPlaces = {
+    1, 37, 37 * 37, 37 * 37 * 37};
 
 struct CfrNetImpl : torch::nn::Module {
   explicit CfrNetImpl(int hidden_size)
@@ -143,10 +134,20 @@ NeuralFeatureVector EncodeNeuralFeatures(InfoSetKey key,
   const size_t private_begin = output;
   if (config.card_abstraction.private_kind ==
       PrivateAbstractionKind::Handcrafted36) {
-    const uint32_t bucket = CurrentPrivateBucket(
-        key.private_observation, betting.street,
-        config.card_abstraction.recall_mode);
-    if (bucket != 0) features[output + bucket - 1] = 1.0f;
+    const uint32_t observation =
+        std::to_underlying(key.private_observation);
+    if (config.card_abstraction.recall_mode == RecallMode::BucketHistory) {
+      for (size_t street = 0; street < kPrivateObservationPlaces.size();
+           ++street) {
+        const uint32_t bucket =
+            (observation / kPrivateObservationPlaces[street]) % 37;
+        if (bucket != 0) {
+          features[output + street * kPrivateBucketCount + bucket - 1] = 1.0f;
+        }
+      }
+    } else if (observation != 0) {
+      features[output + observation - 1] = 1.0f;
+    }
   } else {
     append_bits(std::to_underlying(key.private_observation));
   }
@@ -334,13 +335,41 @@ float FitNeuralNetwork(
 }
 
 void SaveNeuralNetwork(const NeuralNetwork& network,
-                       const std::filesystem::path& path) {
-  torch::save(network.impl_->network, path.string());
+                       const std::filesystem::path& path,
+                       ModelFingerprint model) {
+  torch::serialize::OutputArchive archive;
+  archive.write("feature_schema", torch::tensor(
+      static_cast<int64_t>(kNeuralFeatureSchemaVersion)));
+  archive.write("hidden_size", torch::tensor(
+      static_cast<int64_t>(network.impl_->hidden_size)));
+  archive.write("model", torch::tensor(
+      std::bit_cast<int64_t>(std::to_underlying(model))));
+  network.impl_->network->save(archive);
+  archive.save_to(path.string());
 }
 
 void LoadNeuralNetwork(NeuralNetwork& network,
-                       const std::filesystem::path& path) {
-  torch::load(network.impl_->network, path.string());
+                       const std::filesystem::path& path,
+                       ModelFingerprint expected_model) {
+  torch::serialize::InputArchive archive;
+  archive.load_from(path.string());
+  torch::Tensor schema;
+  torch::Tensor hidden_size;
+  torch::Tensor model;
+  archive.read("feature_schema", schema);
+  archive.read("hidden_size", hidden_size);
+  archive.read("model", model);
+  if (schema.item<int64_t>() != kNeuralFeatureSchemaVersion) {
+    throw std::runtime_error("neural feature schema does not match");
+  }
+  if (hidden_size.item<int64_t>() != network.impl_->hidden_size) {
+    throw std::runtime_error("neural hidden size does not match");
+  }
+  if (model.item<int64_t>() !=
+      std::bit_cast<int64_t>(std::to_underlying(expected_model))) {
+    throw std::runtime_error("neural model fingerprint does not match");
+  }
+  network.impl_->network->load(archive);
   network.impl_->network->eval();
 }
 

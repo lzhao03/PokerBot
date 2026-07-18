@@ -43,5 +43,8 @@ cc_test(
 cc_test(
     name = "deep_cfr_test",
     srcs = ["deep_cfr_test.cc"],
-    deps = DOCTEST_DEPS + ["//src:deep_cfr"],
+    deps = DOCTEST_DEPS + [
+        "//src:deep_cfr",
+        "//src:neural_policy",
+    ],
 )
