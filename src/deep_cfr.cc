@@ -107,7 +107,6 @@ struct DeepCfrSolver::Impl {
         advantage_network{
             NeuralNetwork(config.hidden_size),
             NeuralNetwork(config.hidden_size)},
-        policy_network(config.hidden_size),
         inference_hidden{
             std::vector<float>(static_cast<size_t>(config.hidden_size)),
             std::vector<float>(static_cast<size_t>(config.hidden_size))},
@@ -116,7 +115,6 @@ struct DeepCfrSolver::Impl {
     for (auto& cache : advantage_cache) {
       cache.reserve(config.inference_cache_capacity);
     }
-    stats.policy_parameter_bytes = NeuralParameterBytes(policy_network);
   }
 
   std::optional<UpdateHandle> current_strategy(
@@ -146,7 +144,7 @@ struct DeepCfrSolver::Impl {
   bool policy_strategy(InfoSetKey key,
                        std::span<float> probabilities) {
     return policy_strategy(
-        key, probabilities, policy_cache, inference_hidden,
+        key, probabilities, policy_cache,
         stats.network_evaluations, stats.cache_hits);
   }
 
@@ -154,18 +152,27 @@ struct DeepCfrSolver::Impl {
       InfoSetKey key,
       std::span<float> probabilities,
       absl::flat_hash_map<InfoSetKey, NeuralActionVector>& cache,
-      std::array<std::vector<float>, 2>& hidden,
       uint64_t& network_evaluations,
       uint64_t& cache_hits) {
-    if (!policy_trained) {
+    if (!policy) {
       FillUniform(probabilities);
       return false;
     }
-    const NeuralActionVector logits =
-        cached_prediction(policy_network, cache, key, hidden,
-                          config.policy_cache_capacity,
-                          network_evaluations, cache_hits);
-    Softmax(logits, probabilities);
+    const auto found = cache.find(key);
+    if (found != cache.end()) {
+      ++cache_hits;
+      std::copy_n(found->second.begin(), probabilities.size(),
+                  probabilities.begin());
+      return true;
+    }
+    ++network_evaluations;
+    NeuralActionVector values = {};
+    policy->strategy(game, key,
+                     std::span<float>(values.data(), probabilities.size()));
+    std::copy_n(values.begin(), probabilities.size(), probabilities.begin());
+    if (cache.size() < config.policy_cache_capacity) {
+      cache.emplace(key, values);
+    }
     return true;
   }
 
@@ -319,13 +326,17 @@ struct DeepCfrSolver::Impl {
       ++stats.iterations;
     }
 
+    NeuralNetwork trained_policy(config.hidden_size);
     stats.strategy_loss = train_network(
-        policy_network, strategy_memory,
+        trained_policy, strategy_memory,
         NetworkSeed(config.seed, stats.iterations, kPlayerCount),
         config.distill_current_policy ? NeuralTarget::CurrentPolicy
                                       : NeuralTarget::AveragePolicy,
         config.policy_training_steps);
-    policy_trained = strategy_memory.size() > 0;
+    if (strategy_memory.size() > 0) {
+      policy.emplace(std::move(trained_policy), game.model);
+      stats.policy_parameter_bytes = policy->parameter_bytes();
+    }
     policy_cache.clear();
     for (size_t player = 0; player < kPlayerCount; ++player) {
       stats.advantage_samples[player] = advantage_memory[player].size();
@@ -373,10 +384,9 @@ struct DeepCfrSolver::Impl {
   std::array<Reservoir, kPlayerCount> advantage_memory;
   Reservoir strategy_memory;
   std::array<NeuralNetwork, kPlayerCount> advantage_network;
-  NeuralNetwork policy_network;
+  std::optional<NeuralPolicy> policy;
   std::array<std::vector<float>, 2> inference_hidden;
   std::array<bool, kPlayerCount> advantage_trained = {};
-  bool policy_trained = false;
   std::array<absl::flat_hash_map<InfoSetKey, NeuralActionVector>, kPlayerCount>
       advantage_cache;
   absl::flat_hash_map<InfoSetKey, NeuralActionVector> policy_cache;
@@ -489,7 +499,7 @@ absl::StatusOr<DeepCfrMatchResult> DeepCfrSolver::evaluate_against_policy(
 absl::StatusOr<ExploitabilityEstimate>
 DeepCfrSolver::estimate_exploitability(
     const BestResponseConfig& config) {
-  if (!impl_->policy_trained) {
+  if (!impl_->policy) {
     return absl::FailedPreconditionError(
         "average policy has not been trained");
   }
@@ -501,18 +511,14 @@ DeepCfrSolver::estimate_exploitability(
     };
     absl::flat_hash_map<InfoSetKey, NeuralActionVector> player_b_cache;
     player_b_cache.reserve(impl_->config.policy_cache_capacity);
-    std::array<std::vector<float>, 2> player_b_hidden = {
-        std::vector<float>(static_cast<size_t>(impl_->config.hidden_size)),
-        std::vector<float>(static_cast<size_t>(impl_->config.hidden_size))};
     uint64_t network_evaluations = 0;
     uint64_t cache_hits = 0;
     const StrategyLookup player_b_lookup = [this, &player_b_cache,
-                                             &player_b_hidden,
                                              &network_evaluations,
                                              &cache_hits](
         InfoSetKey key, std::span<float> probabilities) {
       return impl_->policy_strategy(
-          key, probabilities, player_b_cache, player_b_hidden,
+          key, probabilities, player_b_cache,
           network_evaluations, cache_hits);
     };
     const std::array<StrategyLookup, kPlayerCount> lookups = {
@@ -529,27 +535,20 @@ DeepCfrSolver::estimate_exploitability(
 
 absl::Status DeepCfrSolver::load_average_model(
     const std::filesystem::path& path) {
-  try {
-    LoadNeuralNetwork(impl_->policy_network, path, impl_->game.model);
-    impl_->policy_trained = true;
-    impl_->policy_cache.clear();
-    return absl::OkStatus();
-  } catch (const std::exception& error) {
-    return TorchError(error);
-  }
+  auto loaded = LoadNeuralPolicy(path, impl_->game.model);
+  if (!loaded.ok()) return loaded.status();
+  impl_->policy.emplace(std::move(*loaded));
+  impl_->stats.policy_parameter_bytes = impl_->policy->parameter_bytes();
+  impl_->policy_cache.clear();
+  return absl::OkStatus();
 }
 
 absl::Status DeepCfrSolver::save_average_model(
     const std::filesystem::path& path) const {
-  if (!impl_->policy_trained) {
+  if (!impl_->policy) {
     return absl::FailedPreconditionError("average policy has not been trained");
   }
-  try {
-    SaveNeuralNetwork(impl_->policy_network, path, impl_->game.model);
-    return absl::OkStatus();
-  } catch (const std::exception& error) {
-    return TorchError(error);
-  }
+  return SaveNeuralPolicy(*impl_->policy, path);
 }
 
 const DeepCfrStats& DeepCfrSolver::stats() const noexcept {

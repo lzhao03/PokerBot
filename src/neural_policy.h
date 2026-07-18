@@ -119,6 +119,7 @@ struct NeuralPolicyFitResult;
 
 class NeuralPolicy {
  public:
+  NeuralPolicy(NeuralNetwork network, ModelFingerprint model);
   NeuralPolicy(NeuralPolicy&&) noexcept;
   NeuralPolicy& operator=(NeuralPolicy&&) noexcept;
 
@@ -132,8 +133,6 @@ class NeuralPolicy {
   ModelFingerprint model() const noexcept { return model_; }
 
  private:
-  NeuralPolicy(NeuralNetwork network, ModelFingerprint model);
-
   NeuralNetwork network_;
   ModelFingerprint model_;
 

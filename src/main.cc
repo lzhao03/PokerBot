@@ -58,7 +58,9 @@ ABSL_FLAG(std::vector<std::string>, river_pot_fractions, {},
 ABSL_FLAG(std::string, policy_output, "",
           "output path for the trained compact tabular policy");
 ABSL_FLAG(std::string, neural_policy_output, "",
-          "output path for a neural approximation of the tabular policy");
+          "output path for a fitted neural policy");
+ABSL_FLAG(std::string, neural_policy_input, "",
+          "neural policy to load for Deep CFR evaluation");
 ABSL_FLAG(int, neural_steps, 500,
           "optimizer steps for tabular policy neural approximation");
 ABSL_FLAG(int, neural_batch_size, 128,
@@ -94,12 +96,8 @@ ABSL_FLAG(uint64_t, deep_best_response_iterations, 0,
 ABSL_FLAG(bool, deep_best_response_external_sampling, true,
           "Sample fixed-opponent actions during Deep CFR best responses");
 ABSL_FLAG(uint64_t, deep_seed, 1, "Deep CFR training seed");
-ABSL_FLAG(std::string, deep_model_output, "",
-          "output path for the trained Deep CFR average model");
 ABSL_FLAG(uint64_t, deep_checkpoint_interval, 0,
           "save a numbered Deep CFR model every N iterations; 0 disables");
-ABSL_FLAG(std::string, deep_model_input, "",
-          "trained Deep CFR average model to load");
 ABSL_FLAG(std::string, deep_opponent_policy, "",
           "tabular policy to evaluate against the Deep CFR model");
 
@@ -326,7 +324,7 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
     std::cerr << "Error: " << solver.status() << '\n';
     return 1;
   }
-  const std::string model_input = absl::GetFlag(FLAGS_deep_model_input);
+  const std::string model_input = absl::GetFlag(FLAGS_neural_policy_input);
   if (!model_input.empty()) {
     const absl::Status loaded = solver->load_average_model(model_input);
     if (!loaded.ok()) {
@@ -334,12 +332,12 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
       return 1;
     }
   }
-  const std::string model_output = absl::GetFlag(FLAGS_deep_model_output);
+  const std::string model_output = absl::GetFlag(FLAGS_neural_policy_output);
   const uint64_t checkpoint_interval =
       absl::GetFlag(FLAGS_deep_checkpoint_interval);
   if (checkpoint_interval > 0 && model_output.empty()) {
     std::cerr << "Error: --deep_checkpoint_interval requires "
-                 "--deep_model_output\n";
+                 "--neural_policy_output\n";
     return 1;
   }
   const auto start = std::chrono::steady_clock::now();
@@ -533,7 +531,7 @@ int main(int argc, char** argv) {
   if (iterations < 0 ||
       (iterations == 0 &&
        (algorithm != "deep" ||
-        absl::GetFlag(FLAGS_deep_model_input).empty()))) {
+        absl::GetFlag(FLAGS_neural_policy_input).empty()))) {
     std::cerr << "Error: --iterations must be positive unless loading a Deep "
                  "CFR model\n";
     return 1;
