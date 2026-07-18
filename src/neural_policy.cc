@@ -10,11 +10,14 @@
 #include <random>
 #include <span>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include <Accelerate/Accelerate.h>
 #include <torch/torch.h>
+
+#include "absl/status/status.h"
 
 namespace poker {
 namespace {
@@ -75,6 +78,31 @@ std::mt19937 MakeRng(uint64_t seed) {
       static_cast<uint32_t>(seed), static_cast<uint32_t>(seed >> 32)};
   std::seed_seq sequence(words.begin(), words.end());
   return std::mt19937(sequence);
+}
+
+struct NeuralMetadata {
+  uint32_t feature_schema;
+  int hidden_size;
+  ModelFingerprint model;
+};
+
+NeuralMetadata ReadMetadata(const std::filesystem::path& path) {
+  torch::serialize::InputArchive archive;
+  archive.load_from(path.string());
+  torch::Tensor schema;
+  torch::Tensor hidden_size;
+  torch::Tensor model;
+  archive.read("feature_schema", schema);
+  archive.read("hidden_size", hidden_size);
+  archive.read("model", model);
+  return {
+      static_cast<uint32_t>(schema.item<int64_t>()),
+      static_cast<int>(hidden_size.item<int64_t>()),
+      ModelFingerprint{std::bit_cast<uint64_t>(model.item<int64_t>())}};
+}
+
+absl::Status TorchError(const std::exception& error) {
+  return absl::InternalError(error.what());
 }
 
 }  // namespace
@@ -225,7 +253,7 @@ void Softmax(std::span<const float> logits,
 }
 
 NeuralActionVector PredictNeuralNetwork(
-    NeuralNetwork& network,
+    const NeuralNetwork& network,
     const CompiledGame& game,
     InfoSetKey key,
     std::array<std::vector<float>, 2>& hidden) {
@@ -371,6 +399,116 @@ void LoadNeuralNetwork(NeuralNetwork& network,
   }
   network.impl_->network->load(archive);
   network.impl_->network->eval();
+}
+
+NeuralPolicy::NeuralPolicy(NeuralNetwork network, ModelFingerprint model)
+    : network_(std::move(network)), model_(model) {}
+
+NeuralPolicy::NeuralPolicy(NeuralPolicy&&) noexcept = default;
+NeuralPolicy& NeuralPolicy::operator=(NeuralPolicy&&) noexcept = default;
+
+bool NeuralPolicy::strategy(const CompiledGame& game,
+                            InfoSetKey key,
+                            std::span<float> probabilities) const {
+  if (game.model != model_) {
+    FillUniform(probabilities);
+    return false;
+  }
+  thread_local std::array<std::vector<float>, 2> hidden;
+  for (auto& values : hidden) {
+    values.resize(static_cast<size_t>(network_.hidden_size()));
+  }
+  const NeuralActionVector logits =
+      PredictNeuralNetwork(network_, game, key, hidden);
+  Softmax(logits, probabilities);
+  return true;
+}
+
+size_t NeuralPolicy::parameter_bytes() const {
+  return NeuralParameterBytes(network_);
+}
+
+absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(
+    const CompiledGame& game,
+    const Policy& teacher,
+    const NeuralTrainingConfig& config) {
+  if (teacher.model != game.model) {
+    return absl::FailedPreconditionError(
+        "policy model does not match compiled game");
+  }
+  if (teacher.rows.empty()) {
+    return absl::InvalidArgumentError("policy has no explicit rows");
+  }
+  if (config.steps <= 0 || config.batch_size <= 0 ||
+      config.hidden_size <= 0 || !std::isfinite(config.learning_rate) ||
+      config.learning_rate <= 0.0) {
+    return absl::InvalidArgumentError("invalid neural training config");
+  }
+
+  std::vector<std::pair<InfoSetKey, uint32_t>> rows(
+      teacher.rows.begin(), teacher.rows.end());
+  std::ranges::sort(rows, {}, &std::pair<InfoSetKey, uint32_t>::first);
+  std::vector<NeuralSample> samples;
+  samples.reserve(rows.size());
+  for (const auto& [key, offset] : rows) {
+    if (Index(key.history) >= game.history.nodes.size()) {
+      return absl::InvalidArgumentError("policy history is out of range");
+    }
+    const HistoryNode& node = game.history.nodes[Index(key.history)];
+    if (!std::holds_alternative<DecisionState>(node.state) ||
+        node.child_count == 0 ||
+        offset + node.child_count > teacher.probabilities.size()) {
+      return absl::InvalidArgumentError("invalid policy row");
+    }
+    NeuralSample sample{key};
+    const std::span<float> target(sample.target.data(), node.child_count);
+    if (!teacher.strategy(key, target)) {
+      return absl::InvalidArgumentError("invalid policy row offset");
+    }
+    samples.push_back(sample);
+  }
+
+  try {
+    SetNeuralSeed(config.seed);
+    NeuralNetwork network(config.hidden_size);
+    const float loss = FitNeuralNetwork(
+        network, game, samples, config, NeuralTarget::AveragePolicy);
+    return NeuralPolicyFitResult{
+        NeuralPolicy(std::move(network), game.model), loss, samples.size()};
+  } catch (const std::exception& error) {
+    return TorchError(error);
+  }
+}
+
+absl::Status SaveNeuralPolicy(const NeuralPolicy& policy,
+                              const std::filesystem::path& path) {
+  try {
+    SaveNeuralNetwork(policy.network_, path, policy.model_);
+    return absl::OkStatus();
+  } catch (const std::exception& error) {
+    return TorchError(error);
+  }
+}
+
+absl::StatusOr<NeuralPolicy> LoadNeuralPolicy(
+    const std::filesystem::path& path,
+    ModelFingerprint expected_model) {
+  try {
+    const NeuralMetadata metadata = ReadMetadata(path);
+    if (metadata.feature_schema != kNeuralFeatureSchemaVersion) {
+      return absl::FailedPreconditionError(
+          "neural feature schema does not match");
+    }
+    if (metadata.model != expected_model) {
+      return absl::FailedPreconditionError(
+          "neural model fingerprint does not match");
+    }
+    NeuralNetwork network(metadata.hidden_size);
+    LoadNeuralNetwork(network, path, expected_model);
+    return NeuralPolicy(std::move(network), expected_model);
+  } catch (const std::exception& error) {
+    return TorchError(error);
+  }
 }
 
 }  // namespace poker

@@ -145,6 +145,7 @@ cc_binary(
     srcs = ["main.cc"],
     deps = [
         ":deep_cfr",
+        ":neural_policy",
         ":policy_codec",
         ":solver",
         "@abseil-cpp//absl/flags:flag",

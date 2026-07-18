@@ -1,4 +1,5 @@
 #include "src/deep_cfr.h"
+#include "src/neural_policy.h"
 #include "src/policy_codec.h"
 #include "src/solver.h"
 
@@ -54,6 +55,20 @@ ABSL_FLAG(std::vector<std::string>, turn_pot_fractions, {},
           "turn pot fractions after calling");
 ABSL_FLAG(std::vector<std::string>, river_pot_fractions, {},
           "river pot fractions after calling");
+ABSL_FLAG(std::string, policy_output, "",
+          "output path for the trained compact tabular policy");
+ABSL_FLAG(std::string, neural_policy_output, "",
+          "output path for a neural approximation of the tabular policy");
+ABSL_FLAG(int, neural_steps, 500,
+          "optimizer steps for tabular policy neural approximation");
+ABSL_FLAG(int, neural_batch_size, 128,
+          "batch size for tabular policy neural approximation");
+ABSL_FLAG(int, neural_hidden_size, 32,
+          "hidden width for tabular policy neural approximation");
+ABSL_FLAG(double, neural_learning_rate, 1e-3,
+          "learning rate for tabular policy neural approximation");
+ABSL_FLAG(uint64_t, neural_seed, 1,
+          "random seed for tabular policy neural approximation");
 ABSL_FLAG(int, deep_traversals_per_player, 64,
           "Deep CFR traversals per player and iteration");
 ABSL_FLAG(int, deep_training_steps, 50,
@@ -240,6 +255,47 @@ int RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads) {
 
   PrintRunSummary(*solver, solver->game().config, elapsed.count());
   std::cout << "threads=" << threads << "\n";
+
+  const std::string policy_output = absl::GetFlag(FLAGS_policy_output);
+  const std::string neural_output =
+      absl::GetFlag(FLAGS_neural_policy_output);
+  if (policy_output.empty() && neural_output.empty()) return 0;
+
+  const auto policy = solver->extract_average_policy();
+  if (!policy.ok()) {
+    std::cerr << "Error: " << policy.status() << '\n';
+    return 1;
+  }
+  if (!policy_output.empty()) {
+    const absl::Status saved = poker::SavePolicy(*policy, policy_output);
+    if (!saved.ok()) {
+      std::cerr << "Error: " << saved << '\n';
+      return 1;
+    }
+  }
+  if (!neural_output.empty()) {
+    const auto fitted = poker::FitNeuralPolicy(
+        solver->game(), *policy,
+        {.seed = absl::GetFlag(FLAGS_neural_seed),
+         .steps = absl::GetFlag(FLAGS_neural_steps),
+         .batch_size = absl::GetFlag(FLAGS_neural_batch_size),
+         .hidden_size = absl::GetFlag(FLAGS_neural_hidden_size),
+         .learning_rate = absl::GetFlag(FLAGS_neural_learning_rate)});
+    if (!fitted.ok()) {
+      std::cerr << "Error: " << fitted.status() << '\n';
+      return 1;
+    }
+    const absl::Status saved =
+        poker::SaveNeuralPolicy(fitted->policy, neural_output);
+    if (!saved.ok()) {
+      std::cerr << "Error: " << saved << '\n';
+      return 1;
+    }
+    std::cout << "neural_policy_samples=" << fitted->samples << '\n'
+              << "neural_policy_loss=" << fitted->loss << '\n'
+              << "neural_policy_parameter_bytes="
+              << fitted->policy.parameter_bytes() << '\n';
+  }
   return 0;
 }
 

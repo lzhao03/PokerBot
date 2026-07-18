@@ -276,6 +276,7 @@ struct DeepCfrSolver::Impl {
         {.seed = seed,
          .steps = training_steps,
          .batch_size = config.batch_size,
+         .hidden_size = config.hidden_size,
          .learning_rate = config.learning_rate},
         target_kind,
         {&advantage_network[0], &advantage_network[1]});
