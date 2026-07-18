@@ -56,7 +56,8 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const StrategyLookup& player_b,
     uint64_t samples,
     uint64_t seed,
-    bool measure_reach_coverage = false);
+    bool measure_reach_coverage = false,
+    bool sample_actions = false);
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const CompiledGame& game,
@@ -64,7 +65,8 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const Policy& player_b,
     uint64_t samples,
     uint64_t seed,
-    bool measure_reach_coverage = false);
+    bool measure_reach_coverage = false,
+    bool sample_actions = false);
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const CompiledGame& game,
@@ -72,7 +74,8 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const NeuralPolicy& player_b,
     uint64_t samples,
     uint64_t seed,
-    bool measure_reach_coverage = false);
+    bool measure_reach_coverage = false,
+    bool sample_actions = false);
 
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     const CompiledGame& game,

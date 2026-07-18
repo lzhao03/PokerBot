@@ -59,6 +59,10 @@ TEST_CASE("tabular policies fit the shared neural policy format") {
       *game, fitted->policy, fitted->policy, 2, 11);
   REQUIRE(value.ok());
   CHECK(std::isfinite(value->mean));
+  const auto sampled_value = EstimateExpectedValue(
+      *game, fitted->policy, fitted->policy, 2, 11, false, true);
+  REQUIRE(sampled_value.ok());
+  CHECK(std::isfinite(sampled_value->mean));
   const auto exploitability = EstimateExploitability(
       *game, fitted->policy, {2, 2, 11});
   REQUIRE(exploitability.ok());

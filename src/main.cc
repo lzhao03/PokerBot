@@ -62,6 +62,8 @@ ABSL_FLAG(std::string, neural_policy_output, "",
           "output path for a fitted neural policy");
 ABSL_FLAG(std::string, neural_policy_input, "",
           "neural policy to load for Deep CFR evaluation");
+ABSL_FLAG(std::string, neural_opponent_policy, "",
+          "second neural policy for seat-swapped evaluation");
 ABSL_FLAG(int, neural_steps, 2500,
           "optimizer steps for fitting the final neural policy");
 ABSL_FLAG(int, neural_batch_size, 256,
@@ -511,6 +513,33 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
                   << current_as_b->policy_player_value << '\n';
       }
     }
+  }
+  const std::string neural_opponent_path =
+      absl::GetFlag(FLAGS_neural_opponent_policy);
+  if (!neural_opponent_path.empty()) {
+    const auto opponent = poker::LoadNeuralPolicy(
+        neural_opponent_path, solver->game().model);
+    if (!opponent.ok() || solver->average_policy() == nullptr) {
+      std::cerr << "Error: could not load neural policy profile\n";
+      return 1;
+    }
+    const uint64_t samples =
+        static_cast<uint64_t>(absl::GetFlag(FLAGS_evaluation_samples));
+    const uint64_t seed = absl::GetFlag(FLAGS_neural_seed);
+    const auto as_a = poker::EstimateExpectedValue(
+        solver->game(), *solver->average_policy(), *opponent,
+        samples, seed, false, true);
+    const auto as_b = poker::EstimateExpectedValue(
+        solver->game(), *opponent, *solver->average_policy(),
+        samples, seed, false, true);
+    if (!as_a.ok() || !as_b.ok()) {
+      std::cerr << "Error: neural policy profile evaluation failed\n";
+      return 1;
+    }
+    std::cout << "neural_vs_neural_as_a=" << as_a->mean << '\n'
+              << "neural_vs_neural_as_a_se=" << as_a->standard_error << '\n'
+              << "neural_vs_neural_as_b=" << -as_b->mean << '\n'
+              << "neural_vs_neural_as_b_se=" << as_b->standard_error << '\n';
   }
   const std::chrono::duration<double> elapsed =
       std::chrono::steady_clock::now() - start;

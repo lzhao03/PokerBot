@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <random>
 #include <span>
@@ -40,8 +41,25 @@ StrategyLookup LookupPolicy(const Policy& policy) {
 
 StrategyLookup LookupPolicy(const CompiledGame& game,
                             const NeuralPolicy& policy) {
-  return [&game, &policy](InfoSetKey key, std::span<float> output) {
-    return policy.strategy(game, key, output);
+  constexpr size_t kCacheCapacity = 1'000'000;
+  auto cache = std::make_shared<
+      absl::flat_hash_map<InfoSetKey, NeuralActionVector>>();
+  cache->reserve(100'000);
+  return [&game, &policy, cache](InfoSetKey key, std::span<float> output) {
+    const auto found = cache->find(key);
+    if (found != cache->end()) {
+      std::copy_n(found->second.begin(), output.size(), output.begin());
+      return true;
+    }
+    NeuralActionVector probabilities = {};
+    policy.strategy(
+        game, key,
+        std::span<float>(probabilities.data(), output.size()));
+    std::copy_n(probabilities.begin(), output.size(), output.begin());
+    if (cache->size() < kCacheCapacity) {
+      cache->emplace(key, probabilities);
+    }
+    return true;
   };
 }
 
@@ -218,12 +236,13 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const StrategyLookup& player_b,
     uint64_t samples,
     uint64_t seed,
-    bool measure_reach_coverage) {
+    bool measure_reach_coverage,
+    bool sample_actions) {
   if (samples == 0) {
     return absl::InvalidArgumentError("evaluation samples must be positive");
   }
   return EstimateProfile(game, player_a, player_b, samples, seed,
-                         measure_reach_coverage).value;
+                         measure_reach_coverage, sample_actions).value;
 }
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
@@ -232,14 +251,15 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const NeuralPolicy& player_b,
     uint64_t samples,
     uint64_t seed,
-    bool measure_reach_coverage) {
+    bool measure_reach_coverage,
+    bool sample_actions) {
   if (player_a.model() != game.model || player_b.model() != game.model) {
     return absl::FailedPreconditionError(
         "neural policy model does not match game");
   }
   return EstimateExpectedValue(
       game, LookupPolicy(game, player_a), LookupPolicy(game, player_b),
-      samples, seed, measure_reach_coverage);
+      samples, seed, measure_reach_coverage, sample_actions);
 }
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
@@ -248,14 +268,15 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const Policy& player_b,
     uint64_t samples,
     uint64_t seed,
-    bool measure_reach_coverage) {
+    bool measure_reach_coverage,
+    bool sample_actions) {
   if (player_a.model != game.model || player_b.model != game.model) {
     return absl::FailedPreconditionError(
         "policy model does not match game");
   }
   return EstimateExpectedValue(
       game, LookupPolicy(player_a), LookupPolicy(player_b),
-      samples, seed, measure_reach_coverage);
+      samples, seed, measure_reach_coverage, sample_actions);
 }
 
 namespace {

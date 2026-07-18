@@ -564,4 +564,8 @@ const CompiledGame& DeepCfrSolver::game() const noexcept {
   return impl_->game;
 }
 
+const NeuralPolicy* DeepCfrSolver::average_policy() const noexcept {
+  return impl_->policy ? &*impl_->policy : nullptr;
+}
+
 }  // namespace poker

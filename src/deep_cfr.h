@@ -82,6 +82,7 @@ class DeepCfrSolver {
 
   const DeepCfrStats& stats() const noexcept;
   const CompiledGame& game() const noexcept;
+  const NeuralPolicy* average_policy() const noexcept;
 
  private:
   struct Impl;
