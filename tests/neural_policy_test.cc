@@ -2,7 +2,10 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <numeric>
+#include <string>
 #include <vector>
 
 #include "doctest/doctest.h"
@@ -77,7 +80,20 @@ TEST_CASE("tabular policies fit the shared neural policy format") {
   REQUIRE(loaded->strategy(*game, key, loaded_probabilities));
   CHECK(loaded_probabilities == probabilities);
   CHECK_FALSE(LoadNeuralPolicy(path, ModelFingerprint{1}).ok());
+
+  const auto portable_path =
+      std::filesystem::temp_directory_path() / "poker_neural_policy_test.pnn";
+  REQUIRE(SavePortableNeuralPolicy(fitted->policy, portable_path).ok());
+  std::ifstream portable_input(portable_path, std::ios::binary);
+  const std::vector<char> bytes(
+      (std::istreambuf_iterator<char>(portable_input)),
+      std::istreambuf_iterator<char>());
+  REQUIRE(bytes.size() == 32 + fitted->policy.parameter_bytes());
+  CHECK(std::string(bytes.begin(), bytes.begin() + 4) == "PNN1");
+  CHECK(bytes[4] == 1);
+  CHECK(bytes[8] == kNeuralFeatureSchemaVersion);
   std::filesystem::remove(path);
+  std::filesystem::remove(portable_path);
 }
 
 TEST_CASE("neural fitting rejects a policy for another game") {

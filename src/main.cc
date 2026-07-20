@@ -60,6 +60,8 @@ ABSL_FLAG(std::string, policy_output, "",
           "output path for the trained compact tabular policy");
 ABSL_FLAG(std::string, neural_policy_output, "",
           "output path for a fitted neural policy");
+ABSL_FLAG(std::string, portable_neural_policy_output, "",
+          "output path for browser-compatible neural policy weights");
 ABSL_FLAG(std::string, neural_policy_input, "",
           "neural policy to load for Deep CFR evaluation");
 ABSL_FLAG(std::string, neural_opponent_policy, "",
@@ -444,6 +446,20 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
   }
   if (!model_output.empty() && checkpoint_interval == 0) {
     const absl::Status saved = solver->save_average_model(model_output);
+    if (!saved.ok()) {
+      std::cerr << "Error: " << saved << '\n';
+      return 1;
+    }
+  }
+  const std::string portable_output =
+      absl::GetFlag(FLAGS_portable_neural_policy_output);
+  if (!portable_output.empty()) {
+    if (solver->average_policy() == nullptr) {
+      std::cerr << "Error: no average neural policy to export\n";
+      return 1;
+    }
+    const absl::Status saved = poker::SavePortableNeuralPolicy(
+        *solver->average_policy(), portable_output);
     if (!saved.ok()) {
       std::cerr << "Error: " << saved << '\n';
       return 1;

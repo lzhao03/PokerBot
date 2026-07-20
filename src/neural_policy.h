@@ -40,6 +40,8 @@ struct NeuralTrainingConfig {
   double learning_rate = 1e-3;
 };
 
+class NeuralPolicy;
+
 class NeuralNetwork {
  public:
   explicit NeuralNetwork(int hidden_size);
@@ -74,6 +76,9 @@ class NeuralNetwork {
   friend void LoadNeuralNetwork(NeuralNetwork& network,
                                 const std::filesystem::path& path,
                                 ModelFingerprint expected_model);
+  friend absl::Status SavePortableNeuralPolicy(
+      const NeuralPolicy& policy,
+      const std::filesystem::path& path);
 };
 
 void SetNeuralSeed(uint64_t seed);
@@ -143,6 +148,9 @@ class NeuralPolicy {
   friend absl::StatusOr<NeuralPolicy> LoadNeuralPolicy(
       const std::filesystem::path& path,
       ModelFingerprint expected_model);
+  friend absl::Status SavePortableNeuralPolicy(
+      const NeuralPolicy& policy,
+      const std::filesystem::path& path);
 };
 
 struct NeuralPolicyFitResult {
@@ -161,5 +169,8 @@ absl::Status SaveNeuralPolicy(const NeuralPolicy& policy,
 absl::StatusOr<NeuralPolicy> LoadNeuralPolicy(
     const std::filesystem::path& path,
     ModelFingerprint expected_model);
+absl::Status SavePortableNeuralPolicy(
+    const NeuralPolicy& policy,
+    const std::filesystem::path& path);
 
 }  // namespace poker

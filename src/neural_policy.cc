@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <random>
 #include <span>
 #include <stdexcept>
@@ -103,6 +104,25 @@ NeuralMetadata ReadMetadata(const std::filesystem::path& path) {
 
 absl::Status TorchError(const std::exception& error) {
   return absl::InternalError(error.what());
+}
+
+void AppendU32(std::vector<uint8_t>& bytes, uint32_t value) {
+  for (int shift = 0; shift < 32; shift += 8) {
+    bytes.push_back(static_cast<uint8_t>(value >> shift));
+  }
+}
+
+void AppendU64(std::vector<uint8_t>& bytes, uint64_t value) {
+  AppendU32(bytes, static_cast<uint32_t>(value));
+  AppendU32(bytes, static_cast<uint32_t>(value >> 32));
+}
+
+void AppendTensor(std::vector<uint8_t>& bytes, const torch::Tensor& tensor) {
+  const torch::Tensor contiguous = tensor.contiguous();
+  const float* values = contiguous.data_ptr<float>();
+  for (int64_t index = 0; index < contiguous.numel(); ++index) {
+    AppendU32(bytes, std::bit_cast<uint32_t>(values[index]));
+  }
 }
 
 }  // namespace
@@ -485,6 +505,41 @@ absl::StatusOr<NeuralPolicy> LoadNeuralPolicy(
     NeuralNetwork network(metadata.hidden_size);
     LoadNeuralNetwork(network, path, expected_model);
     return NeuralPolicy(std::move(network), expected_model);
+  } catch (const std::exception& error) {
+    return TorchError(error);
+  }
+}
+
+absl::Status SavePortableNeuralPolicy(
+    const NeuralPolicy& policy,
+    const std::filesystem::path& path) {
+  try {
+    const CfrNet& network = policy.network_.impl_->network;
+    std::vector<uint8_t> bytes;
+    bytes.reserve(32 + policy.parameter_bytes());
+    AppendU32(bytes, 0x314e4e50);  // PNN1
+    AppendU32(bytes, 1);
+    AppendU32(bytes, kNeuralFeatureSchemaVersion);
+    AppendU32(bytes, static_cast<uint32_t>(kNeuralFeatureCount));
+    AppendU32(bytes, static_cast<uint32_t>(policy.network_.hidden_size()));
+    AppendU32(bytes, static_cast<uint32_t>(kMaxActionsPerNode));
+    AppendU64(bytes, std::to_underlying(policy.model_));
+    AppendTensor(bytes, network->hidden1->weight);
+    AppendTensor(bytes, network->hidden1->bias);
+    AppendTensor(bytes, network->hidden2->weight);
+    AppendTensor(bytes, network->hidden2->bias);
+    AppendTensor(bytes, network->hidden3->weight);
+    AppendTensor(bytes, network->hidden3->bias);
+    AppendTensor(bytes, network->output->weight);
+    AppendTensor(bytes, network->output->bias);
+
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    output.write(reinterpret_cast<const char*>(bytes.data()),
+                 static_cast<std::streamsize>(bytes.size()));
+    if (!output) {
+      return absl::InternalError("could not write portable neural policy");
+    }
+    return absl::OkStatus();
   } catch (const std::exception& error) {
     return TorchError(error);
   }
