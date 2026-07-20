@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { act, bestHand, botAction, compareHands, legalActions, newHand, nextHand, type Card } from "./poker";
-import { policyActions, policyHistoryNodeCount, privateObservation, publicObservation } from "./policy";
+import { parseNeuralPolicy, policyActions, policyHistoryNodeCount, policyMove, privateObservation, privateObservationHistory, publicObservation } from "./policy";
 import { bbPer100, emptyStats, recordHand, stdDevPer100 } from "./stats";
 
 const cards = (text: string): Card[] => text.split(" ") as Card[];
@@ -96,7 +97,25 @@ assert.equal(privateObservation(cards("AH AS"), []), 1);
 assert.equal(privateObservation(cards("AH KH"), []), 13);
 assert.equal(privateObservation(cards("7H 2S"), []), 36);
 assert.equal(privateObservation(cards("AH KS"), cards("2H 7H QH")), 7);
+assert.equal(
+  privateObservationHistory(cards("AH KS"), cards("2H 7H QH 3C")),
+  privateObservation(cards("AH KS"), []) +
+    37 * privateObservation(cards("AH KS"), cards("2H 7H QH")) +
+    37 * 37 * privateObservation(cards("AH KS"), cards("2H 7H QH 3C"))
+);
 assert.equal(publicObservation(cards("AH 9H 4C 7D 2S")), 131330n);
+
+const neuralBytes = readFileSync(new URL("../../../models/deep_cfr_compact_texture_h36_history_small_100bb_i300.pnn", import.meta.url));
+const neuralPolicy = parseNeuralPolicy(
+  neuralBytes.buffer.slice(neuralBytes.byteOffset, neuralBytes.byteOffset + neuralBytes.byteLength) as ArrayBuffer
+);
+game = newHand([200, 200], 1);
+game.holes[game.toAct] = cards("AH KS");
+assert.deepEqual(policyMove(neuralPolicy, game, () => 0.02), { action: "fold", found: true });
+assert.deepEqual(policyMove(neuralPolicy, game, () => 0.1), { action: "call", found: true });
+assert.deepEqual(policyMove(neuralPolicy, game, () => 0.5), { action: "raise", raiseTo: 4, found: true });
+assert.deepEqual(policyMove(neuralPolicy, game, () => 0.8), { action: "raise", raiseTo: 6, found: true });
+assert.deepEqual(policyMove(neuralPolicy, game, () => 0.95), { action: "raise", raiseTo: 200, allIn: true, found: true });
 
 let stats = emptyStats();
 game = newHand([200, 200], 0);

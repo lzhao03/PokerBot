@@ -1,16 +1,19 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { act, legalActions, nextHand, newHand, type Action, type Card, type Street, type Suit } from "./poker";
-  import { loadPolicy, policyActions, policyMove, type Policy } from "./policy";
+  import { loadNeuralPolicy, loadTabularPolicy, policyActions, policyMove, type Policy } from "./policy";
   import { FACINGS, STAT_ACTIONS, STREETS, bbPer100, emptyStats, loadStats, rate, recordHand, saveStats, stdDevPer100, type PokerStats } from "./stats";
 
   let game = newHand();
   let stats: PokerStats = emptyStats();
   let selectedStreet: Street = "preflop";
   let botTimer: ReturnType<typeof setTimeout>;
-  let policy: Policy | null = null;
+  let selectedModel: "deep" | "tabular" = "deep";
+  let deepPolicy: Policy | null = null;
+  let tabularPolicy: Policy | null = null;
   let policyReady = false;
   const debug = new URLSearchParams(location.search).get("debug") === "1";
+  $: policy = selectedModel === "deep" ? deepPolicy : tabularPolicy;
   $: legal = legalActions(game);
   $: raiseOptions = game.winner ? [] : policyActions(game).filter((option) => option.action === "raise");
   $: busted = game.stacks.some((stack) => stack === 0);
@@ -63,10 +66,15 @@
   const cardImage = (card: Card) => `/cards/${card}.svg`;
   onMount(() => {
     stats = loadStats();
-    void loadPolicy()
-      .then((loaded) => (policy = loaded))
-      .catch((error: unknown) => console.error("Could not load poker policy; using uniform actions.", error))
-      .finally(() => (policyReady = true));
+    void Promise.allSettled([loadTabularPolicy(), loadNeuralPolicy()])
+      .then(([tabular, deep]) => {
+        if (tabular.status === "fulfilled") tabularPolicy = tabular.value;
+        else console.error("Could not load tabular policy.", tabular.reason);
+        if (deep.status === "fulfilled") deepPolicy = deep.value;
+        else console.error("Could not load Deep CFR policy.", deep.reason);
+        if (!deepPolicy && tabularPolicy) selectedModel = "tabular";
+        policyReady = true;
+      });
   });
   onDestroy(() => clearTimeout(botTimer));
 </script>
@@ -82,6 +90,12 @@
           </h2>
           <p><span>Stack</span><strong>${game.stacks[seat]}</strong></p>
         </header>
+        {#if seat === 1}
+          <div class="model-selector" role="group" aria-label="Computer model">
+            <button class:active-model={selectedModel === "deep"} disabled={!deepPolicy} on:click={() => (selectedModel = "deep")}>Deep CFR</button>
+            <button class:active-model={selectedModel === "tabular"} disabled={!tabularPolicy} on:click={() => (selectedModel = "tabular")}>Tabular CFR</button>
+          </div>
+        {/if}
         <div class="cards">
           {#each game.holes[seat] as card}
             {#if seat === 1 && !game.showdown && !debug}
@@ -324,6 +338,37 @@
     font-size: 11px;
     font-weight: 850;
     line-height: 1;
+  }
+
+  .model-selector {
+    display: flex;
+    width: fit-content;
+    margin: 8px auto 0;
+    overflow: hidden;
+    border: 1px solid rgb(255 255 255 / 0.2);
+    border-radius: 6px;
+  }
+
+  .model-selector button {
+    min-width: 84px;
+    min-height: 30px;
+    padding: 0 9px;
+    border: 0;
+    border-right: 1px solid rgb(255 255 255 / 0.16);
+    border-radius: 0;
+    color: #c9d0cd;
+    background: transparent;
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  .model-selector button:last-child {
+    border-right: 0;
+  }
+
+  .model-selector .active-model {
+    color: #171b19;
+    background: #e7c766;
   }
 
   article:first-of-type {

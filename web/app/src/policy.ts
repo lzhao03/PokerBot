@@ -1,9 +1,12 @@
 import type { Action, Card, Game, LoggedAction } from "./poker";
 
-const MODEL_LOW = 0xa150904f;
-const MODEL_HIGH = 0x5bf84653;
+const TABULAR_MODEL_LOW = 0xa150904f;
+const TABULAR_MODEL_HIGH = 0x5bf84653;
+const NEURAL_MODEL = 0x6fbb89e52780fea2n;
 const FRACTIONS = [0.5, 1];
 const MAX_ACTIONS = 8;
+const NEURAL_FEATURES = 287;
+const PRIVATE_PLACES = [1, 37, 37 * 37, 37 * 37 * 37];
 
 type Player = 0 | 1;
 type Kind = "bet" | "fold" | "call" | "raise" | "check" | "all-in";
@@ -51,10 +54,27 @@ interface Decoder {
   _poker_model_high(): number;
 }
 
-export interface Policy {
+interface TabularPolicy {
+  kind: "tabular";
   decoder: Decoder;
   output: number;
 }
+
+interface NeuralLayer {
+  weights: Float32Array;
+  bias: Float32Array;
+  inputCount: number;
+}
+
+interface NeuralPolicy {
+  kind: "neural";
+  layers: NeuralLayer[];
+  features: Float32Array;
+  hidden: [Float32Array, Float32Array];
+  logits: Float32Array;
+}
+
+export type Policy = TabularPolicy | NeuralPolicy;
 
 export interface PolicyAction {
   action: Action;
@@ -150,6 +170,12 @@ function afterChance(state: Extract<State, { type: "chance" }>): State {
   return { type: "decision", data, actor: 1 };
 }
 
+const ROOT_STATE: DecisionState = {
+  type: "decision",
+  actor: 0,
+  data: { stack: [199, 198], total: [1, 2], committed: [1, 2], lastRaise: 2, street: 0, actionsRemaining: 2 }
+};
+
 function buildTree(): Node[] {
   const nodes: Node[] = [];
   const append = (state: State): number => {
@@ -164,20 +190,20 @@ function buildTree(): Node[] {
     }
     return id;
   };
-  append({
-    type: "decision",
-    actor: 0,
-    data: { stack: [199, 198], total: [1, 2], committed: [1, 2], lastRaise: 2, street: 0, actionsRemaining: 2 }
-  });
+  append(ROOT_STATE);
   return nodes;
 }
 
 const TREE = buildTree();
 
-function decisionFor(actions: LoggedAction[]): { history: number; actions: ActionEdge[] } {
+function decisionFor(actions: LoggedAction[]): { history: number; state: DecisionState; actions: ActionEdge[] } {
   let history = 0;
+  let state: State = ROOT_STATE;
   const skipChance = (): void => {
-    while (TREE[history]?.type === "chance") history = (TREE[history] as Extract<Node, { type: "chance" }>).child;
+    while (TREE[history]?.type === "chance") {
+      state = afterChance(state as Extract<State, { type: "chance" }>);
+      history = (TREE[history] as Extract<Node, { type: "chance" }>).child;
+    }
   };
   for (const logged of actions) {
     skipChance();
@@ -188,12 +214,13 @@ function decisionFor(actions: LoggedAction[]): { history: number; actions: Actio
       return candidate.kind === logged.action;
     });
     if (!edge) throw new Error(`Action ${logged.action} is outside the policy abstraction`);
+    state = apply(state as DecisionState, edge);
     history = edge.child;
   }
   skipChance();
   const node = TREE[history];
   if (node?.type !== "decision") throw new Error("Policy has no decision at this state");
-  return { history, actions: node.actions };
+  return { history, state: state as DecisionState, actions: node.actions };
 }
 
 const rank = (card: Card): number => "23456789TJQKA".indexOf(card[0]) + 2;
@@ -273,7 +300,15 @@ export function privateObservation(hand: Card[], board: Card[]): number {
   return made * 9 + draw * 3 + strength + 1;
 }
 
-export async function loadPolicy(url = "/pokerbot.policy"): Promise<Policy> {
+export function privateObservationHistory(hand: Card[], board: Card[]): number {
+  let observation = privateObservation(hand, []);
+  for (let index = 2; index < board.length; index += 1) {
+    observation += privateObservation(hand, board.slice(0, index + 1)) * PRIVATE_PLACES[index - 1];
+  }
+  return observation;
+}
+
+export async function loadTabularPolicy(url = "/pokerbot.policy"): Promise<Policy> {
   const decoderPromise: Promise<Decoder> = import("@poker/policy_decoder")
     .then(async (module) => (await module.default()) as Decoder);
   const [decoder, response] = await Promise.all([
@@ -290,12 +325,132 @@ export async function loadPolicy(url = "/pokerbot.policy"): Promise<Policy> {
   } finally {
     decoder._poker_free(pointer);
   }
-  if ((decoder._poker_model_low() >>> 0) !== MODEL_LOW || (decoder._poker_model_high() >>> 0) !== MODEL_HIGH) {
+  if ((decoder._poker_model_low() >>> 0) !== TABULAR_MODEL_LOW || (decoder._poker_model_high() >>> 0) !== TABULAR_MODEL_HIGH) {
     throw new Error("Policy does not match the 100BB game model");
   }
   const output = decoder._poker_allocate(MAX_ACTIONS * Float32Array.BYTES_PER_ELEMENT);
   if (!output) throw new Error("Could not allocate strategy memory");
-  return { decoder, output };
+  return { kind: "tabular", decoder, output };
+}
+
+export function parseNeuralPolicy(buffer: ArrayBuffer): Policy {
+  const header = new DataView(buffer);
+  if (buffer.byteLength < 32 || header.getUint32(0, true) !== 0x314e4e50 ||
+      header.getUint32(4, true) !== 1 || header.getUint32(8, true) !== 2 ||
+      header.getUint32(12, true) !== NEURAL_FEATURES || header.getUint32(20, true) !== MAX_ACTIONS ||
+      header.getBigUint64(24, true) !== NEURAL_MODEL) {
+    throw new Error("Invalid neural policy");
+  }
+  const hiddenSize = header.getUint32(16, true);
+  let offset = 32;
+  const layer = (inputCount: number, outputCount: number): NeuralLayer => {
+    const weights = new Float32Array(buffer, offset, inputCount * outputCount);
+    offset += weights.byteLength;
+    const bias = new Float32Array(buffer, offset, outputCount);
+    offset += bias.byteLength;
+    return { weights, bias, inputCount };
+  };
+  const layers = [
+    layer(NEURAL_FEATURES, hiddenSize),
+    layer(hiddenSize, hiddenSize),
+    layer(hiddenSize, hiddenSize),
+    layer(hiddenSize, MAX_ACTIONS)
+  ];
+  if (offset !== buffer.byteLength) throw new Error("Invalid neural policy size");
+  return {
+    kind: "neural",
+    layers,
+    features: new Float32Array(NEURAL_FEATURES),
+    hidden: [new Float32Array(hiddenSize), new Float32Array(hiddenSize)],
+    logits: new Float32Array(MAX_ACTIONS)
+  };
+}
+
+export async function loadNeuralPolicy(url = "/deep-cfr.pnn"): Promise<Policy> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Could not load neural policy: ${response.status}`);
+  return parseNeuralPolicy(await response.arrayBuffer());
+}
+
+function encodeNeuralFeatures(
+  output: Float32Array,
+  history: number,
+  publicId: bigint,
+  privateId: number,
+  state: DecisionState,
+  actionCount: number
+): void {
+  output.fill(0);
+  let cursor = 0;
+  for (let bit = 0; bit < 32; bit += 1) output[cursor++] = (history >>> bit) & 1;
+
+  let bucketOffset = 0;
+  for (const [street, bucketCount] of [16, 16, 64].entries()) {
+    const bucket = Number((publicId >> BigInt(street * 7)) & 0x7fn);
+    if (bucket !== 0) output[cursor + bucketOffset + bucket - 1] = 1;
+    bucketOffset += bucketCount;
+  }
+  cursor += 16 + 16 + 64;
+
+  for (let street = 0; street < PRIVATE_PLACES.length; street += 1) {
+    const bucket = Math.floor(privateId / PRIVATE_PLACES[street]) % 37;
+    if (bucket !== 0) output[cursor + street * 36 + bucket - 1] = 1;
+  }
+  cursor += 4 * 36;
+
+  const { data, actor } = state;
+  output[cursor++] = actor;
+  output[cursor++] = actionCount / MAX_ACTIONS;
+  for (let street = 0; street < 4; street += 1) output[cursor++] = data.street === street ? 1 : 0;
+  const pot = data.total[0] + data.total[1];
+  const scale = 1 / Math.max(1, pot + data.stack[0] + data.stack[1]);
+  for (const value of data.stack) output[cursor++] = value * scale;
+  for (const value of data.total) output[cursor++] = value * scale;
+  for (const value of data.committed) output[cursor++] = value * scale;
+  output[cursor++] = data.lastRaise * scale;
+  output[cursor++] = data.actionsRemaining / 2;
+  output[cursor++] = pot * scale;
+}
+
+function linear(layer: NeuralLayer, input: Float32Array, output: Float32Array, relu: boolean): void {
+  for (let row = 0; row < layer.bias.length; row += 1) {
+    let value = layer.bias[row];
+    const begin = row * layer.inputCount;
+    for (let column = 0; column < layer.inputCount; column += 1) {
+      value += layer.weights[begin + column] * input[column];
+    }
+    output[row] = relu ? Math.max(0, value) : value;
+  }
+}
+
+function neuralStrategy(
+  policy: NeuralPolicy,
+  decision: ReturnType<typeof decisionFor>,
+  hand: Card[],
+  board: Card[]
+): Float32Array {
+  encodeNeuralFeatures(
+    policy.features,
+    decision.history,
+    publicObservation(board),
+    privateObservationHistory(hand, board),
+    decision.state,
+    decision.actions.length
+  );
+  linear(policy.layers[0], policy.features, policy.hidden[0], true);
+  linear(policy.layers[1], policy.hidden[0], policy.hidden[1], true);
+  linear(policy.layers[2], policy.hidden[1], policy.hidden[0], true);
+  linear(policy.layers[3], policy.hidden[0], policy.logits, false);
+
+  const probabilities = policy.logits.subarray(0, decision.actions.length);
+  const maximum = Math.max(...probabilities);
+  let mass = 0;
+  for (let action = 0; action < probabilities.length; action += 1) {
+    probabilities[action] = Math.exp(probabilities[action] - maximum);
+    mass += probabilities[action];
+  }
+  for (let action = 0; action < probabilities.length; action += 1) probabilities[action] /= mass;
+  return probabilities;
 }
 
 const moveFor = (edge: ActionEdge): PolicyAction => ["bet", "raise", "all-in"].includes(edge.kind)
@@ -310,7 +465,7 @@ export function policyMove(policy: Policy | null, game: Game, random: () => numb
   const decision = decisionFor(game.actions);
   let probabilities: Float32Array | null = null;
   let found = false;
-  if (policy) {
+  if (policy?.kind === "tabular") {
     const publicId = publicObservation(game.board);
     const result = policy.decoder._poker_strategy(
       Number(publicId & 0xffffffffn),
@@ -326,6 +481,9 @@ export function policyMove(policy: Policy | null, game: Game, random: () => numb
       policy.output / Float32Array.BYTES_PER_ELEMENT,
       policy.output / Float32Array.BYTES_PER_ELEMENT + decision.actions.length
     );
+  } else if (policy) {
+    probabilities = neuralStrategy(policy, decision, game.holes[game.toAct], game.board);
+    found = true;
   }
   let roll = random();
   let chosen = decision.actions.length - 1;
