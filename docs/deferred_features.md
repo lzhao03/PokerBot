@@ -19,6 +19,9 @@ git show dcbadfc^:<path>
 ### Training checkpoints
 
 - **Status:** Deferred; first feature to reconsider for long training runs.
+- **Current partial behavior:** `--deep_checkpoint_interval` saves numbered Deep
+  CFR average-policy snapshots during a run. These snapshots can be loaded for
+  evaluation or deployment, but they cannot resume training state.
 - **Removed:** `SolverCheckpoint`, `SerializedRngState`, `checkpoint()`,
   `restore()`, `SaveCheckpoint()`, and `LoadCheckpoint()`.
 - **Previous behavior:** Persisted the model fingerprint, CFR rows, regrets,
@@ -36,11 +39,9 @@ git show dcbadfc^:<path>
 
 - **Status:** Restored as the compact `PKCODEC1` codec.
 - **Current behavior:** `EncodePolicy()` and `DecodePolicy()` validate compact
-  policy buffers; `SavePolicy()` atomically replaces files. Uniform rows are
-  omitted and use the policy's uniform fallback.
-- **What remains deferred:** A filesystem `LoadPolicy()` convenience function.
-  Callers that need it can read bytes and use `DecodePolicy()` without adding a
-  second serialization path.
+  policy buffers; `SavePolicy()` atomically replaces files and `LoadPolicy()`
+  reads and decodes them. Uniform rows are omitted and use the policy's uniform
+  fallback.
 - **Compatibility note:** Legacy `PKPOLCY1` and `PKPOLCY2` artifacts are not
   accepted by the compact codec.
 
@@ -60,16 +61,16 @@ git show dcbadfc^:<path>
 
 ### Neural policy compression and dynamic bet sizing
 
-- **Status:** Deferred experiment.
-- **Desired compression:** Train a compact policy network to approximate a strong
-  trained strategy, storing network weights instead of explicit infoset rows.
-- **Existing foundation:** Deep CFR already distills and saves a policy network;
-  reuse that representation and training path rather than building a separate
-  neural-policy stack.
-- **Later extension:** Let the network propose legal bet sizes dynamically instead
-  of choosing only among the fixed betting abstraction's actions.
-- **Evaluate when:** Compare artifact size, strategy error, playing strength, and
-  inference cost against the compact tabular codec.
+- **Status:** Neural strategy compression is implemented; dynamic bet sizing is
+  deferred.
+- **Current behavior:** `FitNeuralPolicy()` trains the shared policy network from
+  a tabular teacher. Deep CFR uses the same representation, and policies support
+  native save/load plus portable `PNN1` browser export.
+- **Current limitation:** The network predicts probabilities over the fixed legal
+  actions produced by the betting abstraction.
+- **What remains deferred:** Let the network propose legal bet sizes dynamically
+  and evaluate artifact size, strategy quality, and inference cost against the
+  fixed-action models.
 
 ### Solver workflow quality of life
 
@@ -85,11 +86,13 @@ git show dcbadfc^:<path>
   model hash.
 - **Training preflight:** Report betting-history size, maximum action count,
   estimated memory at the infoset cap, and likely policy size without training.
-- **Progress reporting:** Periodically show iterations, visits per second,
-  elapsed time, ETA, RSS, infoset count, cap utilization, and estimated encoded
-  policy size.
-- **Policy comparison:** Measure head-to-head EV, probability divergence on
-  shared infosets, coverage, and missing-row rates for two models.
+- **Progress reporting:** `cfr_benchmark --progress_interval` reports iteration
+  milestones, with throughput and infoset totals reported after training.
+  Periodic throughput, elapsed time, ETA, RSS, cap utilization, and estimated
+  encoded policy size remain deferred.
+- **Policy comparison:** The CLI reports seat-swapped EV for Deep-versus-tabular
+  and neural-versus-neural policies. A generic comparison command, probability
+  divergence, coverage, and missing-row analysis remain deferred.
 - **Strict validation:** Optionally fail on cap exhaustion, incompatible
   fingerprints, poor policy coverage, or an invalid exploitability estimate.
 - **Saved configuration presets:** Keep named, checked-in configurations for
@@ -253,7 +256,9 @@ git show dcbadfc^:<path>
 - **Status:** External sampling is available through `external_sampling` and
   `--external_sampling`; outcome and public-chance sampling remain deferred.
 - **Current behavior:** Samples opponent actions while enumerating actions for
-  the player being updated. Evaluation remains a full traversal.
+  the player being updated, including approximate best-response training.
+  Policy evaluation can optionally sample actions; default tabular evaluation
+  remains a full traversal.
 - **Why defer the rest:** Additional variants add estimator variance, sampling
   weights, and different average-strategy accounting. The default
   chance-sampled traversal remains the simpler correctness baseline.
@@ -320,6 +325,7 @@ git show dcbadfc^:<path>
 The current solver still includes heads-up Poker rules, typed cards and combos,
 range parsing, blocker-aware chance sampling, exact and texture public card
 abstractions, exact and handcrafted-36 private abstractions, recall modes,
-CFR+ training, parallel fixed-table updates, average-policy extraction and
-saving, expected-value evaluation, approximate best responses, exploitability,
-model fingerprints, and the benchmark executable.
+CFR+ training, parallel fixed-table updates, Deep CFR, tabular-to-neural policy
+fitting, portable neural export, average-policy extraction and saving,
+expected-value evaluation, approximate best responses, exploitability, model
+fingerprints, and the benchmark executable.
