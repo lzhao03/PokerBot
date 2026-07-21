@@ -114,7 +114,6 @@
         </div>
         {#if game.bets[seat] > 0 || lastActionWasCheck(seat)}
           <p class="action-bubble" aria-label={`${seat === 0 ? "Your" : "Computer"} last action: ${game.bets[seat] > 0 ? `$${game.bets[seat]}` : "Check"}`}>
-            {#if game.bets[seat] > 0}<span class="chip" aria-hidden="true"></span>{/if}
             <strong>{game.bets[seat] > 0 ? `$${game.bets[seat]}` : "Check"}</strong>
           </p>
         {/if}
@@ -408,16 +407,6 @@
     text-align: center;
     transform: translateX(-50%);
     box-shadow: 0 3px 8px rgb(0 0 0 / 0.35);
-  }
-
-  .action-bubble .chip {
-    width: 17px;
-    height: 17px;
-    flex: 0 0 auto;
-    border: 2px dashed #5f4b19;
-    border-radius: 50%;
-    background: #e7c766;
-    box-shadow: 0 0 0 2px #f8e8aa inset, 0 2px 4px rgb(0 0 0 / 0.45);
   }
 
   article:first-of-type .action-bubble {
