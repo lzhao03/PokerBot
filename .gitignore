@@ -7,3 +7,4 @@ __pycache__/
 source_bundle.txt
 test_bundle.txt
 /scripts/
+/models/

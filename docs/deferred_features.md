@@ -58,6 +58,45 @@ git show dcbadfc^:<path>
   in `src/solver.h`, the lossy-policy tests, and `tools/cfr_benchmark.cc` in
   `dcbadfc^`.
 
+### Neural policy compression and dynamic bet sizing
+
+- **Status:** Deferred experiment.
+- **Desired compression:** Train a compact policy network to approximate a strong
+  trained strategy, storing network weights instead of explicit infoset rows.
+- **Existing foundation:** Deep CFR already distills and saves a policy network;
+  reuse that representation and training path rather than building a separate
+  neural-policy stack.
+- **Later extension:** Let the network propose legal bet sizes dynamically instead
+  of choosing only among the fixed betting abstraction's actions.
+- **Evaluate when:** Compare artifact size, strategy error, playing strength, and
+  inference cost against the compact tabular codec.
+
+### Solver workflow quality of life
+
+- **Status:** Deferred until repeated training and policy analysis justify a
+  broader tooling surface.
+- **Policy inspector:** Report file size, row count, quantization settings,
+  action-count distribution, fingerprint, and decoding validity.
+- **Single-state policy query:** Given hole cards, board, and action history,
+  report abstractions, infoset key, legal actions, probabilities, and whether
+  uniform fallback was used.
+- **Run manifest:** Write a non-deployed sidecar with the normalized
+  configuration, seed, iteration count, Git commit, throughput, peak RSS, and
+  model hash.
+- **Training preflight:** Report betting-history size, maximum action count,
+  estimated memory at the infoset cap, and likely policy size without training.
+- **Progress reporting:** Periodically show iterations, visits per second,
+  elapsed time, ETA, RSS, infoset count, cap utilization, and estimated encoded
+  policy size.
+- **Policy comparison:** Measure head-to-head EV, probability divergence on
+  shared infosets, coverage, and missing-row rates for two models.
+- **Strict validation:** Optionally fail on cap exhaustion, incompatible
+  fingerprints, poor policy coverage, or an invalid exploitability estimate.
+- **Saved configuration presets:** Keep named, checked-in configurations for
+  reproducible common training runs instead of repeating long flag lists.
+- **Deterministic hand replay:** Save a seed or compact hand history that the CLI
+  and browser can replay when debugging strategy disagreements.
+
 ## Poker and policy inspection features
 
 ### Semantic hand evaluation
