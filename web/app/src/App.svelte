@@ -64,6 +64,13 @@
   })[facing];
   const suitName = (card: Card) => suits[card[1] as Suit];
   const cardImage = (card: Card) => `/cards/${card}.svg`;
+  const lastActionWasCheck = (player: number) => {
+    for (let index = game.actions.length - 1; index >= 0; index -= 1) {
+      const action = game.actions[index];
+      if (action.player === player && action.street === game.street) return action.action === "check";
+    }
+    return false;
+  };
   onMount(() => {
     stats = loadStats();
     void Promise.allSettled([loadTabularPolicy(), loadNeuralPolicy()])
@@ -105,9 +112,9 @@
             {/if}
           {/each}
         </div>
-        {#if game.bets[seat] > 0}
-          <p class="committed-bet" aria-label={`${seat === 0 ? "Your" : "Computer"} outstanding bet: $${game.bets[seat]}`}>
-            <span aria-hidden="true"></span><strong>${game.bets[seat]}</strong>
+        {#if game.bets[seat] > 0 || lastActionWasCheck(seat)}
+          <p class="action-bubble" aria-label={`${seat === 0 ? "Your" : "Computer"} last action: ${game.bets[seat] > 0 ? `$${game.bets[seat]}` : "Check"}`}>
+            <strong>{game.bets[seat] > 0 ? `$${game.bets[seat]}` : "Check"}</strong>
           </p>
         {/if}
       </article>
@@ -379,36 +386,31 @@
     grid-area: player-one;
   }
 
-  .committed-bet {
+  .action-bubble {
     position: absolute;
     left: 50%;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: #f1cf73;
-    font-size: 18px;
+    min-width: 42px;
+    padding: 5px 9px;
+    border: 1px solid #fff;
+    border-radius: 6px;
+    box-sizing: border-box;
+    color: #17201d;
+    background: #f7f3e8;
+    font-size: 13px;
     font-weight: 800;
     font-variant-numeric: tabular-nums;
     line-height: 1;
+    text-align: center;
     transform: translateX(-50%);
-    text-shadow: 0 2px 3px #000;
+    box-shadow: 0 3px 8px rgb(0 0 0 / 0.35);
   }
 
-  .committed-bet span {
-    width: 17px;
-    height: 17px;
-    border: 2px dashed #5f4b19;
-    border-radius: 50%;
-    background: #e7c766;
-    box-shadow: 0 0 0 2px #f8e8aa inset, 0 2px 4px #000;
+  article:first-of-type .action-bubble {
+    top: -32px;
   }
 
-  article:first-of-type .committed-bet {
-    top: -27px;
-  }
-
-  article:nth-of-type(2) .committed-bet {
-    bottom: -27px;
+  article:nth-of-type(2) .action-bubble {
+    bottom: -32px;
   }
 
   .board {
