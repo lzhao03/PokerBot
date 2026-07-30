@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <optional>
 #include <span>
 #include <tuple>
 #include <utility>
@@ -15,6 +16,7 @@
 
 #include "src/bet_abstraction.h"
 #include "src/card_abstraction.h"
+#include "src/hand_evaluator.h"
 #include "src/history.h"
 #include "src/neural_features.h"
 #include "src/poker.h"
@@ -333,22 +335,43 @@ bool IsAggressive(poker::ActionKind kind) {
          kind == poker::ActionKind::AllIn;
 }
 
-bool FindDecision(std::span<const uint8_t> input_kinds,
-                  std::span<const int32_t> input_targets,
-                  poker::HistoryId& history) {
+std::optional<poker::StreetKind> StreetForBoardCount(size_t board_count) {
+  switch (board_count) {
+    case 0:
+      return poker::StreetKind::Preflop;
+    case 3:
+      return poker::StreetKind::Flop;
+    case 4:
+      return poker::StreetKind::Turn;
+    case 5:
+      return poker::StreetKind::River;
+    default:
+      return std::nullopt;
+  }
+}
+
+bool ReplayHistory(std::span<const uint8_t> input_kinds,
+                   std::span<const int32_t> input_targets,
+                   poker::StreetKind board_street,
+                   poker::HistoryId& history) {
   const BrowserGame& game = Game();
-  const auto skip_chance = [&] {
+  const auto advance_chance = [&] {
     while (std::holds_alternative<poker::ChanceState>(
         game.history.nodes[poker::Index(history)].state)) {
       const poker::HistoryNode& node =
           game.history.nodes[poker::Index(history)];
+      if (poker::Data(node.state).street == board_street) return true;
+      if (std::to_underlying(poker::Data(node.state).street) >
+          std::to_underlying(board_street)) {
+        return false;
+      }
       if (node.child_count != 1) return false;
       history = game.history.children[node.children_begin];
     }
     return true;
   };
   for (size_t input = 0; input < input_kinds.size(); ++input) {
-    if (!skip_chance()) return false;
+    if (!advance_chance()) return false;
     const poker::HistoryNode& node =
         game.history.nodes[poker::Index(history)];
     const auto* decision = std::get_if<poker::DecisionState>(&node.state);
@@ -370,9 +393,107 @@ bool FindDecision(std::span<const uint8_t> input_kinds,
     if (selected == actions.size()) return false;
     history = game.history.children[node.children_begin + selected];
   }
-  if (!skip_chance()) return false;
-  return std::holds_alternative<poker::DecisionState>(
-      game.history.nodes[poker::Index(history)].state);
+  if (!advance_chance()) return false;
+  return poker::Data(game.history.nodes[poker::Index(history)].state).street ==
+         board_street;
+}
+
+bool DecodeBrowserCards(const uint8_t* cards,
+                        size_t board_count,
+                        std::array<poker::ComboId, 2>& hands,
+                        poker::Board& board) {
+  if (cards == nullptr || !StreetForBoardCount(board_count)) return false;
+  std::array<poker::Card, 4 + poker::kMaxBoardCards> decoded;
+  poker::CardMask seen = 0;
+  for (size_t index = 0; index < board_count + 4; ++index) {
+    if (cards[index] >= poker::kDeck.size()) return false;
+    decoded[index] = poker::kDeck[cards[index]];
+    const poker::CardMask bit = poker::CardBit(decoded[index]);
+    if ((seen & bit) != 0) return false;
+    seen |= bit;
+  }
+  const auto first = poker::MaybeCardsToComboId(decoded[0], decoded[1]);
+  const auto second = poker::MaybeCardsToComboId(decoded[2], decoded[3]);
+  const auto decoded_board = poker::MakeBoard(
+      std::span<const poker::Card>(decoded.data() + 4, board_count));
+  if (!first || !second || !decoded_board.ok()) return false;
+  hands = {*first, *second};
+  board = *decoded_board;
+  return true;
+}
+
+size_t Seat(poker::Player player, int dealer) {
+  return player == poker::Player::A ? static_cast<size_t>(dealer)
+                                    : static_cast<size_t>(1 - dealer);
+}
+
+void WriteBrowserState(const poker::BettingState& state,
+                       const std::array<poker::ComboId, 2>& seat_hands,
+                       const poker::Board& board,
+                       int dealer,
+                       int32_t* output) {
+  using namespace poker::web;
+  const poker::BettingData& data = poker::Data(state);
+  std::array<poker::Chips, 2> stacks = {};
+  std::array<poker::Chips, 2> bets = {};
+  for (poker::Player player : {poker::Player::A, poker::Player::B}) {
+    const size_t model = poker::Index(player);
+    const size_t seat = Seat(player, dealer);
+    stacks[seat] = data.stack[model];
+    bets[seat] = data.street_committed[model];
+  }
+
+  int32_t phase = DecisionPhase;
+  int32_t actor = -1;
+  int32_t winner_mask = 0;
+  int32_t cards_needed = 0;
+  if (const auto* decision = std::get_if<poker::DecisionState>(&state)) {
+    actor = static_cast<int32_t>(Seat(decision->actor, dealer));
+  } else if (std::holds_alternative<poker::ChanceState>(state)) {
+    phase = ChancePhase;
+    cards_needed = static_cast<int32_t>(
+        poker::CardsForNextStreet(data.street));
+  } else {
+    const poker::Chips pot = poker::Pot(data);
+    if (const auto* fold = std::get_if<poker::FoldTerminalState>(&state)) {
+      phase = FoldPhase;
+      const size_t winner = Seat(poker::Opponent(fold->folded), dealer);
+      stacks[winner] += pot;
+      winner_mask = 1 << winner;
+    } else {
+      phase = ShowdownPhase;
+      const poker::ComboId player_a = seat_hands[Seat(poker::Player::A, dealer)];
+      const poker::ComboId player_b = seat_hands[Seat(poker::Player::B, dealer)];
+      const int comparison = poker::CompareHands(player_a, player_b, board);
+      if (comparison == 0) {
+        stacks[0] += pot / 2;
+        stacks[1] += pot - pot / 2;
+        winner_mask = 3;
+      } else {
+        const poker::Player winner =
+            comparison > 0 ? poker::Player::A : poker::Player::B;
+        const size_t seat = Seat(winner, dealer);
+        stacks[seat] += pot;
+        winner_mask = 1 << seat;
+      }
+    }
+  }
+
+  output[Phase] = phase;
+  output[Street] = std::to_underlying(data.street);
+  output[Actor] = actor;
+  output[Stack0] = stacks[0];
+  output[Stack1] = stacks[1];
+  output[Bet0] = bets[0];
+  output[Bet1] = bets[1];
+  output[Pot] = winner_mask == 0 ? poker::Pot(data) : 0;
+  output[CurrentWager] = poker::CurrentWager(data);
+  output[CallAmount] =
+      actor >= 0 ? poker::ToCall(data, actor == dealer ? poker::Player::A
+                                                       : poker::Player::B)
+                 : 0;
+  output[WinnerMask] = winner_mask;
+  output[CardsNeeded] = cards_needed;
 }
 
 bool QueryKey(const uint8_t* cards,
@@ -503,8 +624,12 @@ EMSCRIPTEN_KEEPALIVE int poker_query(
     return -1;
   }
   poker::HistoryId history{};
-  if (!FindDecision({input_kinds, input_count},
-                    {input_targets, input_count}, history)) {
+  const auto board_street = StreetForBoardCount(board_count);
+  if (!board_street ||
+      !ReplayHistory({input_kinds, input_count},
+                     {input_targets, input_count}, *board_street, history) ||
+      !std::holds_alternative<poker::DecisionState>(
+          Game().history.nodes[poker::Index(history)].state)) {
     return -1;
   }
   const poker::HistoryNode& node = Game().history.nodes[poker::Index(history)];
@@ -553,6 +678,46 @@ EMSCRIPTEN_KEEPALIVE int poker_query_found() {
 
 EMSCRIPTEN_KEEPALIVE size_t poker_history_node_count() {
   return Game().history.nodes.size();
+}
+
+// Returns the number of legal abstract actions, or -1 for invalid input.
+EMSCRIPTEN_KEEPALIVE int poker_replay(
+    int dealer,
+    const uint8_t* input_kinds,
+    const int32_t* input_targets,
+    size_t input_count,
+    const uint8_t* cards,
+    size_t board_count,
+    int32_t* output_state,
+    uint8_t* output_kinds,
+    int32_t* output_targets) {
+  if ((input_count > 0 && (input_kinds == nullptr || input_targets == nullptr)) ||
+      input_count > kMaxLoggedActions || (dealer != 0 && dealer != 1) ||
+      output_state == nullptr || output_kinds == nullptr ||
+      output_targets == nullptr) {
+    return -1;
+  }
+  std::array<poker::ComboId, 2> hands;
+  poker::Board board;
+  if (!DecodeBrowserCards(cards, board_count, hands, board)) return -1;
+
+  poker::HistoryId history{};
+  if (!ReplayHistory({input_kinds, input_count},
+                     {input_targets, input_count}, board.street(), history)) {
+    return -1;
+  }
+  const poker::HistoryNode& node = Game().history.nodes[poker::Index(history)];
+  WriteBrowserState(node.state, hands, board, dealer, output_state);
+  const auto* decision = std::get_if<poker::DecisionState>(&node.state);
+  if (decision == nullptr) return 0;
+
+  const poker::AbstractActions actions =
+      poker::SelectAbstractActions(Game().abstraction, *decision);
+  for (size_t action = 0; action < actions.size(); ++action) {
+    output_kinds[action] = std::to_underlying(actions[action].kind);
+    output_targets[action] = actions[action].target_street_commitment;
+  }
+  return static_cast<int>(actions.size());
 }
 
 }  // extern "C"

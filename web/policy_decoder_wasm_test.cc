@@ -129,5 +129,83 @@ TEST_CASE("browser query owns history actions observations and inference") {
   poker_unload_neural_policy();
 }
 
+TEST_CASE("browser replay returns canonical state and terminal payouts") {
+  const std::array<uint8_t, 9> cards = {
+      static_cast<uint8_t>(Card(Rank::Ace, Suit::Hearts).index()),
+      static_cast<uint8_t>(Card(Rank::Ace, Suit::Spades).index()),
+      static_cast<uint8_t>(Card(Rank::King, Suit::Hearts).index()),
+      static_cast<uint8_t>(Card(Rank::King, Suit::Spades).index()),
+      static_cast<uint8_t>(Card(Rank::Two, Suit::Clubs).index()),
+      static_cast<uint8_t>(Card(Rank::Three, Suit::Diamonds).index()),
+      static_cast<uint8_t>(Card(Rank::Four, Suit::Spades).index()),
+      static_cast<uint8_t>(Card(Rank::Eight, Suit::Clubs).index()),
+      static_cast<uint8_t>(Card(Rank::Nine, Suit::Diamonds).index()),
+  };
+  std::array<int32_t, web::BrowserStateFieldCount> state = {};
+  std::array<uint8_t, kMaxActionsPerNode> output_kinds = {};
+  std::array<int32_t, kMaxActionsPerNode> output_targets = {};
+
+  CHECK(poker_replay(
+            0, nullptr, nullptr, 0, cards.data(), 0, state.data(),
+            output_kinds.data(), output_targets.data()) == 5);
+  CHECK(state[web::Phase] == web::DecisionPhase);
+  CHECK(state[web::Actor] == 0);
+  CHECK(state[web::Stack0] == 199);
+  CHECK(state[web::Stack1] == 198);
+  CHECK(state[web::Bet0] == 1);
+  CHECK(state[web::Bet1] == 2);
+  CHECK(state[web::Pot] == 3);
+  CHECK(state[web::CallAmount] == 1);
+
+  const std::array<uint8_t, 2> preflop = {
+      std::to_underlying(ActionKind::Call),
+      std::to_underlying(ActionKind::Check)};
+  const std::array<int32_t, 2> passive_targets = {2, 0};
+  CHECK(poker_replay(
+            0, preflop.data(), passive_targets.data(), preflop.size(),
+            cards.data(), 0, state.data(), output_kinds.data(),
+            output_targets.data()) == 0);
+  CHECK(state[web::Phase] == web::ChancePhase);
+  CHECK(state[web::CardsNeeded] == 3);
+
+  CHECK(poker_replay(
+            0, preflop.data(), passive_targets.data(), preflop.size(),
+            cards.data(), 3, state.data(), output_kinds.data(),
+            output_targets.data()) == 4);
+  CHECK(state[web::Phase] == web::DecisionPhase);
+  CHECK(state[web::Street] == std::to_underlying(StreetKind::Flop));
+  CHECK(state[web::Actor] == 1);
+
+  const std::array<uint8_t, 8> showdown_actions = {
+      std::to_underlying(ActionKind::Call),
+      std::to_underlying(ActionKind::Check),
+      std::to_underlying(ActionKind::Check),
+      std::to_underlying(ActionKind::Check),
+      std::to_underlying(ActionKind::Check),
+      std::to_underlying(ActionKind::Check),
+      std::to_underlying(ActionKind::Check),
+      std::to_underlying(ActionKind::Check)};
+  const std::array<int32_t, 8> showdown_targets = {2, 0, 0, 0, 0, 0, 0, 0};
+  CHECK(poker_replay(
+            0, showdown_actions.data(), showdown_targets.data(),
+            showdown_actions.size(), cards.data(), 5, state.data(),
+            output_kinds.data(), output_targets.data()) == 0);
+  CHECK(state[web::Phase] == web::ShowdownPhase);
+  CHECK(state[web::WinnerMask] == 1);
+  CHECK(state[web::Stack0] == 202);
+  CHECK(state[web::Stack1] == 198);
+  CHECK(state[web::Pot] == 0);
+
+  const uint8_t fold = std::to_underlying(ActionKind::Fold);
+  const int32_t zero = 0;
+  CHECK(poker_replay(
+            1, &fold, &zero, 1, cards.data(), 0, state.data(),
+            output_kinds.data(), output_targets.data()) == 0);
+  CHECK(state[web::Phase] == web::FoldPhase);
+  CHECK(state[web::WinnerMask] == 1);
+  CHECK(state[web::Stack0] == 201);
+  CHECK(state[web::Stack1] == 199);
+}
+
 }  // namespace
 }  // namespace poker

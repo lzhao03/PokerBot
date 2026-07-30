@@ -11,6 +11,29 @@ inline constexpr int kUniformPolicy = 0;
 inline constexpr int kTabularPolicy = 1;
 inline constexpr int kNeuralPolicy = 2;
 
+enum BrowserPhase : int32_t {
+  DecisionPhase,
+  ChancePhase,
+  FoldPhase,
+  ShowdownPhase,
+};
+
+enum BrowserStateField : size_t {
+  Phase,
+  Street,
+  Actor,
+  Stack0,
+  Stack1,
+  Bet0,
+  Bet1,
+  Pot,
+  CurrentWager,
+  CallAmount,
+  WinnerMask,
+  CardsNeeded,
+  BrowserStateFieldCount,
+};
+
 }  // namespace poker::web
 
 extern "C" {
@@ -40,5 +63,14 @@ int poker_query(int policy_kind,
                 float* output_probabilities);
 int poker_query_found();
 size_t poker_history_node_count();
+int poker_replay(int dealer,
+                 const uint8_t* input_kinds,
+                 const int32_t* input_targets,
+                 size_t input_count,
+                 const uint8_t* cards,
+                 size_t board_count,
+                 int32_t* output_state,
+                 uint8_t* output_kinds,
+                 int32_t* output_targets);
 
 }
