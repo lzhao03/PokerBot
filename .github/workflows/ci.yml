@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v7
+      - uses: bazel-contrib/setup-bazel@0.19.0
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/app/package-lock.json
+      - name: Test portable C++ core
+        run: >-
+          bazel test
+          //tests:game_rules_test
+          //tests:poker_test
+          //tests:card_abstraction_modes_test
+          //web:policy_decoder_test
+      - name: Build portable tools and WASM
+        run: bazel build //tools:cfr_benchmark //web:policy_decoder_wasm
+      - name: Test web application
+        working-directory: web/app
+        run: |
+          npm ci
+          npm test
+          npm run check
