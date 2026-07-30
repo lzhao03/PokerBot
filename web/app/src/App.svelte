@@ -1,10 +1,10 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
-  import { act, legalActions, nextHand, newHand, type Action, type Card, type Street, type Suit } from "./poker";
-  import { loadNeuralPolicy, loadTabularPolicy, policyActions, policyMove, type Policy } from "./policy";
+  import { act, loadNeuralPolicy, loadRuntime, loadTabularPolicy, nextHand, newHand, policyMove, type Action, type Card, type Game, type Policy, type Runtime, type Street, type Suit } from "./poker";
   import { FACINGS, STAT_ACTIONS, STREETS, bbPer100, emptyStats, loadStats, rate, recordHand, saveStats, stdDevPer100, type PokerStats } from "./stats";
 
-  let game = newHand();
+  let runtime: Runtime | null = null;
+  let game: Game | null = null;
   let stats: PokerStats = emptyStats();
   let selectedStreet: Street = "preflop";
   let botTimer: ReturnType<typeof setTimeout>;
@@ -13,17 +13,18 @@
   let tabularPolicy: Policy | null = null;
   const debug = new URLSearchParams(location.search).get("debug") === "1";
   $: policy = selectedModel === "deep" ? deepPolicy : tabularPolicy;
-  $: legal = legalActions(game);
-  $: raiseOptions = game.winner || !policy
-    ? []
-    : policyActions(policy, game).filter((option) => option.action === "raise");
-  $: busted = game.stacks.some((stack) => stack === 0);
+  $: foldOption = game?.options.find((option) => option.action === "fold");
+  $: checkOption = game?.options.find((option) => option.action === "check");
+  $: callOption = game?.options.find((option) => option.action === "call");
+  $: raiseOptions = game?.options.filter((option) => option.action === "raise") ?? [];
+  $: busted = game?.stacks.some((stack) => stack === 0) ?? false;
   $: {
     clearTimeout(botTimer);
     const activePolicy = policy;
-    if (!game.winner && game.toAct === 1 && activePolicy) {
+    const activeGame = game;
+    if (activeGame && !activeGame.winner && activeGame.toAct === 1 && activePolicy) {
       botTimer = setTimeout(() => {
-        const move = policyMove(activePolicy, game);
+        const move = policyMove(activePolicy, activeGame);
         play(move.action, move.raiseTo);
       }, 500);
     }
@@ -31,15 +32,17 @@
 
   const suits: Record<Suit, string> = { C: "clubs", D: "diamonds", H: "hearts", S: "spades" };
   const play = (action: Action, raiseTo?: number) => {
-    const next = act(game, action, raiseTo);
-    if (!game.winner && next.winner) {
-      stats = recordHand(stats, next);
+    if (!game || !runtime) return;
+    const result = act(runtime, game, action, raiseTo);
+    if (!game.winner && result.winner) {
+      stats = recordHand(stats, result);
       saveStats(stats);
     }
-    game = next;
+    game = result;
   };
   const next = () => {
-    const hand = busted ? newHand() : nextHand(game);
+    if (!game || !runtime) return;
+    const hand = busted ? newHand(runtime) : nextHand(runtime, game);
     game = hand;
     if (hand.winner) {
       stats = recordHand(stats, hand);
@@ -67,6 +70,7 @@
   const suitName = (card: Card) => suits[card[1] as Suit];
   const cardImage = (card: Card) => `/cards/${card}.svg`;
   const lastActionWasCheck = (player: number) => {
+    if (!game) return false;
     for (let index = game.actions.length - 1; index >= 0; index -= 1) {
       const action = game.actions[index];
       if (action.player === player && action.street === game.street) return action.action === "check";
@@ -75,19 +79,28 @@
   };
   onMount(() => {
     stats = loadStats();
-    void Promise.allSettled([loadTabularPolicy(), loadNeuralPolicy()])
+    void loadRuntime()
+      .then((loaded) => {
+        runtime = loaded;
+        game = newHand(loaded);
+        return Promise.allSettled([loadTabularPolicy(), loadNeuralPolicy()]);
+      })
       .then(([tabular, deep]) => {
         if (tabular.status === "fulfilled") tabularPolicy = tabular.value;
         else console.error("Could not load tabular policy.", tabular.reason);
         if (deep.status === "fulfilled") deepPolicy = deep.value;
         else console.error("Could not load Deep CFR policy.", deep.reason);
         if (!deepPolicy && tabularPolicy) selectedModel = "tabular";
+      })
+      .catch((error) => {
+        console.error("Could not initialize poker.", error);
       });
   });
   onDestroy(() => clearTimeout(botTimer));
 </script>
 
 <main>
+  {#if game}
   <section class="table">
     {#each [0, 1] as seat}
       <article class:active={!game.winner && game.toAct === seat}>
@@ -138,9 +151,9 @@
         <button class="next-action" on:click={next}>{busted ? "Reset game" : "Next hand"}</button>
       {:else if game.toAct === 0}
         <div class="actions">
-          {#if legal.canFold}<button class="fold-action" on:click={() => play("fold")}>Fold</button>{/if}
-          {#if legal.canCheck}<button class="check-action" on:click={() => play("check")}>Check</button>{/if}
-          {#if legal.canCall}<button class="wager-action" on:click={() => play("call")}>Call <strong>${legal.toCall}</strong></button>{/if}
+          {#if foldOption}<button class="fold-action" on:click={() => play("fold")}>Fold</button>{/if}
+          {#if checkOption}<button class="check-action" on:click={() => play("check")}>Check</button>{/if}
+          {#if callOption}<button class="wager-action" on:click={() => play("call")}>Call <strong>${game.toCall}</strong></button>{/if}
           {#each raiseOptions as option}
             <button class="wager-action" on:click={() => play("raise", option.raiseTo)}>
               {#if option.allIn}
@@ -206,6 +219,7 @@
       </div>
     </details>
   </section>
+  {/if}
 
 </main>
 

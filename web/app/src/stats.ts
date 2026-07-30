@@ -56,7 +56,10 @@ function statAction(action: LoggedAction, previous: StatAction[]): StatAction {
   return action.street !== "preflop" && !previous.some((value) => value === "bet" || value === "raise") ? "bet" : "raise";
 }
 
-export function recordHand(current: PokerStats, game: Game): PokerStats {
+export function recordHand(
+  current: PokerStats,
+  game: Pick<Game, "winner" | "stacks" | "startingStacks" | "actions">
+): PokerStats {
   if (!game.winner) throw new Error("Cannot record an unfinished hand");
   const next = structuredClone(current);
   const result = (game.stacks[0] - game.startingStacks[0]) / BIG_BLIND;

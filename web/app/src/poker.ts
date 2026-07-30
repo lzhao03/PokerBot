@@ -14,10 +14,10 @@ export interface LoggedAction {
 
 type Pair<T> = [T, T];
 
-export interface HandScore {
-  category: number;
-  values: number[];
-  name: string;
+export interface GameAction {
+  action: Action;
+  raiseTo?: number;
+  allIn?: boolean;
 }
 
 export interface Game {
@@ -29,286 +29,356 @@ export interface Game {
   bets: Pair<number>;
   pot: number;
   dealer: Player;
-  toAct: Player;
+  toAct: Player | null;
   street: Street;
   currentBet: number;
-  minRaise: number;
-  acted: Pair<boolean>;
+  toCall: number;
   message: string;
   winner: Player[] | null;
   showdown: boolean;
   actions: LoggedAction[];
+  options: GameAction[];
 }
 
-export interface LegalActions {
-  toCall: number;
-  canFold: boolean;
-  canCheck: boolean;
-  canCall: boolean;
-  minRaiseTo: number | null;
-  maxRaiseTo: number;
-}
+const MAX_LOGGED_ACTIONS = 64;
+const MAX_ACTIONS = 8;
+const MAX_CARDS = 9;
+const INPUT_KINDS = 0;
+const INPUT_TARGETS = INPUT_KINDS + MAX_LOGGED_ACTIONS;
+const CARDS = INPUT_TARGETS + MAX_LOGGED_ACTIONS * Int32Array.BYTES_PER_ELEMENT;
+const OUTPUT_KINDS = CARDS + MAX_CARDS;
+const OUTPUT_TARGETS = (OUTPUT_KINDS + MAX_ACTIONS + 3) & ~3;
+const OUTPUT_PROBABILITIES =
+  OUTPUT_TARGETS + MAX_ACTIONS * Int32Array.BYTES_PER_ELEMENT;
+const OUTPUT_STATE =
+  OUTPUT_PROBABILITIES + MAX_ACTIONS * Float32Array.BYTES_PER_ELEMENT;
+const STATE_FIELDS = 12;
+const SCRATCH_SIZE =
+  OUTPUT_STATE + STATE_FIELDS * Int32Array.BYTES_PER_ELEMENT;
 
+const PHASE_FOLD = 2;
+const PHASE_SHOWDOWN = 3;
+const STATE = {
+  phase: 0,
+  street: 1,
+  actor: 2,
+  stack0: 3,
+  stack1: 4,
+  bet0: 5,
+  bet1: 6,
+  pot: 7,
+  currentWager: 8,
+  callAmount: 9,
+  winnerMask: 10,
+  cardsNeeded: 11
+} as const;
+const policyKinds = { tabular: 1, neural: 2 } as const;
+const actionKinds: Record<Action, number> = {
+  fold: 1,
+  call: 2,
+  raise: 3,
+  check: 4
+};
+const suitOffsets: Record<Suit, number> = {
+  H: 0,
+  D: 13,
+  C: 26,
+  S: 39
+};
 const RANKS: Rank[] = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"];
 const SUITS: Suit[] = ["S", "H", "D", "C"];
-const SMALL_BLIND = 1;
-const BIG_BLIND = 2;
-const STARTING_STACK = BIG_BLIND * 100;
-const HANDS = [
-  "high card",
-  "pair",
-  "two pair",
-  "three of a kind",
-  "straight",
-  "flush",
-  "full house",
-  "four of a kind",
-  "straight flush"
-];
+const STREETS: Street[] = ["preflop", "flop", "turn", "river"];
+const STARTING_STACK = 200;
 
-const other = (player: Player): Player => (player === 0 ? 1 : 0);
-const rank = (card: Card): number => RANKS.indexOf(card[0] as Rank) + 2;
-const uniqueDesc = (ranks: number[]): number[] => [...new Set(ranks)].sort((a, b) => b - a);
+interface Decoder {
+  HEAPU8: Uint8Array;
+  HEAP32: Int32Array;
+  HEAPF32: Float32Array;
+  _poker_allocate(size: number): number;
+  _poker_free(pointer: number): void;
+  _poker_load_policy(pointer: number, size: number): number;
+  _poker_load_neural_policy(pointer: number, size: number): number;
+  _poker_query(
+    policyKind: number,
+    inputKinds: number,
+    inputTargets: number,
+    inputCount: number,
+    cards: number,
+    boardCount: number,
+    outputKinds: number,
+    outputTargets: number,
+    outputProbabilities: number
+  ): number;
+  _poker_query_found(): number;
+  _poker_replay(
+    dealer: number,
+    inputKinds: number,
+    inputTargets: number,
+    inputCount: number,
+    cards: number,
+    boardCount: number,
+    outputState: number,
+    outputKinds: number,
+    outputTargets: number
+  ): number;
+}
+
+export interface Runtime {
+  decoder: Decoder;
+  scratch: number;
+}
+
+export interface Policy {
+  kind: "tabular" | "neural";
+  runtime: Runtime;
+}
+
+export interface PolicyMove extends GameAction {
+  found: boolean;
+}
+
+let runtimePromise: Promise<Runtime> | undefined;
+
+export function loadRuntime(): Promise<Runtime> {
+  return runtimePromise ??= import("@poker/policy_decoder").then(async (module) => {
+    const decoder = (await module.default()) as Decoder;
+    const scratch = decoder._poker_allocate(SCRATCH_SIZE);
+    if (!scratch) throw new Error("Could not allocate poker memory");
+    return { decoder, scratch };
+  });
+}
+
+async function loadPolicy(
+  kind: Policy["kind"],
+  url: string
+): Promise<Policy> {
+  const [runtime, response] = await Promise.all([loadRuntime(), fetch(url)]);
+  if (!response.ok) throw new Error(`Could not load policy: ${response.status}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const pointer = runtime.decoder._poker_allocate(bytes.length);
+  if (!pointer) throw new Error("Could not allocate policy memory");
+  try {
+    runtime.decoder.HEAPU8.set(bytes, pointer);
+    const loaded = kind === "tabular"
+      ? runtime.decoder._poker_load_policy(pointer, bytes.length)
+      : runtime.decoder._poker_load_neural_policy(pointer, bytes.length);
+    if (loaded !== 1) throw new Error(`Invalid ${kind} policy`);
+  } finally {
+    runtime.decoder._poker_free(pointer);
+  }
+  return { kind, runtime };
+}
+
+export function loadTabularPolicy(url = "/pokerbot.policy"): Promise<Policy> {
+  return loadPolicy("tabular", url);
+}
+
+export function loadNeuralPolicy(url = "/deep-cfr.pnn"): Promise<Policy> {
+  return loadPolicy("neural", url);
+}
+
+const cardIndex = (card: Card): number =>
+  suitOffsets[card[1] as Suit] + "23456789TJQKA".indexOf(card[0]);
+
+function moveFor(kind: number, target: number): GameAction {
+  if (kind === 0 || kind === 3) return { action: "raise", raiseTo: target };
+  if (kind === 5) return { action: "raise", raiseTo: target, allIn: true };
+  if (kind === 1) return { action: "fold" };
+  if (kind === 2) return { action: "call" };
+  if (kind === 4) return { action: "check" };
+  throw new Error("Poker engine returned an unknown action");
+}
+
+function writeHistory(runtime: Runtime, game: Pick<Game, "actions">): void {
+  if (game.actions.length > MAX_LOGGED_ACTIONS) {
+    throw new Error("Poker history is too long");
+  }
+  runtime.decoder.HEAPU8.set(
+    game.actions.map(({ action }) => actionKinds[action]),
+    runtime.scratch + INPUT_KINDS
+  );
+  const targetBegin =
+    (runtime.scratch + INPUT_TARGETS) / Int32Array.BYTES_PER_ELEMENT;
+  game.actions.forEach(({ raiseTo }, index) => {
+    runtime.decoder.HEAP32[targetBegin + index] = raiseTo ?? 0;
+  });
+}
+
+function readActions(runtime: Runtime, count: number): GameAction[] {
+  const targetBegin =
+    (runtime.scratch + OUTPUT_TARGETS) / Int32Array.BYTES_PER_ELEMENT;
+  return Array.from({ length: count }, (_, index) =>
+    moveFor(
+      runtime.decoder.HEAPU8[runtime.scratch + OUTPUT_KINDS + index],
+      runtime.decoder.HEAP32[targetBegin + index]
+    )
+  );
+}
 
 function deck(): Card[] {
-  return RANKS.flatMap((r) => SUITS.map((s) => `${r}${s}` as Card));
+  return RANKS.flatMap((rank) => SUITS.map((suit) => `${rank}${suit}` as Card));
 }
 
 function shuffle(cards: Card[]): Card[] {
-  const out = [...cards];
-  for (let i = out.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
+  const result = [...cards];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const selected = Math.floor(Math.random() * (index + 1));
+    [result[index], result[selected]] = [result[selected], result[index]];
   }
-  return out;
+  return result;
 }
 
-function straightHigh(ranks: number[]): number {
-  const values = uniqueDesc(ranks);
-  if (values.includes(14)) values.push(1);
-  for (let i = 0; i <= values.length - 5; i += 1) {
-    if (values[i] - values[i + 4] === 4) return values[i];
+type ReplayInput = Pick<
+  Game,
+  "deck" | "holes" | "board" | "startingStacks" | "dealer" | "actions"
+>;
+
+function replay(runtime: Runtime, input: ReplayInput): Game {
+  const { decoder, scratch } = runtime;
+  const deck = [...input.deck];
+  const board = [...input.board];
+  writeHistory(runtime, input);
+
+  while (true) {
+    decoder.HEAPU8.set(
+      [...input.holes[0], ...input.holes[1], ...board].map(cardIndex),
+      scratch + CARDS
+    );
+    const actionCount = decoder._poker_replay(
+      input.dealer,
+      scratch + INPUT_KINDS,
+      scratch + INPUT_TARGETS,
+      input.actions.length,
+      scratch + CARDS,
+      board.length,
+      scratch + OUTPUT_STATE,
+      scratch + OUTPUT_KINDS,
+      scratch + OUTPUT_TARGETS
+    );
+    if (actionCount < 0) throw new Error("Invalid poker state");
+
+    const stateBegin =
+      (scratch + OUTPUT_STATE) / Int32Array.BYTES_PER_ELEMENT;
+    const state = decoder.HEAP32.subarray(
+      stateBegin,
+      stateBegin + STATE_FIELDS
+    );
+    if (state[STATE.cardsNeeded] > 0) {
+      board.push(...deck.splice(0, state[STATE.cardsNeeded]));
+      continue;
+    }
+
+    const winnerMask = state[STATE.winnerMask];
+    const winner = winnerMask === 0
+      ? null
+      : ([0, 1] as Player[]).filter((player) => winnerMask & (1 << player));
+    const phase = state[STATE.phase];
+    const message = winnerMask === 3
+      ? "Split pot."
+      : winner
+        ? `Player ${winner[0] + 1} wins ${phase === PHASE_FOLD ? "by fold" : "at showdown"}.`
+        : "";
+    return {
+      ...input,
+      deck,
+      board,
+      stacks: [state[STATE.stack0], state[STATE.stack1]],
+      bets: [state[STATE.bet0], state[STATE.bet1]],
+      pot: state[STATE.pot],
+      toAct: state[STATE.actor] < 0 ? null : state[STATE.actor] as Player,
+      street: STREETS[state[STATE.street]],
+      currentBet: state[STATE.currentWager],
+      toCall: state[STATE.callAmount],
+      message,
+      winner,
+      showdown: phase === PHASE_SHOWDOWN,
+      options: readActions(runtime, actionCount)
+    };
   }
-  return 0;
 }
 
-const score = (category: number, values: number[]): HandScore => ({ category, values, name: HANDS[category] });
-
-export function bestHand(cards: Card[]): HandScore {
-  const ranks = cards.map(rank).sort((a, b) => b - a);
-  const counts = new Map(ranks.map((r) => [r, ranks.filter((x) => x === r).length]));
-  const group = (n: number): number[] => [...counts].filter(([, count]) => count >= n).map(([r]) => r).sort((a, b) => b - a);
-  const kickers = (skip: number[], n: number): number[] => uniqueDesc(ranks).filter((r) => !skip.includes(r)).slice(0, n);
-  const flushSuit = [...SUITS].find((s) => cards.filter((card) => card[1] === s).length >= 5);
-  const flushRanks = flushSuit ? cards.filter((card) => card[1] === flushSuit).map(rank) : [];
-  const straightFlush = straightHigh(flushRanks);
-  const trips = group(3);
-  const pairs = group(2);
-
-  if (straightFlush) return score(8, [straightFlush]);
-  if (group(4)[0]) return score(7, [group(4)[0], ...kickers(group(4), 1)]);
-  if (trips[0] && (pairs.filter((r) => r !== trips[0])[0] || trips[1])) {
-    return score(6, [trips[0], pairs.filter((r) => r !== trips[0])[0] || trips[1]]);
-  }
-  if (flushSuit) return score(5, uniqueDesc(flushRanks).slice(0, 5));
-  if (straightHigh(ranks)) return score(4, [straightHigh(ranks)]);
-  if (trips[0]) return score(3, [trips[0], ...kickers([trips[0]], 2)]);
-  if (pairs[1]) return score(2, [pairs[0], pairs[1], ...kickers([pairs[0], pairs[1]], 1)]);
-  if (pairs[0]) return score(1, [pairs[0], ...kickers([pairs[0]], 3)]);
-  return score(0, uniqueDesc(ranks).slice(0, 5));
-}
-
-export function compareHands(a: Card[], b: Card[]): number {
-  const left = bestHand(a);
-  const right = bestHand(b);
-  const values = [left.category, ...left.values].map((v, i) => v - [right.category, ...right.values][i]);
-  return values.find(Boolean) || 0;
-}
-
-function clone(game: Game): Game {
-  return {
-    ...game,
-    deck: [...game.deck],
-    holes: [[...game.holes[0]], [...game.holes[1]]],
-    board: [...game.board],
-    startingStacks: [...game.startingStacks],
-    stacks: [...game.stacks],
-    bets: [...game.bets],
-    acted: [...game.acted],
-    actions: game.actions.map((action) => ({ ...action }))
-  };
-}
-
-function pay(game: Game, player: Player, amount: number): void {
-  const chips = Math.min(amount, game.stacks[player]);
-  game.stacks[player] -= chips;
-  game.bets[player] += chips;
-  game.pot += chips;
-}
-
-function dealTo(game: Game, totalBoardCards: number): void {
-  const count = totalBoardCards - game.board.length;
-  game.board.push(...game.deck.slice(0, count));
-  game.deck = game.deck.slice(count);
-}
-
-export function newHand(stacks: Pair<number> = [STARTING_STACK, STARTING_STACK], dealer: Player = 0): Game {
+export function newHand(runtime: Runtime, dealer: Player = 0): Game {
   const cards = shuffle(deck());
-  const game: Game = {
+  return replay(runtime, {
     deck: cards.slice(4),
     holes: [cards.slice(0, 2), cards.slice(2, 4)],
     board: [],
-    startingStacks: [...stacks],
-    stacks: [...stacks],
-    bets: [0, 0],
-    pot: 0,
+    startingStacks: [STARTING_STACK, STARTING_STACK],
     dealer,
-    toAct: dealer,
-    street: "preflop",
-    currentBet: 0,
-    minRaise: BIG_BLIND,
-    acted: [false, false],
-    message: `Player ${dealer + 1} posts ${SMALL_BLIND}; Player ${other(dealer) + 1} posts ${BIG_BLIND}.`,
-    winner: null,
-    showdown: false,
     actions: []
-  };
-  pay(game, dealer, SMALL_BLIND);
-  pay(game, other(dealer), BIG_BLIND);
-  game.currentBet = Math.max(...game.bets);
-  game.acted = [game.stacks[0] === 0, game.stacks[1] === 0];
-  if (game.stacks[dealer] === 0 || (game.stacks[other(dealer)] === 0 && game.currentBet === game.bets[dealer])) {
-    refundUncalled(game);
-    return showdown(game);
+  });
+}
+
+export function nextHand(runtime: Runtime, game: Game): Game {
+  return newHand(runtime, game.dealer === 0 ? 1 : 0);
+}
+
+export function act(
+  runtime: Runtime,
+  game: Game,
+  action: Action,
+  raiseTo?: number
+): Game {
+  if (game.winner || game.toAct === null) return game;
+  if (!game.options.some((option) =>
+    option.action === action && option.raiseTo === raiseTo)) {
+    throw new Error("Illegal poker action");
   }
-  return game;
+  return replay(runtime, {
+    ...game,
+    actions: [
+      ...game.actions,
+      {
+        action,
+        player: game.toAct,
+        street: game.street,
+        ...(raiseTo === undefined ? {} : { raiseTo })
+      }
+    ]
+  });
 }
 
-export function nextHand(game: Game): Game {
-  return newHand([STARTING_STACK, STARTING_STACK], other(game.dealer));
-}
-
-export function legalActions(game: Game): LegalActions {
-  const player = game.toAct;
-  const toCall = Math.max(0, game.currentBet - game.bets[player]);
-  const maxRaiseTo = game.bets[player] + game.stacks[player];
-  const canRaise = !game.winner && game.stacks[other(player)] > 0 && maxRaiseTo > game.currentBet;
-  const fullRaiseTo = game.currentBet ? game.currentBet + game.minRaise : BIG_BLIND;
-  return {
-    toCall,
-    canFold: !game.winner && toCall > 0,
-    canCheck: !game.winner && toCall === 0,
-    canCall: !game.winner && toCall > 0,
-    minRaiseTo: canRaise ? Math.min(fullRaiseTo, maxRaiseTo) : null,
-    maxRaiseTo
-  };
-}
-
-export function botAction(game: Game, random: () => number = Math.random): Action {
-  const legal = legalActions(game);
-  const actions: Action[] = [];
-  if (legal.canFold) actions.push("fold");
-  if (legal.canCheck) actions.push("check");
-  if (legal.canCall) actions.push("call");
-  if (legal.minRaiseTo !== null) actions.push("raise");
-  return actions[Math.floor(random() * actions.length)];
-}
-
-function refundUncalled(game: Game): void {
-  if (game.bets[0] === game.bets[1]) return;
-  const player = game.bets[0] > game.bets[1] ? 0 : 1;
-  const refund = game.bets[player] - game.bets[other(player)];
-  game.bets[player] -= refund;
-  game.stacks[player] += refund;
-  game.pot -= refund;
-}
-
-function showdown(game: Game): Game {
-  dealTo(game, 5);
-  game.showdown = true;
-  const hands = game.holes.map((hand) => bestHand([...hand, ...game.board]));
-  const result = compareHands([...game.holes[0], ...game.board], [...game.holes[1], ...game.board]);
-  if (result === 0) {
-    const half = Math.floor(game.pot / 2);
-    game.stacks[0] += half + (game.dealer === 1 ? game.pot % 2 : 0);
-    game.stacks[1] += half + (game.dealer === 0 ? game.pot % 2 : 0);
-    game.message = `Split pot: both have ${hands[0].name}.`;
-    game.winner = [0, 1];
-  } else {
-    const winner = result > 0 ? 0 : 1;
-    game.stacks[winner] += game.pot;
-    game.message = `Player ${winner + 1} wins with ${hands[winner].name}.`;
-    game.winner = [winner];
-  }
-  game.pot = 0;
-  return game;
-}
-
-function finishStreet(game: Game): Game {
-  if (game.stacks.some((stack) => stack === 0)) {
-    refundUncalled(game);
-    return showdown(game);
-  }
-  if (game.street === "river") return showdown(game);
-  const streets: Record<Exclude<Street, "river">, [Street, number]> = {
-    preflop: ["flop", 3],
-    flop: ["turn", 4],
-    turn: ["river", 5]
-  };
-  const next = streets[game.street];
-  game.street = next[0];
-  dealTo(game, next[1]);
-  game.bets = [0, 0];
-  game.currentBet = 0;
-  game.minRaise = BIG_BLIND;
-  game.acted = [false, false];
-  game.toAct = other(game.dealer);
-  game.message = `${game.street[0].toUpperCase()}${game.street.slice(1)}. Player ${game.toAct + 1} acts.`;
-  return game;
-}
-
-function roundDone(game: Game): boolean {
-  return game.acted.every(Boolean) && (game.bets[0] === game.bets[1] || game.stacks.some((stack) => stack === 0));
-}
-
-export function act(game: Game, action: Action, raiseTo?: number): Game {
-  if (game.winner) return game;
-  const next = clone(game);
-  const player = next.toAct;
-  const opponent = other(player);
-  const legal = legalActions(next);
-
-  if (action === "fold") {
-    if (!legal.canFold) throw new Error("Cannot fold when checking is available");
-    next.stacks[opponent] += next.pot;
-    next.message = `Player ${opponent + 1} wins by fold.`;
-    next.pot = 0;
-    next.winner = [opponent];
-    next.actions.push({ action, player, street: next.street });
-    return next;
+export function policyMove(
+  policy: Policy,
+  game: Game,
+  random: () => number = Math.random
+): PolicyMove {
+  if (game.toAct === null) throw new Error("Cannot query a terminal game");
+  const { decoder, scratch } = policy.runtime;
+  writeHistory(policy.runtime, game);
+  decoder.HEAPU8.set(
+    [...game.holes[game.toAct], ...game.board].map(cardIndex),
+    scratch + CARDS
+  );
+  const actionCount = decoder._poker_query(
+    policyKinds[policy.kind],
+    scratch + INPUT_KINDS,
+    scratch + INPUT_TARGETS,
+    game.actions.length,
+    scratch + CARDS,
+    game.board.length,
+    scratch + OUTPUT_KINDS,
+    scratch + OUTPUT_TARGETS,
+    scratch + OUTPUT_PROBABILITIES
+  );
+  if (actionCount < 0) {
+    throw new Error("Game state is outside the policy abstraction");
   }
 
-  if (action === "raise") {
-    if (legal.minRaiseTo === null || raiseTo === undefined || raiseTo < legal.minRaiseTo || raiseTo > legal.maxRaiseTo) {
-      throw new Error("Illegal raise amount");
+  const actions = readActions(policy.runtime, actionCount);
+  const probabilityBegin =
+    (scratch + OUTPUT_PROBABILITIES) / Float32Array.BYTES_PER_ELEMENT;
+  let roll = random();
+  let chosen = actionCount - 1;
+  for (let index = 0; index < actionCount; index += 1) {
+    roll -= decoder.HEAPF32[probabilityBegin + index];
+    if (roll <= 0) {
+      chosen = index;
+      break;
     }
-    const oldBet = next.currentBet;
-    pay(next, player, raiseTo - next.bets[player]);
-    const raiseSize = raiseTo - oldBet;
-    if (raiseSize >= next.minRaise) next.minRaise = raiseSize;
-    next.currentBet = raiseTo;
-    next.acted[opponent] = false;
-  } else if (action === "call") {
-    if (!legal.canCall) throw new Error("Nothing to call");
-    pay(next, player, legal.toCall);
-  } else if (action === "check") {
-    if (!legal.canCheck) throw new Error("Cannot check facing a bet");
   }
-
-  next.acted[player] = true;
-  next.actions.push({ action, player, street: next.street, ...(action === "raise" ? { raiseTo } : {}) });
-  if (roundDone(next)) return finishStreet(next);
-  next.toAct = opponent;
-  next.message = `Player ${next.toAct + 1} acts.`;
-  return next;
+  return {
+    ...actions[chosen],
+    found: decoder._poker_query_found() === 1
+  };
 }
