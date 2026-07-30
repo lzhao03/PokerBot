@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <span>
 #include <utility>
 
 namespace poker {
@@ -35,8 +36,8 @@ uint64_t EncodeBoard(const Board& board,
   for (size_t index = 0; index < cards.size(); ++index) {
     mapped[index] = PermuteCard(cards[index], permutation);
   }
-  std::sort(mapped.begin(),
-            mapped.begin() + std::min<size_t>(3, cards.size()));
+  std::ranges::sort(
+      std::span(mapped).first(std::min<size_t>(3, cards.size())));
   uint64_t encoded = cards.size();
   size_t shift = 3;
   for (size_t index = 0; index < cards.size(); ++index) {

@@ -7,6 +7,7 @@ build --host_cxxopt="-std=c++23"
 # (Optional) warnings as errors everywhere
 build --cxxopt="-Wall" 
 build --cxxopt="-Werror"
+build --cxxopt="-Wno-error=deprecated-pragma"
 build --host_cxxopt="-Wall"
 build --host_cxxopt="-Werror"
 
@@ -16,3 +17,9 @@ build:opt --host_cxxopt="-O3"
 
 # Make 'opt' the default
 build --config=opt
+
+# Apple clang otherwise prefers an older Command Line Tools SDK when both are
+# installed. The Xcode SDK provides the C++23 standard library used here.
+build --enable_platform_specific_config
+build:macos --action_env=SDKROOT=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk
+build:macos --repo_env=SDKROOT=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk
