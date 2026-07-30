@@ -135,6 +135,16 @@ double Measure(std::string_view name, Function function) {
 int main(int argc, char** argv) {
   absl::SetProgramUsageMessage("Benchmark the heads-up poker CFR solver.");
   absl::ParseCommandLine(argc, argv);
+  const int iterations = absl::GetFlag(FLAGS_iterations);
+  if (iterations < 0) {
+    std::cerr << "Error: --iterations must be non-negative\n";
+    return 1;
+  }
+  const int eval_samples = absl::GetFlag(FLAGS_eval_samples);
+  if (absl::GetFlag(FLAGS_evaluate) && eval_samples <= 0) {
+    std::cerr << "Error: --eval_samples must be positive\n";
+    return 1;
+  }
   const auto config_result = BenchmarkConfig();
   if (!config_result.ok()) {
     std::cerr << "Error: " << config_result.status() << '\n';
@@ -197,15 +207,14 @@ int main(int argc, char** argv) {
   const double training_seconds = Measure("train_range", [&] {
     const double seconds = absl::GetFlag(FLAGS_training_seconds);
     if (seconds <= 0.0) {
-      const uint64_t iterations =
-          static_cast<uint64_t>(absl::GetFlag(FLAGS_iterations));
+      const uint64_t iteration_limit = static_cast<uint64_t>(iterations);
       if (progress_interval == 0) {
-        solver->run(iterations, threads);
+        solver->run(iteration_limit, threads);
       } else {
-        while (solver->iterations() < iterations) {
+        while (solver->iterations() < iteration_limit) {
           const uint64_t batch = std::min(
               progress_interval,
-              iterations - solver->iterations());
+              iteration_limit - solver->iterations());
           solver->run(batch, threads);
           std::cerr << "training_iterations\t"
                     << solver->iterations() << '\n';
@@ -244,10 +253,10 @@ int main(int argc, char** argv) {
   Measure("evaluate_range", [&] {
     if (!config.accumulate_average_strategy) {
       return solver->evaluate_current(
-          absl::GetFlag(FLAGS_eval_samples));
+          eval_samples);
     }
     const auto value = solver->evaluate_average(
-        absl::GetFlag(FLAGS_eval_samples));
+        eval_samples);
     return value.ok() ? *value : 0.0;
   });
 
@@ -268,7 +277,7 @@ int main(int argc, char** argv) {
     }
     const auto profile = poker::EstimateExpectedValue(
         solver->game(), *policy, *policy,
-        static_cast<uint64_t>(absl::GetFlag(FLAGS_eval_samples)),
+        static_cast<uint64_t>(eval_samples),
         absl::GetFlag(FLAGS_evaluation_seed),
         absl::GetFlag(FLAGS_reach_coverage));
     if (profile.ok()) {
@@ -295,7 +304,7 @@ int main(int argc, char** argv) {
       const auto exploitability = poker::EstimateExploitability(
           solver->game(), *policy,
           {response_iterations,
-           static_cast<uint64_t>(absl::GetFlag(FLAGS_eval_samples)),
+           static_cast<uint64_t>(eval_samples),
            absl::GetFlag(FLAGS_evaluation_seed)});
       if (exploitability.ok()) {
         std::cout << "nash_conv\t" << exploitability->nash_conv << '\n'
