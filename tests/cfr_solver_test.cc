@@ -209,6 +209,24 @@ TEST_CASE("external sampling visits only traverser action branches") {
   CHECK(sampled->extract_average_policy().ok());
 }
 
+TEST_CASE("external sampling linearly weights average strategies") {
+  SolverConfig config = Config();
+  config.external_sampling = true;
+  auto solver = MakeSolver(config, R(kA), R(kB), WinningRiverRoot());
+  solver->run(2);
+
+  const CfrState& state = TabularCfrSolverTestAccess::state(*solver);
+  const InfoSetKey root_key{
+      solver->game().root.public_state.observation(), HistoryId{},
+      ObservePrivate(kA, solver->game().root.public_state)};
+  const std::optional<uint32_t> offset = state.find(root_key);
+  REQUIRE(offset.has_value());
+  const uint8_t action_count = solver->game().history.nodes[0].child_count;
+  CHECK(std::accumulate(state.strategy_sum.begin() + *offset,
+                        state.strategy_sum.begin() + *offset + action_count,
+                        0.0f) == doctest::Approx(2.0f));
+}
+
 TEST_CASE("model fingerprints are stable and cover solve ranges") {
   auto first = MakeSolver(Config(), R(kA), R(kB));
   auto second = MakeSolver(Config(), R(kA), R(kB));
@@ -452,6 +470,17 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
   CHECK(fallback->missing_policy_lookups > 0);
   CHECK(fallback->weighted_missing_policy_lookups > 0.0);
 
+  const StrategyLookup unavailable = [](InfoSetKey, std::span<float> output) {
+    std::ranges::fill(output, std::numeric_limits<float>::quiet_NaN());
+    return false;
+  };
+  const auto generic_fallback = EstimateExpectedValue(
+      solver->game(), unavailable, unavailable, 2, 17);
+  REQUIRE(generic_fallback.ok());
+  CHECK(generic_fallback->mean == fallback->mean);
+  CHECK(generic_fallback->missing_policy_lookups ==
+        fallback->missing_policy_lookups);
+
   auto different = MakeSolver(Config(), R(kB), R(kA));
   CHECK_FALSE(EstimateExpectedValue(
       different->game(), policy, policy, 1, 17).ok());
@@ -597,11 +626,16 @@ TEST_CASE("exploitability reports both responder perspectives") {
       InfoSetKey key, std::span<float> output) {
     return policy->strategy(key, output);
   };
-  const std::array<StrategyLookup, kPlayerCount> lookups = {lookup, lookup};
+  size_t factory_calls = 0;
   const auto parallel = EstimateExploitabilityParallel(
-      game->game(), lookups, BestResponseConfig{200, 2, 23});
+      game->game(), [&] {
+        ++factory_calls;
+        return lookup;
+      },
+      BestResponseConfig{200, 2, 23});
   REQUIRE(estimate.ok());
   REQUIRE(parallel.ok());
+  CHECK(factory_calls == kPlayerCount);
   CHECK(parallel->player_a_response.value ==
         estimate->player_a_response.value);
   CHECK(parallel->player_b_response.value ==

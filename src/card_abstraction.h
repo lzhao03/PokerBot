@@ -7,6 +7,19 @@
 
 namespace poker {
 
+// Bump when a public or private observation ID changes meaning.
+inline constexpr uint8_t kCardAbstractionSchemaVersion = 0;
+inline constexpr size_t kPublicObservationBitsPerStreet = 7;
+inline constexpr std::array<uint64_t, 3> kCompactPublicBuckets = {16, 16, 64};
+inline constexpr size_t kPrivateBucketCount = 36;
+inline constexpr uint32_t kPrivateObservationRadix = kPrivateBucketCount + 1;
+inline constexpr std::array<uint32_t, 4> kPrivateObservationPlaces = {
+    1,
+    kPrivateObservationRadix,
+    kPrivateObservationRadix * kPrivateObservationRadix,
+    kPrivateObservationRadix * kPrivateObservationRadix *
+        kPrivateObservationRadix};
+
 enum class PublicCardMode : uint8_t {
   ExactCanonical,
   Texture,

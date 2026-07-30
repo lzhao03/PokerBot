@@ -1,5 +1,6 @@
 #include "src/deep_cfr.h"
 #include "src/evaluation.h"
+#include "src/neural_evaluation.h"
 #include "src/neural_policy.h"
 #include "src/policy_codec.h"
 #include "src/solver.h"
@@ -596,6 +597,10 @@ int main(int argc, char** argv) {
         absl::GetFlag(FLAGS_neural_policy_input).empty()))) {
     std::cerr << "Error: --iterations must be positive unless loading a Deep "
                  "CFR model\n";
+    return 1;
+  }
+  if (absl::GetFlag(FLAGS_evaluation_samples) <= 0) {
+    std::cerr << "Error: --evaluation_samples must be positive\n";
     return 1;
   }
   const int64_t memory_limit_mb = absl::GetFlag(FLAGS_max_memory_mb);

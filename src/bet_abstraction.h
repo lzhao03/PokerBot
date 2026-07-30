@@ -9,6 +9,8 @@
 
 namespace poker {
 
+// Bump when an abstract action list changes for the same betting state.
+inline constexpr uint8_t kBetAbstractionSchemaVersion = 0;
 inline constexpr size_t kMaxActionsPerNode = 8;
 
 struct BetAbstractionConfig {

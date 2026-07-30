@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cassert>
 #include <cstddef>
@@ -22,7 +23,9 @@
 namespace poker {
 namespace {
 
-static_assert(__atomic_always_lock_free(sizeof(float), nullptr));
+static_assert(std::atomic_ref<float>::is_always_lock_free);
+
+constexpr uint32_t kModelFingerprintSchemaVersion = 4;
 
 template <std::integral Integer>
 void AppendInteger(std::vector<uint8_t>& bytes, Integer value) {
@@ -79,7 +82,11 @@ void AddRange(std::vector<uint8_t>& bytes, const ComboRange& range) noexcept {
 
 ModelFingerprint FingerprintModel(const SolveSpec& spec) noexcept {
   std::vector<uint8_t> bytes;
-  AppendInteger<uint32_t>(bytes, 4);  // Fingerprint schema.
+  const uint32_t schema = kModelFingerprintSchemaVersion |
+      (static_cast<uint32_t>(kBetAbstractionSchemaVersion) << 8) |
+      (static_cast<uint32_t>(kCardAbstractionSchemaVersion) << 16) |
+      (static_cast<uint32_t>(kHistorySchemaVersion) << 24);
+  AppendInteger(bytes, schema);
 
   const SolverConfig& config = spec.config;
   AppendInteger(bytes, config.betting_rules.minimum_bet);
@@ -152,41 +159,6 @@ std::string_view Trim(std::string_view text) {
   return text.substr(first, last - first + 1);
 }
 
-HistoryId AppendHistory(HistoryTree& tree,
-                        const BettingState& state,
-                        const BettingRules& rules,
-                        const SolverConfig& config) {
-  const HistoryId id{static_cast<uint32_t>(tree.nodes.size())};
-  if (const auto* decision = std::get_if<DecisionState>(&state)) {
-    const AbstractActions actions = SelectAbstractActions(
-        config.bet_abstraction, *decision);
-    const uint32_t begin = static_cast<uint32_t>(tree.children.size());
-    tree.children.resize(begin + actions.size(), id);
-    tree.nodes.push_back(
-        {state, begin, static_cast<uint8_t>(actions.size())});
-    for (size_t index = 0; index < actions.size(); ++index) {
-      const auto child_state = ApplyAction(*decision, actions[index]);
-      assert(child_state.ok());
-      tree.children[begin + index] =
-          AppendHistory(tree, *child_state, rules, config);
-    }
-    return id;
-  }
-
-  if (const auto* chance = std::get_if<ChanceState>(&state)) {
-    const uint32_t begin = static_cast<uint32_t>(tree.children.size());
-    tree.children.push_back(id);
-    tree.nodes.push_back({state, begin, 1});
-    const BettingState child_state = AdvanceBettingStreet(*chance, rules);
-    tree.children[begin] = AppendHistory(tree, child_state, rules, config);
-    return id;
-  }
-
-  tree.nodes.push_back(
-      {state, static_cast<uint32_t>(tree.children.size()), 0});
-  return id;
-}
-
 }  // namespace
 
 absl::StatusOr<DealDistribution> DealDistribution::Create(
@@ -251,20 +223,13 @@ void FillUniform(std::span<float> probabilities) {
   }
 }
 
-float LoadValue(const float& value, bool concurrent) {
+float LoadValue(float& value, bool concurrent) {
   if (!concurrent) return value;
-  float loaded;
-  __atomic_load(&value, &loaded, __ATOMIC_RELAXED);
-  return loaded;
+  return std::atomic_ref<float>(value).load(std::memory_order_relaxed);
 }
 
 void AtomicAdd(float& target, float delta) {
-  float old = LoadValue(target, true);
-  float next;
-  do {
-    next = old + delta;
-  } while (!__atomic_compare_exchange(
-      &target, &old, &next, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
+  std::atomic_ref<float>(target).fetch_add(delta, std::memory_order_relaxed);
 }
 
 }  // namespace
@@ -279,12 +244,10 @@ void CfrState::add_regret(uint32_t offset,
     regret = std::max(0.0f, regret + delta);
     return;
   }
-  float old = LoadValue(regret, true);
-  float next;
-  do {
-    next = std::max(0.0f, old + delta);
-  } while (!__atomic_compare_exchange(
-      &regret, &old, &next, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
+  std::atomic_ref<float> atomic(regret);
+  float old = atomic.load(std::memory_order_relaxed);
+  while (!atomic.compare_exchange_weak(
+      old, std::max(0.0f, old + delta), std::memory_order_relaxed)) {}
 }
 
 void CfrState::add_strategy(uint32_t offset,
@@ -303,7 +266,7 @@ void CfrState::add_strategy(uint32_t offset,
   }
 }
 
-void CfrState::strategy(std::span<const float> values,
+void CfrState::strategy(std::span<float> values,
                         std::optional<uint32_t> offset,
                         std::span<float> probabilities,
                         bool concurrent) const {
@@ -312,7 +275,7 @@ void CfrState::strategy(std::span<const float> values,
     return;
   }
   float sum = 0.0f;
-  const float* value = values.data() + *offset;
+  float* value = values.data() + *offset;
   for (float& probability : probabilities) {
     probability = LoadValue(*value++, concurrent);
     sum += probability;
@@ -602,11 +565,9 @@ absl::StatusOr<CompiledGame> CompileGame(SolveSpec spec) {
   const Position root{
       HistoryId{},
       PublicPosition(spec.config.card_abstraction, spec.root.board)};
-  HistoryTree history;
-  history.nodes.reserve(4096);
-  history.children.reserve(4096);
-  AppendHistory(history, spec.root.betting, spec.config.betting_rules,
-                spec.config);
+  HistoryTree history = BuildHistoryTree(
+      spec.root.betting, spec.config.betting_rules,
+      spec.config.bet_abstraction);
   return CompiledGame{std::move(spec.config), std::move(*deals),
                       std::move(history), root, model};
 }
@@ -643,7 +604,7 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
         .mode = internal::TraversalMode::Train,
         .update_player = (iteration & 1) == 0 ? Player::A : Player::B,
         .iteration = iteration,
-        .external_sampling = game_.config.external_sampling,
+        .sample_actions = game_.config.external_sampling,
         .rng = rng,
         .stats = stats,
     };
@@ -706,7 +667,7 @@ double TabularCfrSolver::evaluate_deal(const Deal& deal,
                   : internal::TraversalMode::EvaluateCurrent,
       .update_player = Player::A,
       .iteration = 0,
-      .external_sampling = false,
+      .sample_actions = false,
       .rng = rng_,
       .stats = stats_,
   };

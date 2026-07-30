@@ -9,6 +9,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "src/evaluation.h"
+#include "src/neural_policy.h"
 
 namespace poker {
 

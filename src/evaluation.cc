@@ -6,7 +6,6 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
-#include <memory>
 #include <optional>
 #include <random>
 #include <span>
@@ -17,7 +16,24 @@
 #include "src/cfr_traversal.h"
 
 namespace poker {
+StrategyLookup MakeStrategyLookup(const Policy& policy) {
+  return [&policy](InfoSetKey key, std::span<float> output) {
+    return policy.strategy(key, output);
+  };
+}
+
 namespace {
+
+bool LookupOrUniform(const StrategyLookup& lookup,
+                     InfoSetKey key,
+                     std::span<float> probabilities) {
+  if (lookup(key, probabilities)) return true;
+  if (!probabilities.empty()) {
+    std::fill(probabilities.begin(), probabilities.end(),
+              1.0f / static_cast<float>(probabilities.size()));
+  }
+  return false;
+}
 
 struct EvaluationCounters {
   std::array<uint64_t, kPlayerCount> lookups = {};
@@ -32,36 +48,6 @@ struct ProfileEstimate {
   ValueEstimate value;
   EvaluationCounters counters;
 };
-
-StrategyLookup LookupPolicy(const Policy& policy) {
-  return [&policy](InfoSetKey key, std::span<float> output) {
-    return policy.strategy(key, output);
-  };
-}
-
-StrategyLookup LookupPolicy(const CompiledGame& game,
-                            const NeuralPolicy& policy) {
-  constexpr size_t kCacheCapacity = 1'000'000;
-  auto cache = std::make_shared<
-      absl::flat_hash_map<InfoSetKey, NeuralActionVector>>();
-  cache->reserve(100'000);
-  return [&game, &policy, cache](InfoSetKey key, std::span<float> output) {
-    const auto found = cache->find(key);
-    if (found != cache->end()) {
-      std::copy_n(found->second.begin(), output.size(), output.begin());
-      return true;
-    }
-    NeuralActionVector probabilities = {};
-    policy.strategy(
-        game, key,
-        std::span<float>(probabilities.data(), output.size()));
-    std::copy_n(probabilities.begin(), output.size(), output.begin());
-    if (cache->size() < kCacheCapacity) {
-      cache->emplace(key, probabilities);
-    }
-    return true;
-  };
-}
 
 struct PolicyBackend {
   using UpdateHandle = size_t;
@@ -80,7 +66,7 @@ struct PolicyBackend {
     }
     ++counters.lookups[player];
     counters.weighted_lookups[player] += reach;
-    if (!(*policies[player])(decision.key, probabilities)) {
+    if (!LookupOrUniform(*policies[player], decision.key, probabilities)) {
       ++counters.missing[player];
       counters.weighted_missing[player] += reach;
     }
@@ -133,7 +119,7 @@ ProfileEstimate EstimateProfile(
         .mode = internal::TraversalMode::EvaluateCurrent,
         .update_player = Player::A,
         .iteration = 0,
-        .external_sampling = sample_actions,
+        .sample_actions = sample_actions,
         .rng = rng,
         .stats = stats,
     };
@@ -188,7 +174,7 @@ struct ResponseBackend {
       std::span<float> probabilities) {
     if (decision.state.actor != responder) {
       ++opponent_lookups;
-      if (!opponent(decision.key, probabilities)) {
+      if (!LookupOrUniform(opponent, decision.key, probabilities)) {
         ++missing_opponent_lookups;
       }
       return std::nullopt;
@@ -200,7 +186,7 @@ struct ResponseBackend {
     if (offset || responder_fallback == nullptr) {
       response.strategy(response.regret_sum, offset, probabilities);
     } else {
-      (*responder_fallback)(decision.key, probabilities);
+      LookupOrUniform(*responder_fallback, decision.key, probabilities);
     }
     return access == internal::StrategyAccess::Writable ? offset
                                                         : std::nullopt;
@@ -247,23 +233,6 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const CompiledGame& game,
-    const NeuralPolicy& player_a,
-    const NeuralPolicy& player_b,
-    uint64_t samples,
-    uint64_t seed,
-    bool measure_reach_coverage,
-    bool sample_actions) {
-  if (player_a.model() != game.model || player_b.model() != game.model) {
-    return absl::FailedPreconditionError(
-        "neural policy model does not match game");
-  }
-  return EstimateExpectedValue(
-      game, LookupPolicy(game, player_a), LookupPolicy(game, player_b),
-      samples, seed, measure_reach_coverage, sample_actions);
-}
-
-absl::StatusOr<ValueEstimate> EstimateExpectedValue(
-    const CompiledGame& game,
     const Policy& player_a,
     const Policy& player_b,
     uint64_t samples,
@@ -275,7 +244,7 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
         "policy model does not match game");
   }
   return EstimateExpectedValue(
-      game, LookupPolicy(player_a), LookupPolicy(player_b),
+      game, MakeStrategyLookup(player_a), MakeStrategyLookup(player_b),
       samples, seed, measure_reach_coverage, sample_actions);
 }
 
@@ -304,10 +273,10 @@ absl::StatusOr<BestResponseResult> TrainResponse(
         .mode = internal::TraversalMode::Train,
         .update_player = responder,
         .iteration = response_state.iterations,
-        .external_sampling = config.external_sampling,
+        .sample_actions = config.external_sampling,
         .rng = rng,
         .stats = stats,
-        .accumulate_update_strategy = config.external_sampling,
+        .record_traverser_strategy = config.external_sampling,
     };
     const double value = internal::Traverse(game, context, backend);
     response_state.cumulative_root_utility += value;
@@ -322,10 +291,8 @@ absl::StatusOr<BestResponseResult> TrainResponse(
   const StrategyLookup response_lookup = [&result, responder_fallback](
       InfoSetKey key, std::span<float> output) {
     if (result.response_policy.strategy(key, output)) return true;
-    if (responder_fallback != nullptr) {
-      (*responder_fallback)(key, output);
-    }
-    return false;
+    return responder_fallback != nullptr &&
+           (*responder_fallback)(key, output);
   };
   const StrategyLookup& player_a =
       responder == Player::A ? response_lookup : opponent;
@@ -372,7 +339,7 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
         "opponent policy model does not match game");
   }
   return TrainApproximateBestResponse(
-      game, responder, LookupPolicy(opponent), config);
+      game, responder, MakeStrategyLookup(opponent), config);
 }
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
@@ -397,8 +364,16 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitabilityParallel(
     const CompiledGame& game,
-    const std::array<StrategyLookup, kPlayerCount>& policies,
+    const StrategyLookupFactory& policy_factory,
     const BestResponseConfig& config) {
+  if (!policy_factory) {
+    return absl::InvalidArgumentError("policy factory is empty");
+  }
+  const std::array<StrategyLookup, kPlayerCount> policies = {
+      policy_factory(), policy_factory()};
+  if (!policies[0] || !policies[1]) {
+    return absl::InvalidArgumentError("policy factory returned an empty lookup");
+  }
   std::optional<absl::StatusOr<BestResponseResult>> player_a;
   std::thread player_a_thread([&] {
     player_a.emplace(TrainResponse(
@@ -430,18 +405,7 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
     return absl::FailedPreconditionError(
         "policy model does not match game");
   }
-  return EstimateExploitability(game, LookupPolicy(policy), config);
-}
-
-absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
-    const CompiledGame& game,
-    const NeuralPolicy& policy,
-    const BestResponseConfig& config) {
-  if (policy.model() != game.model) {
-    return absl::FailedPreconditionError(
-        "neural policy model does not match game");
-  }
-  return EstimateExploitability(game, LookupPolicy(game, policy), config);
+  return EstimateExploitability(game, MakeStrategyLookup(policy), config);
 }
 
 }  // namespace poker

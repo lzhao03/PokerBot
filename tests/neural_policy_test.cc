@@ -4,13 +4,14 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <numeric>
 #include <string>
 #include <vector>
 
 #include "doctest/doctest.h"
 #include "src/bet_abstraction.h"
-#include "src/evaluation.h"
+#include "src/neural_evaluation.h"
 
 namespace poker {
 namespace {
@@ -58,6 +59,19 @@ TEST_CASE("tabular policies fit the shared neural policy format") {
   CHECK(std::accumulate(probabilities.begin(), probabilities.end(), 0.0f) ==
         doctest::Approx(1.0f));
   CHECK(probabilities.front() > 0.9f);
+
+  const ModelFingerprint model = game->model;
+  game->model = ModelFingerprint{1};
+  const StrategyLookup unavailable = MakeStrategyLookup(*game, fitted->policy);
+  std::vector<float> unavailable_probabilities(
+      root.child_count, std::numeric_limits<float>::quiet_NaN());
+  CHECK_FALSE(unavailable(key, unavailable_probabilities));
+  CHECK_FALSE(unavailable(key, unavailable_probabilities));
+  for (float probability : unavailable_probabilities) {
+    CHECK(probability == doctest::Approx(1.0f / root.child_count));
+  }
+  game->model = model;
+
   const auto value = EstimateExpectedValue(
       *game, fitted->policy, fitted->policy, 2, 11);
   REQUIRE(value.ok());

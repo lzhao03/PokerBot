@@ -10,16 +10,10 @@
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "src/neural_features.h"
 #include "src/solver.h"
 
 namespace poker {
-
-inline constexpr uint32_t kNeuralFeatureSchemaVersion = 2;
-inline constexpr size_t kNeuralFeatureCount =
-    32 + 16 + 16 + 64 + 4 * 36 + 15;
-
-using NeuralFeatureVector = std::array<float, kNeuralFeatureCount>;
-using NeuralActionVector = std::array<float, kMaxActionsPerNode>;
 
 struct NeuralSample {
   InfoSetKey key;
@@ -82,6 +76,7 @@ class NeuralNetwork {
 };
 
 void SetNeuralSeed(uint64_t seed);
+void UseSingleThreadedNeuralRuntime();
 
 NeuralFeatureVector EncodeNeuralFeatures(
     InfoSetKey key,

@@ -11,16 +11,12 @@
 namespace poker {
 namespace {
 
-inline constexpr int kPublicObservationBitsPerStreet = 7;
 inline constexpr int kSuitBucketCount = 4;
 inline constexpr int kStraightBucketCount = 3;
 inline constexpr int kHighBucketCount = 3;
 inline constexpr uint64_t kTextureBucketCount =
     3 * kSuitBucketCount * kStraightBucketCount * kHighBucketCount;
 inline constexpr std::array<uint64_t, 3> kTextureBuckets = {108, 108, 108};
-inline constexpr std::array<uint64_t, 3> kCompactTextureBuckets = {16, 16, 64};
-inline constexpr std::array<uint32_t, 4> kPrivateObservationPlaces = {
-    1, 37, 37 * 37, 37 * 37 * 37};
 
 struct BoardFeatures {
   std::array<uint8_t, 13> rank_counts = {};
@@ -175,7 +171,7 @@ PublicObservationId ObservePublicImpl(const CardAbstractionConfig& config,
     case PublicCardMode::Texture:
       return EncodeBoardTextureHistory(board, kTextureBuckets, features);
     case PublicCardMode::CompactTexture:
-      return EncodeBoardTextureHistory(board, kCompactTextureBuckets,
+      return EncodeBoardTextureHistory(board, kCompactPublicBuckets,
                                        features);
   }
 }

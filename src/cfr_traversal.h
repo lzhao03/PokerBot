@@ -36,10 +36,10 @@ struct TraversalContext {
   TraversalMode mode;
   Player update_player;
   uint64_t iteration;
-  bool external_sampling;
+  bool sample_actions;
   std::mt19937& rng;
   SolverStats& stats;
-  bool accumulate_update_strategy = false;
+  bool record_traverser_strategy = false;
 };
 
 struct DecisionView {
@@ -62,6 +62,7 @@ concept CfrBackend = requires(Backend& backend,
       -> std::same_as<std::optional<typename Backend::UpdateHandle>>;
   { backend.average_strategy(decision, probabilities) } -> std::same_as<void>;
   { backend.record_regrets(decision, handle, regrets) } -> std::same_as<void>;
+  // weight includes player reach and linear iteration weighting.
   { backend.record_strategy(decision, handle, probabilities, weight) }
       -> std::same_as<void>;
 };
@@ -126,8 +127,7 @@ double TraverseNode(const CompiledGame& game,
     const size_t player_index = Index(player);
     const uint8_t action_count = history_node.child_count;
     const bool training = context.mode == TraversalMode::Train;
-    const bool sample_actions = context.external_sampling;
-    const bool external_sampling = training && sample_actions;
+    const bool external_sampling = training && context.sample_actions;
     const bool updates_regrets = training && context.update_player == player;
     const DecisionView view{
         {public_state.observation(), history,
@@ -153,9 +153,11 @@ double TraverseNode(const CompiledGame& game,
     }
     if (training) ++context.stats.decision_visits;
 
-    if (sample_actions && !updates_regrets) {
+    if (context.sample_actions && !updates_regrets) {
       if (handle) {
-        backend.record_strategy(view, *handle, probability_span, 1.0);
+        backend.record_strategy(
+            view, *handle, probability_span,
+            static_cast<double>(context.iteration + 1));
       }
       float sample = std::uniform_real_distribution<float>{}(context.rng);
       uint8_t sampled_action = 0;
@@ -171,7 +173,7 @@ double TraverseNode(const CompiledGame& game,
     double node_value = 0.0;
     TraversalFrame child_frame = frame;
     for (uint8_t action = 0; action < action_count; ++action) {
-      if (!external_sampling || context.accumulate_update_strategy) {
+      if (!external_sampling || context.record_traverser_strategy) {
         child_frame.reach[player_index] =
             frame.reach[player_index] * probabilities[action];
       }
@@ -196,7 +198,7 @@ double TraverseNode(const CompiledGame& game,
     }
     backend.record_regrets(
         view, *handle, std::span<const float>(regrets.data(), action_count));
-    if (!external_sampling || context.accumulate_update_strategy) {
+    if (!external_sampling || context.record_traverser_strategy) {
       const double weight = frame.reach[player_index] * (context.iteration + 1);
       backend.record_strategy(view, *handle, probability_span, weight);
     }

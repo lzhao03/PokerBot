@@ -16,6 +16,7 @@
 #include "absl/status/statusor.h"
 #include "src/bet_abstraction.h"
 #include "src/card_abstraction.h"
+#include "src/history.h"
 #include "src/poker.h"
 
 namespace poker {
@@ -59,23 +60,6 @@ enum class ModelFingerprint : uint64_t {};
 absl::StatusOr<ComboRange> ParseRange(std::string_view text);
 ComboRange UniformComboRange();
 
-enum class HistoryId : uint32_t {};
-
-constexpr size_t Index(HistoryId history) noexcept {
-  return std::to_underlying(history);
-}
-
-struct HistoryNode {
-  BettingState state;
-  uint32_t children_begin = 0;
-  uint8_t child_count = 0;
-};
-
-struct HistoryTree {
-  std::vector<HistoryNode> nodes;
-  std::vector<HistoryId> children;
-};
-
 struct Position {
   HistoryId history;
   PublicPosition public_state;
@@ -107,7 +91,7 @@ struct CfrState {
   uint64_t iterations = 0;
   double cumulative_root_utility = 0.0;
 
-  void strategy(std::span<const float> values,
+  void strategy(std::span<float> values,
                 std::optional<uint32_t> offset,
                 std::span<float> probabilities,
                 bool concurrent = false) const;

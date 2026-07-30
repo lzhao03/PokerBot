@@ -1,19 +1,21 @@
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <span>
 
 #include "absl/status/statusor.h"
-#include "src/neural_policy.h"
 #include "src/solver.h"
 
 namespace poker {
 
-using StrategyLookup =
-    std::function<bool(InfoSetKey, std::span<float>)>;
+// Returning false requests uniform fallback; callers always initialize output.
+using StrategyLookup = std::function<bool(InfoSetKey, std::span<float>)>;
+using StrategyLookupFactory = std::function<StrategyLookup()>;
+
+StrategyLookup MakeStrategyLookup(const Policy& policy);
+StrategyLookup MakeStrategyLookup(Policy&& policy) = delete;
 
 struct ValueEstimate {
   double mean = 0.0;
@@ -68,15 +70,6 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     bool measure_reach_coverage = false,
     bool sample_actions = false);
 
-absl::StatusOr<ValueEstimate> EstimateExpectedValue(
-    const CompiledGame& game,
-    const NeuralPolicy& player_a,
-    const NeuralPolicy& player_b,
-    uint64_t samples,
-    uint64_t seed,
-    bool measure_reach_coverage = false,
-    bool sample_actions = false);
-
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     const CompiledGame& game,
     Player responder,
@@ -92,21 +85,18 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
     const CompiledGame& game,
     const StrategyLookup& policy,
-    const BestResponseConfig& config);
+    const BestResponseConfig& config =
+        BestResponseConfig{.external_sampling = true});
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitabilityParallel(
     const CompiledGame& game,
-    const std::array<StrategyLookup, kPlayerCount>& policies,
+    const StrategyLookupFactory& policy_factory,
     const BestResponseConfig& config);
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
     const CompiledGame& game,
     const Policy& policy,
-    const BestResponseConfig& config);
-
-absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
-    const CompiledGame& game,
-    const NeuralPolicy& policy,
-    const BestResponseConfig& config);
+    const BestResponseConfig& config =
+        BestResponseConfig{.external_sampling = true});
 
 }  // namespace poker

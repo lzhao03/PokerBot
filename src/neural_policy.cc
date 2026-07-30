@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <random>
 #include <span>
@@ -22,13 +23,6 @@
 
 namespace poker {
 namespace {
-
-constexpr std::array<size_t, 3> kCompactPublicBuckets = {16, 16, 64};
-constexpr size_t kPublicFeatureCount = 16 + 16 + 64;
-constexpr size_t kPrivateBucketCount = 36;
-constexpr size_t kPrivateFeatureCount = 4 * kPrivateBucketCount;
-constexpr std::array<uint32_t, 4> kPrivateObservationPlaces = {
-    1, 37, 37 * 37, 37 * 37 * 37};
 
 struct CfrNetImpl : torch::nn::Module {
   explicit CfrNetImpl(int hidden_size)
@@ -68,6 +62,27 @@ void Linear(const torch::nn::Linear& layer,
               static_cast<int>(input.size()), 1.0f,
               layer->weight.data_ptr<float>(), static_cast<int>(input.size()),
               input.data(), 1, 1.0f, output.data(), 1);
+}
+
+void SparseLinear(const torch::nn::Linear& layer,
+                  const torch::Tensor& columns,
+                  std::span<const float> input,
+                  std::span<float> output) {
+  assert(layer->weight.size(0) == static_cast<int64_t>(output.size()));
+  assert(layer->weight.size(1) == static_cast<int64_t>(input.size()));
+  assert(columns.size(0) == static_cast<int64_t>(input.size()));
+  assert(columns.size(1) == static_cast<int64_t>(output.size()));
+  // Poker features are mostly one-hot; skip their zero multiplications.
+  std::copy_n(layer->bias.data_ptr<float>(), output.size(), output.begin());
+  const float* weights = columns.data_ptr<float>();
+  for (size_t feature = 0; feature < input.size(); ++feature) {
+    const float value = input[feature];
+    if (value == 0.0f) continue;
+    const float* column = weights + feature * output.size();
+    for (size_t row = 0; row < output.size(); ++row) {
+      output[row] += value * column[row];
+    }
+  }
 }
 
 void Relu(std::span<float> values) {
@@ -128,10 +143,17 @@ void AppendTensor(std::vector<uint8_t>& bytes, const torch::Tensor& tensor) {
 }  // namespace
 
 struct NeuralNetwork::Impl {
-  explicit Impl(int hidden) : hidden_size(hidden), network(hidden) {}
+  explicit Impl(int hidden) : hidden_size(hidden), network(hidden) {
+    RefreshInputWeights();
+  }
 
+  void RefreshInputWeights() {
+    input_weights =
+        network->hidden1->weight.detach().transpose(0, 1).contiguous();
+  }
   int hidden_size;
   CfrNet network;
+  torch::Tensor input_weights;
 };
 
 NeuralNetwork::NeuralNetwork(int hidden_size)
@@ -149,83 +171,19 @@ void SetNeuralSeed(uint64_t seed) {
   torch::manual_seed(seed);
 }
 
+void UseSingleThreadedNeuralRuntime() {
+  if (std::getenv("OMP_NUM_THREADS") == nullptr) {
+    torch::set_num_threads(1);
+  }
+  setenv("VECLIB_MAXIMUM_THREADS", "1", 0);
+}
+
 NeuralFeatureVector EncodeNeuralFeatures(InfoSetKey key,
                                          const HistoryNode& node,
                                          const SolverConfig& config) {
-  const DecisionState& decision = std::get<DecisionState>(node.state);
-  const BettingData& betting = decision.data;
-  NeuralFeatureVector features = {};
-  size_t output = 0;
-  const auto append_bits = [&](auto value) {
-    for (size_t bit = 0; bit < sizeof(value) * 8; ++bit) {
-      features[output++] = static_cast<float>((value >> bit) & 1);
-    }
-  };
-  append_bits(std::to_underlying(key.history));
-
-  const size_t public_begin = output;
-  if (config.card_abstraction.public_mode == PublicCardMode::CompactTexture) {
-    const uint64_t observation = std::to_underlying(key.public_observation);
-    size_t bucket_offset = 0;
-    for (size_t street = 0; street < kCompactPublicBuckets.size(); ++street) {
-      const uint64_t bucket = (observation >> (street * 7)) & 0x7f;
-      if (bucket != 0) {
-        features[output + bucket_offset + bucket - 1] = 1.0f;
-      }
-      bucket_offset += kCompactPublicBuckets[street];
-    }
-  } else {
-    append_bits(std::to_underlying(key.public_observation));
-  }
-  output = public_begin + kPublicFeatureCount;
-
-  const size_t private_begin = output;
-  if (config.card_abstraction.private_kind ==
-      PrivateAbstractionKind::Handcrafted36) {
-    const uint32_t observation =
-        std::to_underlying(key.private_observation);
-    if (config.card_abstraction.recall_mode == RecallMode::BucketHistory) {
-      for (size_t street = 0; street < kPrivateObservationPlaces.size();
-           ++street) {
-        const uint32_t bucket =
-            (observation / kPrivateObservationPlaces[street]) % 37;
-        if (bucket != 0) {
-          features[output + street * kPrivateBucketCount + bucket - 1] = 1.0f;
-        }
-      }
-    } else if (observation != 0) {
-      features[output + observation - 1] = 1.0f;
-    }
-  } else {
-    append_bits(std::to_underlying(key.private_observation));
-  }
-  output = private_begin + kPrivateFeatureCount;
-
-  features[output++] = decision.actor == Player::B ? 1.0f : 0.0f;
-  features[output++] =
-      static_cast<float>(node.child_count) / kMaxActionsPerNode;
-  for (StreetKind street : {StreetKind::Preflop, StreetKind::Flop,
-                            StreetKind::Turn, StreetKind::River}) {
-    features[output++] = betting.street == street ? 1.0f : 0.0f;
-  }
-
-  const Chips total_chips =
-      Pot(betting) + betting.stack[0] + betting.stack[1];
-  const float chip_scale = 1.0f / std::max(Chips{1}, total_chips);
-  for (Chips value : betting.stack) {
-    features[output++] = value * chip_scale;
-  }
-  for (Chips value : betting.total_committed) {
-    features[output++] = value * chip_scale;
-  }
-  for (Chips value : betting.street_committed) {
-    features[output++] = value * chip_scale;
-  }
-  features[output++] = betting.last_full_raise * chip_scale;
-  features[output++] = betting.actions_remaining / 2.0f;
-  features[output++] = Pot(betting) * chip_scale;
-  assert(output == features.size());
-  return features;
+  return EncodeNeuralFeatures(
+      key.history, key.public_observation, key.private_observation,
+      node, config.card_abstraction);
 }
 
 size_t NeuralParameterBytes(const NeuralNetwork& network) {
@@ -279,7 +237,8 @@ NeuralActionVector PredictNeuralNetwork(
     std::array<std::vector<float>, 2>& hidden) {
   const NeuralFeatureVector features = EncodeNeuralFeatures(
       key, game.history.nodes[Index(key.history)], game.config);
-  Linear(network.impl_->network->hidden1, features, hidden[0]);
+  SparseLinear(network.impl_->network->hidden1,
+               network.impl_->input_weights, features, hidden[0]);
   Relu(hidden[0]);
   Linear(network.impl_->network->hidden2, hidden[0], hidden[1]);
   Relu(hidden[1]);
@@ -358,6 +317,7 @@ float FitNeuralNetwork(
     final_loss = loss.item<float>();
   }
   network.impl_->network->eval();
+  network.impl_->RefreshInputWeights();
   return final_loss;
 }
 
@@ -398,6 +358,7 @@ void LoadNeuralNetwork(NeuralNetwork& network,
   }
   network.impl_->network->load(archive);
   network.impl_->network->eval();
+  network.impl_->RefreshInputWeights();
 }
 
 NeuralPolicy::NeuralPolicy(NeuralNetwork network, ModelFingerprint model)

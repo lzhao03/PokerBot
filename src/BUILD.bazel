@@ -49,20 +49,38 @@ cc_library(
 )
 
 cc_library(
-    name = "solver",
-    srcs = [
-        "card_abstraction.cc",
-        "solver.cc",
+    name = "card_abstraction",
+    srcs = ["card_abstraction.cc"],
+    hdrs = ["card_abstraction.h"],
+    copts = CORE_COPTS,
+    deps = [
+        ":card_canonicalization",
+        ":poker",
     ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "history",
+    srcs = ["history.cc"],
+    hdrs = ["history.h"],
+    copts = CORE_COPTS,
+    deps = [":bet_abstraction"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "solver",
+    srcs = ["solver.cc"],
     hdrs = [
-        "card_abstraction.h",
         "cfr_traversal.h",
         "solver.h",
     ],
     copts = CORE_COPTS,
     deps = [
         ":bet_abstraction",
-        ":card_canonicalization",
+        ":card_abstraction",
+        ":history",
         ":poker",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/status:status",
@@ -77,8 +95,21 @@ cc_library(
     hdrs = ["evaluation.h"],
     copts = CORE_COPTS,
     deps = [
-        ":neural_policy",
         ":solver",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/status:status",
+        "@abseil-cpp//absl/status:statusor",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "neural_evaluation",
+    srcs = ["neural_evaluation.cc"],
+    hdrs = ["neural_evaluation.h"],
+    deps = [
+        ":evaluation",
+        ":neural_policy",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/status:status",
         "@abseil-cpp//absl/status:statusor",
@@ -112,10 +143,23 @@ cc_library(
         "-Wsign-conversion",
     ],
     deps = [
+        ":neural_features",
         ":solver",
         "@libtorch_macos_arm64//:torch",
     ],
     linkopts = ["-framework Accelerate"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "neural_features",
+    srcs = ["neural_features.cc"],
+    hdrs = ["neural_features.h"],
+    copts = CORE_COPTS,
+    deps = [
+        ":card_abstraction",
+        ":history",
+    ],
     visibility = ["//visibility:public"],
 )
 
@@ -146,6 +190,8 @@ cc_binary(
     srcs = ["main.cc"],
     deps = [
         ":deep_cfr",
+        ":evaluation",
+        ":neural_evaluation",
         ":neural_policy",
         ":policy_codec",
         ":solver",

@@ -167,13 +167,14 @@ struct DeepCfrSolver::Impl {
     }
     ++network_evaluations;
     NeuralActionVector values = {};
-    policy->strategy(game, key,
-                     std::span<float>(values.data(), probabilities.size()));
+    const bool available = policy->strategy(
+        game, key,
+        std::span<float>(values.data(), probabilities.size()));
     std::copy_n(values.begin(), probabilities.size(), probabilities.begin());
-    if (cache.size() < config.policy_cache_capacity) {
+    if (available && cache.size() < config.policy_cache_capacity) {
       cache.emplace(key, values);
     }
-    return true;
+    return available;
   }
 
   struct EvaluationBackend {
@@ -247,8 +248,7 @@ struct DeepCfrSolver::Impl {
     NeuralSample sample{decision.key};
     std::copy(probabilities.begin(), probabilities.end(),
               sample.target.begin());
-    sample.weight = static_cast<float>(
-        weight * static_cast<double>(decision.iteration + 1));
+    sample.weight = static_cast<float>(weight);
     strategy_memory.add(std::move(sample), reservoir_rng);
   }
 
@@ -297,7 +297,7 @@ struct DeepCfrSolver::Impl {
         .mode = internal::TraversalMode::Train,
         .update_player = update_player,
         .iteration = iteration,
-        .external_sampling = true,
+        .sample_actions = true,
         .rng = game_rng,
         .stats = stats.traversal,
     };
@@ -362,7 +362,7 @@ struct DeepCfrSolver::Impl {
           .mode = mode,
           .update_player = Player::A,
           .iteration = stats.iterations,
-          .external_sampling = true,
+          .sample_actions = true,
           .rng = rng,
           .stats = evaluation_stats,
       };
@@ -415,6 +415,7 @@ absl::StatusOr<DeepCfrSolver> DeepCfrSolver::Create(
   auto game = CompileGame(std::move(spec));
   if (!game.ok()) return game.status();
   try {
+    UseSingleThreadedNeuralRuntime();
     SetNeuralSeed(config.seed);
     return DeepCfrSolver(
         std::make_unique<Impl>(std::move(*game), config));
@@ -509,29 +510,28 @@ DeepCfrSolver::estimate_exploitability(
         "average policy has not been trained");
   }
   try {
-    impl_->policy_cache.reserve(impl_->config.policy_cache_capacity);
-    const StrategyLookup player_a_lookup = [this](
-        InfoSetKey key, std::span<float> probabilities) {
-      return impl_->policy_strategy(key, probabilities);
-    };
-    absl::flat_hash_map<InfoSetKey, NeuralActionVector> player_b_cache;
-    player_b_cache.reserve(impl_->config.policy_cache_capacity);
-    uint64_t network_evaluations = 0;
-    uint64_t cache_hits = 0;
-    const StrategyLookup player_b_lookup = [this, &player_b_cache,
-                                             &network_evaluations,
-                                             &cache_hits](
-        InfoSetKey key, std::span<float> probabilities) {
-      return impl_->policy_strategy(
-          key, probabilities, player_b_cache,
-          network_evaluations, cache_hits);
-    };
-    const std::array<StrategyLookup, kPlayerCount> lookups = {
-        player_a_lookup, player_b_lookup};
+    std::array<absl::flat_hash_map<InfoSetKey, NeuralActionVector>,
+               kPlayerCount> caches;
+    std::array<uint64_t, kPlayerCount> network_evaluations = {};
+    std::array<uint64_t, kPlayerCount> cache_hits = {};
+    size_t next_lookup = 0;
     auto result = EstimateExploitabilityParallel(
-        impl_->game, lookups, config);
-    impl_->stats.network_evaluations += network_evaluations;
-    impl_->stats.cache_hits += cache_hits;
+        impl_->game,
+        [&] {
+          const size_t index = next_lookup++;
+          caches[index].reserve(impl_->config.policy_cache_capacity);
+          return [this, &cache = caches[index],
+                  &evaluations = network_evaluations[index],
+                  &hits = cache_hits[index]](
+                     InfoSetKey key, std::span<float> probabilities) {
+            return impl_->policy_strategy(
+                key, probabilities, cache, evaluations, hits);
+          };
+        },
+        config);
+    impl_->stats.network_evaluations +=
+        network_evaluations[0] + network_evaluations[1];
+    impl_->stats.cache_hits += cache_hits[0] + cache_hits[1];
     return result;
   } catch (const std::exception& error) {
     return TorchError(error);
