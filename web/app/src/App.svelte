@@ -11,17 +11,19 @@
   let selectedModel: "deep" | "tabular" = "deep";
   let deepPolicy: Policy | null = null;
   let tabularPolicy: Policy | null = null;
-  let policyReady = false;
   const debug = new URLSearchParams(location.search).get("debug") === "1";
   $: policy = selectedModel === "deep" ? deepPolicy : tabularPolicy;
   $: legal = legalActions(game);
-  $: raiseOptions = game.winner ? [] : policyActions(game).filter((option) => option.action === "raise");
+  $: raiseOptions = game.winner || !policy
+    ? []
+    : policyActions(policy, game).filter((option) => option.action === "raise");
   $: busted = game.stacks.some((stack) => stack === 0);
   $: {
     clearTimeout(botTimer);
-    if (!game.winner && game.toAct === 1 && policyReady) {
+    const activePolicy = policy;
+    if (!game.winner && game.toAct === 1 && activePolicy) {
       botTimer = setTimeout(() => {
-        const move = policyMove(policy, game);
+        const move = policyMove(activePolicy, game);
         play(move.action, move.raiseTo);
       }, 500);
     }
@@ -80,7 +82,6 @@
         if (deep.status === "fulfilled") deepPolicy = deep.value;
         else console.error("Could not load Deep CFR policy.", deep.reason);
         if (!deepPolicy && tabularPolicy) selectedModel = "tabular";
-        policyReady = true;
       });
   });
   onDestroy(() => clearTimeout(botTimer));
