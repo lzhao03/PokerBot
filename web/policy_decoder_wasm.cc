@@ -496,38 +496,19 @@ void WriteBrowserState(const poker::BettingState& state,
   output[CardsNeeded] = cards_needed;
 }
 
-bool QueryKey(const uint8_t* cards,
-              size_t board_count,
-              poker::HistoryId history,
-              bool retain_private_history,
-              Key& key) {
-  if (cards == nullptr || board_count > poker::kMaxBoardCards) return false;
-  std::array<poker::Card, 2 + poker::kMaxBoardCards> decoded;
-  poker::CardMask seen = 0;
-  for (size_t index = 0; index < board_count + 2; ++index) {
-    if (cards[index] >= poker::kDeck.size()) return false;
-    decoded[index] = poker::kDeck[cards[index]];
-    const poker::CardMask bit = poker::CardBit(decoded[index]);
-    if ((seen & bit) != 0) return false;
-    seen |= bit;
-  }
-  const auto hand = poker::MaybeCardsToComboId(decoded[0], decoded[1]);
-  const auto board = poker::MakeBoard(
-      std::span<const poker::Card>(decoded.data() + 2, board_count));
-  if (!hand || !board.ok()) return false;
-  const poker::HistoryNode& node = Game().history.nodes[poker::Index(history)];
-  const auto& decision = std::get<poker::DecisionState>(node.state);
-  if (board->street() != decision.data.street) return false;
+Key QueryKey(poker::ComboId hand,
+             const poker::Board& board,
+             poker::HistoryId history,
+             bool retain_private_history) {
   poker::CardAbstractionConfig config{
       poker::PublicCardMode::CompactTexture,
       poker::PrivateAbstractionKind::Handcrafted36,
       retain_private_history ? poker::RecallMode::BucketHistory
                              : poker::RecallMode::CurrentBucketOnly};
-  const poker::PublicPosition position(config, *board);
-  key = {std::to_underlying(position.observation()),
-         std::to_underlying(history),
-         std::to_underlying(poker::ObservePrivate(*hand, position))};
-  return true;
+  const poker::PublicPosition position(config, board);
+  return {std::to_underlying(position.observation()),
+          std::to_underlying(history),
+          std::to_underlying(poker::ObservePrivate(hand, position))};
 }
 
 CompactPolicy tabular_policy;
@@ -607,6 +588,7 @@ EMSCRIPTEN_KEEPALIVE uint32_t poker_model_high() {
 // Returns the number of legal abstract actions, or -1 for invalid input.
 EMSCRIPTEN_KEEPALIVE int poker_query(
     int policy_kind,
+    int dealer,
     const uint8_t* input_kinds,
     const int32_t* input_targets,
     size_t input_count,
@@ -619,15 +601,18 @@ EMSCRIPTEN_KEEPALIVE int poker_query(
   if ((input_count > 0 && (input_kinds == nullptr || input_targets == nullptr)) ||
       input_count > kMaxLoggedActions || output_kinds == nullptr ||
       output_targets == nullptr || output_probabilities == nullptr ||
+      (dealer != 0 && dealer != 1) ||
       policy_kind < poker::web::kUniformPolicy ||
       policy_kind > poker::web::kNeuralPolicy) {
     return -1;
   }
+  std::array<poker::ComboId, 2> hands;
+  poker::Board board;
+  if (!DecodeBrowserCards(cards, board_count, hands, board)) return -1;
+
   poker::HistoryId history{};
-  const auto board_street = StreetForBoardCount(board_count);
-  if (!board_street ||
-      !ReplayHistory({input_kinds, input_count},
-                     {input_targets, input_count}, *board_street, history) ||
+  if (!ReplayHistory({input_kinds, input_count},
+                     {input_targets, input_count}, board.street(), history) ||
       !std::holds_alternative<poker::DecisionState>(
           Game().history.nodes[poker::Index(history)].state)) {
     return -1;
@@ -644,11 +629,10 @@ EMSCRIPTEN_KEEPALIVE int poker_query(
     return static_cast<int>(actions.size());
   }
 
-  Key key;
-  if (!QueryKey(cards, board_count, history,
-                policy_kind == poker::web::kNeuralPolicy, key)) {
-    return -1;
-  }
+  const auto& decision = std::get<poker::DecisionState>(node.state);
+  const Key key = QueryKey(
+      hands[Seat(decision.actor, dealer)], board, history,
+      policy_kind == poker::web::kNeuralPolicy);
   if (policy_kind == poker::web::kTabularPolicy) {
     if (tabular_policy.model != poker::web::kTabularModel) return -1;
     query_found = TabularStrategy(

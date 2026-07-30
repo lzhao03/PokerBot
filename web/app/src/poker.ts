@@ -100,6 +100,7 @@ interface Decoder {
   _poker_load_neural_policy(pointer: number, size: number): number;
   _poker_query(
     policyKind: number,
+    dealer: number,
     inputKinds: number,
     inputTargets: number,
     inputCount: number,
@@ -347,11 +348,12 @@ export function policyMove(
   const { decoder, scratch } = policy.runtime;
   writeHistory(policy.runtime, game);
   decoder.HEAPU8.set(
-    [...game.holes[game.toAct], ...game.board].map(cardIndex),
+    [...game.holes[0], ...game.holes[1], ...game.board].map(cardIndex),
     scratch + CARDS
   );
   const actionCount = decoder._poker_query(
     policyKinds[policy.kind],
+    game.dealer,
     scratch + INPUT_KINDS,
     scratch + INPUT_TARGETS,
     game.actions.length,

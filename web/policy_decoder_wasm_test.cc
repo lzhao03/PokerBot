@@ -91,14 +91,16 @@ TEST_CASE("browser query owns history actions observations and inference") {
   REQUIRE(encoded.ok());
   REQUIRE(poker_load_policy(encoded->data(), encoded->size()) == 1);
 
-  const std::array<uint8_t, 2> input_cards = {
+  const std::array<uint8_t, 4> input_cards = {
       static_cast<uint8_t>(first.index()),
-      static_cast<uint8_t>(second.index())};
+      static_cast<uint8_t>(second.index()),
+      static_cast<uint8_t>(Card(Rank::Queen, Suit::Hearts).index()),
+      static_cast<uint8_t>(Card(Rank::Queen, Suit::Spades).index())};
   std::array<uint8_t, kMaxActionsPerNode> kinds = {};
   std::array<int32_t, kMaxActionsPerNode> targets = {};
   std::array<float, kMaxActionsPerNode> probabilities = {};
   const int action_count = poker_query(
-      web::kTabularPolicy, nullptr, nullptr, 0,
+      web::kTabularPolicy, 0, nullptr, nullptr, 0,
       input_cards.data(), 0, kinds.data(), targets.data(),
       probabilities.data());
   REQUIRE(action_count == 5);
@@ -118,7 +120,7 @@ TEST_CASE("browser query owns history actions observations and inference") {
   const std::vector<uint8_t> neural = ZeroNeuralPolicy();
   REQUIRE(poker_load_neural_policy(neural.data(), neural.size()) == 1);
   REQUIRE(poker_query(
-      web::kNeuralPolicy, nullptr, nullptr, 0,
+      web::kNeuralPolicy, 0, nullptr, nullptr, 0,
       input_cards.data(), 0, kinds.data(), targets.data(),
       probabilities.data()) == 5);
   CHECK(poker_query_found() == 1);

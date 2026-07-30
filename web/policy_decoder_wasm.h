@@ -53,6 +53,7 @@ int poker_strategy(uint32_t public_low,
 uint32_t poker_model_low();
 uint32_t poker_model_high();
 int poker_query(int policy_kind,
+                int dealer,
                 const uint8_t* input_kinds,
                 const int32_t* input_targets,
                 size_t input_count,
