@@ -47,14 +47,18 @@ git show dcbadfc^:<path>
 
 ### Byte-budgeted policy export
 
-- **Status:** Deferred.
+- **Status:** Deferred implementation; the current 1 MB deployment goal now
+  justifies revisiting it.
 - **Removed:** `extract_average_policy(max_serialized_bytes)` and benchmark flag
   `--policy_max_bytes`.
 - **Previous behavior:** Ranked infosets by accumulated strategy mass and kept
   the highest-mass rows that fit a deterministic serialized-byte budget.
 - **Why removed:** The deployment constraint was unproven; its only non-test
   caller was an optional benchmark flag whose default was unlimited.
-- **Restore when:** Policies must fit a hard storage, memory, or transport limit.
+- **Next design:** Rank rows and neural distillation samples using reach plus
+  regret or value sensitivity, then validate held-out playing strength rather
+  than probability error alone. Measure implicit key ordering and entropy coding
+  only when they reduce total model-and-decoder bytes.
 - **Recovery locations:** `ExtractAveragePolicy` in `src/solver.cc`, its overload
   in `src/solver.h`, the lossy-policy tests, and `tools/cfr_benchmark.cc` in
   `dcbadfc^`.
@@ -68,6 +72,9 @@ git show dcbadfc^:<path>
   native save/load plus portable `PNN1` browser export.
 - **Current limitation:** The network predicts probabilities over the fixed legal
   actions produced by the betting abstraction.
+- **Artifact compression:** Portable `PNN1` stores float32 parameters. Float16 or
+  int8 weights with explicit per-layer scales remain deferred; compare total
+  model-and-decoder bytes, inference speed, and strategy quality.
 - **What remains deferred:** Let the network propose legal bet sizes dynamically
   and evaluate artifact size, strategy quality, and inference cost against the
   fixed-action models.
@@ -90,9 +97,10 @@ git show dcbadfc^:<path>
   milestones, with throughput and infoset totals reported after training.
   Periodic throughput, elapsed time, ETA, RSS, cap utilization, and estimated
   encoded policy size remain deferred.
-- **Policy comparison:** The CLI reports seat-swapped EV for Deep-versus-tabular
-  and neural-versus-neural policies. A generic comparison command, probability
-  divergence, coverage, and missing-row analysis remain deferred.
+- **Policy comparison:** `//tools:policy_compare` compares matching tabular,
+  Deep CFR, and distilled policies using seat-swapped EV and rough
+  exploitability. Probability divergence and reach-weighted coverage remain
+  deferred.
 - **Strict validation:** Optionally fail on cap exhaustion, incompatible
   fingerprints, poor policy coverage, or an invalid exploitability estimate.
 - **Saved configuration presets:** Keep named, checked-in configurations for
@@ -100,7 +108,33 @@ git show dcbadfc^:<path>
 - **Deterministic hand replay:** Save a seed or compact hand history that the CLI
   and browser can replay when debugging strategy disagreements.
 
+### Convergence-aware policy quality evaluation
+
+- **Status:** Deferred beyond the current sampled approximate-best-response
+  estimates.
+- **Current limitation:** Evaluation reports sampling error and lookup coverage,
+  but it does not establish that the trained response converged. A finite-budget
+  approximate response can therefore produce an invalid negative NashConv.
+- **Desired endpoint:** Sweep increasing response budgets, compare responses with
+  the original-policy fallback, report cap and coverage failures, reject invalid
+  estimates, and verify the estimator against exact toy games.
+- **Use:** Track policy quality against wall time and artifact size so training,
+  abstraction, and compression changes have a common regression signal.
+
 ## Poker and policy inspection features
+
+### Optional betting-tree raise cap
+
+- **Status:** Deferred; useful as an abstraction and resource-control experiment,
+  not as a poker-rules correction.
+- **Current behavior:** Passive actions close a street and aggressive actions
+  reopen a response, so legal raises continue until stack and minimum-raise rules
+  end them.
+- **Previous behavior:** `max_raises_per_street` optionally truncated the tree;
+  it was removed in commit `876e676`.
+- **Restore when:** A measured memory or convergence experiment needs a shallower
+  betting tree. Include the cap in the model fingerprint and keep uncapped play
+  as the default.
 
 ### Semantic hand evaluation
 
@@ -153,27 +187,16 @@ git show dcbadfc^:<path>
 
 ### WASM-owned browser poker semantics
 
-- **Status:** Deferred while the web application remains experimental.
-- **Current duplication:** `web/app/src/policy.ts` reconstructs the abstract
-  betting tree, public texture history, and private bucket used by C++ policy
-  lookup. `web/app/src/poker.ts` separately implements browser game rules and
-  hand evaluation.
-- **Risk:** A C++ rules, action-abstraction, or card-abstraction change can make
-  the browser query a valid but incorrect policy row without an obvious error.
-- **Initial migration:** Add one narrow WASM query accepting the action history,
-  hole cards, and board, and returning legal abstract actions plus policy
-  probabilities. Keep rendering, random selection, and statistics in
-  TypeScript.
-- **Possible endpoint:** Move game transitions into the same WASM boundary so
-  TypeScript only renders state and submits a selected action.
+- **Status:** Complete for the browser demo.
+- **Current behavior:** The WASM replay API owns betting transitions, legal
+  abstract actions, street progression, showdown evaluation, and payouts.
+  TypeScript owns deck sampling, presentation state, statistics, and rendering.
 - **Constraint:** Do not add more poker, abstraction, or policy semantics to
   TypeScript; extend the WASM boundary instead so C++ remains the source of
   truth.
-- **Restore when:** The browser becomes a supported policy consumer or another
-  model/rules change would require manually porting C++ semantics again.
-- **Verification:** Compare C++ and browser history IDs, observations, actions,
-  and probabilities over a deterministic corpus before deleting the TypeScript
-  implementations.
+- **Verification:** `//web:policy_decoder_test` checks compact decoding,
+  canonical action replay, terminal payouts, card-derived lookup, and portable
+  neural inference.
 
 ### Reveal a winning bot hand
 
@@ -240,6 +263,28 @@ git show dcbadfc^:<path>
 - **Restore when:** LibTorch download size, link time, or deployment size becomes
   a practical problem for tabular-only use.
 
+### Portable and scalable Deep CFR training
+
+- **Status:** Deferred while local Apple Silicon CPU training is sufficient.
+- **Current limitations:** Neural targets link the macOS ARM LibTorch archive and
+  Accelerate, and Deep CFR requires `--threads=1`.
+- **Desired endpoint:** Support Linux training and measured batching or parallel
+  traversal improvements; add CUDA only when GPU profiling justifies it.
+- **Verification:** Compare wall-clock policy quality, peak memory, and seeded
+  single-worker behavior rather than throughput alone.
+
+### Semantic neural history and generalization
+
+- **Status:** Research item; low priority until one network must span multiple
+  betting trees, stack depths, or dynamic bet sizes.
+- **Current behavior:** Neural features include the numeric history ID plus
+  semantic card, stack, pot, street, and actor features.
+- **Previous experiment:** Recent-action features were added and reverted in
+  `0e2e4b3` after showing no measured improvement.
+- **Revisit when:** A held-out cross-configuration benchmark can demonstrate that
+  a semantic action history improves strategy quality enough to replace the
+  simpler encoding.
+
 ### Full Bazel web build
 
 - **Status:** Deferred while the Vercel build remains small and reliable.
@@ -271,6 +316,18 @@ git show dcbadfc^:<path>
 - **Verification:** Compare sampled updates against exact CFR on toy games, track
   exploitability versus nodes touched and wall time, and first validate the
   single-threaded uncapped perfect-recall implementation.
+
+### Depth-limited and continual solving
+
+- **Status:** Conditional research feature; unnecessary for the current static
+  policy artifact and browser demo.
+- **Previous behavior:** A continuation-value interface and exact-hand nested CFR
+  solver were removed in `2aad5c1`; that implementation was not range-aware and
+  should not be restored directly.
+- **Desired endpoint:** If online solving becomes a product goal, use range-aware
+  or learned continuation values with validated depth cutoffs and safe resolving.
+- **Restore when:** Real-time adaptation is worth the runtime, model, and
+  correctness complexity compared with serving a precomputed policy.
 
 ### Separate production benchmark target
 
