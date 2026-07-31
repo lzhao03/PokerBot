@@ -90,13 +90,6 @@ absl::Status TorchError(const std::exception& error) {
 struct DeepCfrSolver::Impl {
   struct UpdateHandle {};
 
-  struct EvaluationResult {
-    double mean = 0.0;
-    double standard_error = 0.0;
-    uint64_t opponent_policy_lookups = 0;
-    uint64_t missing_opponent_lookups = 0;
-  };
-
   Impl(CompiledGame compiled_game, DeepCfrConfig deep_config)
       : game(std::move(compiled_game)),
         config(deep_config),
@@ -121,19 +114,26 @@ struct DeepCfrSolver::Impl {
       const internal::DecisionView& decision,
       internal::StrategyAccess access,
       std::span<float> probabilities) {
-    const size_t player = Index(decision.state.actor);
+    fill_current_strategy(decision.state.actor, decision.key, probabilities);
+    return access == internal::StrategyAccess::ReadOnly
+               ? std::nullopt
+               : std::optional<UpdateHandle>{std::in_place};
+  }
+
+  void fill_current_strategy(
+      Player actor,
+      InfoSetKey key,
+      std::span<float> probabilities) {
+    const size_t player = Index(actor);
     if (!advantage_trained[player]) {
       FillUniform(probabilities);
     } else {
       const NeuralActionVector values = cached_prediction(
-          advantage_network[player], advantage_cache[player], decision.key,
+          advantage_network[player], advantage_cache[player], key,
           inference_hidden, config.inference_cache_capacity,
           stats.network_evaluations, stats.cache_hits);
       RegretMatch(values, probabilities);
     }
-    return access == internal::StrategyAccess::ReadOnly
-               ? std::nullopt
-               : std::optional<UpdateHandle>{std::in_place};
   }
 
   void average_strategy(const internal::DecisionView& decision,
@@ -177,55 +177,31 @@ struct DeepCfrSolver::Impl {
     return available;
   }
 
-  struct EvaluationBackend {
-    using UpdateHandle = Impl::UpdateHandle;
-
-    std::optional<UpdateHandle> current_strategy(
-        const internal::DecisionView& decision,
-        internal::StrategyAccess access,
-        std::span<float> probabilities) {
-      if (fixed_strategy(decision, probabilities)) return std::nullopt;
-      return model.current_strategy(decision, access, probabilities);
-    }
-
-    void average_strategy(const internal::DecisionView& decision,
-                          std::span<float> probabilities) {
-      if (!fixed_strategy(decision, probabilities)) {
-        model.average_strategy(decision, probabilities);
+  StrategyLookup strategy_lookup(DeepCfrStrategy strategy) {
+    return [this, strategy](InfoSetKey key,
+                            std::span<float> probabilities) {
+      if (strategy == DeepCfrStrategy::Average) {
+        return policy_strategy(key, probabilities);
       }
-    }
-
-    void record_regrets(const internal::DecisionView&,
-                        UpdateHandle,
-                        std::span<const float>) {}
-    void record_strategy(const internal::DecisionView&,
-                         UpdateHandle,
-                         std::span<const float>,
-                         double) {}
-
-    bool fixed_strategy(const internal::DecisionView& decision,
-                        std::span<float> probabilities) {
-      if (uniform_player == decision.state.actor) {
-        FillUniform(probabilities);
-        return true;
-      }
-      if (opponent == nullptr || opponent_player != decision.state.actor) {
-        return false;
-      }
-      ++opponent_policy_lookups;
-      if (!opponent->strategy(decision.key, probabilities)) {
-        ++missing_opponent_lookups;
-      }
+      const HistoryNode& node = game.history.nodes[Index(key.history)];
+      fill_current_strategy(
+          std::get<DecisionState>(node.state).actor, key, probabilities);
       return true;
-    }
+    };
+  }
 
-    Impl& model;
-    std::optional<Player> uniform_player;
-    const Policy* opponent = nullptr;
-    Player opponent_player = Player::A;
-    uint64_t opponent_policy_lookups = 0;
-    uint64_t missing_opponent_lookups = 0;
-  };
+  absl::StatusOr<ValueEstimate> evaluate(
+      const StrategyLookup& player_a,
+      const StrategyLookup& player_b,
+      int samples) {
+    if (samples <= 0) {
+      return absl::InvalidArgumentError(
+          "evaluation samples must be positive");
+    }
+    return EstimateExpectedValue(
+        game, player_a, player_b, static_cast<uint64_t>(samples),
+        config.seed + 3, false, true);
+  }
 
   void record_regrets(const internal::DecisionView& decision,
                       UpdateHandle,
@@ -343,41 +319,6 @@ struct DeepCfrSolver::Impl {
     stats.strategy_samples = strategy_memory.size();
   }
 
-  EvaluationResult evaluate(
-      int samples,
-      internal::TraversalMode mode,
-      std::optional<Player> uniform_player = std::nullopt,
-      const Policy* opponent = nullptr,
-      Player opponent_player = Player::A) {
-    SolverStats evaluation_stats;
-    EvaluationBackend backend{
-        *this, uniform_player, opponent, opponent_player};
-    std::mt19937 rng = MakeRng(config.seed + 3);
-    double mean = 0.0;
-    double squared_error = 0.0;
-    for (int sample = 0; sample < samples; ++sample) {
-      const Deal deal = game.deals.sample(rng);
-      internal::TraversalContext context{
-          .deal = deal,
-          .mode = mode,
-          .update_player = Player::A,
-          .iteration = stats.iterations,
-          .sample_actions = true,
-          .rng = rng,
-          .stats = evaluation_stats,
-      };
-      const double value = internal::Traverse(game, context, backend);
-      const double delta = value - mean;
-      mean += delta / (sample + 1);
-      squared_error += delta * (value - mean);
-    }
-    const double standard_error = samples > 1
-        ? std::sqrt(squared_error / (samples - 1) / samples)
-        : 0.0;
-    return {mean, standard_error, backend.opponent_policy_lookups,
-            backend.missing_opponent_lookups};
-  }
-
   CompiledGame game;
   DeepCfrConfig config;
   std::array<Reservoir, kPlayerCount> advantage_memory;
@@ -435,24 +376,24 @@ absl::Status DeepCfrSolver::run(uint64_t iterations) {
 }
 
 absl::StatusOr<double> DeepCfrSolver::evaluate_current(int samples) {
-  if (samples <= 0) {
-    return absl::InvalidArgumentError("evaluation samples must be positive");
-  }
   try {
-    return impl_->evaluate(samples, internal::TraversalMode::EvaluateCurrent)
-        .mean;
+    const StrategyLookup lookup =
+        impl_->strategy_lookup(DeepCfrStrategy::Current);
+    auto result = impl_->evaluate(lookup, lookup, samples);
+    if (!result.ok()) return result.status();
+    return result->mean;
   } catch (const std::exception& error) {
     return TorchError(error);
   }
 }
 
 absl::StatusOr<double> DeepCfrSolver::evaluate_average(int samples) {
-  if (samples <= 0) {
-    return absl::InvalidArgumentError("evaluation samples must be positive");
-  }
   try {
-    return impl_->evaluate(samples, internal::TraversalMode::EvaluateAverage)
-        .mean;
+    const StrategyLookup lookup =
+        impl_->strategy_lookup(DeepCfrStrategy::Average);
+    auto result = impl_->evaluate(lookup, lookup, samples);
+    if (!result.ok()) return result.status();
+    return result->mean;
   } catch (const std::exception& error) {
     return TorchError(error);
   }
@@ -461,14 +402,16 @@ absl::StatusOr<double> DeepCfrSolver::evaluate_average(int samples) {
 absl::StatusOr<double> DeepCfrSolver::evaluate_average_against_uniform(
     Player policy_player,
     int samples) {
-  if (samples <= 0) {
-    return absl::InvalidArgumentError("evaluation samples must be positive");
-  }
   try {
-    const double player_a_value = impl_->evaluate(
-        samples, internal::TraversalMode::EvaluateAverage,
-        Opponent(policy_player)).mean;
-    return policy_player == Player::A ? player_a_value : -player_a_value;
+    const StrategyLookup policy =
+        impl_->strategy_lookup(DeepCfrStrategy::Average);
+    const StrategyLookup uniform =
+        [](InfoSetKey, std::span<float>) { return false; };
+    auto result = policy_player == Player::A
+                      ? impl_->evaluate(policy, uniform, samples)
+                      : impl_->evaluate(uniform, policy, samples);
+    if (!result.ok()) return result.status();
+    return policy_player == Player::A ? result->mean : -result->mean;
   } catch (const std::exception& error) {
     return TorchError(error);
   }
@@ -479,24 +422,29 @@ absl::StatusOr<DeepCfrMatchResult> DeepCfrSolver::evaluate_against_policy(
     const Policy& opponent,
     DeepCfrStrategy strategy,
     int samples) {
-  if (samples <= 0) {
-    return absl::InvalidArgumentError("evaluation samples must be positive");
-  }
   if (opponent.model != impl_->game.model) {
     return absl::FailedPreconditionError("policy model does not match game");
   }
   try {
-    const internal::TraversalMode mode =
-        strategy == DeepCfrStrategy::Average
-            ? internal::TraversalMode::EvaluateAverage
-            : internal::TraversalMode::EvaluateCurrent;
-    const Impl::EvaluationResult result = impl_->evaluate(
-        samples, mode, std::nullopt, &opponent, Opponent(policy_player));
+    const StrategyLookup policy = impl_->strategy_lookup(strategy);
+    uint64_t opponent_lookups = 0;
+    uint64_t missing_opponent_lookups = 0;
+    const StrategyLookup opponent_lookup =
+        [&opponent, &opponent_lookups, &missing_opponent_lookups](
+            InfoSetKey key, std::span<float> probabilities) {
+          ++opponent_lookups;
+          if (opponent.strategy(key, probabilities)) return true;
+          ++missing_opponent_lookups;
+          return false;
+        };
+    auto result = policy_player == Player::A
+                      ? impl_->evaluate(policy, opponent_lookup, samples)
+                      : impl_->evaluate(opponent_lookup, policy, samples);
+    if (!result.ok()) return result.status();
     const double sign = policy_player == Player::A ? 1.0 : -1.0;
     return DeepCfrMatchResult{
-        sign * result.mean, result.standard_error,
-        result.opponent_policy_lookups,
-        result.missing_opponent_lookups};
+        sign * result->mean, result->standard_error,
+        opponent_lookups, missing_opponent_lookups};
   } catch (const std::exception& error) {
     return TorchError(error);
   }
