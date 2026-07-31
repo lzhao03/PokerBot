@@ -143,7 +143,7 @@ uint16_t Handcrafted36Bucket(
 PublicObservationId EncodeBoardTextureHistory(
     const Board& board,
     const std::array<uint64_t, 3>& buckets_per_street,
-    BoardFeatures* final_features) noexcept {
+    BoardFeatures& final_features) noexcept {
   uint64_t observation = 0;
   BoardFeatures features;
   const auto cards = board.cards();
@@ -157,16 +157,16 @@ PublicObservationId EncodeBoardTextureHistory(
                      << ((index - 2) * kPublicObservationBitsPerStreet);
     }
   }
-  if (final_features != nullptr) *final_features = features;
+  final_features = features;
   return PublicObservationId(observation);
 }
 
 PublicObservationId ObservePublicImpl(const CardAbstractionConfig& config,
                                       const Board& board,
-                                      BoardFeatures* features) noexcept {
+                                      BoardFeatures& features) noexcept {
   switch (config.public_mode) {
     case PublicCardMode::ExactCanonical:
-      if (features != nullptr) *features = BoardFeaturesFor(board);
+      features = BoardFeaturesFor(board);
       return CanonicalPublicObservation(board);
     case PublicCardMode::Texture:
       return EncodeBoardTextureHistory(board, kTextureBuckets, features);
@@ -230,7 +230,7 @@ PublicPosition::PublicPosition(const CardAbstractionConfig& config,
       private_kind_(config.private_kind),
       recall_mode_(config.recall_mode) {
   BoardFeatures features;
-  observation_ = ObservePublicImpl(config, board_, &features);
+  observation_ = ObservePublicImpl(config, board_, features);
   rank_counts_ = features.rank_counts;
   suit_counts_ = features.suit_counts;
   rank_mask_ = features.rank_mask;
