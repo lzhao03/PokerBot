@@ -5,6 +5,7 @@
 #include "src/policy_codec.h"
 #include "src/solver.h"
 
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
@@ -236,12 +237,12 @@ void PrintRunSummary(const poker::TabularCfrSolver& solver,
   }
 }
 
-int RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads) {
+absl::Status RunTabular(
+    poker::SolveSpec spec,
+    uint64_t iterations,
+    int threads) {
   auto solver = poker::TabularCfrSolver::Create(std::move(spec));
-  if (!solver.ok()) {
-    std::cerr << "Error: " << solver.status() << "\n";
-    return 1;
-  }
+  if (!solver.ok()) return solver.status();
   const auto start = std::chrono::steady_clock::now();
   solver->run(iterations, threads);
   const std::chrono::duration<double> elapsed =
@@ -253,19 +254,15 @@ int RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads) {
   const std::string policy_output = absl::GetFlag(FLAGS_policy_output);
   const std::string neural_output =
       absl::GetFlag(FLAGS_neural_policy_output);
-  if (policy_output.empty() && neural_output.empty()) return 0;
+  if (policy_output.empty() && neural_output.empty()) {
+    return absl::OkStatus();
+  }
 
   const auto policy = solver->extract_average_policy();
-  if (!policy.ok()) {
-    std::cerr << "Error: " << policy.status() << '\n';
-    return 1;
-  }
+  if (!policy.ok()) return policy.status();
   if (!policy_output.empty()) {
     const absl::Status saved = poker::SavePolicy(*policy, policy_output);
-    if (!saved.ok()) {
-      std::cerr << "Error: " << saved << '\n';
-      return 1;
-    }
+    if (!saved.ok()) return saved;
   }
   if (!neural_output.empty()) {
     const auto fitted = poker::FitNeuralPolicy(
@@ -275,16 +272,10 @@ int RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads) {
          .batch_size = absl::GetFlag(FLAGS_neural_batch_size),
          .hidden_size = absl::GetFlag(FLAGS_neural_hidden_size),
          .learning_rate = absl::GetFlag(FLAGS_neural_learning_rate)});
-    if (!fitted.ok()) {
-      std::cerr << "Error: " << fitted.status() << '\n';
-      return 1;
-    }
+    if (!fitted.ok()) return fitted.status();
     const absl::Status saved =
         poker::SaveNeuralPolicy(fitted->policy, neural_output);
-    if (!saved.ok()) {
-      std::cerr << "Error: " << saved << '\n';
-      return 1;
-    }
+    if (!saved.ok()) return saved;
     std::cout << "neural_policy_samples=" << fitted->samples << '\n'
               << "neural_policy_loss=" << fitted->loss << '\n'
               << "neural_policy_parameter_bytes="
@@ -293,10 +284,7 @@ int RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads) {
         solver->game(), fitted->policy, fitted->policy,
         static_cast<uint64_t>(absl::GetFlag(FLAGS_evaluation_samples)),
         absl::GetFlag(FLAGS_neural_seed));
-    if (!value.ok()) {
-      std::cerr << "Error: " << value.status() << '\n';
-      return 1;
-    }
+    if (!value.ok()) return value.status();
     std::cout << "neural_policy_value=" << value->mean << '\n'
               << "neural_policy_value_se=" << value->standard_error << '\n';
     const uint64_t response_iterations =
@@ -310,19 +298,16 @@ int RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads) {
           absl::GetFlag(FLAGS_best_response_external_sampling);
       const auto exploitability = poker::EstimateExploitability(
           solver->game(), fitted->policy, response_config);
-      if (!exploitability.ok()) {
-        std::cerr << "Error: " << exploitability.status() << '\n';
-        return 1;
-      }
+      if (!exploitability.ok()) return exploitability.status();
       std::cout << "neural_nash_conv=" << exploitability->nash_conv << '\n'
                 << "neural_exploitability="
                 << exploitability->exploitability << '\n';
     }
   }
-  return 0;
+  return absl::OkStatus();
 }
 
-int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
+absl::Status RunDeep(poker::SolveSpec spec, uint64_t iterations) {
   poker::DeepCfrConfig config;
   config.seed = absl::GetFlag(FLAGS_neural_seed);
   config.advantage_memory_capacity =
@@ -342,25 +327,18 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
   config.learning_rate = absl::GetFlag(FLAGS_neural_learning_rate);
 
   auto solver = poker::DeepCfrSolver::Create(std::move(spec), config);
-  if (!solver.ok()) {
-    std::cerr << "Error: " << solver.status() << '\n';
-    return 1;
-  }
+  if (!solver.ok()) return solver.status();
   const std::string model_input = absl::GetFlag(FLAGS_neural_policy_input);
   if (!model_input.empty()) {
     const absl::Status loaded = solver->load_average_model(model_input);
-    if (!loaded.ok()) {
-      std::cerr << "Error: " << loaded << '\n';
-      return 1;
-    }
+    if (!loaded.ok()) return loaded;
   }
   const std::string model_output = absl::GetFlag(FLAGS_neural_policy_output);
   const uint64_t checkpoint_interval =
       absl::GetFlag(FLAGS_deep_checkpoint_interval);
   if (checkpoint_interval > 0 && model_output.empty()) {
-    std::cerr << "Error: --deep_checkpoint_interval requires "
-                 "--neural_policy_output\n";
-    return 1;
+    return absl::InvalidArgumentError(
+        "--deep_checkpoint_interval requires --neural_policy_output");
   }
   const auto start = std::chrono::steady_clock::now();
   uint64_t trained_iterations = 0;
@@ -370,35 +348,24 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
                                : std::min(checkpoint_interval,
                                           iterations - trained_iterations);
     const absl::Status trained = solver->run(batch);
-    if (!trained.ok()) {
-      std::cerr << "Error: " << trained << '\n';
-      return 1;
-    }
+    if (!trained.ok()) return trained;
     trained_iterations += batch;
     if (checkpoint_interval > 0) {
       const auto path = CheckpointPath(model_output, trained_iterations);
       const absl::Status saved = solver->save_average_model(path);
-      if (!saved.ok()) {
-        std::cerr << "Error: " << saved << '\n';
-        return 1;
-      }
+      if (!saved.ok()) return saved;
       std::cout << "deep_checkpoint=" << path.string() << '\n' << std::flush;
     }
   }
   const auto value =
       solver->evaluate_average(absl::GetFlag(FLAGS_evaluation_samples));
-  if (!value.ok()) {
-    std::cerr << "Error: " << value.status() << '\n';
-    return 1;
-  }
+  if (!value.ok()) return value.status();
   const auto value_as_a = solver->evaluate_average_against_uniform(
       poker::Player::A, absl::GetFlag(FLAGS_evaluation_samples));
+  if (!value_as_a.ok()) return value_as_a.status();
   const auto value_as_b = solver->evaluate_average_against_uniform(
       poker::Player::B, absl::GetFlag(FLAGS_evaluation_samples));
-  if (!value_as_a.ok() || !value_as_b.ok()) {
-    std::cerr << "Error: uniform-opponent evaluation failed\n";
-    return 1;
-  }
+  if (!value_as_b.ok()) return value_as_b.status();
   const uint64_t response_iterations =
       absl::GetFlag(FLAGS_best_response_iterations);
   if (response_iterations > 0) {
@@ -409,10 +376,7 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
     response_config.external_sampling =
         absl::GetFlag(FLAGS_best_response_external_sampling);
     const auto estimate = solver->estimate_exploitability(response_config);
-    if (!estimate.ok()) {
-      std::cerr << "Error: " << estimate.status() << '\n';
-      return 1;
-    }
+    if (!estimate.ok()) return estimate.status();
     std::cout
         << "deep_best_response_a_value="
         << estimate->player_a_response.value << '\n'
@@ -447,45 +411,34 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
   }
   if (!model_output.empty() && checkpoint_interval == 0) {
     const absl::Status saved = solver->save_average_model(model_output);
-    if (!saved.ok()) {
-      std::cerr << "Error: " << saved << '\n';
-      return 1;
-    }
+    if (!saved.ok()) return saved;
   }
   const std::string portable_output =
       absl::GetFlag(FLAGS_portable_neural_policy_output);
   if (!portable_output.empty()) {
     if (solver->average_policy() == nullptr) {
-      std::cerr << "Error: no average neural policy to export\n";
-      return 1;
+      return absl::FailedPreconditionError(
+          "no average neural policy to export");
     }
     const absl::Status saved = poker::SavePortableNeuralPolicy(
         *solver->average_policy(), portable_output);
-    if (!saved.ok()) {
-      std::cerr << "Error: " << saved << '\n';
-      return 1;
-    }
+    if (!saved.ok()) return saved;
   }
   const std::string opponent_path =
       absl::GetFlag(FLAGS_deep_opponent_policy);
   if (!opponent_path.empty()) {
     const auto opponent = poker::LoadPolicy(opponent_path);
-    if (!opponent.ok()) {
-      std::cerr << "Error: " << opponent.status() << '\n';
-      return 1;
-    }
+    if (!opponent.ok()) return opponent.status();
     const auto as_a = solver->evaluate_against_policy(
         poker::Player::A, *opponent,
         poker::DeepCfrStrategy::Average,
         absl::GetFlag(FLAGS_evaluation_samples));
+    if (!as_a.ok()) return as_a.status();
     const auto as_b = solver->evaluate_against_policy(
         poker::Player::B, *opponent,
         poker::DeepCfrStrategy::Average,
         absl::GetFlag(FLAGS_evaluation_samples));
-    if (!as_a.ok() || !as_b.ok()) {
-      std::cerr << "Error: tabular opponent evaluation failed\n";
-      return 1;
-    }
+    if (!as_b.ok()) return as_b.status();
     std::cout << "average_vs_tabular_as_a=" << as_a->policy_player_value
               << '\n'
               << "average_vs_tabular_as_a_se=" << as_a->standard_error
@@ -536,9 +489,10 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
   if (!neural_opponent_path.empty()) {
     const auto opponent = poker::LoadNeuralPolicy(
         neural_opponent_path, solver->game().model);
-    if (!opponent.ok() || solver->average_policy() == nullptr) {
-      std::cerr << "Error: could not load neural policy profile\n";
-      return 1;
+    if (!opponent.ok()) return opponent.status();
+    if (solver->average_policy() == nullptr) {
+      return absl::FailedPreconditionError(
+          "no average neural policy to evaluate");
     }
     const uint64_t samples =
         static_cast<uint64_t>(absl::GetFlag(FLAGS_evaluation_samples));
@@ -546,13 +500,11 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
     const auto as_a = poker::EstimateExpectedValue(
         solver->game(), *solver->average_policy(), *opponent,
         samples, seed, false, true);
+    if (!as_a.ok()) return as_a.status();
     const auto as_b = poker::EstimateExpectedValue(
         solver->game(), *opponent, *solver->average_policy(),
         samples, seed, false, true);
-    if (!as_a.ok() || !as_b.ok()) {
-      std::cerr << "Error: neural policy profile evaluation failed\n";
-      return 1;
-    }
+    if (!as_b.ok()) return as_b.status();
     std::cout << "neural_vs_neural_as_a=" << as_a->mean << '\n'
               << "neural_vs_neural_as_a_se=" << as_a->standard_error << '\n'
               << "neural_vs_neural_as_b=" << -as_b->mean << '\n'
@@ -577,51 +529,44 @@ int RunDeep(poker::SolveSpec spec, uint64_t iterations) {
             << "average_vs_uniform_as_a=" << *value_as_a << '\n'
             << "average_vs_uniform_as_b=" << *value_as_b << '\n'
             << "seconds=" << elapsed.count() << '\n';
-  return std::isfinite(*value) ? 0 : 1;
+  return std::isfinite(*value)
+             ? absl::OkStatus()
+             : absl::InternalError("Deep CFR evaluation was not finite");
 }
 
-}  // namespace
-
-int main(int argc, char** argv) {
-  absl::SetProgramUsageMessage("Train the heads-up poker solver.");
-  absl::ParseCommandLine(argc, argv);
+absl::Status RunFromFlags() {
   const std::string algorithm = absl::GetFlag(FLAGS_algorithm);
   if (algorithm != "tabular" && algorithm != "deep") {
-    std::cerr << "Error: --algorithm must be tabular or deep\n";
-    return 1;
+    return absl::InvalidArgumentError(
+        "--algorithm must be tabular or deep");
   }
   const int iterations = absl::GetFlag(FLAGS_iterations);
   if (iterations < 0 ||
       (iterations == 0 &&
        (algorithm != "deep" ||
         absl::GetFlag(FLAGS_neural_policy_input).empty()))) {
-    std::cerr << "Error: --iterations must be positive unless loading a Deep "
-                 "CFR model\n";
-    return 1;
+    return absl::InvalidArgumentError(
+        "--iterations must be positive unless loading a Deep CFR model");
   }
   if (absl::GetFlag(FLAGS_evaluation_samples) <= 0) {
-    std::cerr << "Error: --evaluation_samples must be positive\n";
-    return 1;
+    return absl::InvalidArgumentError(
+        "--evaluation_samples must be positive");
   }
   const int64_t memory_limit_mb = absl::GetFlag(FLAGS_max_memory_mb);
   if (memory_limit_mb < 0) {
-    std::cerr << "Error: --max_memory_mb must be non-negative\n";
-    return 1;
+    return absl::InvalidArgumentError(
+        "--max_memory_mb must be non-negative");
   }
   const int threads = absl::GetFlag(FLAGS_threads);
   if (threads <= 0) {
-    std::cerr << "Error: --threads must be positive\n";
-    return 1;
+    return absl::InvalidArgumentError("--threads must be positive");
   }
   if (algorithm == "deep" && threads != 1) {
-    std::cerr << "Error: Deep CFR currently requires --threads=1\n";
-    return 1;
+    return absl::InvalidArgumentError(
+        "Deep CFR currently requires --threads=1");
   }
   const auto config = ConfigFromFlags();
-  if (!config.ok()) {
-    std::cerr << "Error: " << config.status() << "\n";
-    return 1;
-  }
+  if (!config.ok()) return config.status();
   const poker::ComboRange range = poker::UniformComboRange();
   const poker::Chips stack = absl::GetFlag(FLAGS_starting_stack);
   const poker::Chips small_blind = absl::GetFlag(FLAGS_small_blind);
@@ -633,4 +578,15 @@ int main(int argc, char** argv) {
   return algorithm == "deep"
       ? RunDeep(std::move(spec), static_cast<uint64_t>(iterations))
       : RunTabular(std::move(spec), static_cast<uint64_t>(iterations), threads);
+}
+
+}  // namespace
+
+int main(int argc, char** argv) {
+  absl::SetProgramUsageMessage("Train the heads-up poker solver.");
+  absl::ParseCommandLine(argc, argv);
+  const absl::Status status = RunFromFlags();
+  if (status.ok()) return 0;
+  std::cerr << "Error: " << status.message() << '\n';
+  return 1;
 }
