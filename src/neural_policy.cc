@@ -11,7 +11,6 @@
 #include <fstream>
 #include <random>
 #include <span>
-#include <stdexcept>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -96,27 +95,6 @@ std::mt19937 MakeRng(uint64_t seed) {
   return std::mt19937(sequence);
 }
 
-struct NeuralMetadata {
-  uint32_t feature_schema;
-  int hidden_size;
-  ModelFingerprint model;
-};
-
-NeuralMetadata ReadMetadata(const std::filesystem::path& path) {
-  torch::serialize::InputArchive archive;
-  archive.load_from(path.string());
-  torch::Tensor schema;
-  torch::Tensor hidden_size;
-  torch::Tensor model;
-  archive.read("feature_schema", schema);
-  archive.read("hidden_size", hidden_size);
-  archive.read("model", model);
-  return {
-      static_cast<uint32_t>(schema.item<int64_t>()),
-      static_cast<int>(hidden_size.item<int64_t>()),
-      ModelFingerprint{std::bit_cast<uint64_t>(model.item<int64_t>())}};
-}
-
 absl::Status TorchError(const std::exception& error) {
   return absl::InternalError(error.what());
 }
@@ -184,15 +162,6 @@ NeuralFeatureVector EncodeNeuralFeatures(InfoSetKey key,
   return EncodeNeuralFeatures(
       key.history, key.public_observation, key.private_observation,
       node, config.card_abstraction);
-}
-
-size_t NeuralParameterBytes(const NeuralNetwork& network) {
-  size_t bytes = 0;
-  for (const torch::Tensor& parameter : network.impl_->network->parameters()) {
-    bytes += static_cast<size_t>(parameter.numel()) *
-             static_cast<size_t>(parameter.element_size());
-  }
-  return bytes;
 }
 
 void FillUniform(std::span<float> probabilities) {
@@ -321,46 +290,6 @@ float FitNeuralNetwork(
   return final_loss;
 }
 
-void SaveNeuralNetwork(const NeuralNetwork& network,
-                       const std::filesystem::path& path,
-                       ModelFingerprint model) {
-  torch::serialize::OutputArchive archive;
-  archive.write("feature_schema", torch::tensor(
-      static_cast<int64_t>(kNeuralFeatureSchemaVersion)));
-  archive.write("hidden_size", torch::tensor(
-      static_cast<int64_t>(network.impl_->hidden_size)));
-  archive.write("model", torch::tensor(
-      std::bit_cast<int64_t>(std::to_underlying(model))));
-  network.impl_->network->save(archive);
-  archive.save_to(path.string());
-}
-
-void LoadNeuralNetwork(NeuralNetwork& network,
-                       const std::filesystem::path& path,
-                       ModelFingerprint expected_model) {
-  torch::serialize::InputArchive archive;
-  archive.load_from(path.string());
-  torch::Tensor schema;
-  torch::Tensor hidden_size;
-  torch::Tensor model;
-  archive.read("feature_schema", schema);
-  archive.read("hidden_size", hidden_size);
-  archive.read("model", model);
-  if (schema.item<int64_t>() != kNeuralFeatureSchemaVersion) {
-    throw std::runtime_error("neural feature schema does not match");
-  }
-  if (hidden_size.item<int64_t>() != network.impl_->hidden_size) {
-    throw std::runtime_error("neural hidden size does not match");
-  }
-  if (model.item<int64_t>() !=
-      std::bit_cast<int64_t>(std::to_underlying(expected_model))) {
-    throw std::runtime_error("neural model fingerprint does not match");
-  }
-  network.impl_->network->load(archive);
-  network.impl_->network->eval();
-  network.impl_->RefreshInputWeights();
-}
-
 NeuralPolicy::NeuralPolicy(NeuralNetwork network, ModelFingerprint model)
     : network_(std::move(network)), model_(model) {}
 
@@ -385,7 +314,13 @@ bool NeuralPolicy::strategy(const CompiledGame& game,
 }
 
 size_t NeuralPolicy::parameter_bytes() const {
-  return NeuralParameterBytes(network_);
+  size_t bytes = 0;
+  for (const torch::Tensor& parameter :
+       network_.impl_->network->parameters()) {
+    bytes += static_cast<size_t>(parameter.numel()) *
+             static_cast<size_t>(parameter.element_size());
+  }
+  return bytes;
 }
 
 absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(
@@ -443,7 +378,15 @@ absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(
 absl::Status SaveNeuralPolicy(const NeuralPolicy& policy,
                               const std::filesystem::path& path) {
   try {
-    SaveNeuralNetwork(policy.network_, path, policy.model_);
+    torch::serialize::OutputArchive archive;
+    archive.write("feature_schema", torch::tensor(
+        static_cast<int64_t>(kNeuralFeatureSchemaVersion)));
+    archive.write("hidden_size", torch::tensor(
+        static_cast<int64_t>(policy.network_.impl_->hidden_size)));
+    archive.write("model", torch::tensor(
+        std::bit_cast<int64_t>(std::to_underlying(policy.model_))));
+    policy.network_.impl_->network->save(archive);
+    archive.save_to(path.string());
     return absl::OkStatus();
   } catch (const std::exception& error) {
     return TorchError(error);
@@ -454,17 +397,27 @@ absl::StatusOr<NeuralPolicy> LoadNeuralPolicy(
     const std::filesystem::path& path,
     ModelFingerprint expected_model) {
   try {
-    const NeuralMetadata metadata = ReadMetadata(path);
-    if (metadata.feature_schema != kNeuralFeatureSchemaVersion) {
+    torch::serialize::InputArchive archive;
+    archive.load_from(path.string());
+    torch::Tensor schema;
+    torch::Tensor hidden_size;
+    torch::Tensor model;
+    archive.read("feature_schema", schema);
+    archive.read("hidden_size", hidden_size);
+    archive.read("model", model);
+    if (schema.item<int64_t>() != kNeuralFeatureSchemaVersion) {
       return absl::FailedPreconditionError(
           "neural feature schema does not match");
     }
-    if (metadata.model != expected_model) {
+    if (model.item<int64_t>() !=
+        std::bit_cast<int64_t>(std::to_underlying(expected_model))) {
       return absl::FailedPreconditionError(
           "neural model fingerprint does not match");
     }
-    NeuralNetwork network(metadata.hidden_size);
-    LoadNeuralNetwork(network, path, expected_model);
+    NeuralNetwork network(static_cast<int>(hidden_size.item<int64_t>()));
+    network.impl_->network->load(archive);
+    network.impl_->network->eval();
+    network.impl_->RefreshInputWeights();
     return NeuralPolicy(std::move(network), expected_model);
   } catch (const std::exception& error) {
     return TorchError(error);

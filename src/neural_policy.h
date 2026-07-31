@@ -52,7 +52,7 @@ class NeuralNetwork {
   struct Impl;
   std::unique_ptr<Impl> impl_;
 
-  friend size_t NeuralParameterBytes(const NeuralNetwork& network);
+  friend class NeuralPolicy;
   friend NeuralActionVector PredictNeuralNetwork(
       const NeuralNetwork& network,
       const CompiledGame& game,
@@ -64,12 +64,12 @@ class NeuralNetwork {
       std::span<const NeuralSample> samples,
       const NeuralTrainingConfig& config,
       NeuralTarget target);
-  friend void SaveNeuralNetwork(const NeuralNetwork& network,
-                                const std::filesystem::path& path,
-                                ModelFingerprint model);
-  friend void LoadNeuralNetwork(NeuralNetwork& network,
-                                const std::filesystem::path& path,
-                                ModelFingerprint expected_model);
+  friend absl::Status SaveNeuralPolicy(
+      const NeuralPolicy& policy,
+      const std::filesystem::path& path);
+  friend absl::StatusOr<NeuralPolicy> LoadNeuralPolicy(
+      const std::filesystem::path& path,
+      ModelFingerprint expected_model);
   friend absl::Status SavePortableNeuralPolicy(
       const NeuralPolicy& policy,
       const std::filesystem::path& path);
@@ -82,8 +82,6 @@ NeuralFeatureVector EncodeNeuralFeatures(
     InfoSetKey key,
     const HistoryNode& node,
     const SolverConfig& config);
-
-size_t NeuralParameterBytes(const NeuralNetwork& network);
 
 void FillUniform(std::span<float> probabilities);
 void RegretMatch(std::span<const float> advantages,
@@ -103,13 +101,6 @@ float FitNeuralNetwork(
     std::span<const NeuralSample> samples,
     const NeuralTrainingConfig& config,
     NeuralTarget target);
-
-void SaveNeuralNetwork(const NeuralNetwork& network,
-                       const std::filesystem::path& path,
-                       ModelFingerprint model);
-void LoadNeuralNetwork(NeuralNetwork& network,
-                       const std::filesystem::path& path,
-                       ModelFingerprint expected_model);
 
 struct NeuralPolicyFitResult;
 
