@@ -7,7 +7,6 @@ namespace poker::web {
 
 inline constexpr uint64_t kTabularModel = 0x5bf84653a150904fULL;
 inline constexpr uint64_t kNeuralModel = 0x6fbb89e52780fea2ULL;
-inline constexpr int kUniformPolicy = 0;
 inline constexpr int kTabularPolicy = 1;
 inline constexpr int kNeuralPolicy = 2;
 
@@ -41,17 +40,7 @@ extern "C" {
 uint8_t* poker_allocate(size_t size);
 void poker_free(void* memory);
 int poker_load_policy(const uint8_t* bytes, size_t size);
-void poker_unload_policy();
 int poker_load_neural_policy(const uint8_t* bytes, size_t size);
-void poker_unload_neural_policy();
-int poker_strategy(uint32_t public_low,
-                   uint32_t public_high,
-                   uint32_t history,
-                   uint32_t private_observation,
-                   size_t action_count,
-                   float* output);
-uint32_t poker_model_low();
-uint32_t poker_model_high();
 int poker_query(int policy_kind,
                 int dealer,
                 const uint8_t* input_kinds,
@@ -63,7 +52,6 @@ int poker_query(int policy_kind,
                 int32_t* output_targets,
                 float* output_probabilities);
 int poker_query_found();
-size_t poker_history_node_count();
 int poker_replay(int dealer,
                  const uint8_t* input_kinds,
                  const int32_t* input_targets,

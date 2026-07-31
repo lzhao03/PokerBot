@@ -515,10 +515,6 @@ CompactPolicy tabular_policy;
 PortableNeuralPolicy neural_policy;
 int query_found = 0;
 
-uint64_t PublicObservation(uint32_t low, uint32_t high) {
-  return low | (uint64_t{high} << 32);
-}
-
 }  // namespace
 
 extern "C" {
@@ -541,48 +537,12 @@ EMSCRIPTEN_KEEPALIVE int poker_load_policy(const uint8_t* bytes, size_t size) {
   return 1;
 }
 
-EMSCRIPTEN_KEEPALIVE void poker_unload_policy() {
-  tabular_policy = {};
-}
-
 EMSCRIPTEN_KEEPALIVE int poker_load_neural_policy(const uint8_t* bytes,
                                                   size_t size) {
   PortableNeuralPolicy decoded;
   if (bytes == nullptr || !DecodeNeuralPolicy(bytes, size, decoded)) return 0;
   neural_policy = std::move(decoded);
   return 1;
-}
-
-EMSCRIPTEN_KEEPALIVE void poker_unload_neural_policy() {
-  neural_policy = {};
-}
-
-// Returns 1 for a stored row, 0 for uniform fallback, and -1 on misuse.
-EMSCRIPTEN_KEEPALIVE int poker_strategy(uint32_t public_low,
-                                       uint32_t public_high,
-                                       uint32_t history,
-                                       uint32_t private_observation,
-                                       size_t action_count,
-                                       float* output) {
-  if (output == nullptr || action_count == 0 ||
-      action_count > tabular_policy.max_actions) {
-    return -1;
-  }
-  return TabularStrategy(
-             tabular_policy,
-             {PublicObservation(public_low, public_high), history,
-              private_observation},
-             action_count, output)
-             ? 1
-             : 0;
-}
-
-EMSCRIPTEN_KEEPALIVE uint32_t poker_model_low() {
-  return static_cast<uint32_t>(tabular_policy.model);
-}
-
-EMSCRIPTEN_KEEPALIVE uint32_t poker_model_high() {
-  return static_cast<uint32_t>(tabular_policy.model >> 32);
 }
 
 // Returns the number of legal abstract actions, or -1 for invalid input.
@@ -602,7 +562,7 @@ EMSCRIPTEN_KEEPALIVE int poker_query(
       input_count > kMaxLoggedActions || output_kinds == nullptr ||
       output_targets == nullptr || output_probabilities == nullptr ||
       (dealer != 0 && dealer != 1) ||
-      policy_kind < poker::web::kUniformPolicy ||
+      policy_kind < poker::web::kTabularPolicy ||
       policy_kind > poker::web::kNeuralPolicy) {
     return -1;
   }
@@ -624,11 +584,6 @@ EMSCRIPTEN_KEEPALIVE int poker_query(
     output_kinds[action] = std::to_underlying(actions[action].kind);
     output_targets[action] = actions[action].target_street_commitment;
   }
-  if (policy_kind == poker::web::kUniformPolicy) {
-    std::fill_n(output_probabilities, actions.size(), 1.0f / actions.size());
-    return static_cast<int>(actions.size());
-  }
-
   const auto& decision = std::get<poker::DecisionState>(node.state);
   const Key key = QueryKey(
       hands[Seat(decision.actor, dealer)], board, history,
@@ -658,10 +613,6 @@ EMSCRIPTEN_KEEPALIVE int poker_query(
 
 EMSCRIPTEN_KEEPALIVE int poker_query_found() {
   return query_found;
-}
-
-EMSCRIPTEN_KEEPALIVE size_t poker_history_node_count() {
-  return Game().history.nodes.size();
 }
 
 // Returns the number of legal abstract actions, or -1 for invalid input.
