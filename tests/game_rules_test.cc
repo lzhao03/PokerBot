@@ -278,6 +278,13 @@ TEST_CASE("generated transitions preserve exact-state invariants") {
   }
 }
 
+TEST_CASE("chance transitions require the next street's card count") {
+  const ExactPublicState state = ClosedState(StreetKind::Preflop);
+  const std::array cards = {C(14, S::Spades)};
+
+  CHECK_FALSE(TryApplyChance(state, cards, kRules).ok());
+}
+
 BettingState State(std::array<Chips, kPlayerCount> stack,
                    std::array<Chips, kPlayerCount> total,
                    std::array<Chips, kPlayerCount> street,
