@@ -80,33 +80,6 @@ void AddRange(std::vector<uint8_t>& bytes, const ComboRange& range) noexcept {
   }
 }
 
-ModelFingerprint FingerprintModel(const SolveSpec& spec) noexcept {
-  std::vector<uint8_t> bytes;
-  const uint32_t schema = kModelFingerprintSchemaVersion |
-      (static_cast<uint32_t>(kBetAbstractionSchemaVersion) << 8) |
-      (static_cast<uint32_t>(kCardAbstractionSchemaVersion) << 16) |
-      (static_cast<uint32_t>(kHistorySchemaVersion) << 24);
-  AppendInteger(bytes, schema);
-
-  const SolverConfig& config = spec.config;
-  AppendInteger(bytes, config.betting_rules.minimum_bet);
-  bytes.push_back(std::to_underlying(config.card_abstraction.public_mode));
-  bytes.push_back(std::to_underlying(config.card_abstraction.private_kind));
-  bytes.push_back(std::to_underlying(config.card_abstraction.recall_mode));
-  for (const auto& fractions :
-       config.bet_abstraction.pot_fractions) {
-    AppendInteger(bytes, static_cast<uint32_t>(fractions.size()));
-    for (double fraction : fractions) {
-      AppendInteger(bytes, std::bit_cast<uint64_t>(fraction));
-    }
-  }
-
-  AddBettingState(bytes, spec.root.betting);
-  AddBoard(bytes, spec.root.board);
-  for (const ComboRange& range : spec.ranges) AddRange(bytes, range);
-  return Fingerprint(bytes);
-}
-
 enum class HandShape {
   Suited,
   Offsuit,
@@ -160,6 +133,35 @@ std::string_view Trim(std::string_view text) {
 }
 
 }  // namespace
+
+ModelFingerprint ModelFingerprintFor(
+    const SolverConfig& config,
+    const ExactPublicState& root,
+    const std::array<ComboRange, kPlayerCount>& ranges) noexcept {
+  std::vector<uint8_t> bytes;
+  const uint32_t schema = kModelFingerprintSchemaVersion |
+      (static_cast<uint32_t>(kBetAbstractionSchemaVersion) << 8) |
+      (static_cast<uint32_t>(kCardAbstractionSchemaVersion) << 16) |
+      (static_cast<uint32_t>(kHistorySchemaVersion) << 24);
+  AppendInteger(bytes, schema);
+
+  AppendInteger(bytes, config.betting_rules.minimum_bet);
+  bytes.push_back(std::to_underlying(config.card_abstraction.public_mode));
+  bytes.push_back(std::to_underlying(config.card_abstraction.private_kind));
+  bytes.push_back(std::to_underlying(config.card_abstraction.recall_mode));
+  for (const auto& fractions :
+       config.bet_abstraction.pot_fractions) {
+    AppendInteger(bytes, static_cast<uint32_t>(fractions.size()));
+    for (double fraction : fractions) {
+      AppendInteger(bytes, std::bit_cast<uint64_t>(fraction));
+    }
+  }
+
+  AddBettingState(bytes, root.betting);
+  AddBoard(bytes, root.board);
+  for (const ComboRange& range : ranges) AddRange(bytes, range);
+  return Fingerprint(bytes);
+}
 
 absl::StatusOr<DealDistribution> DealDistribution::Create(
     const ComboRange& player_a,
@@ -545,40 +547,41 @@ ComboRange UniformComboRange() {
   return range;
 }
 
-TabularCfrSolver::TabularCfrSolver(CompiledSolve compiled)
-    : game_(std::move(compiled.game)),
-      initial_public_(std::move(compiled.initial_public)),
-      model_(compiled.model),
+TabularCfrSolver::TabularCfrSolver(CompiledGame game,
+                                   PublicPosition initial_public,
+                                   ModelFingerprint model)
+    : game_(std::move(game)),
+      initial_public_(std::move(initial_public)),
+      model_(model),
       rng_(12345),
       state_(game_.config, game_.history.nodes.size(),
              game_.config.accumulate_average_strategy) {}
 
-absl::StatusOr<CompiledSolve> CompileGame(SolveSpec spec) {
-  auto config = SolverConfig::Create(std::move(spec.config));
+absl::StatusOr<CompiledGame> CompileGame(const SolveSpec& spec) {
+  auto config = SolverConfig::Create(spec.config);
   if (!config.ok()) return config.status();
-  spec.config = std::move(*config);
   if (!IsValidBettingData(Data(spec.root.betting))) {
     return absl::InvalidArgumentError("invalid root betting state");
   }
   auto deals = DealDistribution::Create(spec.ranges[Index(Player::A)],
                                         spec.ranges[Index(Player::B)]);
   if (!deals.ok()) return deals.status();
-  const ModelFingerprint model = FingerprintModel(spec);
-  PublicPosition initial_public(
-      spec.config.card_abstraction, spec.root.board);
   HistoryTree history = BuildHistoryTree(
-      spec.root.betting, spec.config.betting_rules,
-      spec.config.bet_abstraction);
-  return CompiledSolve{
-      CompiledGame{std::move(spec.config), std::move(*deals),
-                   std::move(history)},
-      std::move(initial_public), model};
+      spec.root.betting, config->betting_rules,
+      config->bet_abstraction);
+  return CompiledGame{
+      std::move(*config), std::move(*deals), std::move(history)};
 }
 
 absl::StatusOr<TabularCfrSolver> TabularCfrSolver::Create(SolveSpec spec) {
-  auto compiled = CompileGame(std::move(spec));
-  if (!compiled.ok()) return compiled.status();
-  return TabularCfrSolver(std::move(*compiled));
+  auto game = CompileGame(spec);
+  if (!game.ok()) return game.status();
+  PublicPosition initial_public(
+      game->config.card_abstraction, spec.root.board);
+  const ModelFingerprint model =
+      ModelFingerprintFor(game->config, spec.root, spec.ranges);
+  return TabularCfrSolver(
+      std::move(*game), std::move(initial_public), model);
 }
 
 Position internal::SampleChanceChild(const CompiledGame& game,

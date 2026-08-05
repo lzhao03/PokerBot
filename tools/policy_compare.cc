@@ -32,7 +32,7 @@ namespace {
 constexpr uint64_t kEvaluationSamples = 100'000;
 constexpr uint64_t kSeed = 1;
 
-absl::StatusOr<poker::CompiledSolve> ComparisonGame() {
+absl::StatusOr<poker::SolveSpec> ComparisonSpec() {
   poker::SolverConfig config;
   config.bet_abstraction = poker::SmallBettingConfig();
   config.card_abstraction.public_mode =
@@ -50,11 +50,11 @@ absl::StatusOr<poker::CompiledSolve> ComparisonGame() {
         "private_recall must be current or history");
   }
   const poker::ComboRange range = poker::UniformComboRange();
-  return poker::CompileGame({
+  return poker::SolveSpec{
       config,
       poker::MakeInitialState(config.betting_rules, {200, 200}, {1, 2}),
       {range, range},
-  });
+  };
 }
 
 struct Candidate {
@@ -79,26 +79,35 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  auto game = ComparisonGame();
+  auto spec = ComparisonSpec();
+  if (!spec.ok()) {
+    std::cerr << "Error: " << spec.status() << '\n';
+    return 1;
+  }
+  auto game = poker::CompileGame(*spec);
   if (!game.ok()) {
     std::cerr << "Error: " << game.status() << '\n';
     return 1;
   }
+  const poker::PublicPosition initial_public(
+      game->config.card_abstraction, spec->root.board);
+  const poker::ModelFingerprint model = poker::ModelFingerprintFor(
+      game->config, spec->root, spec->ranges);
   auto tabular = poker::LoadPolicy(tabular_path);
   if (!tabular.ok()) {
     std::cerr << "Error loading --tabular: " << tabular.status() << '\n';
     return 1;
   }
-  if (tabular->model != game->model) {
+  if (tabular->model != model) {
     std::cerr << "Error: tabular model does not match the comparison game\n";
     return 1;
   }
-  auto deep = poker::LoadNeuralPolicy(deep_path, game->model);
+  auto deep = poker::LoadNeuralPolicy(deep_path, model);
   if (!deep.ok()) {
     std::cerr << "Error loading --deep: " << deep.status() << '\n';
     return 1;
   }
-  auto distilled = poker::LoadNeuralPolicy(distilled_path, game->model);
+  auto distilled = poker::LoadNeuralPolicy(distilled_path, model);
   if (!distilled.ok()) {
     std::cerr << "Error loading --distilled: " << distilled.status() << '\n';
     return 1;
@@ -107,24 +116,23 @@ int main(int argc, char** argv) {
   const std::array<Candidate, 3> candidates = {{
       {"tabular", tabular_path, poker::MakeStrategyLookup(*tabular)},
       {"deep", deep_path,
-       poker::MakeStrategyLookup(game->game, game->model, *deep)},
+       poker::MakeStrategyLookup(*game, model, *deep)},
       {"distilled", distilled_path,
-       poker::MakeStrategyLookup(game->game, game->model, *distilled)},
+       poker::MakeStrategyLookup(*game, model, *distilled)},
   }};
 
   std::cout << std::setprecision(8)
-            << "model_fingerprint\t" << std::to_underlying(game->model)
+            << "model_fingerprint\t" << std::to_underlying(model)
             << '\n'
             << "evaluation_samples\t" << kEvaluationSamples << '\n'
             << "best_response_info_set_cap_per_player\t"
-            << game->game.config.max_info_sets << '\n'
+            << game->config.max_info_sets << '\n'
             << "policy\tbytes\tapprox_exploitability\tstandard_error"
                "\tresponse_rows_total\topponent_misses\tresponse_misses\n";
   for (const Candidate& candidate : candidates) {
     const auto estimate =
         poker::EstimateExploitability(
-            game->game, game->initial_public, game->model,
-            candidate.strategy);
+            *game, initial_public, model, candidate.strategy);
     if (!estimate.ok()) {
       std::cerr << "Error evaluating " << candidate.name << ": "
                 << estimate.status() << '\n';
@@ -154,10 +162,10 @@ int main(int argc, char** argv) {
   for (size_t left = 0; left < candidates.size(); ++left) {
     for (size_t right = left + 1; right < candidates.size(); ++right) {
       const auto as_a = poker::EstimateExpectedValue(
-          game->game, game->initial_public, candidates[left].strategy,
+          *game, initial_public, candidates[left].strategy,
           candidates[right].strategy, kEvaluationSamples, kSeed, false, true);
       const auto as_b = poker::EstimateExpectedValue(
-          game->game, game->initial_public, candidates[right].strategy,
+          *game, initial_public, candidates[right].strategy,
           candidates[left].strategy, kEvaluationSamples, kSeed, false, true);
       if (!as_a.ok() || !as_b.ok()) {
         std::cerr << "Error evaluating " << candidates[left].name << " vs "

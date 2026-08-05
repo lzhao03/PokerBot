@@ -90,10 +90,13 @@ absl::Status TorchError(const std::exception& error) {
 struct DeepCfrSolver::Impl {
   struct UpdateHandle {};
 
-  Impl(CompiledSolve compiled, DeepCfrConfig deep_config)
-      : game(std::move(compiled.game)),
-        initial_public(std::move(compiled.initial_public)),
-        model(compiled.model),
+  Impl(CompiledGame compiled_game,
+       PublicPosition root_public,
+       ModelFingerprint fingerprint,
+       DeepCfrConfig deep_config)
+      : game(std::move(compiled_game)),
+        initial_public(std::move(root_public)),
+        model(fingerprint),
         config(deep_config),
         advantage_memory{
             Reservoir(config.advantage_memory_capacity),
@@ -358,13 +361,18 @@ absl::StatusOr<DeepCfrSolver> DeepCfrSolver::Create(
     return absl::InvalidArgumentError(
         "Deep CFR requires private bucket history recall");
   }
-  auto compiled = CompileGame(std::move(spec));
-  if (!compiled.ok()) return compiled.status();
+  auto game = CompileGame(spec);
+  if (!game.ok()) return game.status();
+  PublicPosition initial_public(
+      game->config.card_abstraction, spec.root.board);
+  const ModelFingerprint model =
+      ModelFingerprintFor(game->config, spec.root, spec.ranges);
   try {
     UseSingleThreadedNeuralRuntime();
     SetNeuralSeed(config.seed);
     return DeepCfrSolver(
-        std::make_unique<Impl>(std::move(*compiled), config));
+        std::make_unique<Impl>(std::move(*game), std::move(initial_public),
+                               model, config));
   } catch (const std::exception& error) {
     return TorchError(error);
   }

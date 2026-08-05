@@ -59,6 +59,10 @@ enum class ModelFingerprint : uint64_t {};
 
 absl::StatusOr<ComboRange> ParseRange(std::string_view text);
 ComboRange UniformComboRange();
+ModelFingerprint ModelFingerprintFor(
+    const SolverConfig& config,
+    const ExactPublicState& root,
+    const std::array<ComboRange, kPlayerCount>& ranges) noexcept;
 
 struct Position {
   HistoryId history;
@@ -174,13 +178,7 @@ struct CompiledGame {
   HistoryTree history;
 };
 
-struct CompiledSolve {
-  CompiledGame game;
-  PublicPosition initial_public;
-  ModelFingerprint model{};
-};
-
-absl::StatusOr<CompiledSolve> CompileGame(SolveSpec spec);
+absl::StatusOr<CompiledGame> CompileGame(const SolveSpec& spec);
 
 struct TabularCfrSolverTestAccess;
 
@@ -218,7 +216,9 @@ class TabularCfrSolver {
  private:
   friend struct TabularCfrSolverTestAccess;
 
-  explicit TabularCfrSolver(CompiledSolve compiled);
+  TabularCfrSolver(CompiledGame game,
+                   PublicPosition initial_public,
+                   ModelFingerprint model);
 
   enum class EvaluationMode : uint8_t {
     Current,

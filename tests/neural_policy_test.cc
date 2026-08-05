@@ -16,33 +16,38 @@
 namespace poker {
 namespace {
 
-absl::StatusOr<CompiledSolve> TinyGame() {
+SolveSpec TinySpec() {
   SolverConfig config;
   config.bet_abstraction = SmallBettingConfig();
   config.card_abstraction.public_mode = PublicCardMode::CompactTexture;
   config.card_abstraction.recall_mode = RecallMode::CurrentBucketOnly;
   const ComboRange range = UniformComboRange();
-  return CompileGame({config,
-                      MakeInitialState(config.betting_rules, {8, 8}, {1, 2}),
-                      {range, range}});
+  return {config,
+          MakeInitialState(config.betting_rules, {8, 8}, {1, 2}),
+          {range, range}};
 }
 
 TEST_CASE("tabular policies fit the shared neural policy format") {
-  auto game = TinyGame();
+  const SolveSpec spec = TinySpec();
+  auto game = CompileGame(spec);
   REQUIRE(game.ok());
-  const HistoryNode& root = game->game.history.nodes.front();
+  const PublicPosition initial_public(
+      game->config.card_abstraction, spec.root.board);
+  const ModelFingerprint model =
+      ModelFingerprintFor(game->config, spec.root, spec.ranges);
+  const HistoryNode& root = game->history.nodes.front();
   const InfoSetKey key{
-      game->initial_public.observation(), HistoryId{},
-      ObservePrivate(ComboId{}, game->initial_public)};
+      initial_public.observation(), HistoryId{},
+      ObservePrivate(ComboId{}, initial_public)};
 
   Policy teacher;
-  teacher.model = game->model;
+  teacher.model = model;
   teacher.rows.emplace(key, 0);
   teacher.probabilities.assign(root.child_count, 0.0f);
   teacher.probabilities.front() = 1.0f;
 
   const auto fitted = FitNeuralPolicy(
-      game->game, game->model, teacher,
+      *game, model, teacher,
       {.seed = 7,
        .steps = 100,
        .batch_size = 16,
@@ -51,18 +56,18 @@ TEST_CASE("tabular policies fit the shared neural policy format") {
   REQUIRE(fitted.ok());
   CHECK(fitted->samples == 1);
   CHECK(std::isfinite(fitted->loss));
-  CHECK(fitted->policy.model() == game->model);
+  CHECK(fitted->policy.model() == model);
   CHECK(fitted->policy.parameter_bytes() > 0);
 
   std::vector<float> probabilities(root.child_count);
   REQUIRE(fitted->policy.strategy(
-      game->game, game->model, key, probabilities));
+      *game, model, key, probabilities));
   CHECK(std::accumulate(probabilities.begin(), probabilities.end(), 0.0f) ==
         doctest::Approx(1.0f));
   CHECK(probabilities.front() > 0.9f);
 
   const StrategyLookup unavailable = MakeStrategyLookup(
-      game->game, ModelFingerprint{1}, fitted->policy);
+      *game, ModelFingerprint{1}, fitted->policy);
   std::vector<float> unavailable_probabilities(
       root.child_count, std::numeric_limits<float>::quiet_NaN());
   CHECK_FALSE(unavailable(key, unavailable_probabilities));
@@ -71,29 +76,27 @@ TEST_CASE("tabular policies fit the shared neural policy format") {
     CHECK(probability == doctest::Approx(1.0f / root.child_count));
   }
   const auto value = EstimateExpectedValue(
-      game->game, game->initial_public, game->model, fitted->policy,
-      fitted->policy, 2, 11);
+      *game, initial_public, model, fitted->policy, fitted->policy, 2, 11);
   REQUIRE(value.ok());
   CHECK(std::isfinite(value->mean));
   const auto sampled_value = EstimateExpectedValue(
-      game->game, game->initial_public, game->model, fitted->policy,
-      fitted->policy, 2, 11, false, true);
+      *game, initial_public, model, fitted->policy, fitted->policy, 2, 11,
+      false, true);
   REQUIRE(sampled_value.ok());
   CHECK(std::isfinite(sampled_value->mean));
   const auto exploitability = EstimateExploitability(
-      game->game, game->initial_public, game->model, fitted->policy,
-      {2, 2, 11});
+      *game, initial_public, model, fitted->policy, {2, 2, 11});
   REQUIRE(exploitability.ok());
   CHECK(std::isfinite(exploitability->exploitability));
 
   const auto path =
       std::filesystem::temp_directory_path() / "poker_neural_policy_test.pt";
   REQUIRE(SaveNeuralPolicy(fitted->policy, path).ok());
-  const auto loaded = LoadNeuralPolicy(path, game->model);
+  const auto loaded = LoadNeuralPolicy(path, model);
   REQUIRE(loaded.ok());
   std::vector<float> loaded_probabilities(root.child_count);
   REQUIRE(loaded->strategy(
-      game->game, game->model, key, loaded_probabilities));
+      *game, model, key, loaded_probabilities));
   CHECK(loaded_probabilities == probabilities);
   CHECK_FALSE(LoadNeuralPolicy(path, ModelFingerprint{1}).ok());
 
@@ -113,12 +116,14 @@ TEST_CASE("tabular policies fit the shared neural policy format") {
 }
 
 TEST_CASE("neural fitting rejects a policy for another game") {
-  auto game = TinyGame();
+  const SolveSpec spec = TinySpec();
+  auto game = CompileGame(spec);
   REQUIRE(game.ok());
+  const ModelFingerprint model =
+      ModelFingerprintFor(game->config, spec.root, spec.ranges);
   Policy policy;
   policy.model = ModelFingerprint{1};
-  CHECK_FALSE(FitNeuralPolicy(
-      game->game, game->model, policy, {}).ok());
+  CHECK_FALSE(FitNeuralPolicy(*game, model, policy, {}).ok());
 }
 
 }  // namespace
