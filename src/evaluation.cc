@@ -96,7 +96,9 @@ std::mt19937 MakeEvaluationRng(uint64_t seed) {
 }
 
 ProfileEstimate EstimateProfile(
-    const CompiledGame& game,
+    const SolverConfig& solver_config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     const StrategyLookup& player_a,
     const StrategyLookup& player_b,
@@ -114,8 +116,11 @@ ProfileEstimate EstimateProfile(
   double mean = 0.0;
   double squared_error = 0.0;
   for (uint64_t sample = 0; sample < samples; ++sample) {
-    const Deal deal = game.deals.sample(rng);
+    const Deal deal = deals.sample(rng);
     internal::TraversalContext context{
+        .history = history,
+        .card_abstraction = solver_config.card_abstraction,
+        .chance_samples = solver_config.chance_samples,
         .deal = deal,
         .mode = internal::TraversalMode::EvaluateCurrent,
         .update_player = Player::A,
@@ -124,8 +129,7 @@ ProfileEstimate EstimateProfile(
         .rng = rng,
         .stats = stats,
     };
-    const double value =
-        internal::Traverse(game, initial_public, context, backend);
+    const double value = internal::Traverse(initial_public, context, backend);
     const double delta = value - mean;
     mean += delta / (sample + 1);
     squared_error += delta * (value - mean);
@@ -219,7 +223,9 @@ struct ResponseBackend {
 }  // namespace
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
-    const CompiledGame& game,
+    const SolverConfig& config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     const StrategyLookup& player_a,
     const StrategyLookup& player_b,
@@ -231,12 +237,14 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     return absl::InvalidArgumentError("evaluation samples must be positive");
   }
   return EstimateProfile(
-      game, initial_public, player_a, player_b, samples, seed,
+      config, deals, history, initial_public, player_a, player_b, samples, seed,
       measure_reach_coverage, sample_actions).value;
 }
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
-    const CompiledGame& game,
+    const SolverConfig& config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     ModelFingerprint model,
     const Policy& player_a,
@@ -250,7 +258,7 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
         "policy model does not match game");
   }
   return EstimateExpectedValue(
-      game, initial_public, MakeStrategyLookup(player_a),
+      config, deals, history, initial_public, MakeStrategyLookup(player_a),
       MakeStrategyLookup(player_b), samples, seed, measure_reach_coverage,
       sample_actions);
 }
@@ -258,7 +266,9 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
 namespace {
 
 absl::StatusOr<BestResponseResult> TrainResponse(
-    const CompiledGame& game,
+    const SolverConfig& solver_config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     ModelFingerprint model,
     Player responder,
@@ -269,15 +279,18 @@ absl::StatusOr<BestResponseResult> TrainResponse(
     return absl::InvalidArgumentError(
         "best-response iteration counts must be positive");
   }
-  CfrState response_state(game.config, game.history.nodes.size(), true);
+  CfrState response_state(solver_config, history.nodes.size(), true);
   std::mt19937 rng = MakeEvaluationRng(config.seed);
   ResponseBackend backend{
       responder, opponent, response_state, responder_fallback};
   SolverStats stats;
   BestResponseResult result;
   while (response_state.iterations < config.training_iterations) {
-    const Deal deal = game.deals.sample(rng);
+    const Deal deal = deals.sample(rng);
     internal::TraversalContext context{
+        .history = history,
+        .card_abstraction = solver_config.card_abstraction,
+        .chance_samples = solver_config.chance_samples,
         .deal = deal,
         .mode = internal::TraversalMode::Train,
         .update_player = responder,
@@ -287,14 +300,12 @@ absl::StatusOr<BestResponseResult> TrainResponse(
         .stats = stats,
         .record_traverser_strategy = config.external_sampling,
     };
-    const double value =
-        internal::Traverse(game, initial_public, context, backend);
+    const double value = internal::Traverse(initial_public, context, backend);
     response_state.cumulative_root_utility += value;
     ++response_state.iterations;
   }
 
-  auto response = ExtractAveragePolicy(
-      response_state, game.history, model);
+  auto response = ExtractAveragePolicy(response_state, history, model);
   if (!response.ok()) return response.status();
   result.response_policy = std::move(*response);
   const uint64_t evaluation_seed = config.seed ^ 0x9e3779b97f4a7c15ULL;
@@ -309,8 +320,9 @@ absl::StatusOr<BestResponseResult> TrainResponse(
   const StrategyLookup& player_b =
       responder == Player::B ? response_lookup : opponent;
   const ProfileEstimate estimate = EstimateProfile(
-      game, initial_public, player_a, player_b, config.evaluation_samples,
-      evaluation_seed, false, config.external_sampling);
+      solver_config, deals, history, initial_public, player_a, player_b,
+      config.evaluation_samples, evaluation_seed, false,
+      config.external_sampling);
   result.value = responder == Player::A
                      ? estimate.value.mean
                      : -estimate.value.mean;
@@ -332,18 +344,23 @@ absl::StatusOr<BestResponseResult> TrainResponse(
 }  // namespace
 
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
-    const CompiledGame& game,
+    const SolverConfig& solver_config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     ModelFingerprint model,
     Player responder,
     const StrategyLookup& opponent,
     const BestResponseConfig& config) {
   return TrainResponse(
-      game, initial_public, model, responder, opponent, nullptr, config);
+      solver_config, deals, history, initial_public, model, responder,
+      opponent, nullptr, config);
 }
 
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
-    const CompiledGame& game,
+    const SolverConfig& solver_config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     ModelFingerprint model,
     Player responder,
@@ -354,25 +371,28 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
         "opponent policy model does not match game");
   }
   return TrainApproximateBestResponse(
-      game, initial_public, model, responder, MakeStrategyLookup(opponent),
-      config);
+      solver_config, deals, history, initial_public, model, responder,
+      MakeStrategyLookup(opponent), config);
 }
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
-    const CompiledGame& game,
+    const SolverConfig& solver_config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     ModelFingerprint model,
     const StrategyLookup& policy,
     const BestResponseConfig& config) {
   auto player_a = TrainResponse(
-      game, initial_public, model, Player::A, policy, &policy, config);
+      solver_config, deals, history, initial_public, model, Player::A,
+      policy, &policy, config);
   if (!player_a.ok()) return player_a.status();
 
   BestResponseConfig player_b_config = config;
   player_b_config.seed ^= 0xd1b54a32d192ed03ULL;
   auto player_b = TrainResponse(
-      game, initial_public, model, Player::B, policy, &policy,
-      player_b_config);
+      solver_config, deals, history, initial_public, model, Player::B,
+      policy, &policy, player_b_config);
   if (!player_b.ok()) return player_b.status();
 
   const double nash_conv = player_a->value + player_b->value;
@@ -382,7 +402,9 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
 }
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitabilityParallel(
-    const CompiledGame& game,
+    const SolverConfig& solver_config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     ModelFingerprint model,
     const StrategyLookupFactory& policy_factory,
@@ -398,15 +420,16 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitabilityParallel(
   std::optional<absl::StatusOr<BestResponseResult>> player_a;
   std::thread player_a_thread([&] {
     player_a.emplace(TrainResponse(
-        game, initial_public, model, Player::A, policies[Index(Player::A)],
-        &policies[Index(Player::A)], config));
+        solver_config, deals, history, initial_public, model, Player::A,
+        policies[Index(Player::A)], &policies[Index(Player::A)], config));
   });
 
   BestResponseConfig player_b_config = config;
   player_b_config.seed ^= 0xd1b54a32d192ed03ULL;
   auto player_b = TrainResponse(
-      game, initial_public, model, Player::B, policies[Index(Player::B)],
-      &policies[Index(Player::B)], player_b_config);
+      solver_config, deals, history, initial_public, model, Player::B,
+      policies[Index(Player::B)], &policies[Index(Player::B)],
+      player_b_config);
   player_a_thread.join();
   assert(player_a.has_value());
   if (!player_a->ok()) return player_a->status();
@@ -419,7 +442,9 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitabilityParallel(
 }
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
-    const CompiledGame& game,
+    const SolverConfig& solver_config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     ModelFingerprint model,
     const Policy& policy,
@@ -429,7 +454,8 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
         "policy model does not match game");
   }
   return EstimateExploitability(
-      game, initial_public, model, MakeStrategyLookup(policy), config);
+      solver_config, deals, history, initial_public, model,
+      MakeStrategyLookup(policy), config);
 }
 
 }  // namespace poker

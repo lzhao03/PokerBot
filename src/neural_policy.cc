@@ -158,10 +158,11 @@ void UseSingleThreadedNeuralRuntime() {
 
 NeuralFeatureVector EncodeNeuralFeatures(InfoSetKey key,
                                          const HistoryNode& node,
-                                         const SolverConfig& config) {
+                                         const CardAbstractionConfig&
+                                             card_abstraction) {
   return EncodeNeuralFeatures(
       key.history, key.public_observation, key.private_observation,
-      node, config.card_abstraction);
+      node, card_abstraction);
 }
 
 void FillUniform(std::span<float> probabilities) {
@@ -201,11 +202,12 @@ void Softmax(std::span<const float> logits,
 
 NeuralActionVector PredictNeuralNetwork(
     const NeuralNetwork& network,
-    const CompiledGame& game,
+    const HistoryTree& history,
+    const CardAbstractionConfig& card_abstraction,
     InfoSetKey key,
     std::array<std::vector<float>, 2>& hidden) {
   const NeuralFeatureVector features = EncodeNeuralFeatures(
-      key, game.history.nodes[Index(key.history)], game.config);
+      key, history.nodes[Index(key.history)], card_abstraction);
   SparseLinear(network.impl_->network->hidden1,
                network.impl_->input_weights, features, hidden[0]);
   Relu(hidden[0]);
@@ -220,7 +222,8 @@ NeuralActionVector PredictNeuralNetwork(
 
 float FitNeuralNetwork(
     NeuralNetwork& network,
-    const CompiledGame& game,
+    const HistoryTree& history,
+    const CardAbstractionConfig& card_abstraction,
     std::span<const NeuralSample> samples,
     const NeuralTrainingConfig& config,
     NeuralTarget target_kind) {
@@ -248,9 +251,9 @@ float FitNeuralNetwork(
     std::fill(masks.begin(), masks.end(), 0.0f);
     for (size_t row = 0; row < batch_size; ++row) {
       const NeuralSample& sample = samples[sample_index(batch_rng)];
-      const HistoryNode& node = game.history.nodes[Index(sample.key.history)];
+      const HistoryNode& node = history.nodes[Index(sample.key.history)];
       const NeuralFeatureVector features =
-          EncodeNeuralFeatures(sample.key, node, game.config);
+          EncodeNeuralFeatures(sample.key, node, card_abstraction);
       std::copy(features.begin(), features.end(),
                 inputs.data() + row * kNeuralFeatureCount);
       std::copy(sample.target.begin(), sample.target.end(),
@@ -296,7 +299,8 @@ NeuralPolicy::NeuralPolicy(NeuralNetwork network, ModelFingerprint model)
 NeuralPolicy::NeuralPolicy(NeuralPolicy&&) noexcept = default;
 NeuralPolicy& NeuralPolicy::operator=(NeuralPolicy&&) noexcept = default;
 
-bool NeuralPolicy::strategy(const CompiledGame& game,
+bool NeuralPolicy::strategy(const HistoryTree& history,
+                            const CardAbstractionConfig& card_abstraction,
                             ModelFingerprint model,
                             InfoSetKey key,
                             std::span<float> probabilities) const {
@@ -309,7 +313,7 @@ bool NeuralPolicy::strategy(const CompiledGame& game,
     values.resize(static_cast<size_t>(network_.hidden_size()));
   }
   const NeuralActionVector logits =
-      PredictNeuralNetwork(network_, game, key, hidden);
+      PredictNeuralNetwork(network_, history, card_abstraction, key, hidden);
   Softmax(logits, probabilities);
   return true;
 }
@@ -325,7 +329,8 @@ size_t NeuralPolicy::parameter_bytes() const {
 }
 
 absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(
-    const CompiledGame& game,
+    const HistoryTree& history,
+    const CardAbstractionConfig& card_abstraction,
     ModelFingerprint model,
     const Policy& teacher,
     const NeuralTrainingConfig& config) {
@@ -348,10 +353,10 @@ absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(
   std::vector<NeuralSample> samples;
   samples.reserve(rows.size());
   for (const auto& [key, offset] : rows) {
-    if (Index(key.history) >= game.history.nodes.size()) {
+    if (Index(key.history) >= history.nodes.size()) {
       return absl::InvalidArgumentError("policy history is out of range");
     }
-    const HistoryNode& node = game.history.nodes[Index(key.history)];
+    const HistoryNode& node = history.nodes[Index(key.history)];
     if (!std::holds_alternative<DecisionState>(node.state) ||
         node.child_count == 0 ||
         offset + node.child_count > teacher.probabilities.size()) {
@@ -369,7 +374,8 @@ absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(
     SetNeuralSeed(config.seed);
     NeuralNetwork network(config.hidden_size);
     const float loss = FitNeuralNetwork(
-        network, game, samples, config, NeuralTarget::AveragePolicy);
+        network, history, card_abstraction, samples, config,
+        NeuralTarget::AveragePolicy);
     return NeuralPolicyFitResult{
         NeuralPolicy(std::move(network), model), loss, samples.size()};
   } catch (const std::exception& error) {

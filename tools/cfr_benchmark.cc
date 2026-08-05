@@ -276,8 +276,8 @@ int main(int argc, char** argv) {
                 << std::filesystem::file_size(output) << '\n';
     }
     const auto profile = poker::EstimateExpectedValue(
-        solver->game(), solver->initial_public(), solver->model(), *policy,
-        *policy,
+        solver->config(), solver->deals(), solver->history(),
+        solver->initial_public(), solver->model(), *policy, *policy,
         static_cast<uint64_t>(eval_samples),
         absl::GetFlag(FLAGS_evaluation_seed),
         absl::GetFlag(FLAGS_reach_coverage));
@@ -303,7 +303,8 @@ int main(int argc, char** argv) {
         absl::GetFlag(FLAGS_best_response_iterations);
     if (response_iterations > 0) {
       const auto exploitability = poker::EstimateExploitability(
-          solver->game(), solver->initial_public(), solver->model(), *policy,
+          solver->config(), solver->deals(), solver->history(),
+          solver->initial_public(), solver->model(), *policy,
           {response_iterations,
            static_cast<uint64_t>(eval_samples),
            absl::GetFlag(FLAGS_evaluation_seed)});

@@ -55,12 +55,14 @@ class NeuralNetwork {
   friend class NeuralPolicy;
   friend NeuralActionVector PredictNeuralNetwork(
       const NeuralNetwork& network,
-      const CompiledGame& game,
+      const HistoryTree& history,
+      const CardAbstractionConfig& card_abstraction,
       InfoSetKey key,
       std::array<std::vector<float>, 2>& hidden);
   friend float FitNeuralNetwork(
       NeuralNetwork& network,
-      const CompiledGame& game,
+      const HistoryTree& history,
+      const CardAbstractionConfig& card_abstraction,
       std::span<const NeuralSample> samples,
       const NeuralTrainingConfig& config,
       NeuralTarget target);
@@ -81,7 +83,7 @@ void UseSingleThreadedNeuralRuntime();
 NeuralFeatureVector EncodeNeuralFeatures(
     InfoSetKey key,
     const HistoryNode& node,
-    const SolverConfig& config);
+    const CardAbstractionConfig& card_abstraction);
 
 void FillUniform(std::span<float> probabilities);
 void RegretMatch(std::span<const float> advantages,
@@ -91,13 +93,15 @@ void Softmax(std::span<const float> logits,
 
 NeuralActionVector PredictNeuralNetwork(
     const NeuralNetwork& network,
-    const CompiledGame& game,
+    const HistoryTree& history,
+    const CardAbstractionConfig& card_abstraction,
     InfoSetKey key,
     std::array<std::vector<float>, 2>& hidden);
 
 float FitNeuralNetwork(
     NeuralNetwork& network,
-    const CompiledGame& game,
+    const HistoryTree& history,
+    const CardAbstractionConfig& card_abstraction,
     std::span<const NeuralSample> samples,
     const NeuralTrainingConfig& config,
     NeuralTarget target);
@@ -113,7 +117,8 @@ class NeuralPolicy {
   NeuralPolicy(const NeuralPolicy&) = delete;
   NeuralPolicy& operator=(const NeuralPolicy&) = delete;
 
-  bool strategy(const CompiledGame& game,
+  bool strategy(const HistoryTree& history,
+                const CardAbstractionConfig& card_abstraction,
                 ModelFingerprint model,
                 InfoSetKey key,
                 std::span<float> probabilities) const;
@@ -126,7 +131,8 @@ class NeuralPolicy {
 
   friend struct NeuralPolicyFitResult;
   friend absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(
-      const CompiledGame& game,
+      const HistoryTree& history,
+      const CardAbstractionConfig& card_abstraction,
       ModelFingerprint model,
       const Policy& teacher,
       const NeuralTrainingConfig& config);
@@ -148,7 +154,8 @@ struct NeuralPolicyFitResult {
 };
 
 absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(
-    const CompiledGame& game,
+    const HistoryTree& history,
+    const CardAbstractionConfig& card_abstraction,
     ModelFingerprint model,
     const Policy& teacher,
     const NeuralTrainingConfig& config);

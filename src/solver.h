@@ -172,14 +172,6 @@ class DealDistribution {
   std::array<std::vector<float>, kPlayerCount> cumulative_weights_;
 };
 
-struct CompiledGame {
-  SolverConfig config;
-  DealDistribution deals;
-  HistoryTree history;
-};
-
-absl::StatusOr<CompiledGame> CompileGame(const SolveSpec& spec);
-
 struct TabularCfrSolverTestAccess;
 
 class TabularCfrSolver {
@@ -198,14 +190,16 @@ class TabularCfrSolver {
   double expected_value(Player player) const;
   uint64_t iterations() const noexcept { return state_.iterations; }
   size_t info_set_count() const { return state_.row_count(); }
-  size_t history_count() const noexcept { return game_.history.nodes.size(); }
+  size_t history_count() const noexcept { return history_.nodes.size(); }
   size_t regret_bytes() const noexcept {
     return state_.regret_sum.size() * sizeof(float);
   }
   size_t strategy_bytes() const noexcept {
     return state_.strategy_sum.size() * sizeof(float);
   }
-  const CompiledGame& game() const noexcept { return game_; }
+  const SolverConfig& config() const noexcept { return config_; }
+  const DealDistribution& deals() const noexcept { return deals_; }
+  const HistoryTree& history() const noexcept { return history_; }
   const PublicPosition& initial_public() const noexcept {
     return initial_public_;
   }
@@ -216,7 +210,9 @@ class TabularCfrSolver {
  private:
   friend struct TabularCfrSolverTestAccess;
 
-  TabularCfrSolver(CompiledGame game,
+  TabularCfrSolver(SolverConfig config,
+                   DealDistribution deals,
+                   HistoryTree history,
                    PublicPosition initial_public,
                    ModelFingerprint model);
 
@@ -227,7 +223,9 @@ class TabularCfrSolver {
 
   double evaluate_deal(const Deal& deal, EvaluationMode mode);
   double evaluate_deals(int samples, EvaluationMode mode);
-  CompiledGame game_;
+  SolverConfig config_;
+  DealDistribution deals_;
+  HistoryTree history_;
   PublicPosition initial_public_;
   ModelFingerprint model_;
   std::mt19937 rng_;

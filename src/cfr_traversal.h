@@ -32,6 +32,9 @@ struct TraversalFrame {
 };
 
 struct TraversalContext {
+  const HistoryTree& history;
+  const CardAbstractionConfig& card_abstraction;
+  int chance_samples;
   const Deal& deal;
   TraversalMode mode;
   Player update_player;
@@ -67,20 +70,20 @@ concept CfrBackend = requires(Backend& backend,
       -> std::same_as<void>;
 };
 
-Position SampleChanceChild(const CompiledGame& game,
+Position SampleChanceChild(const HistoryTree& history,
+                           const CardAbstractionConfig& card_abstraction,
                            const HistoryNode& node,
                            const PublicPosition& public_state,
                            const Deal& deal,
                            std::mt19937& rng);
 
 template <CfrBackend Backend>
-double TraverseNode(const CompiledGame& game,
-                    HistoryId history,
+double TraverseNode(HistoryId history,
                     const PublicPosition& public_state,
                     const TraversalFrame& frame,
                     TraversalContext& context,
                     Backend& backend) {
-  const HistoryTree& tree = game.history;
+  const HistoryTree& tree = context.history;
   while (true) {
     const HistoryNode& history_node = tree.nodes[Index(history)];
     const BettingState& betting_state = history_node.state;
@@ -95,12 +98,13 @@ double TraverseNode(const CompiledGame& game,
           *showdown, *frame.showdown_comparison, Player::A);
     }
     if (std::holds_alternative<ChanceState>(betting_state)) {
-      const int samples = game.config.chance_samples;
+      const int samples = context.chance_samples;
       context.stats.chance_samples += static_cast<uint64_t>(samples);
       double value = 0.0;
       for (int sample = 0; sample < samples; ++sample) {
         const Position child = SampleChanceChild(
-            game, history_node, public_state, context.deal, context.rng);
+            tree, context.card_abstraction, history_node, public_state,
+            context.deal, context.rng);
         TraversalFrame child_frame = frame;
         if (child.public_state.board().count() == kMaxBoardCards) {
           child_frame.showdown_comparison = static_cast<int8_t>(CompareHands(
@@ -116,8 +120,8 @@ double TraverseNode(const CompiledGame& game,
                                          child.public_state, observation);
           }
         }
-        value += TraverseNode(game, child.history, child.public_state,
-                              child_frame, context, backend);
+        value += TraverseNode(child.history, child.public_state, child_frame,
+                              context, backend);
       }
       return value / samples;
     }
@@ -180,7 +184,7 @@ double TraverseNode(const CompiledGame& game,
       const HistoryId child =
           tree.children[history_node.children_begin + action];
       action_values[action] = TraverseNode(
-          game, child, public_state, child_frame, context, backend);
+          child, public_state, child_frame, context, backend);
       node_value += probabilities[action] * action_values[action];
     }
     if (!training || !updates_regrets || !handle) {
@@ -207,8 +211,7 @@ double TraverseNode(const CompiledGame& game,
 }
 
 template <CfrBackend Backend>
-double Traverse(const CompiledGame& game,
-                const PublicPosition& initial_public,
+double Traverse(const PublicPosition& initial_public,
                 TraversalContext& context,
                 Backend& backend) {
   TraversalFrame frame;
@@ -221,8 +224,7 @@ double Traverse(const CompiledGame& game,
         context.deal.hand(Player::A), context.deal.hand(Player::B),
         initial_public.board()));
   }
-  return TraverseNode(game, HistoryId{}, initial_public, frame, context,
-                      backend);
+  return TraverseNode(HistoryId{}, initial_public, frame, context, backend);
 }
 
 }  // namespace poker::internal

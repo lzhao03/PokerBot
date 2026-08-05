@@ -82,7 +82,9 @@ class DeepCfrSolver {
   absl::Status save_average_model(const std::filesystem::path& path) const;
 
   const DeepCfrStats& stats() const noexcept;
-  const CompiledGame& game() const noexcept;
+  const SolverConfig& solver_config() const noexcept;
+  const DealDistribution& deals() const noexcept;
+  const HistoryTree& history() const noexcept;
   const PublicPosition& initial_public() const noexcept;
   ModelFingerprint model() const noexcept;
   const NeuralPolicy* average_policy() const noexcept;

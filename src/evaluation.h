@@ -53,7 +53,9 @@ struct ExploitabilityEstimate {
 };
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
-    const CompiledGame& game,
+    const SolverConfig& config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     const StrategyLookup& player_a,
     const StrategyLookup& player_b,
@@ -63,7 +65,9 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     bool sample_actions = false);
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
-    const CompiledGame& game,
+    const SolverConfig& config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     ModelFingerprint model,
     const Policy& player_a,
@@ -74,7 +78,9 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     bool sample_actions = false);
 
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
-    const CompiledGame& game,
+    const SolverConfig& solver_config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     ModelFingerprint model,
     Player responder,
@@ -82,7 +88,9 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     const BestResponseConfig& config);
 
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
-    const CompiledGame& game,
+    const SolverConfig& solver_config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     ModelFingerprint model,
     Player responder,
@@ -90,7 +98,9 @@ absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     const BestResponseConfig& config);
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
-    const CompiledGame& game,
+    const SolverConfig& solver_config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     ModelFingerprint model,
     const StrategyLookup& policy,
@@ -98,14 +108,18 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
         BestResponseConfig{.external_sampling = true});
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitabilityParallel(
-    const CompiledGame& game,
+    const SolverConfig& solver_config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     ModelFingerprint model,
     const StrategyLookupFactory& policy_factory,
     const BestResponseConfig& config);
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
-    const CompiledGame& game,
+    const SolverConfig& solver_config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     ModelFingerprint model,
     const Policy& policy,

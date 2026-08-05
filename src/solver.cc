@@ -547,18 +547,22 @@ ComboRange UniformComboRange() {
   return range;
 }
 
-TabularCfrSolver::TabularCfrSolver(CompiledGame game,
+TabularCfrSolver::TabularCfrSolver(SolverConfig config,
+                                   DealDistribution deals,
+                                   HistoryTree history,
                                    PublicPosition initial_public,
                                    ModelFingerprint model)
-    : game_(std::move(game)),
+    : config_(std::move(config)),
+      deals_(std::move(deals)),
+      history_(std::move(history)),
       initial_public_(std::move(initial_public)),
       model_(model),
       rng_(12345),
-      state_(game_.config, game_.history.nodes.size(),
-             game_.config.accumulate_average_strategy) {}
+      state_(config_, history_.nodes.size(),
+             config_.accumulate_average_strategy) {}
 
-absl::StatusOr<CompiledGame> CompileGame(const SolveSpec& spec) {
-  auto config = SolverConfig::Create(spec.config);
+absl::StatusOr<TabularCfrSolver> TabularCfrSolver::Create(SolveSpec spec) {
+  auto config = SolverConfig::Create(std::move(spec.config));
   if (!config.ok()) return config.status();
   if (!IsValidBettingData(Data(spec.root.betting))) {
     return absl::InvalidArgumentError("invalid root betting state");
@@ -566,36 +570,30 @@ absl::StatusOr<CompiledGame> CompileGame(const SolveSpec& spec) {
   auto deals = DealDistribution::Create(spec.ranges[Index(Player::A)],
                                         spec.ranges[Index(Player::B)]);
   if (!deals.ok()) return deals.status();
-  HistoryTree history = BuildHistoryTree(
-      spec.root.betting, config->betting_rules,
-      config->bet_abstraction);
-  return CompiledGame{
-      std::move(*config), std::move(*deals), std::move(history)};
-}
-
-absl::StatusOr<TabularCfrSolver> TabularCfrSolver::Create(SolveSpec spec) {
-  auto game = CompileGame(spec);
-  if (!game.ok()) return game.status();
-  PublicPosition initial_public(
-      game->config.card_abstraction, spec.root.board);
+  PublicPosition initial_public(config->card_abstraction, spec.root.board);
   const ModelFingerprint model =
-      ModelFingerprintFor(game->config, spec.root, spec.ranges);
+      ModelFingerprintFor(*config, spec.root, spec.ranges);
+  HistoryTree history = BuildHistoryTree(
+      spec.root.betting, config->betting_rules, config->bet_abstraction);
   return TabularCfrSolver(
-      std::move(*game), std::move(initial_public), model);
+      std::move(*config), std::move(*deals), std::move(history),
+      std::move(initial_public), model);
 }
 
-Position internal::SampleChanceChild(const CompiledGame& game,
-                                     const HistoryNode& node,
-                                     const PublicPosition& public_state,
-                                     const Deal& deal,
-                                     std::mt19937& rng) {
+Position internal::SampleChanceChild(
+    const HistoryTree& history,
+    const CardAbstractionConfig& card_abstraction,
+    const HistoryNode& node,
+    const PublicPosition& public_state,
+    const Deal& deal,
+    std::mt19937& rng) {
   const ChanceState& chance = std::get<ChanceState>(node.state);
   const auto sampled = SampleStreetCards(
       chance.data.street, public_state.board(), deal.blocked_mask(), rng);
   assert(sampled.ok());
   return {
-      game.history.children[node.children_begin],
-      PublicPosition(game.config.card_abstraction,
+      history.children[node.children_begin],
+      PublicPosition(card_abstraction,
                      DealCards(public_state.board(), *sampled))};
 }
 
@@ -604,18 +602,21 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
 
   auto run_iteration = [&](uint64_t iteration, std::mt19937& rng,
                            SolverStats& stats, bool concurrent) {
-    const Deal deal = game_.deals.sample(rng);
+    const Deal deal = deals_.sample(rng);
     internal::TraversalContext context{
+        .history = history_,
+        .card_abstraction = config_.card_abstraction,
+        .chance_samples = config_.chance_samples,
         .deal = deal,
         .mode = internal::TraversalMode::Train,
         .update_player = (iteration & 1) == 0 ? Player::A : Player::B,
         .iteration = iteration,
-        .sample_actions = game_.config.external_sampling,
+        .sample_actions = config_.external_sampling,
         .rng = rng,
         .stats = stats,
     };
     TabularBackend backend{state_, concurrent};
-    return internal::Traverse(game_, initial_public_, context, backend);
+    return internal::Traverse(initial_public_, context, backend);
   };
 
   uint64_t serial_iterations = 0;
@@ -667,6 +668,9 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
 double TabularCfrSolver::evaluate_deal(const Deal& deal,
                                        EvaluationMode mode) {
   internal::TraversalContext context{
+      .history = history_,
+      .card_abstraction = config_.card_abstraction,
+      .chance_samples = config_.chance_samples,
       .deal = deal,
       .mode = mode == EvaluationMode::Average
                   ? internal::TraversalMode::EvaluateAverage
@@ -678,14 +682,14 @@ double TabularCfrSolver::evaluate_deal(const Deal& deal,
       .stats = stats_,
   };
   TabularBackend backend{state_, false};
-  return internal::Traverse(game_, initial_public_, context, backend);
+  return internal::Traverse(initial_public_, context, backend);
 }
 
 double TabularCfrSolver::evaluate_deals(int samples, EvaluationMode mode) {
   if (samples <= 0) return 0.0;
   double value = 0.0;
   for (int sample = 0; sample < samples; ++sample) {
-    value += evaluate_deal(game_.deals.sample(rng_), mode);
+    value += evaluate_deal(deals_.sample(rng_), mode);
   }
   return value / samples;
 }
@@ -703,7 +707,7 @@ double TabularCfrSolver::evaluate_current(int samples) {
 absl::StatusOr<double> TabularCfrSolver::evaluate_average(
     ComboId player_a,
     ComboId player_b) {
-  if (!game_.config.accumulate_average_strategy) {
+  if (!config_.accumulate_average_strategy) {
     return absl::FailedPreconditionError(
         "average strategy accumulation is disabled");
   }
@@ -712,7 +716,7 @@ absl::StatusOr<double> TabularCfrSolver::evaluate_average(
 }
 
 absl::StatusOr<double> TabularCfrSolver::evaluate_average(int samples) {
-  if (!game_.config.accumulate_average_strategy) {
+  if (!config_.accumulate_average_strategy) {
     return absl::FailedPreconditionError(
         "average strategy accumulation is disabled");
   }
@@ -765,11 +769,11 @@ absl::StatusOr<Policy> ExtractAveragePolicy(
 }
 
 absl::StatusOr<Policy> TabularCfrSolver::extract_average_policy() const {
-  if (!game_.config.accumulate_average_strategy) {
+  if (!config_.accumulate_average_strategy) {
     return absl::FailedPreconditionError(
         "average strategy accumulation is disabled");
   }
-  return ExtractAveragePolicy(state_, game_.history, model_);
+  return ExtractAveragePolicy(state_, history_, model_);
 }
 
 double TabularCfrSolver::expected_value(Player player) const {

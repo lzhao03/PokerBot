@@ -149,19 +149,18 @@ const ComboId kB = H(13, S::Clubs, 13, S::Diamonds);
 const ComboId kC = H(12, S::Clubs, 12, S::Diamonds);
 
 Policy PassiveCallingPolicy(const TabularCfrSolver& game, ComboId hand) {
-  const CompiledGame& compiled = game.game();
   Policy policy;
   policy.model = game.model();
   const PublicPosition& position = game.initial_public();
   const PrivateObservationId private_observation = ObservePrivate(
       hand, position);
-  for (size_t history = 0; history < compiled.history.nodes.size();
+  for (size_t history = 0; history < game.history().nodes.size();
        ++history) {
-    const HistoryNode& node = compiled.history.nodes[history];
+    const HistoryNode& node = game.history().nodes[history];
     const auto* decision = std::get_if<DecisionState>(&node.state);
     if (decision == nullptr || decision->actor != Player::B) continue;
     const AbstractActions actions = SelectAbstractActions(
-        compiled.config.bet_abstraction, *decision);
+        game.config().bet_abstraction, *decision);
     const size_t offset = policy.probabilities.size();
     policy.probabilities.resize(offset + node.child_count, 0.0f);
     bool selected = false;
@@ -221,7 +220,7 @@ TEST_CASE("external sampling linearly weights average strategies") {
       ObservePrivate(kA, solver->initial_public())};
   const std::optional<uint32_t> offset = state.find(root_key);
   REQUIRE(offset.has_value());
-  const uint8_t action_count = solver->game().history.nodes[0].child_count;
+  const uint8_t action_count = solver->history().nodes[0].child_count;
   CHECK(std::accumulate(state.strategy_sum.begin() + *offset,
                         state.strategy_sum.begin() + *offset + action_count,
                         0.0f) == doctest::Approx(2.0f));
@@ -254,14 +253,14 @@ TEST_CASE("private abstraction cannot change terminal utility") {
 
 TEST_CASE("history tree stores direct rule transitions") {
   auto solver = MakeSolver(Config(), R(kA), R(kB));
-  const HistoryTree& tree = solver->game().history;
+  const HistoryTree& tree = solver->history();
   REQUIRE_FALSE(tree.nodes.empty());
 
   for (size_t id = 0; id < tree.nodes.size(); ++id) {
     const HistoryNode& node = tree.nodes[id];
     if (const auto* decision = std::get_if<DecisionState>(&node.state)) {
       const AbstractActions actions = SelectAbstractActions(
-          solver->game().config.bet_abstraction, *decision);
+          solver->config().bet_abstraction, *decision);
       REQUIRE(node.child_count == actions.size());
       for (uint8_t action = 0; action < node.child_count; ++action) {
         const HistoryId child = tree.children[node.children_begin + action];
@@ -274,7 +273,7 @@ TEST_CASE("history tree stores direct rule transitions") {
       const HistoryId child = tree.children[node.children_begin];
       REQUIRE(Index(child) < tree.nodes.size());
       CHECK(tree.nodes[Index(child)].state == AdvanceBettingStreet(
-                *chance, solver->game().config.betting_rules));
+                *chance, solver->config().betting_rules));
     } else {
       CHECK(node.child_count == 0);
     }
@@ -338,7 +337,7 @@ TEST_CASE("infoset action rows are contiguous") {
   rows.reserve(entries.size());
   for (const auto& entry : entries) {
     const HistoryNode& node =
-        solver->game().history.nodes[Index(entry.first.history)];
+        solver->history().nodes[Index(entry.first.history)];
     REQUIRE(std::holds_alternative<DecisionState>(node.state));
     rows.push_back({entry.second, node.child_count});
   }
@@ -368,11 +367,11 @@ TEST_CASE("postflop roots use full observation identity") {
 
   auto solver = MakeSolver(config, R(kA), R(kB), root);
   solver->run(2);
-  const HistoryTree& tree = solver->game().history;
+  const HistoryTree& tree = solver->history();
   const Player player = std::get<DecisionState>(tree.nodes[0].state).actor;
   const ComboId hand = player == Player::A ? kA : kB;
   const CardAbstractionConfig& cards =
-      solver->game().config.card_abstraction;
+      solver->config().card_abstraction;
   const PublicPosition public_state(cards, root.board);
   const PrivateObservationId private_id = ObservePrivate(hand, public_state);
   CHECK(TabularCfrSolverTestAccess::state(*solver)
@@ -422,7 +421,7 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
   for (const auto& [key, offset] : policy.rows) {
     (void)offset;
     const HistoryNode& node =
-        solver->game().history.nodes[Index(key.history)];
+        solver->history().nodes[Index(key.history)];
     std::vector<float> probabilities(node.child_count);
     CHECK(policy.strategy(key, absl::MakeSpan(probabilities)));
     double sum = 0.0;
@@ -441,10 +440,12 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
   }
 
   const auto evaluated =
-      EstimateExpectedValue(solver->game(), solver->initial_public(),
+      EstimateExpectedValue(solver->config(), solver->deals(),
+                            solver->history(), solver->initial_public(),
                             solver->model(), policy, policy, 4, 17, true);
   const auto repeated =
-      EstimateExpectedValue(solver->game(), solver->initial_public(),
+      EstimateExpectedValue(solver->config(), solver->deals(),
+                            solver->history(), solver->initial_public(),
                             solver->model(), policy, policy, 4, 17);
   REQUIRE(evaluated.ok());
   REQUIRE(repeated.ok());
@@ -467,7 +468,8 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
   Policy empty;
   empty.model = policy.model;
   const auto fallback =
-      EstimateExpectedValue(solver->game(), solver->initial_public(),
+      EstimateExpectedValue(solver->config(), solver->deals(),
+                            solver->history(), solver->initial_public(),
                             solver->model(), empty, empty, 2, 17);
   REQUIRE(fallback.ok());
   CHECK(fallback->missing_policy_lookups > 0);
@@ -478,8 +480,8 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
     return false;
   };
   const auto generic_fallback = EstimateExpectedValue(
-      solver->game(), solver->initial_public(), unavailable, unavailable, 2,
-      17);
+      solver->config(), solver->deals(), solver->history(),
+      solver->initial_public(), unavailable, unavailable, 2, 17);
   REQUIRE(generic_fallback.ok());
   CHECK(generic_fallback->mean == fallback->mean);
   CHECK(generic_fallback->missing_policy_lookups ==
@@ -487,8 +489,9 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
 
   auto different = MakeSolver(Config(), R(kB), R(kA));
   CHECK_FALSE(EstimateExpectedValue(
-      different->game(), different->initial_public(), different->model(),
-      policy, policy, 1, 17).ok());
+      different->config(), different->deals(), different->history(),
+      different->initial_public(), different->model(), policy, policy, 1,
+      17).ok());
 }
 
 TEST_CASE("zero average mass extracts as uniform policy") {
@@ -501,7 +504,7 @@ TEST_CASE("zero average mass extracts as uniform policy") {
   for (const auto& [key, offset] : extracted->rows) {
     (void)offset;
     const HistoryNode& node =
-        solver->game().history.nodes[Index(key.history)];
+        solver->history().nodes[Index(key.history)];
     std::vector<float> probabilities(node.child_count);
     REQUIRE(extracted->strategy(key, absl::MakeSpan(probabilities)));
     for (float probability : probabilities) {
@@ -521,18 +524,18 @@ TEST_CASE("approximate responses are reproducible and respect infosets") {
 
   const BestResponseConfig config{30, 20, 91};
   const auto first = TrainApproximateBestResponse(
-      game->game(), game->initial_public(), game->model(), Player::A,
-      *opponent, config);
+      game->config(), game->deals(), game->history(), game->initial_public(),
+      game->model(), Player::A, *opponent, config);
   const auto second = TrainApproximateBestResponse(
-      game->game(), game->initial_public(), game->model(), Player::A,
-      *opponent, config);
+      game->config(), game->deals(), game->history(), game->initial_public(),
+      game->model(), Player::A, *opponent, config);
   const StrategyLookup lookup = [&opponent](
       InfoSetKey key, std::span<float> output) {
     return opponent->strategy(key, output);
   };
   const auto generic = TrainApproximateBestResponse(
-      game->game(), game->initial_public(), game->model(), Player::A, lookup,
-      config);
+      game->config(), game->deals(), game->history(), game->initial_public(),
+      game->model(), Player::A, lookup, config);
   REQUIRE(first.ok());
   REQUIRE(second.ok());
   REQUIRE(generic.ok());
@@ -552,7 +555,7 @@ TEST_CASE("approximate responses are reproducible and respect infosets") {
   for (const auto& [key, row] : first->response_policy.rows) {
     (void)row;
     const HistoryNode& node =
-        game->game().history.nodes[Index(key.history)];
+        game->history().nodes[Index(key.history)];
     REQUIRE(std::holds_alternative<DecisionState>(node.state));
     CHECK(std::get<DecisionState>(node.state).actor == Player::A);
     root_rows += key.history == HistoryId{} ? 1 : 0;
@@ -566,8 +569,8 @@ TEST_CASE("approximate response continues after infoset capacity") {
   const auto opponent = game->extract_average_policy();
   REQUIRE(opponent.ok());
   const auto response = TrainApproximateBestResponse(
-      game->game(), game->initial_public(), game->model(), Player::A,
-      *opponent, BestResponseConfig{10, 2, 7});
+      game->config(), game->deals(), game->history(), game->initial_public(),
+      game->model(), Player::A, *opponent, BestResponseConfig{10, 2, 7});
   REQUIRE(response.ok());
   CHECK(response->response_policy.rows.size() == 1);
 }
@@ -578,17 +581,17 @@ TEST_CASE("approximate response learns a profitable shared action") {
   Policy uniform;
   uniform.model = game->model();
   const auto baseline = EstimateExpectedValue(
-      game->game(), game->initial_public(), game->model(), uniform, opponent,
-      1, 11);
+      game->config(), game->deals(), game->history(), game->initial_public(),
+      game->model(), uniform, opponent, 1, 11);
   BestResponseConfig response_config{100, 1, 11};
   response_config.external_sampling = true;
   const auto response = TrainApproximateBestResponse(
-      game->game(), game->initial_public(), game->model(), Player::A,
-      opponent, response_config);
+      game->config(), game->deals(), game->history(), game->initial_public(),
+      game->model(), Player::A, opponent, response_config);
   response_config.external_sampling = false;
   const auto full_response = TrainApproximateBestResponse(
-      game->game(), game->initial_public(), game->model(), Player::A,
-      opponent, response_config);
+      game->config(), game->deals(), game->history(), game->initial_public(),
+      game->model(), Player::A, opponent, response_config);
   REQUIRE(baseline.ok());
   REQUIRE(response.ok());
   REQUIRE(full_response.ok());
@@ -596,16 +599,15 @@ TEST_CASE("approximate response learns a profitable shared action") {
   CHECK(response->value >= baseline->mean);
   CHECK(response->value > 7.5);
 
-  const CompiledGame& compiled = game->game();
   const PublicPosition& position = game->initial_public();
   const InfoSetKey root_key{
       position.observation(), HistoryId{}, ObservePrivate(kA, position)};
   const size_t offset = response->response_policy.rows.at(root_key);
   const size_t full_offset =
       full_response->response_policy.rows.at(root_key);
-  const HistoryNode& root = compiled.history.nodes[0];
+  const HistoryNode& root = game->history().nodes[0];
   const AbstractActions actions = SelectAbstractActions(
-      compiled.config.bet_abstraction,
+      game->config().bet_abstraction,
       std::get<DecisionState>(root.state));
   for (uint8_t action = 0; action < root.child_count; ++action) {
     CHECK(response->response_policy.probabilities[offset + action] ==
@@ -625,23 +627,24 @@ TEST_CASE("exploitability reports both responder perspectives") {
   const auto initial_policy = game->extract_average_policy();
   REQUIRE(initial_policy.ok());
   const auto initial = EstimateExploitability(
-      game->game(), game->initial_public(), game->model(), *initial_policy,
-      BestResponseConfig{200, 2, 23});
+      game->config(), game->deals(), game->history(), game->initial_public(),
+      game->model(), *initial_policy, BestResponseConfig{200, 2, 23});
   REQUIRE(initial.ok());
 
   game->run(200);
   const auto policy = game->extract_average_policy();
   REQUIRE(policy.ok());
   const auto estimate = EstimateExploitability(
-      game->game(), game->initial_public(), game->model(), *policy,
-      BestResponseConfig{200, 2, 23});
+      game->config(), game->deals(), game->history(), game->initial_public(),
+      game->model(), *policy, BestResponseConfig{200, 2, 23});
   const StrategyLookup lookup = [&policy](
       InfoSetKey key, std::span<float> output) {
     return policy->strategy(key, output);
   };
   size_t factory_calls = 0;
   const auto parallel = EstimateExploitabilityParallel(
-      game->game(), game->initial_public(), game->model(), [&] {
+      game->config(), game->deals(), game->history(), game->initial_public(),
+      game->model(), [&] {
         ++factory_calls;
         return lookup;
       },

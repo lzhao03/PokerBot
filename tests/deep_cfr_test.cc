@@ -38,8 +38,8 @@ SolveSpec TinySolveSpec() {
 TEST_CASE("Deep CFR trains bounded neural memories") {
   auto solver = DeepCfrSolver::Create(TinySolveSpec(), TinyDeepConfig());
   REQUIRE(solver.ok());
-  CHECK_FALSE(solver->game().config.external_sampling);
-  CHECK(solver->game().config.accumulate_average_strategy);
+  CHECK_FALSE(solver->solver_config().external_sampling);
+  CHECK(solver->solver_config().accumulate_average_strategy);
   REQUIRE(solver->run(2).ok());
   REQUIRE(solver->average_policy() != nullptr);
 
@@ -132,8 +132,8 @@ TEST_CASE("neural features preserve private bucket history") {
       PublicObservationId{}, HistoryId{},
       PrivateObservationId{kPreflop + 37 * kFlopB + 37 * 37 * kTurn}};
 
-  CHECK(EncodeNeuralFeatures(a, node, config) !=
-        EncodeNeuralFeatures(b, node, config));
+  CHECK(EncodeNeuralFeatures(a, node, config.card_abstraction) !=
+        EncodeNeuralFeatures(b, node, config.card_abstraction));
 }
 
 TEST_CASE("Deep CFR rejects current-bucket imperfect recall") {

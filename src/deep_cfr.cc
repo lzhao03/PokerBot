@@ -90,11 +90,15 @@ absl::Status TorchError(const std::exception& error) {
 struct DeepCfrSolver::Impl {
   struct UpdateHandle {};
 
-  Impl(CompiledGame compiled_game,
+  Impl(SolverConfig solver_options,
+       DealDistribution deal_distribution,
+       HistoryTree history_tree,
        PublicPosition root_public,
        ModelFingerprint fingerprint,
        DeepCfrConfig deep_config)
-      : game(std::move(compiled_game)),
+      : solver_config(std::move(solver_options)),
+        deals(std::move(deal_distribution)),
+        history(std::move(history_tree)),
         initial_public(std::move(root_public)),
         model(fingerprint),
         config(deep_config),
@@ -173,7 +177,7 @@ struct DeepCfrSolver::Impl {
     ++network_evaluations;
     NeuralActionVector values = {};
     const bool available = policy->strategy(
-        game, model, key,
+        history, solver_config.card_abstraction, model, key,
         std::span<float>(values.data(), probabilities.size()));
     std::copy_n(values.begin(), probabilities.size(), probabilities.begin());
     if (available && cache.size() < config.policy_cache_capacity) {
@@ -188,7 +192,7 @@ struct DeepCfrSolver::Impl {
       if (strategy == DeepCfrStrategy::Average) {
         return policy_strategy(key, probabilities);
       }
-      const HistoryNode& node = game.history.nodes[Index(key.history)];
+      const HistoryNode& node = history.nodes[Index(key.history)];
       fill_current_strategy(
           std::get<DecisionState>(node.state).actor, key, probabilities);
       return true;
@@ -204,7 +208,7 @@ struct DeepCfrSolver::Impl {
           "evaluation samples must be positive");
     }
     return EstimateExpectedValue(
-        game, initial_public, player_a, player_b,
+        solver_config, deals, history, initial_public, player_a, player_b,
         static_cast<uint64_t>(samples),
         config.seed + 3, false, true);
   }
@@ -249,7 +253,8 @@ struct DeepCfrSolver::Impl {
     }
     ++network_evaluations;
     const NeuralActionVector values =
-        PredictNeuralNetwork(network, game, key, hidden);
+        PredictNeuralNetwork(
+            network, history, solver_config.card_abstraction, key, hidden);
     if (cache.size() < capacity) {
       cache.emplace(key, values);
     }
@@ -262,7 +267,7 @@ struct DeepCfrSolver::Impl {
                       NeuralTarget target_kind,
                       int training_steps) {
     return FitNeuralNetwork(
-        network, game, memory.samples(),
+        network, history, solver_config.card_abstraction, memory.samples(),
         {.seed = seed,
          .steps = training_steps,
          .batch_size = config.batch_size,
@@ -275,6 +280,9 @@ struct DeepCfrSolver::Impl {
                   Player update_player,
                   uint64_t iteration) {
     internal::TraversalContext context{
+        .history = history,
+        .card_abstraction = solver_config.card_abstraction,
+        .chance_samples = solver_config.chance_samples,
         .deal = deal,
         .mode = internal::TraversalMode::Train,
         .update_player = update_player,
@@ -283,7 +291,7 @@ struct DeepCfrSolver::Impl {
         .rng = game_rng,
         .stats = stats.traversal,
     };
-    return internal::Traverse(game, initial_public, context, *this);
+    return internal::Traverse(initial_public, context, *this);
   }
 
   void run(uint64_t iterations) {
@@ -294,7 +302,7 @@ struct DeepCfrSolver::Impl {
       for (Player player : {Player::A, Player::B}) {
         for (int traversal = 0; traversal < config.traversals_per_player;
              ++traversal) {
-          traverse(game.deals.sample(game_rng), player, iteration);
+          traverse(deals.sample(game_rng), player, iteration);
           ++stats.traversals;
         }
         const size_t index = Index(player);
@@ -325,7 +333,9 @@ struct DeepCfrSolver::Impl {
     stats.strategy_samples = strategy_memory.size();
   }
 
-  CompiledGame game;
+  SolverConfig solver_config;
+  DealDistribution deals;
+  HistoryTree history;
   PublicPosition initial_public;
   ModelFingerprint model;
   DeepCfrConfig config;
@@ -355,24 +365,35 @@ absl::StatusOr<DeepCfrSolver> DeepCfrSolver::Create(
     DeepCfrConfig config) {
   const absl::Status config_status = ValidateConfig(config);
   if (!config_status.ok()) return config_status;
-  if (spec.config.card_abstraction.private_kind ==
+  auto solver_config = SolverConfig::Create(std::move(spec.config));
+  if (!solver_config.ok()) return solver_config.status();
+  if (!IsValidBettingData(Data(spec.root.betting))) {
+    return absl::InvalidArgumentError("invalid root betting state");
+  }
+  if (solver_config->card_abstraction.private_kind ==
           PrivateAbstractionKind::Handcrafted36 &&
-      spec.config.card_abstraction.recall_mode != RecallMode::BucketHistory) {
+      solver_config->card_abstraction.recall_mode !=
+          RecallMode::BucketHistory) {
     return absl::InvalidArgumentError(
         "Deep CFR requires private bucket history recall");
   }
-  auto game = CompileGame(spec);
-  if (!game.ok()) return game.status();
+  auto deals = DealDistribution::Create(spec.ranges[Index(Player::A)],
+                                        spec.ranges[Index(Player::B)]);
+  if (!deals.ok()) return deals.status();
   PublicPosition initial_public(
-      game->config.card_abstraction, spec.root.board);
+      solver_config->card_abstraction, spec.root.board);
   const ModelFingerprint model =
-      ModelFingerprintFor(game->config, spec.root, spec.ranges);
+      ModelFingerprintFor(*solver_config, spec.root, spec.ranges);
+  HistoryTree history = BuildHistoryTree(
+      spec.root.betting, solver_config->betting_rules,
+      solver_config->bet_abstraction);
   try {
     UseSingleThreadedNeuralRuntime();
     SetNeuralSeed(config.seed);
     return DeepCfrSolver(
-        std::make_unique<Impl>(std::move(*game), std::move(initial_public),
-                               model, config));
+        std::make_unique<Impl>(
+            std::move(*solver_config), std::move(*deals), std::move(history),
+            std::move(initial_public), model, config));
   } catch (const std::exception& error) {
     return TorchError(error);
   }
@@ -477,7 +498,8 @@ DeepCfrSolver::estimate_exploitability(
     std::array<uint64_t, kPlayerCount> cache_hits = {};
     size_t next_lookup = 0;
     auto result = EstimateExploitabilityParallel(
-        impl_->game, impl_->initial_public, impl_->model,
+        impl_->solver_config, impl_->deals, impl_->history,
+        impl_->initial_public, impl_->model,
         [&] {
           const size_t index = next_lookup++;
           caches[index].reserve(impl_->config.policy_cache_capacity);
@@ -521,8 +543,16 @@ const DeepCfrStats& DeepCfrSolver::stats() const noexcept {
   return impl_->stats;
 }
 
-const CompiledGame& DeepCfrSolver::game() const noexcept {
-  return impl_->game;
+const SolverConfig& DeepCfrSolver::solver_config() const noexcept {
+  return impl_->solver_config;
+}
+
+const DealDistribution& DeepCfrSolver::deals() const noexcept {
+  return impl_->deals;
+}
+
+const HistoryTree& DeepCfrSolver::history() const noexcept {
+  return impl_->history;
 }
 
 const PublicPosition& DeepCfrSolver::initial_public() const noexcept {

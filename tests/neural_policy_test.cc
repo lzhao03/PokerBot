@@ -29,13 +29,17 @@ SolveSpec TinySpec() {
 
 TEST_CASE("tabular policies fit the shared neural policy format") {
   const SolveSpec spec = TinySpec();
-  auto game = CompileGame(spec);
-  REQUIRE(game.ok());
+  auto config = SolverConfig::Create(spec.config);
+  REQUIRE(config.ok());
+  auto deals = DealDistribution::Create(spec.ranges[0], spec.ranges[1]);
+  REQUIRE(deals.ok());
+  const HistoryTree history = BuildHistoryTree(
+      spec.root.betting, config->betting_rules, config->bet_abstraction);
   const PublicPosition initial_public(
-      game->config.card_abstraction, spec.root.board);
+      config->card_abstraction, spec.root.board);
   const ModelFingerprint model =
-      ModelFingerprintFor(game->config, spec.root, spec.ranges);
-  const HistoryNode& root = game->history.nodes.front();
+      ModelFingerprintFor(*config, spec.root, spec.ranges);
+  const HistoryNode& root = history.nodes.front();
   const InfoSetKey key{
       initial_public.observation(), HistoryId{},
       ObservePrivate(ComboId{}, initial_public)};
@@ -47,7 +51,7 @@ TEST_CASE("tabular policies fit the shared neural policy format") {
   teacher.probabilities.front() = 1.0f;
 
   const auto fitted = FitNeuralPolicy(
-      *game, model, teacher,
+      history, config->card_abstraction, model, teacher,
       {.seed = 7,
        .steps = 100,
        .batch_size = 16,
@@ -61,13 +65,13 @@ TEST_CASE("tabular policies fit the shared neural policy format") {
 
   std::vector<float> probabilities(root.child_count);
   REQUIRE(fitted->policy.strategy(
-      *game, model, key, probabilities));
+      history, config->card_abstraction, model, key, probabilities));
   CHECK(std::accumulate(probabilities.begin(), probabilities.end(), 0.0f) ==
         doctest::Approx(1.0f));
   CHECK(probabilities.front() > 0.9f);
 
   const StrategyLookup unavailable = MakeStrategyLookup(
-      *game, ModelFingerprint{1}, fitted->policy);
+      history, config->card_abstraction, ModelFingerprint{1}, fitted->policy);
   std::vector<float> unavailable_probabilities(
       root.child_count, std::numeric_limits<float>::quiet_NaN());
   CHECK_FALSE(unavailable(key, unavailable_probabilities));
@@ -76,16 +80,18 @@ TEST_CASE("tabular policies fit the shared neural policy format") {
     CHECK(probability == doctest::Approx(1.0f / root.child_count));
   }
   const auto value = EstimateExpectedValue(
-      *game, initial_public, model, fitted->policy, fitted->policy, 2, 11);
+      *config, *deals, history, initial_public, model, fitted->policy,
+      fitted->policy, 2, 11);
   REQUIRE(value.ok());
   CHECK(std::isfinite(value->mean));
   const auto sampled_value = EstimateExpectedValue(
-      *game, initial_public, model, fitted->policy, fitted->policy, 2, 11,
-      false, true);
+      *config, *deals, history, initial_public, model, fitted->policy,
+      fitted->policy, 2, 11, false, true);
   REQUIRE(sampled_value.ok());
   CHECK(std::isfinite(sampled_value->mean));
   const auto exploitability = EstimateExploitability(
-      *game, initial_public, model, fitted->policy, {2, 2, 11});
+      *config, *deals, history, initial_public, model, fitted->policy,
+      {2, 2, 11});
   REQUIRE(exploitability.ok());
   CHECK(std::isfinite(exploitability->exploitability));
 
@@ -96,7 +102,7 @@ TEST_CASE("tabular policies fit the shared neural policy format") {
   REQUIRE(loaded.ok());
   std::vector<float> loaded_probabilities(root.child_count);
   REQUIRE(loaded->strategy(
-      *game, model, key, loaded_probabilities));
+      history, config->card_abstraction, model, key, loaded_probabilities));
   CHECK(loaded_probabilities == probabilities);
   CHECK_FALSE(LoadNeuralPolicy(path, ModelFingerprint{1}).ok());
 
@@ -117,13 +123,16 @@ TEST_CASE("tabular policies fit the shared neural policy format") {
 
 TEST_CASE("neural fitting rejects a policy for another game") {
   const SolveSpec spec = TinySpec();
-  auto game = CompileGame(spec);
-  REQUIRE(game.ok());
+  auto config = SolverConfig::Create(spec.config);
+  REQUIRE(config.ok());
+  const HistoryTree history = BuildHistoryTree(
+      spec.root.betting, config->betting_rules, config->bet_abstraction);
   const ModelFingerprint model =
-      ModelFingerprintFor(game->config, spec.root, spec.ranges);
+      ModelFingerprintFor(*config, spec.root, spec.ranges);
   Policy policy;
   policy.model = ModelFingerprint{1};
-  CHECK_FALSE(FitNeuralPolicy(*game, model, policy, {}).ok());
+  CHECK_FALSE(FitNeuralPolicy(
+      history, config->card_abstraction, model, policy, {}).ok());
 }
 
 }  // namespace

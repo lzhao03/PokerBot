@@ -8,18 +8,23 @@
 
 namespace poker {
 
-StrategyLookup MakeStrategyLookup(const CompiledGame& game,
+StrategyLookup MakeStrategyLookup(const HistoryTree& history,
+                                  const CardAbstractionConfig& card_abstraction,
                                   ModelFingerprint model,
                                   const NeuralPolicy& policy);
-StrategyLookup MakeStrategyLookup(CompiledGame&& game,
+StrategyLookup MakeStrategyLookup(HistoryTree&& history,
+                                  const CardAbstractionConfig& card_abstraction,
                                   ModelFingerprint model,
                                   const NeuralPolicy& policy) = delete;
-StrategyLookup MakeStrategyLookup(const CompiledGame& game,
+StrategyLookup MakeStrategyLookup(const HistoryTree& history,
+                                  const CardAbstractionConfig& card_abstraction,
                                   ModelFingerprint model,
                                   NeuralPolicy&& policy) = delete;
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
-    const CompiledGame& game,
+    const SolverConfig& solver_config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     ModelFingerprint model,
     const NeuralPolicy& player_a,
@@ -30,7 +35,9 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     bool sample_actions = false);
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
-    const CompiledGame& game,
+    const SolverConfig& solver_config,
+    const DealDistribution& deals,
+    const HistoryTree& history,
     const PublicPosition& initial_public,
     ModelFingerprint model,
     const NeuralPolicy& policy,
