@@ -297,9 +297,10 @@ NeuralPolicy::NeuralPolicy(NeuralPolicy&&) noexcept = default;
 NeuralPolicy& NeuralPolicy::operator=(NeuralPolicy&&) noexcept = default;
 
 bool NeuralPolicy::strategy(const CompiledGame& game,
+                            ModelFingerprint model,
                             InfoSetKey key,
                             std::span<float> probabilities) const {
-  if (game.model != model_) {
+  if (model != model_) {
     FillUniform(probabilities);
     return false;
   }
@@ -325,9 +326,10 @@ size_t NeuralPolicy::parameter_bytes() const {
 
 absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(
     const CompiledGame& game,
+    ModelFingerprint model,
     const Policy& teacher,
     const NeuralTrainingConfig& config) {
-  if (teacher.model != game.model) {
+  if (teacher.model != model) {
     return absl::FailedPreconditionError(
         "policy model does not match compiled game");
   }
@@ -369,7 +371,7 @@ absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(
     const float loss = FitNeuralNetwork(
         network, game, samples, config, NeuralTarget::AveragePolicy);
     return NeuralPolicyFitResult{
-        NeuralPolicy(std::move(network), game.model), loss, samples.size()};
+        NeuralPolicy(std::move(network), model), loss, samples.size()};
   } catch (const std::exception& error) {
     return TorchError(error);
   }

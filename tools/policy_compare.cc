@@ -32,7 +32,7 @@ namespace {
 constexpr uint64_t kEvaluationSamples = 100'000;
 constexpr uint64_t kSeed = 1;
 
-absl::StatusOr<poker::CompiledGame> ComparisonGame() {
+absl::StatusOr<poker::CompiledSolve> ComparisonGame() {
   poker::SolverConfig config;
   config.bet_abstraction = poker::SmallBettingConfig();
   config.card_abstraction.public_mode =
@@ -106,9 +106,10 @@ int main(int argc, char** argv) {
 
   const std::array<Candidate, 3> candidates = {{
       {"tabular", tabular_path, poker::MakeStrategyLookup(*tabular)},
-      {"deep", deep_path, poker::MakeStrategyLookup(*game, *deep)},
+      {"deep", deep_path,
+       poker::MakeStrategyLookup(game->game, game->model, *deep)},
       {"distilled", distilled_path,
-       poker::MakeStrategyLookup(*game, *distilled)},
+       poker::MakeStrategyLookup(game->game, game->model, *distilled)},
   }};
 
   std::cout << std::setprecision(8)
@@ -116,12 +117,14 @@ int main(int argc, char** argv) {
             << '\n'
             << "evaluation_samples\t" << kEvaluationSamples << '\n'
             << "best_response_info_set_cap_per_player\t"
-            << game->config.max_info_sets << '\n'
+            << game->game.config.max_info_sets << '\n'
             << "policy\tbytes\tapprox_exploitability\tstandard_error"
                "\tresponse_rows_total\topponent_misses\tresponse_misses\n";
   for (const Candidate& candidate : candidates) {
     const auto estimate =
-        poker::EstimateExploitability(*game, candidate.strategy);
+        poker::EstimateExploitability(
+            game->game, game->initial_public, game->model,
+            candidate.strategy);
     if (!estimate.ok()) {
       std::cerr << "Error evaluating " << candidate.name << ": "
                 << estimate.status() << '\n';
@@ -151,11 +154,11 @@ int main(int argc, char** argv) {
   for (size_t left = 0; left < candidates.size(); ++left) {
     for (size_t right = left + 1; right < candidates.size(); ++right) {
       const auto as_a = poker::EstimateExpectedValue(
-          *game, candidates[left].strategy, candidates[right].strategy,
-          kEvaluationSamples, kSeed, false, true);
+          game->game, game->initial_public, candidates[left].strategy,
+          candidates[right].strategy, kEvaluationSamples, kSeed, false, true);
       const auto as_b = poker::EstimateExpectedValue(
-          *game, candidates[right].strategy, candidates[left].strategy,
-          kEvaluationSamples, kSeed, false, true);
+          game->game, game->initial_public, candidates[right].strategy,
+          candidates[left].strategy, kEvaluationSamples, kSeed, false, true);
       if (!as_a.ok() || !as_b.ok()) {
         std::cerr << "Error evaluating " << candidates[left].name << " vs "
                   << candidates[right].name << ": "

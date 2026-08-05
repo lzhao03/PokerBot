@@ -90,8 +90,10 @@ absl::Status TorchError(const std::exception& error) {
 struct DeepCfrSolver::Impl {
   struct UpdateHandle {};
 
-  Impl(CompiledGame compiled_game, DeepCfrConfig deep_config)
-      : game(std::move(compiled_game)),
+  Impl(CompiledSolve compiled, DeepCfrConfig deep_config)
+      : game(std::move(compiled.game)),
+        initial_public(std::move(compiled.initial_public)),
+        model(compiled.model),
         config(deep_config),
         advantage_memory{
             Reservoir(config.advantage_memory_capacity),
@@ -168,7 +170,7 @@ struct DeepCfrSolver::Impl {
     ++network_evaluations;
     NeuralActionVector values = {};
     const bool available = policy->strategy(
-        game, key,
+        game, model, key,
         std::span<float>(values.data(), probabilities.size()));
     std::copy_n(values.begin(), probabilities.size(), probabilities.begin());
     if (available && cache.size() < config.policy_cache_capacity) {
@@ -199,7 +201,8 @@ struct DeepCfrSolver::Impl {
           "evaluation samples must be positive");
     }
     return EstimateExpectedValue(
-        game, player_a, player_b, static_cast<uint64_t>(samples),
+        game, initial_public, player_a, player_b,
+        static_cast<uint64_t>(samples),
         config.seed + 3, false, true);
   }
 
@@ -277,7 +280,7 @@ struct DeepCfrSolver::Impl {
         .rng = game_rng,
         .stats = stats.traversal,
     };
-    return internal::Traverse(game, context, *this);
+    return internal::Traverse(game, initial_public, context, *this);
   }
 
   void run(uint64_t iterations) {
@@ -309,7 +312,7 @@ struct DeepCfrSolver::Impl {
         NeuralTarget::AveragePolicy,
         config.policy_training_steps);
     if (strategy_memory.size() > 0) {
-      policy.emplace(std::move(trained_policy), game.model);
+      policy.emplace(std::move(trained_policy), model);
       stats.policy_parameter_bytes = policy->parameter_bytes();
     }
     policy_cache.clear();
@@ -320,6 +323,8 @@ struct DeepCfrSolver::Impl {
   }
 
   CompiledGame game;
+  PublicPosition initial_public;
+  ModelFingerprint model;
   DeepCfrConfig config;
   std::array<Reservoir, kPlayerCount> advantage_memory;
   Reservoir strategy_memory;
@@ -353,13 +358,13 @@ absl::StatusOr<DeepCfrSolver> DeepCfrSolver::Create(
     return absl::InvalidArgumentError(
         "Deep CFR requires private bucket history recall");
   }
-  auto game = CompileGame(std::move(spec));
-  if (!game.ok()) return game.status();
+  auto compiled = CompileGame(std::move(spec));
+  if (!compiled.ok()) return compiled.status();
   try {
     UseSingleThreadedNeuralRuntime();
     SetNeuralSeed(config.seed);
     return DeepCfrSolver(
-        std::make_unique<Impl>(std::move(*game), config));
+        std::make_unique<Impl>(std::move(*compiled), config));
   } catch (const std::exception& error) {
     return TorchError(error);
   }
@@ -422,7 +427,7 @@ absl::StatusOr<DeepCfrMatchResult> DeepCfrSolver::evaluate_against_policy(
     const Policy& opponent,
     DeepCfrStrategy strategy,
     int samples) {
-  if (opponent.model != impl_->game.model) {
+  if (opponent.model != impl_->model) {
     return absl::FailedPreconditionError("policy model does not match game");
   }
   try {
@@ -464,7 +469,7 @@ DeepCfrSolver::estimate_exploitability(
     std::array<uint64_t, kPlayerCount> cache_hits = {};
     size_t next_lookup = 0;
     auto result = EstimateExploitabilityParallel(
-        impl_->game,
+        impl_->game, impl_->initial_public, impl_->model,
         [&] {
           const size_t index = next_lookup++;
           caches[index].reserve(impl_->config.policy_cache_capacity);
@@ -488,7 +493,7 @@ DeepCfrSolver::estimate_exploitability(
 
 absl::Status DeepCfrSolver::load_average_model(
     const std::filesystem::path& path) {
-  auto loaded = LoadNeuralPolicy(path, impl_->game.model);
+  auto loaded = LoadNeuralPolicy(path, impl_->model);
   if (!loaded.ok()) return loaded.status();
   impl_->policy.emplace(std::move(*loaded));
   impl_->stats.policy_parameter_bytes = impl_->policy->parameter_bytes();
@@ -510,6 +515,14 @@ const DeepCfrStats& DeepCfrSolver::stats() const noexcept {
 
 const CompiledGame& DeepCfrSolver::game() const noexcept {
   return impl_->game;
+}
+
+const PublicPosition& DeepCfrSolver::initial_public() const noexcept {
+  return impl_->initial_public;
+}
+
+ModelFingerprint DeepCfrSolver::model() const noexcept {
+  return impl_->model;
 }
 
 const NeuralPolicy* DeepCfrSolver::average_policy() const noexcept {

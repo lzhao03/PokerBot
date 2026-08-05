@@ -54,6 +54,7 @@ struct ExploitabilityEstimate {
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
     const StrategyLookup& player_a,
     const StrategyLookup& player_b,
     uint64_t samples,
@@ -63,6 +64,8 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
+    ModelFingerprint model,
     const Policy& player_a,
     const Policy& player_b,
     uint64_t samples,
@@ -72,29 +75,39 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
 
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
+    ModelFingerprint model,
     Player responder,
     const StrategyLookup& opponent,
     const BestResponseConfig& config);
 
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
+    ModelFingerprint model,
     Player responder,
     const Policy& opponent,
     const BestResponseConfig& config);
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
+    ModelFingerprint model,
     const StrategyLookup& policy,
     const BestResponseConfig& config =
         BestResponseConfig{.external_sampling = true});
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitabilityParallel(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
+    ModelFingerprint model,
     const StrategyLookupFactory& policy_factory,
     const BestResponseConfig& config);
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
+    ModelFingerprint model,
     const Policy& policy,
     const BestResponseConfig& config =
         BestResponseConfig{.external_sampling = true});

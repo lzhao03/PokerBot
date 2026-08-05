@@ -208,20 +208,21 @@ double TraverseNode(const CompiledGame& game,
 
 template <CfrBackend Backend>
 double Traverse(const CompiledGame& game,
+                const PublicPosition& initial_public,
                 TraversalContext& context,
                 Backend& backend) {
   TraversalFrame frame;
   for (Player player : {Player::A, Player::B}) {
     frame.private_observations[Index(player)] =
-        ObservePrivate(context.deal.hand(player), game.root.public_state);
+        ObservePrivate(context.deal.hand(player), initial_public);
   }
-  if (game.root.public_state.board().count() == kMaxBoardCards) {
+  if (initial_public.board().count() == kMaxBoardCards) {
     frame.showdown_comparison = static_cast<int8_t>(CompareHands(
         context.deal.hand(Player::A), context.deal.hand(Player::B),
-        game.root.public_state.board()));
+        initial_public.board()));
   }
-  return TraverseNode(game, game.root.history, game.root.public_state, frame,
-                      context, backend);
+  return TraverseNode(game, HistoryId{}, initial_public, frame, context,
+                      backend);
 }
 
 }  // namespace poker::internal

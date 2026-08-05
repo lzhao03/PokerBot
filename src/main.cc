@@ -266,7 +266,7 @@ absl::Status RunTabular(
   }
   if (!neural_output.empty()) {
     const auto fitted = poker::FitNeuralPolicy(
-        solver->game(), *policy,
+        solver->game(), solver->model(), *policy,
         {.seed = absl::GetFlag(FLAGS_neural_seed),
          .steps = absl::GetFlag(FLAGS_neural_steps),
          .batch_size = absl::GetFlag(FLAGS_neural_batch_size),
@@ -281,7 +281,8 @@ absl::Status RunTabular(
               << "neural_policy_parameter_bytes="
               << fitted->policy.parameter_bytes() << '\n';
     const auto value = poker::EstimateExpectedValue(
-        solver->game(), fitted->policy, fitted->policy,
+        solver->game(), solver->initial_public(), solver->model(),
+        fitted->policy, fitted->policy,
         static_cast<uint64_t>(absl::GetFlag(FLAGS_evaluation_samples)),
         absl::GetFlag(FLAGS_neural_seed));
     if (!value.ok()) return value.status();
@@ -297,7 +298,8 @@ absl::Status RunTabular(
       response_config.external_sampling =
           absl::GetFlag(FLAGS_best_response_external_sampling);
       const auto exploitability = poker::EstimateExploitability(
-          solver->game(), fitted->policy, response_config);
+          solver->game(), solver->initial_public(), solver->model(),
+          fitted->policy, response_config);
       if (!exploitability.ok()) return exploitability.status();
       std::cout << "neural_nash_conv=" << exploitability->nash_conv << '\n'
                 << "neural_exploitability="
@@ -488,7 +490,7 @@ absl::Status RunDeep(poker::SolveSpec spec, uint64_t iterations) {
       absl::GetFlag(FLAGS_neural_opponent_policy);
   if (!neural_opponent_path.empty()) {
     const auto opponent = poker::LoadNeuralPolicy(
-        neural_opponent_path, solver->game().model);
+        neural_opponent_path, solver->model());
     if (!opponent.ok()) return opponent.status();
     if (solver->average_policy() == nullptr) {
       return absl::FailedPreconditionError(
@@ -498,12 +500,12 @@ absl::Status RunDeep(poker::SolveSpec spec, uint64_t iterations) {
         static_cast<uint64_t>(absl::GetFlag(FLAGS_evaluation_samples));
     const uint64_t seed = absl::GetFlag(FLAGS_neural_seed);
     const auto as_a = poker::EstimateExpectedValue(
-        solver->game(), *solver->average_policy(), *opponent,
-        samples, seed, false, true);
+        solver->game(), solver->initial_public(), solver->model(),
+        *solver->average_policy(), *opponent, samples, seed, false, true);
     if (!as_a.ok()) return as_a.status();
     const auto as_b = poker::EstimateExpectedValue(
-        solver->game(), *opponent, *solver->average_policy(),
-        samples, seed, false, true);
+        solver->game(), solver->initial_public(), solver->model(), *opponent,
+        *solver->average_policy(), samples, seed, false, true);
     if (!as_b.ok()) return as_b.status();
     std::cout << "neural_vs_neural_as_a=" << as_a->mean << '\n'
               << "neural_vs_neural_as_a_se=" << as_a->standard_error << '\n'

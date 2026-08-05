@@ -11,12 +11,14 @@
 namespace poker {
 
 StrategyLookup MakeStrategyLookup(const CompiledGame& game,
+                                  ModelFingerprint model,
                                   const NeuralPolicy& policy) {
   constexpr size_t kCacheCapacity = 1'000'000;
   auto cache = std::make_shared<
       absl::flat_hash_map<InfoSetKey, NeuralActionVector>>();
   cache->reserve(100'000);
-  return [&game, &policy, cache](InfoSetKey key, std::span<float> output) {
+  return [&game, model, &policy, cache](InfoSetKey key,
+                                        std::span<float> output) {
     const auto found = cache->find(key);
     if (found != cache->end()) {
       std::copy_n(found->second.begin(), output.size(), output.begin());
@@ -24,7 +26,7 @@ StrategyLookup MakeStrategyLookup(const CompiledGame& game,
     }
     NeuralActionVector probabilities = {};
     const bool available = policy.strategy(
-        game, key,
+        game, model, key,
         std::span<float>(probabilities.data(), output.size()));
     std::copy_n(probabilities.begin(), output.size(), output.begin());
     if (available && cache->size() < kCacheCapacity) {
@@ -36,32 +38,37 @@ StrategyLookup MakeStrategyLookup(const CompiledGame& game,
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
+    ModelFingerprint model,
     const NeuralPolicy& player_a,
     const NeuralPolicy& player_b,
     uint64_t samples,
     uint64_t seed,
     bool measure_reach_coverage,
     bool sample_actions) {
-  if (player_a.model() != game.model || player_b.model() != game.model) {
+  if (player_a.model() != model || player_b.model() != model) {
     return absl::FailedPreconditionError(
         "neural policy model does not match game");
   }
   return EstimateExpectedValue(
-      game, MakeStrategyLookup(game, player_a),
-      MakeStrategyLookup(game, player_b), samples, seed,
+      game, initial_public, MakeStrategyLookup(game, model, player_a),
+      MakeStrategyLookup(game, model, player_b), samples, seed,
       measure_reach_coverage, sample_actions);
 }
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
+    ModelFingerprint model,
     const NeuralPolicy& policy,
     const BestResponseConfig& config) {
-  if (policy.model() != game.model) {
+  if (policy.model() != model) {
     return absl::FailedPreconditionError(
         "neural policy model does not match game");
   }
   return EstimateExploitabilityParallel(
-      game, [&] { return MakeStrategyLookup(game, policy); }, config);
+      game, initial_public, model,
+      [&] { return MakeStrategyLookup(game, model, policy); }, config);
 }
 
 }  // namespace poker

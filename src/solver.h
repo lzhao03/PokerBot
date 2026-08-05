@@ -172,11 +172,15 @@ struct CompiledGame {
   SolverConfig config;
   DealDistribution deals;
   HistoryTree history;
-  Position root;
+};
+
+struct CompiledSolve {
+  CompiledGame game;
+  PublicPosition initial_public;
   ModelFingerprint model{};
 };
 
-absl::StatusOr<CompiledGame> CompileGame(SolveSpec spec);
+absl::StatusOr<CompiledSolve> CompileGame(SolveSpec spec);
 
 struct TabularCfrSolverTestAccess;
 
@@ -204,13 +208,17 @@ class TabularCfrSolver {
     return state_.strategy_sum.size() * sizeof(float);
   }
   const CompiledGame& game() const noexcept { return game_; }
+  const PublicPosition& initial_public() const noexcept {
+    return initial_public_;
+  }
+  ModelFingerprint model() const noexcept { return model_; }
   const SolverStats& stats() const noexcept { return stats_; }
   void reset_stats() { stats_ = {}; }
 
  private:
   friend struct TabularCfrSolverTestAccess;
 
-  explicit TabularCfrSolver(CompiledGame game);
+  explicit TabularCfrSolver(CompiledSolve compiled);
 
   enum class EvaluationMode : uint8_t {
     Current,
@@ -220,6 +228,8 @@ class TabularCfrSolver {
   double evaluate_deal(const Deal& deal, EvaluationMode mode);
   double evaluate_deals(int samples, EvaluationMode mode);
   CompiledGame game_;
+  PublicPosition initial_public_;
+  ModelFingerprint model_;
   std::mt19937 rng_;
   CfrState state_;
   SolverStats stats_;

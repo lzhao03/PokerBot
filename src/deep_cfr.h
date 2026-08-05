@@ -83,6 +83,8 @@ class DeepCfrSolver {
 
   const DeepCfrStats& stats() const noexcept;
   const CompiledGame& game() const noexcept;
+  const PublicPosition& initial_public() const noexcept;
+  ModelFingerprint model() const noexcept;
   const NeuralPolicy* average_policy() const noexcept;
 
  private:

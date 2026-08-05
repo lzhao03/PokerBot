@@ -114,6 +114,7 @@ class NeuralPolicy {
   NeuralPolicy& operator=(const NeuralPolicy&) = delete;
 
   bool strategy(const CompiledGame& game,
+                ModelFingerprint model,
                 InfoSetKey key,
                 std::span<float> probabilities) const;
   size_t parameter_bytes() const;
@@ -126,6 +127,7 @@ class NeuralPolicy {
   friend struct NeuralPolicyFitResult;
   friend absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(
       const CompiledGame& game,
+      ModelFingerprint model,
       const Policy& teacher,
       const NeuralTrainingConfig& config);
   friend absl::Status SaveNeuralPolicy(
@@ -147,6 +149,7 @@ struct NeuralPolicyFitResult {
 
 absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(
     const CompiledGame& game,
+    ModelFingerprint model,
     const Policy& teacher,
     const NeuralTrainingConfig& config);
 

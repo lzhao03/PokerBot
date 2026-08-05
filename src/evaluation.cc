@@ -97,6 +97,7 @@ std::mt19937 MakeEvaluationRng(uint64_t seed) {
 
 ProfileEstimate EstimateProfile(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
     const StrategyLookup& player_a,
     const StrategyLookup& player_b,
     uint64_t samples,
@@ -123,7 +124,8 @@ ProfileEstimate EstimateProfile(
         .rng = rng,
         .stats = stats,
     };
-    const double value = internal::Traverse(game, context, backend);
+    const double value =
+        internal::Traverse(game, initial_public, context, backend);
     const double delta = value - mean;
     mean += delta / (sample + 1);
     squared_error += delta * (value - mean);
@@ -218,6 +220,7 @@ struct ResponseBackend {
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
     const StrategyLookup& player_a,
     const StrategyLookup& player_b,
     uint64_t samples,
@@ -227,31 +230,37 @@ absl::StatusOr<ValueEstimate> EstimateExpectedValue(
   if (samples == 0) {
     return absl::InvalidArgumentError("evaluation samples must be positive");
   }
-  return EstimateProfile(game, player_a, player_b, samples, seed,
-                         measure_reach_coverage, sample_actions).value;
+  return EstimateProfile(
+      game, initial_public, player_a, player_b, samples, seed,
+      measure_reach_coverage, sample_actions).value;
 }
 
 absl::StatusOr<ValueEstimate> EstimateExpectedValue(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
+    ModelFingerprint model,
     const Policy& player_a,
     const Policy& player_b,
     uint64_t samples,
     uint64_t seed,
     bool measure_reach_coverage,
     bool sample_actions) {
-  if (player_a.model != game.model || player_b.model != game.model) {
+  if (player_a.model != model || player_b.model != model) {
     return absl::FailedPreconditionError(
         "policy model does not match game");
   }
   return EstimateExpectedValue(
-      game, MakeStrategyLookup(player_a), MakeStrategyLookup(player_b),
-      samples, seed, measure_reach_coverage, sample_actions);
+      game, initial_public, MakeStrategyLookup(player_a),
+      MakeStrategyLookup(player_b), samples, seed, measure_reach_coverage,
+      sample_actions);
 }
 
 namespace {
 
 absl::StatusOr<BestResponseResult> TrainResponse(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
+    ModelFingerprint model,
     Player responder,
     const StrategyLookup& opponent,
     const StrategyLookup* responder_fallback,
@@ -278,13 +287,14 @@ absl::StatusOr<BestResponseResult> TrainResponse(
         .stats = stats,
         .record_traverser_strategy = config.external_sampling,
     };
-    const double value = internal::Traverse(game, context, backend);
+    const double value =
+        internal::Traverse(game, initial_public, context, backend);
     response_state.cumulative_root_utility += value;
     ++response_state.iterations;
   }
 
   auto response = ExtractAveragePolicy(
-      response_state, game.history, game.model);
+      response_state, game.history, model);
   if (!response.ok()) return response.status();
   result.response_policy = std::move(*response);
   const uint64_t evaluation_seed = config.seed ^ 0x9e3779b97f4a7c15ULL;
@@ -299,8 +309,8 @@ absl::StatusOr<BestResponseResult> TrainResponse(
   const StrategyLookup& player_b =
       responder == Player::B ? response_lookup : opponent;
   const ProfileEstimate estimate = EstimateProfile(
-      game, player_a, player_b, config.evaluation_samples, evaluation_seed,
-      false, config.external_sampling);
+      game, initial_public, player_a, player_b, config.evaluation_samples,
+      evaluation_seed, false, config.external_sampling);
   result.value = responder == Player::A
                      ? estimate.value.mean
                      : -estimate.value.mean;
@@ -323,37 +333,46 @@ absl::StatusOr<BestResponseResult> TrainResponse(
 
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
+    ModelFingerprint model,
     Player responder,
     const StrategyLookup& opponent,
     const BestResponseConfig& config) {
-  return TrainResponse(game, responder, opponent, nullptr, config);
+  return TrainResponse(
+      game, initial_public, model, responder, opponent, nullptr, config);
 }
 
 absl::StatusOr<BestResponseResult> TrainApproximateBestResponse(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
+    ModelFingerprint model,
     Player responder,
     const Policy& opponent,
     const BestResponseConfig& config) {
-  if (opponent.model != game.model) {
+  if (opponent.model != model) {
     return absl::FailedPreconditionError(
         "opponent policy model does not match game");
   }
   return TrainApproximateBestResponse(
-      game, responder, MakeStrategyLookup(opponent), config);
+      game, initial_public, model, responder, MakeStrategyLookup(opponent),
+      config);
 }
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
+    ModelFingerprint model,
     const StrategyLookup& policy,
     const BestResponseConfig& config) {
   auto player_a = TrainResponse(
-      game, Player::A, policy, &policy, config);
+      game, initial_public, model, Player::A, policy, &policy, config);
   if (!player_a.ok()) return player_a.status();
 
   BestResponseConfig player_b_config = config;
   player_b_config.seed ^= 0xd1b54a32d192ed03ULL;
   auto player_b = TrainResponse(
-      game, Player::B, policy, &policy, player_b_config);
+      game, initial_public, model, Player::B, policy, &policy,
+      player_b_config);
   if (!player_b.ok()) return player_b.status();
 
   const double nash_conv = player_a->value + player_b->value;
@@ -364,6 +383,8 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitabilityParallel(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
+    ModelFingerprint model,
     const StrategyLookupFactory& policy_factory,
     const BestResponseConfig& config) {
   if (!policy_factory) {
@@ -377,14 +398,14 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitabilityParallel(
   std::optional<absl::StatusOr<BestResponseResult>> player_a;
   std::thread player_a_thread([&] {
     player_a.emplace(TrainResponse(
-        game, Player::A, policies[Index(Player::A)],
+        game, initial_public, model, Player::A, policies[Index(Player::A)],
         &policies[Index(Player::A)], config));
   });
 
   BestResponseConfig player_b_config = config;
   player_b_config.seed ^= 0xd1b54a32d192ed03ULL;
   auto player_b = TrainResponse(
-      game, Player::B, policies[Index(Player::B)],
+      game, initial_public, model, Player::B, policies[Index(Player::B)],
       &policies[Index(Player::B)], player_b_config);
   player_a_thread.join();
   assert(player_a.has_value());
@@ -399,13 +420,16 @@ absl::StatusOr<ExploitabilityEstimate> EstimateExploitabilityParallel(
 
 absl::StatusOr<ExploitabilityEstimate> EstimateExploitability(
     const CompiledGame& game,
+    const PublicPosition& initial_public,
+    ModelFingerprint model,
     const Policy& policy,
     const BestResponseConfig& config) {
-  if (policy.model != game.model) {
+  if (policy.model != model) {
     return absl::FailedPreconditionError(
         "policy model does not match game");
   }
-  return EstimateExploitability(game, MakeStrategyLookup(policy), config);
+  return EstimateExploitability(
+      game, initial_public, model, MakeStrategyLookup(policy), config);
 }
 
 }  // namespace poker
