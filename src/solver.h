@@ -9,7 +9,6 @@
 #include <span>
 #include <string_view>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -87,7 +86,6 @@ static_assert(sizeof(InfoSetKey) == 16);
 
 struct CfrState {
   CfrState(const SolverConfig& config,
-           size_t history_count,
            bool accumulate_average_strategy);
 
   std::vector<float> regret_sum;
@@ -116,17 +114,9 @@ struct CfrState {
       uint8_t action_count);
 
  private:
-  using PackedRows = absl::flat_hash_map<uint64_t, uint32_t>;
-  using FullRows = absl::flat_hash_map<InfoSetKey, uint32_t>;
-
-  uint64_t pack(InfoSetKey key) const;
-  InfoSetKey unpack(uint64_t key) const;
-
-  std::variant<PackedRows, FullRows> rows_;
+  absl::flat_hash_map<InfoSetKey, uint32_t> rows_;
   size_t max_info_sets_;
   bool accumulate_average_strategy_;
-  uint8_t private_bits_ = 0;
-  uint8_t history_bits_ = 0;
 };
 
 struct Policy {

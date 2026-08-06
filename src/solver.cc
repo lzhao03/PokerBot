@@ -15,6 +15,7 @@
 #include <thread>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "absl/status/status.h"
@@ -291,82 +292,31 @@ void CfrState::strategy(std::span<float> values,
 }
 
 CfrState::CfrState(const SolverConfig& config,
-                   size_t history_count,
                    bool accumulate_average_strategy)
     : max_info_sets_(static_cast<size_t>(config.max_info_sets)),
       accumulate_average_strategy_(accumulate_average_strategy) {
-  assert(history_count > 0);
-  const CardAbstractionConfig& cards = config.card_abstraction;
-  bool use_packed_keys = false;
-  if (cards.public_mode != PublicCardMode::ExactCanonical) {
-    private_bits_ = cards.private_kind == PrivateAbstractionKind::ExactCanonical
-                        ? 11
-                        : cards.recall_mode == RecallMode::CurrentBucketOnly
-                              ? 6
-                              : 21;
-    const uint8_t required_history_bits =
-        static_cast<uint8_t>(std::bit_width(history_count - 1));
-    history_bits_ = std::min<uint8_t>(32, 43 - private_bits_);
-    use_packed_keys = required_history_bits <= history_bits_;
-  }
   size_t max_actions = 3;
   for (const auto& fractions : config.bet_abstraction.pot_fractions) {
     max_actions = std::max(max_actions, fractions.size() + 3);
   }
-  if (use_packed_keys) {
-    rows_.emplace<PackedRows>().reserve(max_info_sets_);
-  } else {
-    rows_.emplace<FullRows>().reserve(max_info_sets_);
-  }
+  rows_.reserve(max_info_sets_);
   regret_sum.reserve(max_info_sets_ * max_actions);
   if (accumulate_average_strategy) {
     strategy_sum.reserve(max_info_sets_ * max_actions);
   }
 }
 
-uint64_t CfrState::pack(InfoSetKey key) const {
-  return std::to_underlying(key.private_observation) |
-         uint64_t{std::to_underlying(key.history)} << private_bits_ |
-         std::to_underlying(key.public_observation)
-             << (private_bits_ + history_bits_);
-}
-
-InfoSetKey CfrState::unpack(uint64_t key) const {
-  const auto mask = [](uint8_t bits) { return (uint64_t{1} << bits) - 1; };
-  return {
-      PublicObservationId(key >> (private_bits_ + history_bits_)),
-      HistoryId(static_cast<uint32_t>(key >> private_bits_ &
-                                      mask(history_bits_))),
-      PrivateObservationId(static_cast<uint32_t>(key & mask(private_bits_)))};
-}
-
-size_t CfrState::row_count() const {
-  return std::visit([](const auto& rows) { return rows.size(); }, rows_);
-}
+size_t CfrState::row_count() const { return rows_.size(); }
 
 std::optional<uint32_t> CfrState::find(InfoSetKey key) const {
-  if (const auto* rows = std::get_if<PackedRows>(&rows_)) {
-    const auto found = rows->find(pack(key));
-    return found == rows->end() ? std::nullopt
-                                : std::optional(found->second);
-  }
-  const auto& rows = std::get<FullRows>(rows_);
-  const auto found = rows.find(key);
-  return found == rows.end() ? std::nullopt
-                             : std::optional(found->second);
+  const auto found = rows_.find(key);
+  return found == rows_.end() ? std::nullopt
+                              : std::optional(found->second);
 }
 
 std::vector<std::pair<InfoSetKey, uint32_t>> CfrState::row_entries() const {
-  std::vector<std::pair<InfoSetKey, uint32_t>> entries;
-  entries.reserve(row_count());
-  if (const auto* rows = std::get_if<PackedRows>(&rows_)) {
-    for (const auto& [key, offset] : *rows) {
-      entries.emplace_back(unpack(key), offset);
-    }
-  } else {
-    const auto& full_rows = std::get<FullRows>(rows_);
-    entries.assign(full_rows.begin(), full_rows.end());
-  }
+  std::vector<std::pair<InfoSetKey, uint32_t>> entries(rows_.begin(),
+                                                       rows_.end());
   std::ranges::sort(entries);
   return entries;
 }
@@ -374,25 +324,19 @@ std::vector<std::pair<InfoSetKey, uint32_t>> CfrState::row_entries() const {
 std::optional<uint32_t> CfrState::find_or_create(
     InfoSetKey key,
     uint8_t action_count) {
-  auto insert = [&](auto& rows, auto row_key) -> std::optional<uint32_t> {
-    if (rows.size() >= max_info_sets_) {
-      const auto found = rows.find(row_key);
-      return found == rows.end() ? std::nullopt
-                                 : std::optional(found->second);
-    }
-    const uint32_t offset = static_cast<uint32_t>(regret_sum.size());
-    const auto [row, inserted] = rows.try_emplace(row_key, offset);
-    if (!inserted) return row->second;
-    regret_sum.resize(offset + action_count, 0.0f);
-    if (accumulate_average_strategy_) {
-      strategy_sum.resize(offset + action_count, 0.0f);
-    }
-    return offset;
-  };
-  if (auto* rows = std::get_if<PackedRows>(&rows_)) {
-    return insert(*rows, pack(key));
+  if (rows_.size() >= max_info_sets_) {
+    const auto found = rows_.find(key);
+    return found == rows_.end() ? std::nullopt
+                                : std::optional(found->second);
   }
-  return insert(std::get<FullRows>(rows_), key);
+  const uint32_t offset = static_cast<uint32_t>(regret_sum.size());
+  const auto [row, inserted] = rows_.try_emplace(key, offset);
+  if (!inserted) return row->second;
+  regret_sum.resize(offset + action_count, 0.0f);
+  if (accumulate_average_strategy_) {
+    strategy_sum.resize(offset + action_count, 0.0f);
+  }
+  return offset;
 }
 
 namespace {
@@ -558,8 +502,7 @@ TabularCfrSolver::TabularCfrSolver(SolverConfig config,
       initial_public_(std::move(initial_public)),
       model_(model),
       rng_(12345),
-      state_(config_, history_.nodes.size(),
-             config_.accumulate_average_strategy) {}
+      state_(config_, config_.accumulate_average_strategy) {}
 
 absl::StatusOr<TabularCfrSolver> TabularCfrSolver::Create(SolveSpec spec) {
   auto config = SolverConfig::Create(std::move(spec.config));

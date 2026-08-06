@@ -16,6 +16,18 @@ git show dcbadfc^:<path>
 
 ## High-value workflow features
 
+### Compact infoset keys
+
+- **Status:** Deferred until infoset-map memory is a demonstrated constraint.
+- **Current behavior:** `CfrState` uses one
+  `flat_hash_map<InfoSetKey, uint32_t>` with a structural 16-byte key.
+- **Potential design:** Losslessly encode the current 33-bit public observation,
+  32-bit history, and 21-bit private observation into a fixed 96-bit key.
+- **Measured tradeoff:** The removed conditional 64-bit encoding saved about
+  8.4 MB (13.2% of process RSS) at 500,000 infosets and improved traversal
+  throughput by roughly 3-8%, but required two map representations and packing
+  branches. Benchmark a single 96-bit representation before restoring packing.
+
 ### Training checkpoints
 
 - **Status:** Deferred; first feature to reconsider for long training runs.

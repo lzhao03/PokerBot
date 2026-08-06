@@ -279,7 +279,7 @@ absl::StatusOr<BestResponseResult> TrainResponse(
     return absl::InvalidArgumentError(
         "best-response iteration counts must be positive");
   }
-  CfrState response_state(solver_config, history.nodes.size(), true);
+  CfrState response_state(solver_config, true);
   std::mt19937 rng = MakeEvaluationRng(config.seed);
   ResponseBackend backend{
       responder, opponent, response_state, responder_fallback};
