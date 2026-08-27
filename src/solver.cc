@@ -292,7 +292,8 @@ bool Policy::strategy(InfoSetKey key, std::span<float> output) const {
   if (found == rows.end() ||
       found->second + output.size() > probabilities.size()) {
     if (!output.empty()) {
-      std::fill(output.begin(), output.end(), 1.0f / output.size());
+      std::fill(output.begin(), output.end(),
+                1.0f / static_cast<float>(output.size()));
     }
     return false;
   }
@@ -561,7 +562,7 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
     workers.reserve(worker_count);
     const uint64_t first_iteration = state_.iterations;
     for (size_t worker = 0; worker < worker_count; ++worker) {
-      const uint32_t worker_seed = rng_();
+      const uint32_t worker_seed = static_cast<uint32_t>(rng_());
       workers.emplace_back([&, worker, worker_seed] {
         std::seed_seq seed{worker_seed, static_cast<uint32_t>(worker)};
         std::mt19937 rng(seed);
@@ -768,7 +769,8 @@ absl::StatusOr<Policy> TabularCfrSolver::extract_average_policy() const {
 
 double TabularCfrSolver::expected_value(Player player) const {
   if (state_.iterations == 0) return 0.0;
-  const double player_a_ev = state_.cumulative_root_utility / state_.iterations;
+  const double player_a_ev =
+      state_.cumulative_root_utility / static_cast<double>(state_.iterations);
   return player == Player::A ? player_a_ev : -player_a_ev;
 }
 

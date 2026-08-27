@@ -213,7 +213,8 @@ bool TabularStrategy(const CompactPolicy& policy,
         return Order(row.key) < Order(target);
       });
   if (found == rows.end() || found->key != key) {
-    std::fill_n(output, action_count, 1.0f / action_count);
+    std::fill_n(output, action_count,
+                1.0f / static_cast<float>(action_count));
     return false;
   }
   DecodeProbabilities(found->code, action_count, policy.units, output);
@@ -305,7 +306,8 @@ void NeuralStrategy(PortableNeuralPolicy& policy,
     sum += output[action];
   }
   if (!std::isfinite(sum) || sum <= 0.0f) {
-    std::fill_n(output, action_count, 1.0f / action_count);
+    std::fill_n(output, action_count,
+                1.0f / static_cast<float>(action_count));
   } else {
     for (size_t action = 0; action < action_count; ++action) {
       output[action] /= sum;

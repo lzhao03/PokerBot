@@ -195,12 +195,12 @@ ProfileEstimate EstimateProfile(
         evaluate, HistoryId{}, initial_public, {1.0, 1.0},
         initial_observations, initial_showdown);
     const double delta = value - mean;
-    mean += delta / (sample + 1);
+    mean += delta / static_cast<double>(sample + 1);
     squared_error += delta * (value - mean);
   }
+  const double sample_count = static_cast<double>(samples);
   const double standard_error = samples > 1
-      ? std::sqrt(squared_error /
-                  (samples - 1) / samples)
+      ? std::sqrt(squared_error / (sample_count - 1.0) / sample_count)
       : 0.0;
   const uint64_t lookups = counters.lookups[0] + counters.lookups[1];
   const uint64_t missing = counters.missing[0] + counters.missing[1];

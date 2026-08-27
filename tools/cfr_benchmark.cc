@@ -84,8 +84,8 @@ absl::StatusOr<poker::ComboRange> BenchmarkRange(std::string_view text) {
   return absl::InvalidArgumentError("range must be premium or all");
 }
 
-double Rate(double count, double seconds) {
-  return seconds > 0.0 ? count / seconds : 0.0;
+double Rate(uint64_t count, double seconds) {
+  return seconds > 0.0 ? static_cast<double>(count) / seconds : 0.0;
 }
 
 absl::StatusOr<poker::SolverConfig> BenchmarkConfig() {
