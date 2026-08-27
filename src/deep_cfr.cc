@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -15,7 +16,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
-#include "src/cfr_traversal.h"
+#include "src/hand_evaluator.h"
 #include "src/neural_policy.h"
 
 namespace poker {
@@ -88,8 +89,6 @@ absl::Status TorchError(const std::exception& error) {
 }  // namespace
 
 struct DeepCfrSolver::Impl {
-  struct UpdateHandle {};
-
   Impl(SolverConfig solver_options,
        DealDistribution deal_distribution,
        HistoryTree history_tree,
@@ -119,16 +118,6 @@ struct DeepCfrSolver::Impl {
     }
   }
 
-  std::optional<UpdateHandle> current_strategy(
-      const internal::DecisionView& decision,
-      internal::StrategyAccess access,
-      std::span<float> probabilities) {
-    fill_current_strategy(decision.state.actor, decision.key, probabilities);
-    return access == internal::StrategyAccess::ReadOnly
-               ? std::nullopt
-               : std::optional<UpdateHandle>{std::in_place};
-  }
-
   void fill_current_strategy(
       Player actor,
       InfoSetKey key,
@@ -143,11 +132,6 @@ struct DeepCfrSolver::Impl {
           stats.network_evaluations, stats.cache_hits);
       RegretMatch(values, probabilities);
     }
-  }
-
-  void average_strategy(const internal::DecisionView& decision,
-                        std::span<float> probabilities) {
-    policy_strategy(decision.key, probabilities);
   }
 
   bool policy_strategy(InfoSetKey key,
@@ -213,31 +197,6 @@ struct DeepCfrSolver::Impl {
         config.seed + 3, false, true);
   }
 
-  void record_regrets(const internal::DecisionView& decision,
-                      UpdateHandle,
-                      std::span<const float> regrets) {
-    NeuralSample sample{decision.key};
-    sample.weight = static_cast<float>(decision.iteration + 1);
-    const BettingData& betting = decision.state.data;
-    const float scale = 1.0f / static_cast<float>(
-        Pot(betting) + betting.stack[0] + betting.stack[1]);
-    std::ranges::transform(regrets, sample.target.begin(),
-                           [scale](float regret) { return regret * scale; });
-    advantage_memory[Index(decision.state.actor)].add(
-        std::move(sample), reservoir_rng);
-  }
-
-  void record_strategy(const internal::DecisionView& decision,
-                       UpdateHandle,
-                       std::span<const float> probabilities,
-                       double weight) {
-    NeuralSample sample{decision.key};
-    std::copy(probabilities.begin(), probabilities.end(),
-              sample.target.begin());
-    sample.weight = static_cast<float>(weight);
-    strategy_memory.add(std::move(sample), reservoir_rng);
-  }
-
   NeuralActionVector cached_prediction(
       NeuralNetwork& network,
       absl::flat_hash_map<InfoSetKey, NeuralActionVector>& cache,
@@ -279,19 +238,138 @@ struct DeepCfrSolver::Impl {
   double traverse(const Deal& deal,
                   Player update_player,
                   uint64_t iteration) {
-    internal::TraversalContext context{
-        .history = history,
-        .card_abstraction = solver_config.card_abstraction,
-        .chance_samples = solver_config.chance_samples,
-        .deal = deal,
-        .mode = internal::TraversalMode::Train,
-        .update_player = update_player,
-        .iteration = iteration,
-        .sample_actions = true,
-        .rng = game_rng,
-        .stats = stats.traversal,
+    std::array<PrivateObservationId, kPlayerCount> initial_observations;
+    for (Player player : {Player::A, Player::B}) {
+      initial_observations[Index(player)] =
+          ObservePrivate(deal.hand(player), initial_public);
+    }
+    std::optional<int8_t> initial_showdown;
+    if (initial_public.board().count() == kMaxBoardCards) {
+      initial_showdown = static_cast<int8_t>(CompareHands(
+          deal.hand(Player::A), deal.hand(Player::B),
+          initial_public.board()));
+    }
+
+    auto cfr = [&](auto&& self,
+                   HistoryId history_id,
+                   const PublicPosition& public_state,
+                   std::array<PrivateObservationId, kPlayerCount>
+                       private_observations,
+                   std::optional<int8_t> showdown_comparison) -> double {
+      while (true) {
+        const HistoryNode& node = history.nodes[Index(history_id)];
+        if (const auto* fold =
+                std::get_if<FoldTerminalState>(&node.state)) {
+          ++stats.traversal.terminal_visits;
+          return TerminalUtility(*fold, Player::A);
+        }
+        if (const auto* showdown =
+                std::get_if<ShowdownState>(&node.state)) {
+          ++stats.traversal.terminal_visits;
+          assert(showdown_comparison.has_value());
+          return TerminalUtilityFromComparison(
+              *showdown, *showdown_comparison, Player::A);
+        }
+        if (const auto* chance =
+                std::get_if<ChanceState>(&node.state)) {
+          stats.traversal.chance_samples +=
+              static_cast<uint64_t>(solver_config.chance_samples);
+          double value = 0.0;
+          for (int sample = 0;
+               sample < solver_config.chance_samples; ++sample) {
+            const auto cards = SampleStreetCards(
+                chance->data.street, public_state.board(),
+                deal.blocked_mask(), game_rng);
+            assert(cards.ok());
+            const HistoryId child_history =
+                history.children[node.children_begin];
+            const PublicPosition child_public(
+                solver_config.card_abstraction,
+                DealCards(public_state.board(), *cards));
+            auto child_observations = private_observations;
+            auto child_showdown = showdown_comparison;
+            if (child_public.board().count() == kMaxBoardCards) {
+              child_showdown = static_cast<int8_t>(CompareHands(
+                  deal.hand(Player::A), deal.hand(Player::B),
+                  child_public.board()));
+            }
+            const HistoryNode& child_node =
+                history.nodes[Index(child_history)];
+            if (std::holds_alternative<DecisionState>(child_node.state)) {
+              for (Player player : {Player::A, Player::B}) {
+                auto& observation = child_observations[Index(player)];
+                observation = ObservePrivate(
+                    deal.hand(player), child_public, observation);
+              }
+            }
+            value += self(self, child_history, child_public,
+                          child_observations, child_showdown);
+          }
+          return value / solver_config.chance_samples;
+        }
+
+        const DecisionState& decision =
+            std::get<DecisionState>(node.state);
+        const Player player = decision.actor;
+        const uint8_t action_count = node.child_count;
+        const InfoSetKey key{
+            public_state.observation(), history_id,
+            private_observations[Index(player)]};
+        std::array<float, kMaxActionsPerNode> probabilities;
+        const std::span<float> strategy(probabilities.data(), action_count);
+        fill_current_strategy(player, key, strategy);
+        ++stats.traversal.decision_visits;
+
+        if (player != update_player) {
+          NeuralSample strategy_sample{key};
+          std::copy(strategy.begin(), strategy.end(),
+                    strategy_sample.target.begin());
+          strategy_sample.weight = static_cast<float>(iteration + 1);
+          strategy_memory.add(
+              std::move(strategy_sample), reservoir_rng);
+
+          float sample =
+              std::uniform_real_distribution<float>{}(game_rng);
+          uint8_t sampled_action = 0;
+          while (sampled_action + 1 < action_count &&
+                 sample >= probabilities[sampled_action]) {
+            sample -= probabilities[sampled_action];
+            ++sampled_action;
+          }
+          history_id =
+              history.children[node.children_begin + sampled_action];
+          continue;
+        }
+
+        std::array<double, kMaxActionsPerNode> action_values;
+        double node_value = 0.0;
+        for (uint8_t action = 0; action < action_count; ++action) {
+          const HistoryId child =
+              history.children[node.children_begin + action];
+          action_values[action] = self(
+              self, child, public_state, private_observations,
+              showdown_comparison);
+          node_value += probabilities[action] * action_values[action];
+        }
+
+        NeuralSample advantage_sample{key};
+        advantage_sample.weight = static_cast<float>(iteration + 1);
+        const BettingData& betting = decision.data;
+        const float scale = 1.0f / static_cast<float>(
+            Pot(betting) + betting.stack[0] + betting.stack[1]);
+        const float utility_sign = player == Player::A ? 1.0f : -1.0f;
+        for (uint8_t action = 0; action < action_count; ++action) {
+          advantage_sample.target[action] = static_cast<float>(
+              utility_sign * (action_values[action] - node_value)) * scale;
+        }
+        advantage_memory[Index(player)].add(
+            std::move(advantage_sample), reservoir_rng);
+        return node_value;
+      }
     };
-    return internal::Traverse(initial_public, context, *this);
+
+    return cfr(cfr, HistoryId{}, initial_public, initial_observations,
+               initial_showdown);
   }
 
   void run(uint64_t iterations) {
