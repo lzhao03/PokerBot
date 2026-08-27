@@ -25,14 +25,20 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/app/package-lock.json
-      - name: Test portable C++ core
-        run: >-
-          bazel test
-          //tests:game_rules_test
-          //tests:poker_test
-          //tests:card_abstraction_modes_test
-          //web:policy_decoder_test
-          --test_output=errors
+      - name: Test CFR solver
+        run: bazel test //tests:cfr_solver_test --test_output=errors
+      - name: Test card utilities
+        run: bazel test //tests:card_utils_test --test_output=errors
+      - name: Test policy codec
+        run: bazel test //tests:policy_codec_test --test_output=errors
+      - name: Test training ranges
+        run: bazel test //tests:training_range_test --test_output=errors
+      - name: Test poker rules
+        run: bazel test //tests:game_rules_test --test_output=errors
+      - name: Test card abstraction modes
+        run: bazel test //tests:card_abstraction_modes_test --test_output=errors
+      - name: Test policy decoder
+        run: bazel test //web:policy_decoder_test --test_output=errors
       - name: Build portable tools and WASM
         run: bazel build //tools:cfr_benchmark //web:policy_decoder_wasm
       - name: Test web application
