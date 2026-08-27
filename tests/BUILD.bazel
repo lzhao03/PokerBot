@@ -17,19 +17,44 @@ cc_test(
     ],
 )
 
+POKER_TEST_DEPS = DOCTEST_DEPS + [
+    "//src:bet_abstraction",
+    "//src:evaluation",
+    "//src:policy_codec",
+    "//src:solver",
+]
+
 cc_test(
+    name = "card_utils_test",
+    srcs = ["card_utils_test.cc"],
+    deps = POKER_TEST_DEPS,
+)
+
+cc_test(
+    name = "cfr_solver_test",
+    srcs = ["cfr_solver_test.cc"],
+    deps = POKER_TEST_DEPS,
+)
+
+cc_test(
+    name = "policy_codec_test",
+    srcs = ["policy_codec_test.cc"],
+    deps = POKER_TEST_DEPS,
+)
+
+cc_test(
+    name = "training_range_test",
+    srcs = ["training_range_test.cc"],
+    deps = POKER_TEST_DEPS,
+)
+
+test_suite(
     name = "poker_test",
-    srcs = [
-        "card_utils_test.cc",
-        "cfr_solver_test.cc",
-        "policy_codec_test.cc",
-        "training_range_test.cc",
-    ],
-    deps = DOCTEST_DEPS + [
-        "//src:bet_abstraction",
-        "//src:evaluation",
-        "//src:policy_codec",
-        "//src:solver",
+    tests = [
+        ":card_utils_test",
+        ":cfr_solver_test",
+        ":policy_codec_test",
+        ":training_range_test",
     ],
 )
 
