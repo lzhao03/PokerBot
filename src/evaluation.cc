@@ -76,66 +76,31 @@ ProfileEstimate EstimateProfile(
   double squared_error = 0.0;
   for (uint64_t sample = 0; sample < samples; ++sample) {
     const Deal deal = deals.sample(rng);
-    std::array<PrivateObservationId, kPlayerCount> initial_observations;
-    for (Player player : {Player::A, Player::B}) {
-      initial_observations[Index(player)] =
-          ObservePrivate(deal.hand(player), initial_public);
-    }
-    std::optional<int8_t> initial_showdown;
-    if (initial_public.board().count() == kMaxBoardCards) {
-      initial_showdown = static_cast<int8_t>(CompareHands(
-          deal.hand(Player::A), deal.hand(Player::B),
-          initial_public.board()));
-    }
-
+    TerminalEvaluator terminal_utility(deal.hands);
+    const ObservedPosition initial_position =
+        ObservedPosition::Observe(initial_public, deal);
     auto evaluate = [&](auto&& self,
                         HistoryId history_id,
-                        const PublicPosition& public_state,
-                        std::array<double, kPlayerCount> reach,
-                        std::array<PrivateObservationId, kPlayerCount>
-                            private_observations,
-                        std::optional<int8_t> showdown_comparison) -> double {
+                        const ObservedPosition& position,
+                        std::array<double, kPlayerCount> reach) -> double {
       while (true) {
         const HistoryNode& node = history.nodes[Index(history_id)];
-        if (const auto* fold = std::get_if<FoldTerminalState>(&node.state)) {
-          return TerminalUtility(*fold, Player::A);
-        }
-        if (const auto* showdown = std::get_if<ShowdownState>(&node.state)) {
-          assert(showdown_comparison.has_value());
-          return TerminalUtilityFromComparison(
-              *showdown, *showdown_comparison, Player::A);
+        if (IsTerminal(node.state)) {
+          return terminal_utility(node.state, position.board(), Player::A);
         }
         if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
           double value = 0.0;
           for (int chance_sample = 0;
                chance_sample < solver_config.chance_samples;
                ++chance_sample) {
-            const auto cards = SampleStreetCards(
-                chance->data.street, public_state.board(),
-                deal.blocked_mask(), rng);
-            assert(cards.ok());
             const HistoryId child_history =
                 history.children[node.children_begin];
-            const PublicPosition child_public(
-                solver_config.card_abstraction,
-                DealCards(public_state.board(), *cards));
-            auto child_observations = private_observations;
-            auto child_showdown = showdown_comparison;
-            if (child_public.board().count() == kMaxBoardCards) {
-              child_showdown = static_cast<int8_t>(CompareHands(
-                  deal.hand(Player::A), deal.hand(Player::B),
-                  child_public.board()));
-            }
-            const HistoryNode& child_node = history.nodes[Index(child_history)];
-            if (std::holds_alternative<DecisionState>(child_node.state)) {
-              for (Player player : {Player::A, Player::B}) {
-                auto& observation = child_observations[Index(player)];
-                observation = ObservePrivate(
-                    deal.hand(player), child_public, observation);
-              }
-            }
-            value += self(self, child_history, child_public, reach,
-                          child_observations, child_showdown);
+            const HistoryNode& child_node =
+                history.nodes[Index(child_history)];
+            const ObservedPosition child_position = SampleChancePosition(
+                solver_config.card_abstraction, *chance, child_node.state,
+                position, deal, rng);
+            value += self(self, child_history, child_position, reach);
           }
           return value / solver_config.chance_samples;
         }
@@ -144,8 +109,8 @@ ProfileEstimate EstimateProfile(
         const size_t player = Index(decision.actor);
         const uint8_t action_count = node.child_count;
         const InfoSetKey key{
-            public_state.observation(), history_id,
-            private_observations[player]};
+            position.public_observation(), history_id,
+            position.private_observation(decision.actor)};
         const double decision_reach = reach[0] * reach[1];
         if (counters.measure_reach_coverage && decision_reach > 0.0) {
           counters.reach_by_info_set[key] += decision_reach;
@@ -178,15 +143,13 @@ ProfileEstimate EstimateProfile(
           const HistoryId child =
               history.children[node.children_begin + action];
           value += probabilities[action] * self(
-              self, child, public_state, child_reach,
-              private_observations, showdown_comparison);
+              self, child, position, child_reach);
         }
         return value;
       }
     };
     const double value = evaluate(
-        evaluate, HistoryId{}, initial_public, {1.0, 1.0},
-        initial_observations, initial_showdown);
+        evaluate, HistoryId{}, initial_position, {1.0, 1.0});
     const double delta = value - mean;
     mean += delta / static_cast<double>(sample + 1);
     squared_error += delta * (value - mean);
@@ -287,66 +250,31 @@ absl::StatusOr<BestResponseResult> TrainResponse(
   BestResponseResult result;
   while (response_state.iterations < config.training_iterations) {
     const Deal deal = deals.sample(rng);
-    std::array<PrivateObservationId, kPlayerCount> initial_observations;
-    for (Player player : {Player::A, Player::B}) {
-      initial_observations[Index(player)] =
-          ObservePrivate(deal.hand(player), initial_public);
-    }
-    std::optional<int8_t> initial_showdown;
-    if (initial_public.board().count() == kMaxBoardCards) {
-      initial_showdown = static_cast<int8_t>(CompareHands(
-          deal.hand(Player::A), deal.hand(Player::B),
-          initial_public.board()));
-    }
-
+    TerminalEvaluator terminal_utility(deal.hands);
+    const ObservedPosition initial_position =
+        ObservedPosition::Observe(initial_public, deal);
     auto cfr = [&](auto&& self,
                    HistoryId history_id,
-                   const PublicPosition& public_state,
-                   std::array<double, kPlayerCount> reach,
-                   std::array<PrivateObservationId, kPlayerCount>
-                       private_observations,
-                   std::optional<int8_t> showdown_comparison) -> double {
+                   const ObservedPosition& position,
+                   std::array<double, kPlayerCount> reach) -> double {
       while (true) {
         const HistoryNode& node = history.nodes[Index(history_id)];
-        if (const auto* fold = std::get_if<FoldTerminalState>(&node.state)) {
-          return TerminalUtility(*fold, Player::A);
-        }
-        if (const auto* showdown = std::get_if<ShowdownState>(&node.state)) {
-          assert(showdown_comparison.has_value());
-          return TerminalUtilityFromComparison(
-              *showdown, *showdown_comparison, Player::A);
+        if (IsTerminal(node.state)) {
+          return terminal_utility(node.state, position.board(), responder);
         }
         if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
           double value = 0.0;
           for (int chance_sample = 0;
                chance_sample < solver_config.chance_samples;
                ++chance_sample) {
-            const auto cards = SampleStreetCards(
-                chance->data.street, public_state.board(),
-                deal.blocked_mask(), rng);
-            assert(cards.ok());
             const HistoryId child_history =
                 history.children[node.children_begin];
-            const PublicPosition child_public(
-                solver_config.card_abstraction,
-                DealCards(public_state.board(), *cards));
-            auto child_observations = private_observations;
-            auto child_showdown = showdown_comparison;
-            if (child_public.board().count() == kMaxBoardCards) {
-              child_showdown = static_cast<int8_t>(CompareHands(
-                  deal.hand(Player::A), deal.hand(Player::B),
-                  child_public.board()));
-            }
-            const HistoryNode& child_node = history.nodes[Index(child_history)];
-            if (std::holds_alternative<DecisionState>(child_node.state)) {
-              for (Player player : {Player::A, Player::B}) {
-                auto& observation = child_observations[Index(player)];
-                observation = ObservePrivate(
-                    deal.hand(player), child_public, observation);
-              }
-            }
-            value += self(self, child_history, child_public, reach,
-                          child_observations, child_showdown);
+            const HistoryNode& child_node =
+                history.nodes[Index(child_history)];
+            const ObservedPosition child_position = SampleChancePosition(
+                solver_config.card_abstraction, *chance, child_node.state,
+                position, deal, rng);
+            value += self(self, child_history, child_position, reach);
           }
           return value / solver_config.chance_samples;
         }
@@ -356,8 +284,8 @@ absl::StatusOr<BestResponseResult> TrainResponse(
         const size_t player_index = Index(player);
         const uint8_t action_count = node.child_count;
         const InfoSetKey key{
-            public_state.observation(), history_id,
-            private_observations[player_index]};
+            position.public_observation(), history_id,
+            position.private_observation(player)};
         std::array<float, kMaxActionsPerNode> probabilities;
         const std::span<float> strategy(probabilities.data(), action_count);
         std::optional<uint32_t> offset;
@@ -396,13 +324,11 @@ absl::StatusOr<BestResponseResult> TrainResponse(
           const HistoryId child =
               history.children[node.children_begin + action];
           action_values[action] = self(
-              self, child, public_state, child_reach,
-              private_observations, showdown_comparison);
+              self, child, position, child_reach);
           node_value += probabilities[action] * action_values[action];
         }
         if (player != responder || !offset) return node_value;
 
-        const double utility_sign = player == Player::A ? 1.0 : -1.0;
         const double opponent_reach =
             config.external_sampling
                 ? 1.0
@@ -411,7 +337,7 @@ absl::StatusOr<BestResponseResult> TrainResponse(
           response_state.add_regret(
               *offset, action,
               static_cast<float>(
-                  opponent_reach * utility_sign *
+                  opponent_reach *
                   (action_values[action] - node_value)));
         }
         response_state.add_strategy(
@@ -422,9 +348,9 @@ absl::StatusOr<BestResponseResult> TrainResponse(
       }
     };
     const double value = cfr(
-        cfr, HistoryId{}, initial_public, {1.0, 1.0},
-        initial_observations, initial_showdown);
-    response_state.cumulative_root_utility += value;
+        cfr, HistoryId{}, initial_position, {1.0, 1.0});
+    response_state.cumulative_root_utility +=
+        responder == Player::A ? value : -value;
     ++response_state.iterations;
   }
 

@@ -291,30 +291,30 @@ absl::StatusOr<ExactPublicState> TryApplyChance(
     const ExactPublicState& state,
     std::span<const Card> cards,
     const BettingRules& rules);
-inline double TerminalUtility(const FoldTerminalState& state,
-                              Player evaluated_player) noexcept {
-  const double committed = state.data.total_committed[0];
-  const double player_a_utility = state.folded == Player::A
-                                      ? -committed
-                                      : Pot(state.data) - committed;
-  return evaluated_player == Player::A ? player_a_utility
-                                        : -player_a_utility;
+inline bool IsTerminal(const BettingState& state) noexcept {
+  return std::holds_alternative<FoldTerminalState>(state) ||
+         std::holds_alternative<ShowdownState>(state);
 }
-double TerminalUtility(const ShowdownState& state,
-                       const Board& board,
-                       ComboId player_a,
-                       ComboId player_b) noexcept;
-inline double TerminalUtilityFromComparison(
-    const ShowdownState& state,
-    int hand_comparison,
-    Player evaluated_player) noexcept {
-  const double committed = state.data.total_committed[0];
-  const double player_a_utility =
-      hand_comparison > 0
-          ? Pot(state.data) - committed
-          : hand_comparison < 0 ? -committed
-                                : (Pot(state.data) / 2.0) - committed;
-  return evaluated_player == Player::A ? player_a_utility
-                                        : -player_a_utility;
-}
+
+class TerminalEvaluator {
+ public:
+  explicit TerminalEvaluator(
+      const std::array<ComboId, kPlayerCount>& hands) noexcept
+      : hands_(hands) {}
+
+  double operator()(const BettingState& state,
+                    const Board& board,
+                    Player evaluated_player) noexcept;
+
+ private:
+  std::array<ComboId, kPlayerCount> hands_;
+  std::optional<Board> compared_board_;
+  int hand_comparison_ = 0;
+};
+
+double TerminalUtility(
+    const BettingState& state,
+    const Board& board,
+    const std::array<ComboId, kPlayerCount>& hands,
+    Player evaluated_player) noexcept;
 }  // namespace poker

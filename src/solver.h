@@ -142,6 +142,51 @@ struct Deal {
   }
 };
 
+struct ObservedPosition {
+  PublicPosition public_position;
+  std::array<PrivateObservationId, kPlayerCount> private_observations;
+
+  static ObservedPosition Observe(PublicPosition public_position,
+                                  const Deal& deal) {
+    std::array<PrivateObservationId, kPlayerCount> observations;
+    for (Player player : {Player::A, Player::B}) {
+      observations[Index(player)] =
+          ObservePrivate(deal.hand(player), public_position);
+    }
+    return {std::move(public_position), observations};
+  }
+
+  ObservedPosition advance(PublicPosition child_public,
+                           const BettingState& child_state,
+                           const Deal& deal) const {
+    auto child_observations = private_observations;
+    if (std::holds_alternative<DecisionState>(child_state)) {
+      for (Player player : {Player::A, Player::B}) {
+        auto& observation = child_observations[Index(player)];
+        observation = ObservePrivate(
+            deal.hand(player), child_public, observation);
+      }
+    }
+    return {std::move(child_public), child_observations};
+  }
+
+  const Board& board() const noexcept { return public_position.board(); }
+  PublicObservationId public_observation() const noexcept {
+    return public_position.observation();
+  }
+  PrivateObservationId private_observation(Player player) const noexcept {
+    return private_observations[Index(player)];
+  }
+};
+
+ObservedPosition SampleChancePosition(
+    const CardAbstractionConfig& card_abstraction,
+    const ChanceState& chance,
+    const BettingState& child_state,
+    const ObservedPosition& position,
+    const Deal& deal,
+    std::mt19937& rng);
+
 class DealDistribution {
  public:
   static absl::StatusOr<DealDistribution> Create(

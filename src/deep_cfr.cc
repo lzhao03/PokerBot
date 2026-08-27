@@ -238,35 +238,18 @@ struct DeepCfrSolver::Impl {
   double traverse(const Deal& deal,
                   Player update_player,
                   uint64_t iteration) {
-    std::array<PrivateObservationId, kPlayerCount> initial_observations;
-    for (Player player : {Player::A, Player::B}) {
-      initial_observations[Index(player)] =
-          ObservePrivate(deal.hand(player), initial_public);
-    }
-    std::optional<int8_t> initial_showdown;
-    if (initial_public.board().count() == kMaxBoardCards) {
-      initial_showdown = static_cast<int8_t>(CompareHands(
-          deal.hand(Player::A), deal.hand(Player::B),
-          initial_public.board()));
-    }
-
+    TerminalEvaluator terminal_utility(deal.hands);
+    const ObservedPosition initial_position =
+        ObservedPosition::Observe(initial_public, deal);
     auto cfr = [&](auto&& self,
                    HistoryId history_id,
-                   const PublicPosition& public_state,
-                   std::array<PrivateObservationId, kPlayerCount>
-                       private_observations,
-                   std::optional<int8_t> showdown_comparison) -> double {
+                   const ObservedPosition& position) -> double {
       while (true) {
         const HistoryNode& node = history.nodes[Index(history_id)];
-        if (const auto* fold = std::get_if<FoldTerminalState>(&node.state)) {
+        if (IsTerminal(node.state)) {
           ++stats.traversal.terminal_visits;
-          return TerminalUtility(*fold, Player::A);
-        }
-        if (const auto* showdown = std::get_if<ShowdownState>(&node.state)) {
-          ++stats.traversal.terminal_visits;
-          assert(showdown_comparison.has_value());
-          return TerminalUtilityFromComparison(
-              *showdown, *showdown_comparison, Player::A);
+          return terminal_utility(
+              node.state, position.board(), update_player);
         }
         if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
           stats.traversal.chance_samples +=
@@ -274,32 +257,14 @@ struct DeepCfrSolver::Impl {
           double value = 0.0;
           for (int sample = 0;
                sample < solver_config.chance_samples; ++sample) {
-            const auto cards = SampleStreetCards(
-                chance->data.street, public_state.board(),
-                deal.blocked_mask(), game_rng);
-            assert(cards.ok());
             const HistoryId child_history =
                 history.children[node.children_begin];
-            const PublicPosition child_public(
-                solver_config.card_abstraction,
-                DealCards(public_state.board(), *cards));
-            auto child_observations = private_observations;
-            auto child_showdown = showdown_comparison;
-            if (child_public.board().count() == kMaxBoardCards) {
-              child_showdown = static_cast<int8_t>(CompareHands(
-                  deal.hand(Player::A), deal.hand(Player::B),
-                  child_public.board()));
-            }
-            const HistoryNode& child_node = history.nodes[Index(child_history)];
-            if (std::holds_alternative<DecisionState>(child_node.state)) {
-              for (Player player : {Player::A, Player::B}) {
-                auto& observation = child_observations[Index(player)];
-                observation = ObservePrivate(
-                    deal.hand(player), child_public, observation);
-              }
-            }
-            value += self(self, child_history, child_public,
-                          child_observations, child_showdown);
+            const HistoryNode& child_node =
+                history.nodes[Index(child_history)];
+            const ObservedPosition child_position = SampleChancePosition(
+                solver_config.card_abstraction, *chance, child_node.state,
+                position, deal, game_rng);
+            value += self(self, child_history, child_position);
           }
           return value / solver_config.chance_samples;
         }
@@ -308,8 +273,8 @@ struct DeepCfrSolver::Impl {
         const Player player = decision.actor;
         const uint8_t action_count = node.child_count;
         const InfoSetKey key{
-            public_state.observation(), history_id,
-            private_observations[Index(player)]};
+            position.public_observation(), history_id,
+            position.private_observation(player)};
         std::array<float, kMaxActionsPerNode> probabilities;
         const std::span<float> strategy(probabilities.data(), action_count);
         fill_current_strategy(player, key, strategy);
@@ -339,9 +304,7 @@ struct DeepCfrSolver::Impl {
         for (uint8_t action = 0; action < action_count; ++action) {
           const HistoryId child =
               history.children[node.children_begin + action];
-          action_values[action] = self(
-              self, child, public_state, private_observations,
-              showdown_comparison);
+          action_values[action] = self(self, child, position);
           node_value += probabilities[action] * action_values[action];
         }
 
@@ -350,10 +313,9 @@ struct DeepCfrSolver::Impl {
         const BettingData& betting = decision.data;
         const float scale = 1.0f / static_cast<float>(
             Pot(betting) + betting.stack[0] + betting.stack[1]);
-        const float utility_sign = player == Player::A ? 1.0f : -1.0f;
         for (uint8_t action = 0; action < action_count; ++action) {
           advantage_sample.target[action] = static_cast<float>(
-              utility_sign * (action_values[action] - node_value)) * scale;
+              action_values[action] - node_value) * scale;
         }
         advantage_memory[Index(player)].add(
             std::move(advantage_sample), reservoir_rng);
@@ -361,8 +323,7 @@ struct DeepCfrSolver::Impl {
       }
     };
 
-    return cfr(cfr, HistoryId{}, initial_public, initial_observations,
-               initial_showdown);
+    return cfr(cfr, HistoryId{}, initial_position);
   }
 
   void run(uint64_t iterations) {

@@ -329,12 +329,39 @@ absl::StatusOr<ExactPublicState> TryApplyChance(
       AdvanceBettingStreet(*chance, rules), DealCards(state.board, cards)};
 }
 
-double TerminalUtility(const ShowdownState& state,
-                       const Board& board,
-                       ComboId player_a,
-                       ComboId player_b) noexcept {
-  return TerminalUtilityFromComparison(
-      state, CompareHands(player_a, player_b, board), Player::A);
+double TerminalEvaluator::operator()(const BettingState& state,
+                                     const Board& board,
+                                     Player evaluated_player) noexcept {
+  assert(IsTerminal(state));
+  double player_a_utility;
+  if (const auto* fold = std::get_if<FoldTerminalState>(&state)) {
+    const double committed = fold->data.total_committed[0];
+    player_a_utility = fold->folded == Player::A
+                           ? -committed
+                           : Pot(fold->data) - committed;
+  } else {
+    const ShowdownState& showdown = std::get<ShowdownState>(state);
+    const double committed = showdown.data.total_committed[0];
+    if (!compared_board_ || *compared_board_ != board) {
+      compared_board_ = board;
+      hand_comparison_ = CompareHands(hands_[0], hands_[1], board);
+    }
+    player_a_utility = hand_comparison_ > 0
+                           ? Pot(showdown.data) - committed
+                           : hand_comparison_ < 0
+                                 ? -committed
+                                 : Pot(showdown.data) / 2.0 - committed;
+  }
+  return evaluated_player == Player::A ? player_a_utility
+                                        : -player_a_utility;
+}
+
+double TerminalUtility(
+    const BettingState& state,
+    const Board& board,
+    const std::array<ComboId, kPlayerCount>& hands,
+    Player evaluated_player) noexcept {
+  return TerminalEvaluator(hands)(state, board, evaluated_player);
 }
 
 }  // namespace poker
