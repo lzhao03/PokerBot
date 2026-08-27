@@ -70,8 +70,7 @@ NeuralFeatureVector EncodeNeuralFeatures(
     features[output++] = betting.street == street ? 1.0f : 0.0f;
   }
 
-  const Chips total_chips =
-      Pot(betting) + betting.stack[0] + betting.stack[1];
+  const Chips total_chips = Pot(betting) + betting.stack[0] + betting.stack[1];
   const float scale =
       1.0f / static_cast<float>(std::max(Chips{1}, total_chips));
   const auto scaled = [scale](Chips value) {

@@ -300,8 +300,7 @@ TEST_CASE("exact card observations are invariant under suit renaming") {
   const Board board = B({C(14, S::Hearts), C(13, S::Hearts),
                          C(7, S::Clubs), C(10, S::Diamonds)});
   const ComboId hand = H(C(12, S::Hearts), C(11, S::Spades));
-  const PublicObservationId expected_public =
-      CanonicalPublicObservation(board);
+  const PublicObservationId expected_public = CanonicalPublicObservation(board);
   const PrivateObservationId expected_private =
       CanonicalPrivateObservation(hand, board);
 
@@ -309,8 +308,7 @@ TEST_CASE("exact card observations are invariant under suit renaming") {
       S::Hearts, S::Diamonds, S::Clubs, S::Spades};
   do {
     const Board renamed_board = Rename(board, suits);
-    CHECK(CanonicalPublicObservation(renamed_board) ==
-          expected_public);
+    CHECK(CanonicalPublicObservation(renamed_board) == expected_public);
     CHECK(CanonicalPrivateObservation(Rename(hand, suits), renamed_board) ==
           expected_private);
   } while (std::next_permutation(suits.begin(), suits.end()));
@@ -346,10 +344,8 @@ TEST_CASE("compact public texture keeps the complete street history") {
       PrivateAbstractionKind::Handcrafted36};
   const Board flop = B({C(14, S::Hearts), C(9, S::Hearts),
                         C(4, S::Clubs)});
-  const Board turn =
-      DealCards(flop, std::array<Card, 1>{C(7, S::Diamonds)});
-  const Board river =
-      DealCards(turn, std::array<Card, 1>{C(2, S::Spades)});
+  const Board turn = DealCards(flop, std::array<Card, 1>{C(7, S::Diamonds)});
+  const Board river = DealCards(turn, std::array<Card, 1>{C(2, S::Spades)});
 
   constexpr uint64_t kStreetMask = (1ULL << 7) - 1;
   const uint64_t flop_id = std::to_underlying(PublicId(config, flop));
@@ -374,8 +370,7 @@ TEST_CASE("canonical observations preserve card relationships and order") {
   const Board draw_board = B({C(2, S::Hearts), C(7, S::Hearts),
                               C(12, S::Clubs)});
   const ComboId flush_draw = H(C(14, S::Hearts), C(13, S::Spades));
-  const ComboId no_flush_draw =
-      H(C(14, S::Diamonds), C(13, S::Spades));
+  const ComboId no_flush_draw = H(C(14, S::Diamonds), C(13, S::Spades));
   CHECK(CanonicalPrivateObservation(flush_draw, draw_board) !=
         CanonicalPrivateObservation(no_flush_draw, draw_board));
 
@@ -433,10 +428,8 @@ TEST_CASE("all abstraction modes preserve observation history") {
   const Board flop = DealCards(
       Board{}, std::array<Card, 3>{
                    C(2, S::Hearts), C(7, S::Hearts), C(12, S::Clubs)});
-  const Board turn =
-      DealCards(flop, std::array<Card, 1>{C(9, S::Diamonds)});
-  const Board river =
-      DealCards(turn, std::array<Card, 1>{C(4, S::Spades)});
+  const Board turn = DealCards(flop, std::array<Card, 1>{C(9, S::Diamonds)});
+  const Board river = DealCards(turn, std::array<Card, 1>{C(4, S::Spades)});
 
   for (const CardAbstractionConfig& config : configs) {
     CAPTURE(static_cast<int>(config.public_mode));

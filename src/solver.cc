@@ -418,21 +418,18 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
                    std::optional<int8_t> showdown_comparison) -> double {
       while (true) {
         const HistoryNode& node = history_.nodes[Index(history)];
-        if (const auto* fold =
-                std::get_if<FoldTerminalState>(&node.state)) {
+        if (const auto* fold = std::get_if<FoldTerminalState>(&node.state)) {
           ++stats.terminal_visits;
           return TerminalUtility(*fold, Player::A);
         }
-        if (const auto* showdown =
-                std::get_if<ShowdownState>(&node.state)) {
+        if (const auto* showdown = std::get_if<ShowdownState>(&node.state)) {
           ++stats.terminal_visits;
           assert(showdown_comparison.has_value());
           return TerminalUtilityFromComparison(
               *showdown, *showdown_comparison, Player::A);
         }
         if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
-          stats.chance_samples +=
-              static_cast<uint64_t>(config_.chance_samples);
+          stats.chance_samples += static_cast<uint64_t>(config_.chance_samples);
           double value = 0.0;
           for (int sample = 0; sample < config_.chance_samples; ++sample) {
             const HistoryId child_history =
@@ -461,8 +458,7 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
           return value / config_.chance_samples;
         }
 
-        const DecisionState& decision =
-            std::get<DecisionState>(node.state);
+        const DecisionState& decision = std::get<DecisionState>(node.state);
         const Player player = decision.actor;
         const size_t player_index = Index(player);
         const uint8_t action_count = node.child_count;
@@ -512,8 +508,7 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
         }
         if (!updates_regrets || !offset) return node_value;
 
-        const double utility_sign =
-            player == Player::A ? 1.0 : -1.0;
+        const double utility_sign = player == Player::A ? 1.0 : -1.0;
         const double opponent_reach =
             config_.external_sampling
                 ? 1.0
@@ -610,20 +605,17 @@ double TabularCfrSolver::evaluate_deal(const Deal& deal,
       ++stats_.terminal_visits;
       return TerminalUtility(*fold, Player::A);
     }
-    if (const auto* showdown =
-            std::get_if<ShowdownState>(&node.state)) {
+    if (const auto* showdown = std::get_if<ShowdownState>(&node.state)) {
       ++stats_.terminal_visits;
       assert(showdown_comparison.has_value());
       return TerminalUtilityFromComparison(
           *showdown, *showdown_comparison, Player::A);
     }
     if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
-      stats_.chance_samples +=
-          static_cast<uint64_t>(config_.chance_samples);
+      stats_.chance_samples += static_cast<uint64_t>(config_.chance_samples);
       double value = 0.0;
       for (int sample = 0; sample < config_.chance_samples; ++sample) {
-        const HistoryId child_history =
-            history_.children[node.children_begin];
+        const HistoryId child_history = history_.children[node.children_begin];
         const PublicPosition child_public = SampleChancePublicPosition(
             config_.card_abstraction, *chance, public_state, deal, rng_);
         auto child_observations = private_observations;
@@ -633,8 +625,7 @@ double TabularCfrSolver::evaluate_deal(const Deal& deal,
               deal.hand(Player::A), deal.hand(Player::B),
               child_public.board()));
         }
-        const HistoryNode& child_node =
-            history_.nodes[Index(child_history)];
+        const HistoryNode& child_node = history_.nodes[Index(child_history)];
         if (std::holds_alternative<DecisionState>(child_node.state)) {
           for (Player player : {Player::A, Player::B}) {
             auto& observation = child_observations[Index(player)];
@@ -663,8 +654,7 @@ double TabularCfrSolver::evaluate_deal(const Deal& deal,
 
     double value = 0.0;
     for (uint8_t action = 0; action < action_count; ++action) {
-      const HistoryId child =
-          history_.children[node.children_begin + action];
+      const HistoryId child = history_.children[node.children_begin + action];
       value += probabilities[action] * self(
           self, child, public_state, private_observations,
           showdown_comparison);

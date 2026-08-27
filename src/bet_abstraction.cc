@@ -31,8 +31,7 @@ AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
   }
 
   const ActionKind kind = highest_to > 0 ? ActionKind::Raise : ActionKind::Bet;
-  const auto& fractions =
-      config.pot_fractions[std::to_underlying(data.street)];
+  const auto& fractions = config.pot_fractions[std::to_underlying(data.street)];
   const Chips pot_after_call = Pot(data) + to_call;
   for (double fraction : fractions) {
     const Chips raise_by =

@@ -38,8 +38,7 @@ enum class RecallMode : uint8_t {
 
 struct CardAbstractionConfig {
   PublicCardMode public_mode = PublicCardMode::Texture;
-  PrivateAbstractionKind private_kind =
-      PrivateAbstractionKind::Handcrafted36;
+  PrivateAbstractionKind private_kind = PrivateAbstractionKind::Handcrafted36;
   RecallMode recall_mode = RecallMode::BucketHistory;
 };
 
@@ -58,8 +57,7 @@ class PublicPosition {
   uint16_t rank_mask_ = 0;
   uint8_t max_rank_count_ = 0;
   uint8_t max_suit_count_ = 0;
-  PrivateAbstractionKind private_kind_ =
-      PrivateAbstractionKind::Handcrafted36;
+  PrivateAbstractionKind private_kind_ = PrivateAbstractionKind::Handcrafted36;
   RecallMode recall_mode_ = RecallMode::BucketHistory;
 
   friend PrivateObservationId ObservePrivate(

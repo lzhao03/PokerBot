@@ -258,20 +258,17 @@ struct DeepCfrSolver::Impl {
                    std::optional<int8_t> showdown_comparison) -> double {
       while (true) {
         const HistoryNode& node = history.nodes[Index(history_id)];
-        if (const auto* fold =
-                std::get_if<FoldTerminalState>(&node.state)) {
+        if (const auto* fold = std::get_if<FoldTerminalState>(&node.state)) {
           ++stats.traversal.terminal_visits;
           return TerminalUtility(*fold, Player::A);
         }
-        if (const auto* showdown =
-                std::get_if<ShowdownState>(&node.state)) {
+        if (const auto* showdown = std::get_if<ShowdownState>(&node.state)) {
           ++stats.traversal.terminal_visits;
           assert(showdown_comparison.has_value());
           return TerminalUtilityFromComparison(
               *showdown, *showdown_comparison, Player::A);
         }
-        if (const auto* chance =
-                std::get_if<ChanceState>(&node.state)) {
+        if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
           stats.traversal.chance_samples +=
               static_cast<uint64_t>(solver_config.chance_samples);
           double value = 0.0;
@@ -293,8 +290,7 @@ struct DeepCfrSolver::Impl {
                   deal.hand(Player::A), deal.hand(Player::B),
                   child_public.board()));
             }
-            const HistoryNode& child_node =
-                history.nodes[Index(child_history)];
+            const HistoryNode& child_node = history.nodes[Index(child_history)];
             if (std::holds_alternative<DecisionState>(child_node.state)) {
               for (Player player : {Player::A, Player::B}) {
                 auto& observation = child_observations[Index(player)];
@@ -308,8 +304,7 @@ struct DeepCfrSolver::Impl {
           return value / solver_config.chance_samples;
         }
 
-        const DecisionState& decision =
-            std::get<DecisionState>(node.state);
+        const DecisionState& decision = std::get<DecisionState>(node.state);
         const Player player = decision.actor;
         const uint8_t action_count = node.child_count;
         const InfoSetKey key{
@@ -328,16 +323,14 @@ struct DeepCfrSolver::Impl {
           strategy_memory.add(
               std::move(strategy_sample), reservoir_rng);
 
-          float sample =
-              std::uniform_real_distribution<float>{}(game_rng);
+          float sample = std::uniform_real_distribution<float>{}(game_rng);
           uint8_t sampled_action = 0;
           while (sampled_action + 1 < action_count &&
                  sample >= probabilities[sampled_action]) {
             sample -= probabilities[sampled_action];
             ++sampled_action;
           }
-          history_id =
-              history.children[node.children_begin + sampled_action];
+          history_id = history.children[node.children_begin + sampled_action];
           continue;
         }
 

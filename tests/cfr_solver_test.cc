@@ -140,8 +140,7 @@ TEST_CASE("solver configuration rejects invalid boundary values") {
   CHECK(defaults.card_abstraction.public_mode == PublicCardMode::Texture);
   CHECK(defaults.card_abstraction.private_kind ==
         PrivateAbstractionKind::Handcrafted36);
-  CHECK(defaults.card_abstraction.recall_mode ==
-        RecallMode::BucketHistory);
+  CHECK(defaults.card_abstraction.recall_mode == RecallMode::BucketHistory);
 }
 
 const ComboId kA = H(14, S::Hearts, 14, S::Spades);
@@ -189,8 +188,7 @@ TEST_CASE("small exact solver baseline is deterministic") {
   CHECK(solver->history_count() == 417);
   CHECK(solver->info_set_count() == 720);
   CHECK(solver->stats().decision_visits == 1440);
-  CHECK(solver->expected_value(Player::A) ==
-        doctest::Approx(-0.737666));
+  CHECK(solver->expected_value(Player::A) == doctest::Approx(-0.737666));
 }
 
 TEST_CASE("external sampling visits only traverser action branches") {
@@ -234,8 +232,7 @@ TEST_CASE("model fingerprints are stable and cover solve ranges") {
   CHECK(first->model() == second->model());
   CHECK(first->model() == different_training->model());
   CHECK(first->model() != changed->model());
-  CHECK(std::to_underlying(first->model()) ==
-        0x9ebae6e5a4064673ULL);
+  CHECK(std::to_underlying(first->model()) == 0x9ebae6e5a4064673ULL);
 }
 
 TEST_CASE("private abstraction cannot change terminal utility") {
@@ -370,8 +367,7 @@ TEST_CASE("postflop roots use full observation identity") {
   const HistoryTree& tree = solver->history();
   const Player player = std::get<DecisionState>(tree.nodes[0].state).actor;
   const ComboId hand = player == Player::A ? kA : kB;
-  const CardAbstractionConfig& cards =
-      solver->config().card_abstraction;
+  const CardAbstractionConfig& cards = solver->config().card_abstraction;
   const PublicPosition public_state(cards, root.board);
   const PrivateObservationId private_id = ObservePrivate(hand, public_state);
   CHECK(TabularCfrSolverTestAccess::state(*solver)
@@ -420,8 +416,7 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
   REQUIRE_FALSE(policy.rows.empty());
   for (const auto& [key, offset] : policy.rows) {
     (void)offset;
-    const HistoryNode& node =
-        solver->history().nodes[Index(key.history)];
+    const HistoryNode& node = solver->history().nodes[Index(key.history)];
     std::vector<float> probabilities(node.child_count);
     CHECK(policy.strategy(key, absl::MakeSpan(probabilities)));
     double sum = 0.0;
@@ -458,8 +453,7 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
   CHECK(evaluated->mean == repeated->mean);
   CHECK(evaluated->standard_error == repeated->standard_error);
   CHECK(evaluated->policy_lookups == repeated->policy_lookups);
-  CHECK(evaluated->missing_policy_lookups ==
-        repeated->missing_policy_lookups);
+  CHECK(evaluated->missing_policy_lookups == repeated->missing_policy_lookups);
   CHECK(evaluated->weighted_policy_lookups ==
         repeated->weighted_policy_lookups);
   CHECK(evaluated->weighted_missing_policy_lookups ==
@@ -503,8 +497,7 @@ TEST_CASE("zero average mass extracts as uniform policy") {
   REQUIRE(extracted.ok());
   for (const auto& [key, offset] : extracted->rows) {
     (void)offset;
-    const HistoryNode& node =
-        solver->history().nodes[Index(key.history)];
+    const HistoryNode& node = solver->history().nodes[Index(key.history)];
     std::vector<float> probabilities(node.child_count);
     REQUIRE(extracted->strategy(key, absl::MakeSpan(probabilities)));
     for (float probability : probabilities) {
@@ -554,8 +547,7 @@ TEST_CASE("approximate responses are reproducible and respect infosets") {
   size_t root_rows = 0;
   for (const auto& [key, row] : first->response_policy.rows) {
     (void)row;
-    const HistoryNode& node =
-        game->history().nodes[Index(key.history)];
+    const HistoryNode& node = game->history().nodes[Index(key.history)];
     REQUIRE(std::holds_alternative<DecisionState>(node.state));
     CHECK(std::get<DecisionState>(node.state).actor == Player::A);
     root_rows += key.history == HistoryId{} ? 1 : 0;
@@ -603,8 +595,7 @@ TEST_CASE("approximate response learns a profitable shared action") {
   const InfoSetKey root_key{
       position.observation(), HistoryId{}, ObservePrivate(kA, position)};
   const size_t offset = response->response_policy.rows.at(root_key);
-  const size_t full_offset =
-      full_response->response_policy.rows.at(root_key);
+  const size_t full_offset = full_response->response_policy.rows.at(root_key);
   const HistoryNode& root = game->history().nodes[0];
   const AbstractActions actions = SelectAbstractActions(
       game->config().bet_abstraction,
@@ -652,15 +643,12 @@ TEST_CASE("exploitability reports both responder perspectives") {
   REQUIRE(estimate.ok());
   REQUIRE(parallel.ok());
   CHECK(factory_calls == kPlayerCount);
-  CHECK(parallel->player_a_response.value ==
-        estimate->player_a_response.value);
-  CHECK(parallel->player_b_response.value ==
-        estimate->player_b_response.value);
+  CHECK(parallel->player_a_response.value == estimate->player_a_response.value);
+  CHECK(parallel->player_b_response.value == estimate->player_b_response.value);
   CHECK(estimate->nash_conv == doctest::Approx(
       estimate->player_a_response.value +
       estimate->player_b_response.value));
-  CHECK(estimate->exploitability ==
-        doctest::Approx(0.5 * estimate->nash_conv));
+  CHECK(estimate->exploitability == doctest::Approx(0.5 * estimate->nash_conv));
   const double sampling_tolerance = 3.0 * (
       estimate->player_a_response.standard_error +
       estimate->player_b_response.standard_error);

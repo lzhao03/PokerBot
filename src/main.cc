@@ -153,11 +153,9 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
   const std::string public_abstraction =
       absl::GetFlag(FLAGS_public_abstraction);
   if (public_abstraction == "exact") {
-    config.card_abstraction.public_mode =
-        poker::PublicCardMode::ExactCanonical;
+    config.card_abstraction.public_mode = poker::PublicCardMode::ExactCanonical;
   } else if (public_abstraction == "compact_texture") {
-    config.card_abstraction.public_mode =
-        poker::PublicCardMode::CompactTexture;
+    config.card_abstraction.public_mode = poker::PublicCardMode::CompactTexture;
   } else if (public_abstraction != "texture") {
     return absl::InvalidArgumentError("invalid public abstraction");
   }
@@ -252,8 +250,7 @@ absl::Status RunTabular(
   std::cout << "threads=" << threads << "\n";
 
   const std::string policy_output = absl::GetFlag(FLAGS_policy_output);
-  const std::string neural_output =
-      absl::GetFlag(FLAGS_neural_policy_output);
+  const std::string neural_output = absl::GetFlag(FLAGS_neural_policy_output);
   if (policy_output.empty() && neural_output.empty()) {
     return absl::OkStatus();
   }
@@ -315,12 +312,9 @@ absl::Status RunTabular(
 absl::Status RunDeep(poker::SolveSpec spec, uint64_t iterations) {
   poker::DeepCfrConfig config;
   config.seed = absl::GetFlag(FLAGS_neural_seed);
-  config.advantage_memory_capacity =
-      absl::GetFlag(FLAGS_deep_memory_capacity);
-  config.strategy_memory_capacity =
-      absl::GetFlag(FLAGS_deep_memory_capacity);
-  config.inference_cache_capacity =
-      absl::GetFlag(FLAGS_deep_cache_capacity);
+  config.advantage_memory_capacity = absl::GetFlag(FLAGS_deep_memory_capacity);
+  config.strategy_memory_capacity = absl::GetFlag(FLAGS_deep_memory_capacity);
+  config.inference_cache_capacity = absl::GetFlag(FLAGS_deep_cache_capacity);
   config.policy_cache_capacity =
       absl::GetFlag(FLAGS_deep_policy_cache_capacity);
   config.traversals_per_player =
@@ -429,8 +423,7 @@ absl::Status RunDeep(poker::SolveSpec spec, uint64_t iterations) {
         *solver->average_policy(), portable_output);
     if (!saved.ok()) return saved;
   }
-  const std::string opponent_path =
-      absl::GetFlag(FLAGS_deep_opponent_policy);
+  const std::string opponent_path = absl::GetFlag(FLAGS_deep_opponent_policy);
   if (!opponent_path.empty()) {
     const auto opponent = poker::LoadPolicy(opponent_path);
     if (!opponent.ok()) return opponent.status();

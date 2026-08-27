@@ -113,8 +113,7 @@ TEST_CASE("Deep CFR rejects an empty reservoir") {
 TEST_CASE("neural features preserve private bucket history") {
   SolverConfig config;
   config.card_abstraction.public_mode = PublicCardMode::CompactTexture;
-  config.card_abstraction.private_kind =
-      PrivateAbstractionKind::Handcrafted36;
+  config.card_abstraction.private_kind = PrivateAbstractionKind::Handcrafted36;
   config.card_abstraction.recall_mode = RecallMode::BucketHistory;
   BettingData betting;
   betting.stack = {100, 100};
@@ -151,8 +150,7 @@ TEST_CASE("Deep CFR run boundaries do not change training") {
   REQUIRE(split->run(1).ok());
   REQUIRE(split->run(1).ok());
 
-  CHECK(whole->stats().advantage_samples ==
-        split->stats().advantage_samples);
+  CHECK(whole->stats().advantage_samples == split->stats().advantage_samples);
   CHECK(whole->stats().strategy_samples == split->stats().strategy_samples);
   CHECK(whole->stats().advantage_loss == split->stats().advantage_loss);
   CHECK(whole->stats().strategy_loss == split->stats().strategy_loss);

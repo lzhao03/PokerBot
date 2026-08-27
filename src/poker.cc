@@ -60,8 +60,7 @@ bool IsBettingRoundOver(const BettingData& state) noexcept {
   if (state.stack[0] == 0 && state.stack[1] == 0) {
     return true;
   }
-  const Player live_player =
-      state.stack[0] > 0 ? Player::A : Player::B;
+  const Player live_player = state.stack[0] > 0 ? Player::A : Player::B;
   return ToCall(state, live_player) == 0;
 }
 
@@ -80,8 +79,7 @@ BettingState ApplyActionUnchecked(const DecisionState& state,
   }
   if (delta > 0) CommitChips(child, player, delta);
 
-  const bool aggressive =
-      action.target_street_commitment > highest_before;
+  const bool aggressive = action.target_street_commitment > highest_before;
   if (aggressive) {
     const Chips raise_size =
         child.street_committed[player_index] - highest_before;
@@ -256,8 +254,7 @@ bool IsLegalAction(const DecisionState& state,
   const Chips current_to = data.street_committed[player];
   const Chips highest_to = CurrentWager(data);
   const Chips to_call = highest_to - current_to;
-  const Chips call_to =
-      std::min(highest_to, current_to + data.stack[player]);
+  const Chips call_to = std::min(highest_to, current_to + data.stack[player]);
   const Chips all_in_to =
       current_to + MaxContestableAdditional(data, state.actor);
   const Chips min_full_raise_to = highest_to + data.last_full_raise;

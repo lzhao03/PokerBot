@@ -83,13 +83,11 @@ TEST_CASE("action probability codes round trip every supported row size") {
         std::array<float, 8> input = {};
         size_t remaining = total_units;
         for (size_t action = 0; action + 1 < action_count; ++action) {
-          const size_t units =
-              (sample * 37 + action * 53) % (remaining + 1);
+          const size_t units = (sample * 37 + action * 53) % (remaining + 1);
           input[action] = static_cast<float>(units) / total_units;
           remaining -= units;
         }
-        input[action_count - 1] =
-            static_cast<float>(remaining) / total_units;
+        input[action_count - 1] = static_cast<float>(remaining) / total_units;
 
         const auto code = EncodeActionProbabilities(
             absl::MakeConstSpan(input).subspan(0, action_count), config);

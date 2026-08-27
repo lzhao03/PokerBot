@@ -97,18 +97,15 @@ ProfileEstimate EstimateProfile(
                         std::optional<int8_t> showdown_comparison) -> double {
       while (true) {
         const HistoryNode& node = history.nodes[Index(history_id)];
-        if (const auto* fold =
-                std::get_if<FoldTerminalState>(&node.state)) {
+        if (const auto* fold = std::get_if<FoldTerminalState>(&node.state)) {
           return TerminalUtility(*fold, Player::A);
         }
-        if (const auto* showdown =
-                std::get_if<ShowdownState>(&node.state)) {
+        if (const auto* showdown = std::get_if<ShowdownState>(&node.state)) {
           assert(showdown_comparison.has_value());
           return TerminalUtilityFromComparison(
               *showdown, *showdown_comparison, Player::A);
         }
-        if (const auto* chance =
-                std::get_if<ChanceState>(&node.state)) {
+        if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
           double value = 0.0;
           for (int chance_sample = 0;
                chance_sample < solver_config.chance_samples;
@@ -129,8 +126,7 @@ ProfileEstimate EstimateProfile(
                   deal.hand(Player::A), deal.hand(Player::B),
                   child_public.board()));
             }
-            const HistoryNode& child_node =
-                history.nodes[Index(child_history)];
+            const HistoryNode& child_node = history.nodes[Index(child_history)];
             if (std::holds_alternative<DecisionState>(child_node.state)) {
               for (Player player : {Player::A, Player::B}) {
                 auto& observation = child_observations[Index(player)];
@@ -144,8 +140,7 @@ ProfileEstimate EstimateProfile(
           return value / solver_config.chance_samples;
         }
 
-        const DecisionState& decision =
-            std::get<DecisionState>(node.state);
+        const DecisionState& decision = std::get<DecisionState>(node.state);
         const size_t player = Index(decision.actor);
         const uint8_t action_count = node.child_count;
         const InfoSetKey key{
@@ -165,16 +160,14 @@ ProfileEstimate EstimateProfile(
         }
 
         if (sample_actions) {
-          float action_sample =
-              std::uniform_real_distribution<float>{}(rng);
+          float action_sample = std::uniform_real_distribution<float>{}(rng);
           uint8_t sampled_action = 0;
           while (sampled_action + 1 < action_count &&
                  action_sample >= probabilities[sampled_action]) {
             action_sample -= probabilities[sampled_action];
             ++sampled_action;
           }
-          history_id =
-              history.children[node.children_begin + sampled_action];
+          history_id = history.children[node.children_begin + sampled_action];
           continue;
         }
 
@@ -315,18 +308,15 @@ absl::StatusOr<BestResponseResult> TrainResponse(
                    std::optional<int8_t> showdown_comparison) -> double {
       while (true) {
         const HistoryNode& node = history.nodes[Index(history_id)];
-        if (const auto* fold =
-                std::get_if<FoldTerminalState>(&node.state)) {
+        if (const auto* fold = std::get_if<FoldTerminalState>(&node.state)) {
           return TerminalUtility(*fold, Player::A);
         }
-        if (const auto* showdown =
-                std::get_if<ShowdownState>(&node.state)) {
+        if (const auto* showdown = std::get_if<ShowdownState>(&node.state)) {
           assert(showdown_comparison.has_value());
           return TerminalUtilityFromComparison(
               *showdown, *showdown_comparison, Player::A);
         }
-        if (const auto* chance =
-                std::get_if<ChanceState>(&node.state)) {
+        if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
           double value = 0.0;
           for (int chance_sample = 0;
                chance_sample < solver_config.chance_samples;
@@ -347,8 +337,7 @@ absl::StatusOr<BestResponseResult> TrainResponse(
                   deal.hand(Player::A), deal.hand(Player::B),
                   child_public.board()));
             }
-            const HistoryNode& child_node =
-                history.nodes[Index(child_history)];
+            const HistoryNode& child_node = history.nodes[Index(child_history)];
             if (std::holds_alternative<DecisionState>(child_node.state)) {
               for (Player player : {Player::A, Player::B}) {
                 auto& observation = child_observations[Index(player)];
@@ -362,8 +351,7 @@ absl::StatusOr<BestResponseResult> TrainResponse(
           return value / solver_config.chance_samples;
         }
 
-        const DecisionState& decision =
-            std::get<DecisionState>(node.state);
+        const DecisionState& decision = std::get<DecisionState>(node.state);
         const Player player = decision.actor;
         const size_t player_index = Index(player);
         const uint8_t action_count = node.child_count;
@@ -389,16 +377,14 @@ absl::StatusOr<BestResponseResult> TrainResponse(
         }
 
         if (config.external_sampling && player != responder) {
-          float action_sample =
-              std::uniform_real_distribution<float>{}(rng);
+          float action_sample = std::uniform_real_distribution<float>{}(rng);
           uint8_t sampled_action = 0;
           while (sampled_action + 1 < action_count &&
                  action_sample >= probabilities[sampled_action]) {
             action_sample -= probabilities[sampled_action];
             ++sampled_action;
           }
-          history_id =
-              history.children[node.children_begin + sampled_action];
+          history_id = history.children[node.children_begin + sampled_action];
           continue;
         }
 
@@ -416,8 +402,7 @@ absl::StatusOr<BestResponseResult> TrainResponse(
         }
         if (player != responder || !offset) return node_value;
 
-        const double utility_sign =
-            player == Player::A ? 1.0 : -1.0;
+        const double utility_sign = player == Player::A ? 1.0 : -1.0;
         const double opponent_reach =
             config.external_sampling
                 ? 1.0
@@ -472,10 +457,8 @@ absl::StatusOr<BestResponseResult> TrainResponse(
       missing_opponent_lookups +
       estimate.counters.missing[opponent_index];
   const size_t responder_index = Index(responder);
-  result.response_policy_lookups =
-      estimate.counters.lookups[responder_index];
-  result.missing_response_lookups =
-      estimate.counters.missing[responder_index];
+  result.response_policy_lookups = estimate.counters.lookups[responder_index];
+  result.missing_response_lookups = estimate.counters.missing[responder_index];
   return result;
 }
 

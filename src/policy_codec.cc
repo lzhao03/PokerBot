@@ -231,8 +231,7 @@ absl::StatusOr<uint64_t> EncodeActionProbabilities(
   // Largest-remainder rounding keeps the requested total exact.
   size_t assigned = 0;
   for (size_t action = 0; action < action_count; ++action) {
-    const double scaled =
-        probabilities[action] * config.total_units / total;
+    const double scaled = probabilities[action] * config.total_units / total;
     units[action] = static_cast<uint16_t>(scaled);
     assigned += units[action];
     remainders[action] = scaled - units[action];
@@ -434,8 +433,7 @@ absl::StatusOr<Policy> DecodePolicy(std::span<const uint8_t> bytes) {
 
 absl::Status SavePolicy(const Policy& policy,
                         const std::filesystem::path& path) {
-  const auto bytes =
-      EncodePolicy(policy, {.max_actions = kMaxActionsPerNode});
+  const auto bytes = EncodePolicy(policy, {.max_actions = kMaxActionsPerNode});
   return bytes.ok() ? WriteBytes(path, *bytes) : bytes.status();
 }
 

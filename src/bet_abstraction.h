@@ -24,8 +24,7 @@ struct BetAbstractionConfig {
 
 BetAbstractionConfig SmallBettingConfig();
 
-using AbstractActions =
-    absl::InlinedVector<GameAction, kMaxActionsPerNode>;
+using AbstractActions = absl::InlinedVector<GameAction, kMaxActionsPerNode>;
 
 AbstractActions SelectAbstractActions(const BetAbstractionConfig& config,
                                       const DecisionState& state);

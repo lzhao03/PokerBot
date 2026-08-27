@@ -11,10 +11,8 @@ TEST_CASE("heads-up blinds define pot and call amount") {
   const BettingData& betting = Data(state.betting);
 
   CHECK(betting.stack == std::array<Chips, kPlayerCount>{19, 18});
-  CHECK(betting.total_committed ==
-        std::array<Chips, kPlayerCount>{1, 2});
-  CHECK(betting.street_committed ==
-        std::array<Chips, kPlayerCount>{1, 2});
+  CHECK(betting.total_committed == std::array<Chips, kPlayerCount>{1, 2});
+  CHECK(betting.street_committed == std::array<Chips, kPlayerCount>{1, 2});
   CHECK(betting.last_full_raise == 2);
   CHECK(Pot(betting) == 3);
   CHECK(CurrentWager(betting) == 2);

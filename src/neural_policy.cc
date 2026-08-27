@@ -186,8 +186,7 @@ void RegretMatch(std::span<const float> advantages,
 
 void Softmax(std::span<const float> logits,
              std::span<float> probabilities) {
-  const float maximum =
-      std::ranges::max(logits.first(probabilities.size()));
+  const float maximum = std::ranges::max(logits.first(probabilities.size()));
   float sum = 0.0f;
   for (size_t action = 0; action < probabilities.size(); ++action) {
     probabilities[action] = std::exp(logits[action] - maximum);
@@ -280,8 +279,7 @@ float FitNeuralNetwork(
     if (target_kind != NeuralTarget::Advantage) {
       prediction = torch::softmax(prediction + (mask - 1.0f) * 1e9f, 1);
     }
-    const torch::Tensor squared_error =
-        (prediction - target).square() * mask;
+    const torch::Tensor squared_error = (prediction - target).square() * mask;
     const torch::Tensor loss =
         (squared_error.sum(1) * weight).sum() / weight.sum();
     loss.backward();
