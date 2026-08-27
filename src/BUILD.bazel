@@ -72,10 +72,7 @@ cc_library(
 cc_library(
     name = "solver",
     srcs = ["solver.cc"],
-    hdrs = [
-        "cfr_traversal.h",
-        "solver.h",
-    ],
+    hdrs = ["solver.h"],
     copts = CORE_COPTS,
     deps = [
         ":bet_abstraction",

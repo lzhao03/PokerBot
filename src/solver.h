@@ -63,11 +63,6 @@ ModelFingerprint ModelFingerprintFor(
     const ExactPublicState& root,
     const std::array<ComboRange, kPlayerCount>& ranges) noexcept;
 
-struct Position {
-  HistoryId history;
-  PublicPosition public_state;
-};
-
 struct InfoSetKey {
   PublicObservationId public_observation;
   HistoryId history;

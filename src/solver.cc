@@ -19,7 +19,7 @@
 #include <vector>
 
 #include "absl/status/status.h"
-#include "src/cfr_traversal.h"
+#include "src/hand_evaluator.h"
 
 namespace poker {
 namespace {
@@ -476,22 +476,22 @@ absl::StatusOr<TabularCfrSolver> TabularCfrSolver::Create(SolveSpec spec) {
       std::move(initial_public), model);
 }
 
-Position internal::SampleChanceChild(
-    const HistoryTree& history,
+namespace {
+
+PublicPosition SampleChancePublicPosition(
     const CardAbstractionConfig& card_abstraction,
-    const HistoryNode& node,
+    const ChanceState& chance,
     const PublicPosition& public_state,
     const Deal& deal,
     std::mt19937& rng) {
-  const ChanceState& chance = std::get<ChanceState>(node.state);
   const auto sampled = SampleStreetCards(
       chance.data.street, public_state.board(), deal.blocked_mask(), rng);
   assert(sampled.ok());
-  return {
-      history.children[node.children_begin],
-      PublicPosition(card_abstraction,
-                     DealCards(public_state.board(), *sampled))};
+  return PublicPosition(
+      card_abstraction, DealCards(public_state.board(), *sampled));
 }
+
+}  // namespace
 
 void TabularCfrSolver::run(uint64_t iterations, int threads) {
   if (iterations == 0) return;
@@ -534,31 +534,32 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
           return TerminalUtilityFromComparison(
               *showdown, *showdown_comparison, Player::A);
         }
-        if (std::holds_alternative<ChanceState>(node.state)) {
+        if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
           stats.chance_samples +=
               static_cast<uint64_t>(config_.chance_samples);
           double value = 0.0;
           for (int sample = 0; sample < config_.chance_samples; ++sample) {
-            const Position child = internal::SampleChanceChild(
-                history_, config_.card_abstraction, node, public_state,
-                deal, rng);
+            const HistoryId child_history =
+                history_.children[node.children_begin];
+            const PublicPosition child_public = SampleChancePublicPosition(
+                config_.card_abstraction, *chance, public_state, deal, rng);
             auto child_observations = private_observations;
             auto child_showdown = showdown_comparison;
-            if (child.public_state.board().count() == kMaxBoardCards) {
+            if (child_public.board().count() == kMaxBoardCards) {
               child_showdown = static_cast<int8_t>(CompareHands(
                   deal.hand(Player::A), deal.hand(Player::B),
-                  child.public_state.board()));
+                  child_public.board()));
             }
             const HistoryNode& child_node =
-                history_.nodes[Index(child.history)];
+                history_.nodes[Index(child_history)];
             if (std::holds_alternative<DecisionState>(child_node.state)) {
               for (Player player : {Player::A, Player::B}) {
                 auto& observation = child_observations[Index(player)];
                 observation = ObservePrivate(
-                    deal.hand(player), child.public_state, observation);
+                    deal.hand(player), child_public, observation);
               }
             }
-            value += self(self, child.history, child.public_state, reach,
+            value += self(self, child_history, child_public, reach,
                           child_observations, child_showdown);
           }
           return value / config_.chance_samples;
@@ -720,31 +721,32 @@ double TabularCfrSolver::evaluate_deal(const Deal& deal,
       return TerminalUtilityFromComparison(
           *showdown, *showdown_comparison, Player::A);
     }
-    if (std::holds_alternative<ChanceState>(node.state)) {
+    if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
       stats_.chance_samples +=
           static_cast<uint64_t>(config_.chance_samples);
       double value = 0.0;
       for (int sample = 0; sample < config_.chance_samples; ++sample) {
-        const Position child = internal::SampleChanceChild(
-            history_, config_.card_abstraction, node, public_state,
-            deal, rng_);
+        const HistoryId child_history =
+            history_.children[node.children_begin];
+        const PublicPosition child_public = SampleChancePublicPosition(
+            config_.card_abstraction, *chance, public_state, deal, rng_);
         auto child_observations = private_observations;
         auto child_showdown = showdown_comparison;
-        if (child.public_state.board().count() == kMaxBoardCards) {
+        if (child_public.board().count() == kMaxBoardCards) {
           child_showdown = static_cast<int8_t>(CompareHands(
               deal.hand(Player::A), deal.hand(Player::B),
-              child.public_state.board()));
+              child_public.board()));
         }
         const HistoryNode& child_node =
-            history_.nodes[Index(child.history)];
+            history_.nodes[Index(child_history)];
         if (std::holds_alternative<DecisionState>(child_node.state)) {
           for (Player player : {Player::A, Player::B}) {
             auto& observation = child_observations[Index(player)];
             observation = ObservePrivate(
-                deal.hand(player), child.public_state, observation);
+                deal.hand(player), child_public, observation);
           }
         }
-        value += self(self, child.history, child.public_state,
+        value += self(self, child_history, child_public,
                       child_observations, child_showdown);
       }
       return value / config_.chance_samples;
