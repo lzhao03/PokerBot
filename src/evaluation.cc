@@ -13,7 +13,7 @@
 #include <vector>
 
 #include "absl/status/status.h"
-#include "src/cfr_traversal.h"
+#include "src/hand_evaluator.h"
 
 namespace poker {
 StrategyLookup MakeStrategyLookup(const Policy& policy) {
@@ -49,45 +49,6 @@ struct ProfileEstimate {
   EvaluationCounters counters;
 };
 
-struct PolicyBackend {
-  using UpdateHandle = size_t;
-
-  const std::array<const StrategyLookup*, kPlayerCount>& policies;
-  EvaluationCounters& counters;
-
-  std::optional<size_t> current_strategy(
-      const internal::DecisionView& decision,
-      internal::StrategyAccess,
-      std::span<float> probabilities) {
-    const size_t player = Index(decision.state.actor);
-    const double reach = decision.reaches[0] * decision.reaches[1];
-    if (counters.measure_reach_coverage && reach > 0.0) {
-      counters.reach_by_info_set[decision.key] += reach;
-    }
-    ++counters.lookups[player];
-    counters.weighted_lookups[player] += reach;
-    if (!LookupOrUniform(*policies[player], decision.key, probabilities)) {
-      ++counters.missing[player];
-      counters.weighted_missing[player] += reach;
-    }
-    return std::nullopt;
-  }
-
-  void average_strategy(const internal::DecisionView& decision,
-                        std::span<float> probabilities) {
-    current_strategy(decision, internal::StrategyAccess::ReadOnly,
-                     probabilities);
-  }
-
-  void record_regrets(const internal::DecisionView&,
-                      size_t,
-                      std::span<const float>) {}
-  void record_strategy(const internal::DecisionView&,
-                       size_t,
-                       std::span<const float>,
-                       double) {}
-};
-
 std::mt19937 MakeEvaluationRng(uint64_t seed) {
   const std::array<uint32_t, 2> words = {
       static_cast<uint32_t>(seed), static_cast<uint32_t>(seed >> 32)};
@@ -111,25 +72,128 @@ ProfileEstimate EstimateProfile(
       &player_a, &player_b};
   EvaluationCounters counters;
   counters.measure_reach_coverage = measure_reach_coverage;
-  PolicyBackend backend{policies, counters};
-  SolverStats stats;
   double mean = 0.0;
   double squared_error = 0.0;
   for (uint64_t sample = 0; sample < samples; ++sample) {
     const Deal deal = deals.sample(rng);
-    internal::TraversalContext context{
-        .history = history,
-        .card_abstraction = solver_config.card_abstraction,
-        .chance_samples = solver_config.chance_samples,
-        .deal = deal,
-        .mode = internal::TraversalMode::EvaluateCurrent,
-        .update_player = Player::A,
-        .iteration = 0,
-        .sample_actions = sample_actions,
-        .rng = rng,
-        .stats = stats,
+    std::array<PrivateObservationId, kPlayerCount> initial_observations;
+    for (Player player : {Player::A, Player::B}) {
+      initial_observations[Index(player)] =
+          ObservePrivate(deal.hand(player), initial_public);
+    }
+    std::optional<int8_t> initial_showdown;
+    if (initial_public.board().count() == kMaxBoardCards) {
+      initial_showdown = static_cast<int8_t>(CompareHands(
+          deal.hand(Player::A), deal.hand(Player::B),
+          initial_public.board()));
+    }
+
+    auto evaluate = [&](auto&& self,
+                        HistoryId history_id,
+                        const PublicPosition& public_state,
+                        std::array<double, kPlayerCount> reach,
+                        std::array<PrivateObservationId, kPlayerCount>
+                            private_observations,
+                        std::optional<int8_t> showdown_comparison) -> double {
+      while (true) {
+        const HistoryNode& node = history.nodes[Index(history_id)];
+        if (const auto* fold =
+                std::get_if<FoldTerminalState>(&node.state)) {
+          return TerminalUtility(*fold, Player::A);
+        }
+        if (const auto* showdown =
+                std::get_if<ShowdownState>(&node.state)) {
+          assert(showdown_comparison.has_value());
+          return TerminalUtilityFromComparison(
+              *showdown, *showdown_comparison, Player::A);
+        }
+        if (const auto* chance =
+                std::get_if<ChanceState>(&node.state)) {
+          double value = 0.0;
+          for (int chance_sample = 0;
+               chance_sample < solver_config.chance_samples;
+               ++chance_sample) {
+            const auto cards = SampleStreetCards(
+                chance->data.street, public_state.board(),
+                deal.blocked_mask(), rng);
+            assert(cards.ok());
+            const HistoryId child_history =
+                history.children[node.children_begin];
+            const PublicPosition child_public(
+                solver_config.card_abstraction,
+                DealCards(public_state.board(), *cards));
+            auto child_observations = private_observations;
+            auto child_showdown = showdown_comparison;
+            if (child_public.board().count() == kMaxBoardCards) {
+              child_showdown = static_cast<int8_t>(CompareHands(
+                  deal.hand(Player::A), deal.hand(Player::B),
+                  child_public.board()));
+            }
+            const HistoryNode& child_node =
+                history.nodes[Index(child_history)];
+            if (std::holds_alternative<DecisionState>(child_node.state)) {
+              for (Player player : {Player::A, Player::B}) {
+                auto& observation = child_observations[Index(player)];
+                observation = ObservePrivate(
+                    deal.hand(player), child_public, observation);
+              }
+            }
+            value += self(self, child_history, child_public, reach,
+                          child_observations, child_showdown);
+          }
+          return value / solver_config.chance_samples;
+        }
+
+        const DecisionState& decision =
+            std::get<DecisionState>(node.state);
+        const size_t player = Index(decision.actor);
+        const uint8_t action_count = node.child_count;
+        const InfoSetKey key{
+            public_state.observation(), history_id,
+            private_observations[player]};
+        const double decision_reach = reach[0] * reach[1];
+        if (counters.measure_reach_coverage && decision_reach > 0.0) {
+          counters.reach_by_info_set[key] += decision_reach;
+        }
+        ++counters.lookups[player];
+        counters.weighted_lookups[player] += decision_reach;
+        std::array<float, kMaxActionsPerNode> probabilities;
+        const std::span<float> strategy(probabilities.data(), action_count);
+        if (!LookupOrUniform(*policies[player], key, strategy)) {
+          ++counters.missing[player];
+          counters.weighted_missing[player] += decision_reach;
+        }
+
+        if (sample_actions) {
+          float action_sample =
+              std::uniform_real_distribution<float>{}(rng);
+          uint8_t sampled_action = 0;
+          while (sampled_action + 1 < action_count &&
+                 action_sample >= probabilities[sampled_action]) {
+            action_sample -= probabilities[sampled_action];
+            ++sampled_action;
+          }
+          history_id =
+              history.children[node.children_begin + sampled_action];
+          continue;
+        }
+
+        double value = 0.0;
+        for (uint8_t action = 0; action < action_count; ++action) {
+          auto child_reach = reach;
+          child_reach[player] *= probabilities[action];
+          const HistoryId child =
+              history.children[node.children_begin + action];
+          value += probabilities[action] * self(
+              self, child, public_state, child_reach,
+              private_observations, showdown_comparison);
+        }
+        return value;
+      }
     };
-    const double value = internal::Traverse(initial_public, context, backend);
+    const double value = evaluate(
+        evaluate, HistoryId{}, initial_public, {1.0, 1.0},
+        initial_observations, initial_showdown);
     const double delta = value - mean;
     mean += delta / (sample + 1);
     squared_error += delta * (value - mean);
@@ -163,62 +227,6 @@ ProfileEstimate EstimateProfile(
            reaches.size(), rows_for_99_percent},
           counters};
 }
-
-struct ResponseBackend {
-  using UpdateHandle = uint32_t;
-
-  Player responder;
-  const StrategyLookup& opponent;
-  CfrState& response;
-  const StrategyLookup* responder_fallback = nullptr;
-  uint64_t opponent_lookups = 0;
-  uint64_t missing_opponent_lookups = 0;
-
-  std::optional<uint32_t> current_strategy(
-      const internal::DecisionView& decision,
-      internal::StrategyAccess access,
-      std::span<float> probabilities) {
-    if (decision.state.actor != responder) {
-      ++opponent_lookups;
-      if (!LookupOrUniform(opponent, decision.key, probabilities)) {
-        ++missing_opponent_lookups;
-      }
-      return std::nullopt;
-    }
-    std::optional<uint32_t> offset = response.find(decision.key);
-    if (!offset && access == internal::StrategyAccess::Writable) {
-      offset = response.find_or_create(decision.key, decision.action_count);
-    }
-    if (offset || responder_fallback == nullptr) {
-      response.strategy(response.regret_sum, offset, probabilities);
-    } else {
-      LookupOrUniform(*responder_fallback, decision.key, probabilities);
-    }
-    return access == internal::StrategyAccess::Writable ? offset
-                                                        : std::nullopt;
-  }
-
-  void average_strategy(const internal::DecisionView& decision,
-                        std::span<float> probabilities) {
-    current_strategy(decision, internal::StrategyAccess::ReadOnly,
-                     probabilities);
-  }
-
-  void record_regrets(const internal::DecisionView&,
-                      uint32_t offset,
-                      std::span<const float> regrets) {
-    for (size_t action = 0; action < regrets.size(); ++action) {
-      response.add_regret(offset, action, regrets[action]);
-    }
-  }
-
-  void record_strategy(const internal::DecisionView&,
-                       uint32_t offset,
-                       std::span<const float> probabilities,
-                       double weight) {
-    response.add_strategy(offset, probabilities, weight);
-  }
-};
 
 }  // namespace
 
@@ -281,26 +289,156 @@ absl::StatusOr<BestResponseResult> TrainResponse(
   }
   CfrState response_state(solver_config, true);
   std::mt19937 rng = MakeEvaluationRng(config.seed);
-  ResponseBackend backend{
-      responder, opponent, response_state, responder_fallback};
-  SolverStats stats;
+  uint64_t opponent_lookups = 0;
+  uint64_t missing_opponent_lookups = 0;
   BestResponseResult result;
   while (response_state.iterations < config.training_iterations) {
     const Deal deal = deals.sample(rng);
-    internal::TraversalContext context{
-        .history = history,
-        .card_abstraction = solver_config.card_abstraction,
-        .chance_samples = solver_config.chance_samples,
-        .deal = deal,
-        .mode = internal::TraversalMode::Train,
-        .update_player = responder,
-        .iteration = response_state.iterations,
-        .sample_actions = config.external_sampling,
-        .rng = rng,
-        .stats = stats,
-        .record_traverser_strategy = config.external_sampling,
+    std::array<PrivateObservationId, kPlayerCount> initial_observations;
+    for (Player player : {Player::A, Player::B}) {
+      initial_observations[Index(player)] =
+          ObservePrivate(deal.hand(player), initial_public);
+    }
+    std::optional<int8_t> initial_showdown;
+    if (initial_public.board().count() == kMaxBoardCards) {
+      initial_showdown = static_cast<int8_t>(CompareHands(
+          deal.hand(Player::A), deal.hand(Player::B),
+          initial_public.board()));
+    }
+
+    auto cfr = [&](auto&& self,
+                   HistoryId history_id,
+                   const PublicPosition& public_state,
+                   std::array<double, kPlayerCount> reach,
+                   std::array<PrivateObservationId, kPlayerCount>
+                       private_observations,
+                   std::optional<int8_t> showdown_comparison) -> double {
+      while (true) {
+        const HistoryNode& node = history.nodes[Index(history_id)];
+        if (const auto* fold =
+                std::get_if<FoldTerminalState>(&node.state)) {
+          return TerminalUtility(*fold, Player::A);
+        }
+        if (const auto* showdown =
+                std::get_if<ShowdownState>(&node.state)) {
+          assert(showdown_comparison.has_value());
+          return TerminalUtilityFromComparison(
+              *showdown, *showdown_comparison, Player::A);
+        }
+        if (const auto* chance =
+                std::get_if<ChanceState>(&node.state)) {
+          double value = 0.0;
+          for (int chance_sample = 0;
+               chance_sample < solver_config.chance_samples;
+               ++chance_sample) {
+            const auto cards = SampleStreetCards(
+                chance->data.street, public_state.board(),
+                deal.blocked_mask(), rng);
+            assert(cards.ok());
+            const HistoryId child_history =
+                history.children[node.children_begin];
+            const PublicPosition child_public(
+                solver_config.card_abstraction,
+                DealCards(public_state.board(), *cards));
+            auto child_observations = private_observations;
+            auto child_showdown = showdown_comparison;
+            if (child_public.board().count() == kMaxBoardCards) {
+              child_showdown = static_cast<int8_t>(CompareHands(
+                  deal.hand(Player::A), deal.hand(Player::B),
+                  child_public.board()));
+            }
+            const HistoryNode& child_node =
+                history.nodes[Index(child_history)];
+            if (std::holds_alternative<DecisionState>(child_node.state)) {
+              for (Player player : {Player::A, Player::B}) {
+                auto& observation = child_observations[Index(player)];
+                observation = ObservePrivate(
+                    deal.hand(player), child_public, observation);
+              }
+            }
+            value += self(self, child_history, child_public, reach,
+                          child_observations, child_showdown);
+          }
+          return value / solver_config.chance_samples;
+        }
+
+        const DecisionState& decision =
+            std::get<DecisionState>(node.state);
+        const Player player = decision.actor;
+        const size_t player_index = Index(player);
+        const uint8_t action_count = node.child_count;
+        const InfoSetKey key{
+            public_state.observation(), history_id,
+            private_observations[player_index]};
+        std::array<float, kMaxActionsPerNode> probabilities;
+        const std::span<float> strategy(probabilities.data(), action_count);
+        std::optional<uint32_t> offset;
+        if (player == responder) {
+          offset = response_state.find_or_create(key, action_count);
+          if (offset || responder_fallback == nullptr) {
+            response_state.strategy(
+                response_state.regret_sum, offset, strategy);
+          } else {
+            LookupOrUniform(*responder_fallback, key, strategy);
+          }
+        } else {
+          ++opponent_lookups;
+          if (!LookupOrUniform(opponent, key, strategy)) {
+            ++missing_opponent_lookups;
+          }
+        }
+
+        if (config.external_sampling && player != responder) {
+          float action_sample =
+              std::uniform_real_distribution<float>{}(rng);
+          uint8_t sampled_action = 0;
+          while (sampled_action + 1 < action_count &&
+                 action_sample >= probabilities[sampled_action]) {
+            action_sample -= probabilities[sampled_action];
+            ++sampled_action;
+          }
+          history_id =
+              history.children[node.children_begin + sampled_action];
+          continue;
+        }
+
+        std::array<double, kMaxActionsPerNode> action_values;
+        double node_value = 0.0;
+        for (uint8_t action = 0; action < action_count; ++action) {
+          auto child_reach = reach;
+          child_reach[player_index] *= probabilities[action];
+          const HistoryId child =
+              history.children[node.children_begin + action];
+          action_values[action] = self(
+              self, child, public_state, child_reach,
+              private_observations, showdown_comparison);
+          node_value += probabilities[action] * action_values[action];
+        }
+        if (player != responder || !offset) return node_value;
+
+        const double utility_sign =
+            player == Player::A ? 1.0 : -1.0;
+        const double opponent_reach =
+            config.external_sampling
+                ? 1.0
+                : reach[Index(Opponent(player))];
+        for (uint8_t action = 0; action < action_count; ++action) {
+          response_state.add_regret(
+              *offset, action,
+              static_cast<float>(
+                  opponent_reach * utility_sign *
+                  (action_values[action] - node_value)));
+        }
+        response_state.add_strategy(
+            *offset, strategy,
+            reach[player_index] *
+                static_cast<double>(response_state.iterations + 1));
+        return node_value;
+      }
     };
-    const double value = internal::Traverse(initial_public, context, backend);
+    const double value = cfr(
+        cfr, HistoryId{}, initial_public, {1.0, 1.0},
+        initial_observations, initial_showdown);
     response_state.cumulative_root_utility += value;
     ++response_state.iterations;
   }
@@ -329,9 +467,9 @@ absl::StatusOr<BestResponseResult> TrainResponse(
   result.standard_error = estimate.value.standard_error;
   const size_t opponent_index = Index(Opponent(responder));
   result.opponent_policy_lookups =
-      backend.opponent_lookups + estimate.counters.lookups[opponent_index];
+      opponent_lookups + estimate.counters.lookups[opponent_index];
   result.missing_opponent_lookups =
-      backend.missing_opponent_lookups +
+      missing_opponent_lookups +
       estimate.counters.missing[opponent_index];
   const size_t responder_index = Index(responder);
   result.response_policy_lookups =
