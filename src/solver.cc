@@ -395,8 +395,7 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
   auto run_iteration = [&](uint64_t iteration, std::mt19937& rng,
                            SolverStats& stats, bool concurrent) {
     const Deal deal = deals_.sample(rng);
-    const Player update_player =
-        (iteration & 1) == 0 ? Player::A : Player::B;
+    const Player update_player = iteration % 2 ? Player::B : Player::A;
     std::array<PrivateObservationId, kPlayerCount> initial_observations;
     for (Player player : {Player::A, Player::B}) {
       initial_observations[Index(player)] =
