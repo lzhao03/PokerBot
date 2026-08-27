@@ -181,14 +181,14 @@ Policy PassiveCallingPolicy(const TabularCfrSolver& game, ComboId hand) {
 }
 
 TEST_CASE("small exact solver baseline is deterministic") {
-  auto solver = MakeSolver(
-      Config(), UniformComboRange(), UniformComboRange());
+  auto solver = MakeSolver(Config(), R(kA), R(kB));
   solver->run(10);
 
   CHECK(solver->history_count() == 417);
-  CHECK(solver->info_set_count() == 720);
+  CHECK(solver->info_set_count() == 672);
   CHECK(solver->stats().decision_visits == 1440);
-  CHECK(solver->expected_value(Player::A) == doctest::Approx(-0.737666));
+  CHECK(solver->expected_value(Player::A) ==
+        doctest::Approx(2.70708).epsilon(1e-5));
 }
 
 TEST_CASE("external sampling visits only traverser action branches") {
