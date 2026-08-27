@@ -32,6 +32,7 @@ jobs:
           //tests:poker_test
           //tests:card_abstraction_modes_test
           //web:policy_decoder_test
+          --test_output=errors
       - name: Build portable tools and WASM
         run: bazel build //tools:cfr_benchmark //web:policy_decoder_wasm
       - name: Test web application
