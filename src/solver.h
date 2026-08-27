@@ -92,7 +92,7 @@ struct CfrState {
                 bool concurrent = false) const;
   void add_regret(uint32_t offset,
                   size_t action,
-                  float delta,
+                  double delta,
                   bool concurrent = false);
   void add_strategy(uint32_t offset,
                     std::span<const float> probabilities,

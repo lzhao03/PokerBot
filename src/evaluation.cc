@@ -329,16 +329,12 @@ absl::StatusOr<BestResponseResult> TrainResponse(
         }
         if (player != responder || !offset) return node_value;
 
-        const double opponent_reach =
-            config.external_sampling
-                ? 1.0
-                : reach[Index(Opponent(player))];
         for (uint8_t action = 0; action < action_count; ++action) {
-          response_state.add_regret(
-              *offset, action,
-              static_cast<float>(
-                  opponent_reach *
-                  (action_values[action] - node_value)));
+          double regret = action_values[action] - node_value;
+          if (!config.external_sampling) {
+            regret *= reach[Index(Opponent(player))];
+          }
+          response_state.add_regret(*offset, action, regret);
         }
         response_state.add_strategy(
             *offset, strategy,

@@ -187,18 +187,19 @@ void AtomicAdd(float& target, float delta) {
 
 void CfrState::add_regret(uint32_t offset,
                           size_t action,
-                          float delta,
+                          double delta,
                           bool concurrent) {
   const size_t index = offset + action;
   float& regret = regret_sum[index];
+  const float update = static_cast<float>(delta);
   if (!concurrent) {
-    regret = std::max(0.0f, regret + delta);
+    regret = std::max(0.0f, regret + update);
     return;
   }
   std::atomic_ref<float> atomic(regret);
   float old = atomic.load(std::memory_order_relaxed);
   while (!atomic.compare_exchange_weak(
-      old, std::max(0.0f, old + delta), std::memory_order_relaxed)) {}
+      old, std::max(0.0f, old + update), std::memory_order_relaxed)) {}
 }
 
 void CfrState::add_strategy(uint32_t offset,
@@ -474,17 +475,12 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
         }
         if (!updates_regrets || !offset) return node_value;
 
-        const double opponent_reach =
-            config_.external_sampling
-                ? 1.0
-                : reach[Index(Opponent(player))];
         for (uint8_t action = 0; action < action_count; ++action) {
-          state_.add_regret(
-              *offset, action,
-              static_cast<float>(
-                  opponent_reach *
-                  (action_values[action] - node_value)),
-              concurrent);
+          double regret = action_values[action] - node_value;
+          if (!config_.external_sampling) {
+            regret *= reach[Index(Opponent(player))];
+          }
+          state_.add_regret(*offset, action, regret, concurrent);
         }
         if (!config_.external_sampling) {
           const double weight =
