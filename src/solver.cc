@@ -339,53 +339,6 @@ std::optional<uint32_t> CfrState::find_or_create(
   return offset;
 }
 
-namespace {
-
-struct TabularBackend {
-  using UpdateHandle = uint32_t;
-
-  CfrState& state;
-  bool concurrent_updates;
-
-  std::optional<uint32_t> current_strategy(
-      const internal::DecisionView& decision,
-      internal::StrategyAccess access,
-      std::span<float> probabilities) {
-    const std::optional<uint32_t> offset =
-        access == internal::StrategyAccess::Writable
-            ? state.find_or_create(decision.key, decision.action_count)
-            : state.find(decision.key);
-    state.strategy(state.regret_sum, offset, probabilities,
-                   concurrent_updates);
-    return access == internal::StrategyAccess::ReadOnly ? std::nullopt
-                                                        : offset;
-  }
-
-  void average_strategy(const internal::DecisionView& decision,
-                        std::span<float> probabilities) {
-    state.strategy(state.strategy_sum, state.find(decision.key), probabilities,
-                   concurrent_updates);
-  }
-
-  void record_regrets(const internal::DecisionView&,
-                      uint32_t offset,
-                      std::span<const float> regrets) {
-    size_t action = 0;
-    for (float regret : regrets) {
-      state.add_regret(offset, action++, regret, concurrent_updates);
-    }
-  }
-
-  void record_strategy(const internal::DecisionView&,
-                       uint32_t offset,
-                       std::span<const float> probabilities,
-                       double weight) {
-    state.add_strategy(offset, probabilities, weight, concurrent_updates);
-  }
-};
-
-}  // namespace
-
 bool Policy::strategy(InfoSetKey key, std::span<float> output) const {
   const auto found = rows.find(key);
   if (found == rows.end() ||
@@ -546,20 +499,147 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
   auto run_iteration = [&](uint64_t iteration, std::mt19937& rng,
                            SolverStats& stats, bool concurrent) {
     const Deal deal = deals_.sample(rng);
-    internal::TraversalContext context{
-        .history = history_,
-        .card_abstraction = config_.card_abstraction,
-        .chance_samples = config_.chance_samples,
-        .deal = deal,
-        .mode = internal::TraversalMode::Train,
-        .update_player = (iteration & 1) == 0 ? Player::A : Player::B,
-        .iteration = iteration,
-        .sample_actions = config_.external_sampling,
-        .rng = rng,
-        .stats = stats,
+    const Player update_player =
+        (iteration & 1) == 0 ? Player::A : Player::B;
+    std::array<PrivateObservationId, kPlayerCount> initial_observations;
+    for (Player player : {Player::A, Player::B}) {
+      initial_observations[Index(player)] =
+          ObservePrivate(deal.hand(player), initial_public_);
+    }
+    std::optional<int8_t> initial_showdown;
+    if (initial_public_.board().count() == kMaxBoardCards) {
+      initial_showdown = static_cast<int8_t>(CompareHands(
+          deal.hand(Player::A), deal.hand(Player::B),
+          initial_public_.board()));
+    }
+
+    auto cfr = [&](auto&& self,
+                   HistoryId history,
+                   const PublicPosition& public_state,
+                   std::array<double, kPlayerCount> reach,
+                   std::array<PrivateObservationId, kPlayerCount>
+                       private_observations,
+                   std::optional<int8_t> showdown_comparison) -> double {
+      while (true) {
+        const HistoryNode& node = history_.nodes[Index(history)];
+        if (const auto* fold =
+                std::get_if<FoldTerminalState>(&node.state)) {
+          ++stats.terminal_visits;
+          return TerminalUtility(*fold, Player::A);
+        }
+        if (const auto* showdown =
+                std::get_if<ShowdownState>(&node.state)) {
+          ++stats.terminal_visits;
+          assert(showdown_comparison.has_value());
+          return TerminalUtilityFromComparison(
+              *showdown, *showdown_comparison, Player::A);
+        }
+        if (std::holds_alternative<ChanceState>(node.state)) {
+          stats.chance_samples +=
+              static_cast<uint64_t>(config_.chance_samples);
+          double value = 0.0;
+          for (int sample = 0; sample < config_.chance_samples; ++sample) {
+            const Position child = internal::SampleChanceChild(
+                history_, config_.card_abstraction, node, public_state,
+                deal, rng);
+            auto child_observations = private_observations;
+            auto child_showdown = showdown_comparison;
+            if (child.public_state.board().count() == kMaxBoardCards) {
+              child_showdown = static_cast<int8_t>(CompareHands(
+                  deal.hand(Player::A), deal.hand(Player::B),
+                  child.public_state.board()));
+            }
+            const HistoryNode& child_node =
+                history_.nodes[Index(child.history)];
+            if (std::holds_alternative<DecisionState>(child_node.state)) {
+              for (Player player : {Player::A, Player::B}) {
+                auto& observation = child_observations[Index(player)];
+                observation = ObservePrivate(
+                    deal.hand(player), child.public_state, observation);
+              }
+            }
+            value += self(self, child.history, child.public_state, reach,
+                          child_observations, child_showdown);
+          }
+          return value / config_.chance_samples;
+        }
+
+        const DecisionState& decision =
+            std::get<DecisionState>(node.state);
+        const Player player = decision.actor;
+        const size_t player_index = Index(player);
+        const uint8_t action_count = node.child_count;
+        const bool updates_regrets = update_player == player;
+        const InfoSetKey key{
+            public_state.observation(), history,
+            private_observations[player_index]};
+        const bool writable = updates_regrets || config_.external_sampling;
+        const std::optional<uint32_t> offset =
+            writable ? state_.find_or_create(key, action_count)
+                     : state_.find(key);
+        std::array<float, kMaxActionsPerNode> probabilities;
+        const std::span<float> strategy(probabilities.data(), action_count);
+        state_.strategy(state_.regret_sum, offset, strategy, concurrent);
+        ++stats.decision_visits;
+
+        if (config_.external_sampling && !updates_regrets) {
+          if (offset) {
+            state_.add_strategy(
+                *offset, strategy, static_cast<double>(iteration + 1),
+                concurrent);
+          }
+          float sample = std::uniform_real_distribution<float>{}(rng);
+          uint8_t sampled_action = 0;
+          while (sampled_action + 1 < action_count &&
+                 sample >= probabilities[sampled_action]) {
+            sample -= probabilities[sampled_action];
+            ++sampled_action;
+          }
+          history = history_.children[node.children_begin + sampled_action];
+          continue;
+        }
+
+        std::array<double, kMaxActionsPerNode> action_values;
+        double node_value = 0.0;
+        for (uint8_t action = 0; action < action_count; ++action) {
+          auto child_reach = reach;
+          if (!config_.external_sampling) {
+            child_reach[player_index] *= probabilities[action];
+          }
+          const HistoryId child =
+              history_.children[node.children_begin + action];
+          action_values[action] = self(
+              self, child, public_state, child_reach,
+              private_observations, showdown_comparison);
+          node_value += probabilities[action] * action_values[action];
+        }
+        if (!updates_regrets || !offset) return node_value;
+
+        const double utility_sign =
+            player == Player::A ? 1.0 : -1.0;
+        const double opponent_reach =
+            config_.external_sampling
+                ? 1.0
+                : reach[Index(Opponent(player))];
+        for (uint8_t action = 0; action < action_count; ++action) {
+          state_.add_regret(
+              *offset, action,
+              static_cast<float>(
+                  opponent_reach * utility_sign *
+                  (action_values[action] - node_value)),
+              concurrent);
+        }
+        if (!config_.external_sampling) {
+          const double weight =
+              reach[player_index] * static_cast<double>(iteration + 1);
+          state_.add_strategy(*offset, strategy, weight, concurrent);
+        }
+        return node_value;
+      }
     };
-    TabularBackend backend{state_, concurrent};
-    return internal::Traverse(initial_public_, context, backend);
+
+    return cfr(cfr, HistoryId{}, initial_public_, {1.0, 1.0},
+               initial_observations, initial_showdown);
   };
 
   uint64_t serial_iterations = 0;
@@ -610,22 +690,92 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
 
 double TabularCfrSolver::evaluate_deal(const Deal& deal,
                                        EvaluationMode mode) {
-  internal::TraversalContext context{
-      .history = history_,
-      .card_abstraction = config_.card_abstraction,
-      .chance_samples = config_.chance_samples,
-      .deal = deal,
-      .mode = mode == EvaluationMode::Average
-                  ? internal::TraversalMode::EvaluateAverage
-                  : internal::TraversalMode::EvaluateCurrent,
-      .update_player = Player::A,
-      .iteration = 0,
-      .sample_actions = false,
-      .rng = rng_,
-      .stats = stats_,
+  std::array<PrivateObservationId, kPlayerCount> initial_observations;
+  for (Player player : {Player::A, Player::B}) {
+    initial_observations[Index(player)] =
+        ObservePrivate(deal.hand(player), initial_public_);
+  }
+  std::optional<int8_t> initial_showdown;
+  if (initial_public_.board().count() == kMaxBoardCards) {
+    initial_showdown = static_cast<int8_t>(CompareHands(
+        deal.hand(Player::A), deal.hand(Player::B),
+        initial_public_.board()));
+  }
+
+  auto evaluate = [&](auto&& self,
+                      HistoryId history,
+                      const PublicPosition& public_state,
+                      std::array<PrivateObservationId, kPlayerCount>
+                          private_observations,
+                      std::optional<int8_t> showdown_comparison) -> double {
+    const HistoryNode& node = history_.nodes[Index(history)];
+    if (const auto* fold = std::get_if<FoldTerminalState>(&node.state)) {
+      ++stats_.terminal_visits;
+      return TerminalUtility(*fold, Player::A);
+    }
+    if (const auto* showdown =
+            std::get_if<ShowdownState>(&node.state)) {
+      ++stats_.terminal_visits;
+      assert(showdown_comparison.has_value());
+      return TerminalUtilityFromComparison(
+          *showdown, *showdown_comparison, Player::A);
+    }
+    if (std::holds_alternative<ChanceState>(node.state)) {
+      stats_.chance_samples +=
+          static_cast<uint64_t>(config_.chance_samples);
+      double value = 0.0;
+      for (int sample = 0; sample < config_.chance_samples; ++sample) {
+        const Position child = internal::SampleChanceChild(
+            history_, config_.card_abstraction, node, public_state,
+            deal, rng_);
+        auto child_observations = private_observations;
+        auto child_showdown = showdown_comparison;
+        if (child.public_state.board().count() == kMaxBoardCards) {
+          child_showdown = static_cast<int8_t>(CompareHands(
+              deal.hand(Player::A), deal.hand(Player::B),
+              child.public_state.board()));
+        }
+        const HistoryNode& child_node =
+            history_.nodes[Index(child.history)];
+        if (std::holds_alternative<DecisionState>(child_node.state)) {
+          for (Player player : {Player::A, Player::B}) {
+            auto& observation = child_observations[Index(player)];
+            observation = ObservePrivate(
+                deal.hand(player), child.public_state, observation);
+          }
+        }
+        value += self(self, child.history, child.public_state,
+                      child_observations, child_showdown);
+      }
+      return value / config_.chance_samples;
+    }
+
+    const DecisionState& decision = std::get<DecisionState>(node.state);
+    const size_t player = Index(decision.actor);
+    const uint8_t action_count = node.child_count;
+    const InfoSetKey key{
+        public_state.observation(), history,
+        private_observations[player]};
+    std::array<float, kMaxActionsPerNode> probabilities;
+    const std::span<float> strategy(probabilities.data(), action_count);
+    std::span<float> values = mode == EvaluationMode::Average
+                                  ? std::span<float>(state_.strategy_sum)
+                                  : std::span<float>(state_.regret_sum);
+    state_.strategy(values, state_.find(key), strategy);
+
+    double value = 0.0;
+    for (uint8_t action = 0; action < action_count; ++action) {
+      const HistoryId child =
+          history_.children[node.children_begin + action];
+      value += probabilities[action] * self(
+          self, child, public_state, private_observations,
+          showdown_comparison);
+    }
+    return value;
   };
-  TabularBackend backend{state_, false};
-  return internal::Traverse(initial_public_, context, backend);
+
+  return evaluate(evaluate, HistoryId{}, initial_public_,
+                  initial_observations, initial_showdown);
 }
 
 double TabularCfrSolver::evaluate_deals(int samples, EvaluationMode mode) {
