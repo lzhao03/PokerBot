@@ -1,8 +1,6 @@
 #include "src/solver.h"
 
 #include <cmath>
-#include <stdexcept>
-
 #include "doctest/doctest.h"
 
 namespace poker {
@@ -15,51 +13,12 @@ ComboId H(int r0, S s0, int r1, S s1) {
                         Card(static_cast<Rank>(r1 - 2), s1));
 }
 
-TEST_CASE("range syntax expands to exact combo weights") {
-  struct Case {
-    const char* text;
-    size_t count;
-  };
-  const Case cases[] = {
-      {"AA", 6}, {"AKs", 4}, {"AKo", 12}, {"AK", 16},
-      {"AA,KK", 12}, {"QQ+", 18}};
-  for (const Case& test : cases) {
-    CAPTURE(test.text);
-    const auto range = ParseRange(test.text);
-    REQUIRE(range.ok());
-    CHECK(range->count() == test.count);
-  }
-
-  const auto parsed_aces = ParseRange("AA");
-  REQUIRE(parsed_aces.ok());
-  const ComboRange aces = *parsed_aces;
-  const ComboId hand = H(14, S::Spades, 14, S::Hearts);
-  CHECK(aces.weight(hand) == 1.0f);
-
+TEST_CASE("uniform combo range includes every combo equally") {
   const ComboRange uniform = UniformComboRange();
   CHECK(uniform.count() == kComboCount);
   for (float weight : uniform.weights) {
     CHECK(weight == 1.0f);
   }
-
-  const auto suited = ParseRange("AKs");
-  const auto offsuit = ParseRange("AKo");
-  const auto any = ParseRange("AK");
-  const auto split = ParseRange("AKs,AKo");
-  const auto overlap = ParseRange("AK,AKs");
-  REQUIRE(suited.ok());
-  REQUIRE(offsuit.ok());
-  REQUIRE(any.ok());
-  REQUIRE(split.ok());
-  REQUIRE(overlap.ok());
-  CHECK(suited->count() == 4);
-  CHECK(offsuit->count() == 12);
-  CHECK(any->count() == 16);
-  CHECK(split->weights == any->weights);
-  CHECK(overlap->weights == any->weights);
-  CHECK_FALSE(ParseRange("89s+").ok());
-  CHECK_FALSE(ParseRange("AA,,KK").ok());
-  CHECK_FALSE(ParseRange("").ok());
 }
 
 TEST_CASE("deal sampling rejects incompatible ranges") {

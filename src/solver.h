@@ -7,7 +7,6 @@
 #include <optional>
 #include <random>
 #include <span>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -56,7 +55,6 @@ struct SolveSpec {
 
 enum class ModelFingerprint : uint64_t {};
 
-absl::StatusOr<ComboRange> ParseRange(std::string_view text);
 ComboRange UniformComboRange();
 ModelFingerprint ModelFingerprintFor(
     const SolverConfig& config,

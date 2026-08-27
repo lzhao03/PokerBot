@@ -81,58 +81,6 @@ void AddRange(std::vector<uint8_t>& bytes, const ComboRange& range) noexcept {
   }
 }
 
-enum class HandShape {
-  Suited,
-  Offsuit,
-  Any,
-};
-
-struct HandType {
-  int high;
-  int low;
-  HandShape shape;
-};
-
-std::optional<int> ParseRank(char rank) {
-  const size_t index = std::string_view("23456789TJQKA").find(rank);
-  if (index == std::string_view::npos) return std::nullopt;
-  return static_cast<int>(index) + 2;
-}
-
-std::optional<HandType> ParseHandType(std::string_view text) {
-  if (text.size() != 2 && text.size() != 3) {
-    return std::nullopt;
-  }
-  const auto first = ParseRank(text[0]);
-  const auto second = ParseRank(text[1]);
-  if (!first || !second) {
-    return std::nullopt;
-  }
-  HandType type{std::max(*first, *second), std::min(*first, *second),
-                HandShape::Any};
-  if (type.high == type.low) {
-    return text.size() == 2 ? std::optional<HandType>(type) : std::nullopt;
-  }
-  if (text.size() == 2) return type;
-  if (text[2] == 's') {
-    type.shape = HandShape::Suited;
-  } else if (text[2] == 'o') {
-    type.shape = HandShape::Offsuit;
-  } else {
-    return std::nullopt;
-  }
-  return type;
-}
-
-std::string_view Trim(std::string_view text) {
-  const size_t first = text.find_first_not_of(" \t");
-  if (first == std::string_view::npos) {
-    return {};
-  }
-  const size_t last = text.find_last_not_of(" \t");
-  return text.substr(first, last - first + 1);
-}
-
 }  // namespace
 
 ModelFingerprint ModelFingerprintFor(
@@ -384,58 +332,6 @@ absl::StatusOr<SolverConfig> SolverConfig::Create(SolverConfig config) {
     }
   }
   return config;
-}
-
-absl::StatusOr<ComboRange> ParseRange(std::string_view text) {
-  ComboRange range;
-  auto select = [&](HandType type) {
-    constexpr std::array suits = {
-        Suit::Hearts, Suit::Diamonds, Suit::Clubs, Suit::Spades};
-    const Rank high = static_cast<Rank>(type.high - 2);
-    const Rank low = static_cast<Rank>(type.low - 2);
-    const bool pair = type.high == type.low;
-    for (Suit first : suits) {
-      for (Suit second : suits) {
-        const bool suited = first == second;
-        if ((pair && first >= second) ||
-            (!pair && type.shape != HandShape::Any &&
-             suited != (type.shape == HandShape::Suited))) {
-          continue;
-        }
-        const ComboId combo = CardsToComboId(
-            Card(high, first), Card(low, second));
-        range.weights[combo.index()] = 1.0f;
-      }
-    }
-  };
-  while (!text.empty()) {
-    const size_t comma = text.find(',');
-    const std::string_view part = Trim(text.substr(0, comma));
-    text = comma == std::string_view::npos ? std::string_view()
-                                           : text.substr(comma + 1);
-    if (part.empty()) {
-      return absl::InvalidArgumentError("range contains an empty item");
-    }
-    if (part.size() == 3 && part[0] == part[1] && part[2] == '+') {
-      const auto rank = ParseRank(part[0]);
-      if (!rank) {
-        return absl::InvalidArgumentError("invalid pair range");
-      }
-      for (int value = *rank; value <= 14; ++value) {
-        select(HandType{value, value, HandShape::Any});
-      }
-      continue;
-    }
-    const auto type = ParseHandType(part);
-    if (!type) {
-      return absl::InvalidArgumentError("invalid hand range item");
-    }
-    select(*type);
-  }
-  if (range.count() == 0) {
-    return absl::InvalidArgumentError("range is empty");
-  }
-  return range;
 }
 
 ComboRange UniformComboRange() {

@@ -20,7 +20,7 @@ ABSL_FLAG(int, iterations, 100, "CFR iterations");
 ABSL_FLAG(int, eval_samples, 100, "evaluation samples");
 ABSL_FLAG(bool, evaluate, true, "evaluate and extract a policy after training");
 ABSL_FLAG(std::string, range, "premium",
-          "premium, all, or a poker range");
+          "premium or all");
 ABSL_FLAG(double, training_seconds, 0.0,
           "train for this wall-clock duration; 0 uses iterations");
 ABSL_FLAG(uint64_t, prefill_iterations, 0,
@@ -52,14 +52,36 @@ ABSL_FLAG(std::string, policy_output, "", "optional policy output path");
 
 namespace {
 
+poker::ComboRange PremiumRange() {
+  poker::ComboRange range;
+  for (size_t first = 0; first < poker::kDeck.size(); ++first) {
+    for (size_t second = first + 1; second < poker::kDeck.size(); ++second) {
+      const poker::Card a = poker::kDeck[first];
+      const poker::Card b = poker::kDeck[second];
+      const poker::Rank high = std::max(a.rank(), b.rank());
+      const poker::Rank low = std::min(a.rank(), b.rank());
+      const bool premium_pair = high == low && high >= poker::Rank::Jack;
+      const bool ace_king =
+          high == poker::Rank::Ace && low == poker::Rank::King;
+      const bool suited_ace_queen =
+          high == poker::Rank::Ace && low == poker::Rank::Queen &&
+          a.suit() == b.suit();
+      if (premium_pair || ace_king || suited_ace_queen) {
+        range.add(poker::CardsToComboId(a, b));
+      }
+    }
+  }
+  return range;
+}
+
 absl::StatusOr<poker::ComboRange> BenchmarkRange(std::string_view text) {
   if (text == "premium") {
-    return poker::ParseRange("AA,KK,QQ,JJ,AKs,AQs,AKo");
+    return PremiumRange();
   }
   if (text == "all") {
     return poker::UniformComboRange();
   }
-  return poker::ParseRange(text);
+  return absl::InvalidArgumentError("range must be premium or all");
 }
 
 double Rate(double count, double seconds) {
