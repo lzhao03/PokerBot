@@ -374,13 +374,10 @@ absl::StatusOr<TabularCfrSolver> TabularCfrSolver::Create(SolveSpec spec) {
       std::move(initial_public), model);
 }
 
-ObservedPosition SampleChancePosition(
-    const CardAbstractionConfig& card_abstraction,
-    const ChanceState& chance,
-    const BettingState& child_state,
+ObservedPosition ChanceSampler::operator()(
     const ObservedPosition& position,
-    const Deal& deal,
-    std::mt19937& rng) {
+    const ChanceState& chance,
+    const BettingState& child_state) const {
   const auto sampled = SampleStreetCards(
       chance.data.street, position.board(), deal.blocked_mask(), rng);
   assert(sampled.ok());
@@ -400,6 +397,7 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
     TerminalEvaluator terminal_utility(deal.hands);
     const ObservedPosition initial_position =
         ObservedPosition::Observe(initial_public_, deal);
+    ChanceSampler sample_chance{config_.card_abstraction, deal, rng};
     auto cfr = [&](auto&& self,
                    HistoryId history,
                    const ObservedPosition& position,
@@ -408,21 +406,16 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
         const HistoryNode& node = history_.nodes[Index(history)];
         if (IsTerminal(node.state)) {
           ++stats.terminal_visits;
-          return terminal_utility(
-              node.state, position.board(), update_player);
+          return terminal_utility(node.state, position.board(), update_player);
         }
         if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
           stats.chance_samples += static_cast<uint64_t>(config_.chance_samples);
+          const HistoryId child = history_.children[node.children_begin];
+          const auto& child_state = history_.nodes[Index(child)].state;
           double value = 0.0;
-          for (int sample = 0; sample < config_.chance_samples; ++sample) {
-            const HistoryId child_history =
-                history_.children[node.children_begin];
-            const HistoryNode& child_node =
-                history_.nodes[Index(child_history)];
-            const ObservedPosition child_position = SampleChancePosition(
-                config_.card_abstraction, *chance, child_node.state,
-                position, deal, rng);
-            value += self(self, child_history, child_position, reach);
+          for (int draw = 0; draw < config_.chance_samples; ++draw) {
+            const auto next = sample_chance(position, *chance, child_state);
+            value += self(self, child, next, reach);
           }
           return value / config_.chance_samples;
         }
@@ -547,6 +540,7 @@ double TabularCfrSolver::evaluate_deal(const Deal& deal,
   TerminalEvaluator terminal_utility(deal.hands);
   const ObservedPosition initial_position =
       ObservedPosition::Observe(initial_public_, deal);
+  ChanceSampler sample_chance{config_.card_abstraction, deal, rng_};
   auto evaluate = [&](auto&& self,
                       HistoryId history,
                       const ObservedPosition& position) -> double {
@@ -557,15 +551,12 @@ double TabularCfrSolver::evaluate_deal(const Deal& deal,
     }
     if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
       stats_.chance_samples += static_cast<uint64_t>(config_.chance_samples);
+      const HistoryId child = history_.children[node.children_begin];
+      const auto& child_state = history_.nodes[Index(child)].state;
       double value = 0.0;
-      for (int sample = 0; sample < config_.chance_samples; ++sample) {
-        const HistoryId child_history = history_.children[node.children_begin];
-        const HistoryNode& child_node =
-            history_.nodes[Index(child_history)];
-        const ObservedPosition child_position = SampleChancePosition(
-            config_.card_abstraction, *chance, child_node.state,
-            position, deal, rng_);
-        value += self(self, child_history, child_position);
+      for (int draw = 0; draw < config_.chance_samples; ++draw) {
+        const auto next = sample_chance(position, *chance, child_state);
+        value += self(self, child, next);
       }
       return value / config_.chance_samples;
     }

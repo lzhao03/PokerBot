@@ -179,13 +179,15 @@ struct ObservedPosition {
   }
 };
 
-ObservedPosition SampleChancePosition(
-    const CardAbstractionConfig& card_abstraction,
-    const ChanceState& chance,
-    const BettingState& child_state,
-    const ObservedPosition& position,
-    const Deal& deal,
-    std::mt19937& rng);
+struct ChanceSampler {
+  const CardAbstractionConfig& card_abstraction;
+  const Deal& deal;
+  std::mt19937& rng;
+
+  ObservedPosition operator()(const ObservedPosition& position,
+                              const ChanceState& chance,
+                              const BettingState& child_state) const;
+};
 
 class DealDistribution {
  public:

@@ -241,6 +241,7 @@ struct DeepCfrSolver::Impl {
     TerminalEvaluator terminal_utility(deal.hands);
     const ObservedPosition initial_position =
         ObservedPosition::Observe(initial_public, deal);
+    ChanceSampler sample_chance{solver_config.card_abstraction, deal, game_rng};
     auto cfr = [&](auto&& self,
                    HistoryId history_id,
                    const ObservedPosition& position) -> double {
@@ -248,23 +249,17 @@ struct DeepCfrSolver::Impl {
         const HistoryNode& node = history.nodes[Index(history_id)];
         if (IsTerminal(node.state)) {
           ++stats.traversal.terminal_visits;
-          return terminal_utility(
-              node.state, position.board(), update_player);
+          return terminal_utility(node.state, position.board(), update_player);
         }
         if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
           stats.traversal.chance_samples +=
               static_cast<uint64_t>(solver_config.chance_samples);
+          const HistoryId child = history.children[node.children_begin];
+          const auto& child_state = history.nodes[Index(child)].state;
           double value = 0.0;
-          for (int sample = 0;
-               sample < solver_config.chance_samples; ++sample) {
-            const HistoryId child_history =
-                history.children[node.children_begin];
-            const HistoryNode& child_node =
-                history.nodes[Index(child_history)];
-            const ObservedPosition child_position = SampleChancePosition(
-                solver_config.card_abstraction, *chance, child_node.state,
-                position, deal, game_rng);
-            value += self(self, child_history, child_position);
+          for (int draw = 0; draw < solver_config.chance_samples; ++draw) {
+            const auto next = sample_chance(position, *chance, child_state);
+            value += self(self, child, next);
           }
           return value / solver_config.chance_samples;
         }

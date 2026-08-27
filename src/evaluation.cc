@@ -79,6 +79,7 @@ ProfileEstimate EstimateProfile(
     TerminalEvaluator terminal_utility(deal.hands);
     const ObservedPosition initial_position =
         ObservedPosition::Observe(initial_public, deal);
+    ChanceSampler sample_chance{solver_config.card_abstraction, deal, rng};
     auto evaluate = [&](auto&& self,
                         HistoryId history_id,
                         const ObservedPosition& position,
@@ -89,18 +90,12 @@ ProfileEstimate EstimateProfile(
           return terminal_utility(node.state, position.board(), Player::A);
         }
         if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
+          const HistoryId child = history.children[node.children_begin];
+          const auto& child_state = history.nodes[Index(child)].state;
           double value = 0.0;
-          for (int chance_sample = 0;
-               chance_sample < solver_config.chance_samples;
-               ++chance_sample) {
-            const HistoryId child_history =
-                history.children[node.children_begin];
-            const HistoryNode& child_node =
-                history.nodes[Index(child_history)];
-            const ObservedPosition child_position = SampleChancePosition(
-                solver_config.card_abstraction, *chance, child_node.state,
-                position, deal, rng);
-            value += self(self, child_history, child_position, reach);
+          for (int draw = 0; draw < solver_config.chance_samples; ++draw) {
+            const auto next = sample_chance(position, *chance, child_state);
+            value += self(self, child, next, reach);
           }
           return value / solver_config.chance_samples;
         }
@@ -253,6 +248,7 @@ absl::StatusOr<BestResponseResult> TrainResponse(
     TerminalEvaluator terminal_utility(deal.hands);
     const ObservedPosition initial_position =
         ObservedPosition::Observe(initial_public, deal);
+    ChanceSampler sample_chance{solver_config.card_abstraction, deal, rng};
     auto cfr = [&](auto&& self,
                    HistoryId history_id,
                    const ObservedPosition& position,
@@ -263,18 +259,12 @@ absl::StatusOr<BestResponseResult> TrainResponse(
           return terminal_utility(node.state, position.board(), responder);
         }
         if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
+          const HistoryId child = history.children[node.children_begin];
+          const auto& child_state = history.nodes[Index(child)].state;
           double value = 0.0;
-          for (int chance_sample = 0;
-               chance_sample < solver_config.chance_samples;
-               ++chance_sample) {
-            const HistoryId child_history =
-                history.children[node.children_begin];
-            const HistoryNode& child_node =
-                history.nodes[Index(child_history)];
-            const ObservedPosition child_position = SampleChancePosition(
-                solver_config.card_abstraction, *chance, child_node.state,
-                position, deal, rng);
-            value += self(self, child_history, child_position, reach);
+          for (int draw = 0; draw < solver_config.chance_samples; ++draw) {
+            const auto next = sample_chance(position, *chance, child_state);
+            value += self(self, child, next, reach);
           }
           return value / solver_config.chance_samples;
         }
