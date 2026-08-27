@@ -177,6 +177,9 @@ struct ObservedPosition {
   PrivateObservationId private_observation(Player player) const noexcept {
     return private_observations[Index(player)];
   }
+  InfoSetKey info_set_key(HistoryId history, Player player) const noexcept {
+    return {public_observation(), history, private_observation(player)};
+  }
 };
 
 struct ChanceSampler {

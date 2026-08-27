@@ -420,24 +420,18 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
           return value / config_.chance_samples;
         }
 
-        const DecisionState& decision = std::get<DecisionState>(node.state);
-        const Player player = decision.actor;
-        const size_t player_index = Index(player);
+        const Player player = std::get<DecisionState>(node.state).actor;
         const uint8_t action_count = node.child_count;
-        const bool updates_regrets = update_player == player;
-        const InfoSetKey key{
-            position.public_observation(), history,
-            position.private_observation(player)};
-        const bool writable = updates_regrets || config_.external_sampling;
-        const std::optional<uint32_t> offset =
-            writable ? state_.find_or_create(key, action_count)
-                     : state_.find(key);
+        const bool traverser = update_player == player;
+        const InfoSetKey key = position.info_set_key(history, player);
+        const auto offset = traverser || config_.external_sampling
+            ? state_.find_or_create(key, action_count) : state_.find(key);
         std::array<float, kMaxActionsPerNode> probabilities;
         const std::span<float> strategy(probabilities.data(), action_count);
         state_.strategy(state_.regret_sum, offset, strategy, concurrent);
         ++stats.decision_visits;
 
-        if (config_.external_sampling && !updates_regrets) {
+        if (config_.external_sampling && !traverser) {
           if (offset) {
             state_.add_strategy(
                 *offset, strategy, static_cast<double>(iteration + 1),
@@ -459,14 +453,14 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
         for (uint8_t action = 0; action < action_count; ++action) {
           auto child_reach = reach;
           if (!config_.external_sampling) {
-            child_reach[player_index] *= probabilities[action];
+            child_reach[Index(player)] *= probabilities[action];
           }
           const HistoryId child =
               history_.children[node.children_begin + action];
           action_values[action] = self(self, child, position, child_reach);
           node_value += probabilities[action] * action_values[action];
         }
-        if (!updates_regrets || !offset) return node_value;
+        if (!traverser || !offset) return node_value;
 
         for (uint8_t action = 0; action < action_count; ++action) {
           double regret = action_values[action] - node_value;
@@ -477,7 +471,7 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
         }
         if (!config_.external_sampling) {
           const double weight =
-              reach[player_index] * static_cast<double>(iteration + 1);
+              reach[Index(player)] * static_cast<double>(iteration + 1);
           state_.add_strategy(*offset, strategy, weight, concurrent);
         }
         return node_value;
@@ -561,11 +555,9 @@ double TabularCfrSolver::evaluate_deal(const Deal& deal,
       return value / config_.chance_samples;
     }
 
-    const DecisionState& decision = std::get<DecisionState>(node.state);
+    const Player player = std::get<DecisionState>(node.state).actor;
     const uint8_t action_count = node.child_count;
-    const InfoSetKey key{
-        position.public_observation(), history,
-        position.private_observation(decision.actor)};
+    const InfoSetKey key = position.info_set_key(history, player);
     std::array<float, kMaxActionsPerNode> probabilities;
     const std::span<float> strategy(probabilities.data(), action_count);
     std::span<float> values = mode == EvaluationMode::Average

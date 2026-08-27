@@ -100,12 +100,10 @@ ProfileEstimate EstimateProfile(
           return value / solver_config.chance_samples;
         }
 
-        const DecisionState& decision = std::get<DecisionState>(node.state);
-        const size_t player = Index(decision.actor);
+        const Player actor = std::get<DecisionState>(node.state).actor;
+        const size_t player = Index(actor);
         const uint8_t action_count = node.child_count;
-        const InfoSetKey key{
-            position.public_observation(), history_id,
-            position.private_observation(decision.actor)};
+        const InfoSetKey key = position.info_set_key(history_id, actor);
         const double decision_reach = reach[0] * reach[1];
         if (counters.measure_reach_coverage && decision_reach > 0.0) {
           counters.reach_by_info_set[key] += decision_reach;
@@ -269,13 +267,9 @@ absl::StatusOr<BestResponseResult> TrainResponse(
           return value / solver_config.chance_samples;
         }
 
-        const DecisionState& decision = std::get<DecisionState>(node.state);
-        const Player player = decision.actor;
-        const size_t player_index = Index(player);
+        const Player player = std::get<DecisionState>(node.state).actor;
         const uint8_t action_count = node.child_count;
-        const InfoSetKey key{
-            position.public_observation(), history_id,
-            position.private_observation(player)};
+        const InfoSetKey key = position.info_set_key(history_id, player);
         std::array<float, kMaxActionsPerNode> probabilities;
         const std::span<float> strategy(probabilities.data(), action_count);
         std::optional<uint32_t> offset;
@@ -310,7 +304,7 @@ absl::StatusOr<BestResponseResult> TrainResponse(
         double node_value = 0.0;
         for (uint8_t action = 0; action < action_count; ++action) {
           auto child_reach = reach;
-          child_reach[player_index] *= probabilities[action];
+          child_reach[Index(player)] *= probabilities[action];
           const HistoryId child =
               history.children[node.children_begin + action];
           action_values[action] = self(
@@ -328,7 +322,7 @@ absl::StatusOr<BestResponseResult> TrainResponse(
         }
         response_state.add_strategy(
             *offset, strategy,
-            reach[player_index] *
+            reach[Index(player)] *
                 static_cast<double>(response_state.iterations + 1));
         return node_value;
       }

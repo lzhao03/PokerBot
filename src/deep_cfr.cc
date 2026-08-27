@@ -267,9 +267,7 @@ struct DeepCfrSolver::Impl {
         const DecisionState& decision = std::get<DecisionState>(node.state);
         const Player player = decision.actor;
         const uint8_t action_count = node.child_count;
-        const InfoSetKey key{
-            position.public_observation(), history_id,
-            position.private_observation(player)};
+        const InfoSetKey key = position.info_set_key(history_id, player);
         std::array<float, kMaxActionsPerNode> probabilities;
         const std::span<float> strategy(probabilities.data(), action_count);
         fill_current_strategy(player, key, strategy);
