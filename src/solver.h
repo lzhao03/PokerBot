@@ -84,7 +84,7 @@ struct CfrState {
   std::vector<float> regret_sum;
   std::vector<float> strategy_sum;
   uint64_t iterations = 0;
-  double cumulative_root_utility = 0.0;
+  double root_value_sum = 0.0;
 
   void strategy(std::span<float> values,
                 std::optional<uint32_t> offset,

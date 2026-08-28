@@ -390,8 +390,8 @@ ObservedPosition ChanceSampler::operator()(
 void TabularCfrSolver::run(uint64_t iterations, int threads) {
   if (iterations == 0) return;
 
-  auto run_iteration = [&](uint64_t iteration, std::mt19937& rng,
-                           SolverStats& stats, bool concurrent) {
+  auto run_one = [&](uint64_t iteration, std::mt19937& rng,
+                     SolverStats& stats, bool concurrent) {
     const Deal deal = deals_.sample(rng);
     const Player update_player = iteration % 2 ? Player::B : Player::A;
     TerminalEvaluator terminal_utility(deal.hands);
@@ -483,50 +483,44 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
     return update_player == Player::A ? value : -value;
   };
 
-  uint64_t serial_iterations = 0;
+  uint64_t remaining = iterations;
   // Fill the infoset map serially; workers only update it at capacity.
-  while (serial_iterations < iterations &&
-         (threads <= 1 || !state_.at_capacity())) {
-    state_.cumulative_root_utility += run_iteration(
-        state_.iterations, rng_, stats_, false);
+  while (remaining > 0 && (threads <= 1 || !state_.at_capacity())) {
+    state_.root_value_sum += run_one(state_.iterations, rng_, stats_, false);
     ++state_.iterations;
-    ++serial_iterations;
+    --remaining;
   }
+  if (remaining == 0) return;
 
-  const uint64_t remaining = iterations - serial_iterations;
-  if (remaining > 0) {
-    const size_t worker_count = std::min<size_t>(
-        static_cast<size_t>(threads), static_cast<size_t>(remaining));
-    struct WorkerResult {
-      double utility = 0.0;
-      SolverStats stats;
-    };
-    std::vector<WorkerResult> worker_results(worker_count);
-    std::vector<std::thread> workers;
-    workers.reserve(worker_count);
-    const uint64_t first_iteration = state_.iterations;
-    for (size_t worker = 0; worker < worker_count; ++worker) {
-      const uint32_t worker_seed = static_cast<uint32_t>(rng_());
-      workers.emplace_back([&, worker, worker_seed] {
-        std::seed_seq seed{worker_seed, static_cast<uint32_t>(worker)};
-        std::mt19937 rng(seed);
-        WorkerResult& output = worker_results[worker];
-        for (uint64_t offset = worker; offset < remaining;
-             offset += worker_count) {
-          output.utility += run_iteration(
-              first_iteration + offset, rng, output.stats, true);
-        }
-      });
-    }
-    for (std::thread& worker : workers) worker.join();
-    for (const WorkerResult& worker : worker_results) {
-      state_.cumulative_root_utility += worker.utility;
-      stats_.decision_visits += worker.stats.decision_visits;
-      stats_.chance_samples += worker.stats.chance_samples;
-      stats_.terminal_visits += worker.stats.terminal_visits;
-    }
-    state_.iterations += remaining;
+  const size_t pool_size = std::min<size_t>(
+      static_cast<size_t>(threads), static_cast<size_t>(remaining));
+  struct WorkerResult {
+    double value_sum = 0.0;
+    SolverStats stats;
+  };
+  std::vector<WorkerResult> worker_results(pool_size);
+  std::vector<std::thread> workers;
+  workers.reserve(pool_size);
+  const uint64_t start = state_.iterations;
+  for (size_t worker = 0; worker < pool_size; ++worker) {
+    const uint32_t worker_seed = static_cast<uint32_t>(rng_());
+    workers.emplace_back([&, worker, worker_seed] {
+      std::seed_seq seed{worker_seed, static_cast<uint32_t>(worker)};
+      std::mt19937 rng(seed);
+      WorkerResult& output = worker_results[worker];
+      for (uint64_t offset = worker; offset < remaining; offset += pool_size) {
+        output.value_sum += run_one(start + offset, rng, output.stats, true);
+      }
+    });
   }
+  for (std::thread& worker : workers) worker.join();
+  for (const WorkerResult& worker : worker_results) {
+    state_.root_value_sum += worker.value_sum;
+    stats_.decision_visits += worker.stats.decision_visits;
+    stats_.chance_samples += worker.stats.chance_samples;
+    stats_.terminal_visits += worker.stats.terminal_visits;
+  }
+  state_.iterations += remaining;
 }
 
 double TabularCfrSolver::evaluate_deal(const Deal& deal,
@@ -670,7 +664,7 @@ absl::StatusOr<Policy> TabularCfrSolver::extract_average_policy() const {
 double TabularCfrSolver::expected_value(Player player) const {
   if (state_.iterations == 0) return 0.0;
   const double player_a_ev =
-      state_.cumulative_root_utility / static_cast<double>(state_.iterations);
+      state_.root_value_sum / static_cast<double>(state_.iterations);
   return player == Player::A ? player_a_ev : -player_a_ev;
 }
 

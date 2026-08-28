@@ -329,8 +329,7 @@ absl::StatusOr<BestResponseResult> TrainResponse(
     };
     const double value = cfr(
         cfr, HistoryId{}, initial_position, {1.0, 1.0});
-    response_state.cumulative_root_utility +=
-        responder == Player::A ? value : -value;
+    response_state.root_value_sum += responder == Player::A ? value : -value;
     ++response_state.iterations;
   }
 
