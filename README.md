@@ -37,8 +37,7 @@ Model artifacts under `models/` are local inputs and are not tracked by Git.
 | --- | --- |
 | `src/poker.*` | Cards, betting rules and transitions, deals, and showdown comparison |
 | `src/bet_abstraction.*` | Converts a decision state into the ordered action set used by a model |
-| `src/card_canonicalization.*` | Lossless suit canonicalization |
-| `src/card_abstraction.*` | Public and private observations used in infoset keys |
+| `src/card_abstraction.*` | Canonicalized public and private observations used in infoset keys |
 | `src/history.*` | Builds the complete abstract betting-history tree |
 | `src/cfr_traversal.h` | Shared recursive CFR traversal; backends own storage only |
 | `src/solver.*` | Game compilation, infoset storage, tabular CFR training, and policy extraction |

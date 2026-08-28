@@ -23,9 +23,7 @@ namespace {
 
 bool LookupOrUniform(const StrategyLookup& lookup, InfoSetKey key, std::span<float> probabilities) {
   if (lookup(key, probabilities)) return true;
-  if (!probabilities.empty()) {
-    std::fill(probabilities.begin(), probabilities.end(), 1.0f / static_cast<float>(probabilities.size()));
-  }
+  FillUniform(probabilities);
   return false;
 }
 
@@ -103,13 +101,8 @@ ProfileEstimate EstimateProfile(
         }
 
         if (sample_actions) {
-          float action_sample = std::uniform_real_distribution<float>{}(rng);
-          uint8_t sampled_action = 0;
-          while (sampled_action + 1 < action_count && action_sample >= probabilities[sampled_action]) {
-            action_sample -= probabilities[sampled_action];
-            ++sampled_action;
-          }
-          history_id = history.children[node.children_begin + sampled_action];
+          const uint8_t action = SampleAction(strategy, rng);
+          history_id = history.children[node.children_begin + action];
           continue;
         }
 
@@ -237,13 +230,8 @@ absl::StatusOr<BestResponseResult> TrainResponse(
         }
 
         if (config.external_sampling && player != responder) {
-          float action_sample = std::uniform_real_distribution<float>{}(rng);
-          uint8_t sampled_action = 0;
-          while (sampled_action + 1 < action_count && action_sample >= probabilities[sampled_action]) {
-            action_sample -= probabilities[sampled_action];
-            ++sampled_action;
-          }
-          history_id = history.children[node.children_begin + sampled_action];
+          const uint8_t action = SampleAction(strategy, rng);
+          history_id = history.children[node.children_begin + action];
           continue;
         }
 

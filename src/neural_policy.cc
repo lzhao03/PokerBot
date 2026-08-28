@@ -142,10 +142,6 @@ NeuralFeatureVector EncodeNeuralFeatures(InfoSetKey key, const HistoryNode& node
   return EncodeNeuralFeatures(key.history, key.public_observation, key.private_observation, node, card_abstraction);
 }
 
-void FillUniform(std::span<float> probabilities) {
-  std::fill(probabilities.begin(), probabilities.end(), 1.0f / static_cast<float>(probabilities.size()));
-}
-
 void RegretMatch(std::span<const float> advantages, std::span<float> probabilities) {
   float sum = 0.0f;
   for (size_t action = 0; action < probabilities.size(); ++action) {

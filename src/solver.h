@@ -75,6 +75,15 @@ static_assert(sizeof(InfoSetKey) == 16);
 // Returning false requests uniform fallback; callers always initialize output.
 using StrategyLookup = std::function<bool(InfoSetKey, std::span<float>)>;
 
+inline void FillUniform(std::span<float> probabilities) {
+  if (!probabilities.empty()) {
+    std::ranges::fill(
+        probabilities, 1.0f / static_cast<float>(probabilities.size()));
+  }
+}
+
+uint8_t SampleAction(std::span<const float> probabilities, std::mt19937& rng);
+
 struct InfoSetTable {
   explicit InfoSetTable(const SolverConfig& config);
 

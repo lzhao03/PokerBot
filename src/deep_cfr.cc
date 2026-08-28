@@ -232,13 +232,8 @@ struct DeepCfrSolver::Impl {
           strategy_sample.weight = static_cast<float>(iteration + 1);
           strategy_memory.add(std::move(strategy_sample), reservoir_rng);
 
-          float sample = std::uniform_real_distribution<float>{}(game_rng);
-          uint8_t sampled_action = 0;
-          while (sampled_action + 1 < action_count && sample >= probabilities[sampled_action]) {
-            sample -= probabilities[sampled_action];
-            ++sampled_action;
-          }
-          history_id = history.children[node.children_begin + sampled_action];
+          const uint8_t action = SampleAction(strategy, game_rng);
+          history_id = history.children[node.children_begin + action];
           continue;
         }
 

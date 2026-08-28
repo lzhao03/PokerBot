@@ -42,6 +42,11 @@ struct CardAbstractionConfig {
   RecallMode recall_mode = RecallMode::BucketHistory;
 };
 
+PublicObservationId CanonicalPublicObservation(const Board& board) noexcept;
+PrivateObservationId CanonicalPrivateObservation(
+    ComboId hand,
+    const Board& board) noexcept;
+
 class PublicPosition {
  public:
   PublicPosition(const CardAbstractionConfig& config, const Board& board);

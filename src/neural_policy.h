@@ -85,7 +85,6 @@ NeuralFeatureVector EncodeNeuralFeatures(
     const HistoryNode& node,
     const CardAbstractionConfig& card_abstraction);
 
-void FillUniform(std::span<float> probabilities);
 void RegretMatch(std::span<const float> advantages,
                  std::span<float> probabilities);
 void Softmax(std::span<const float> logits,

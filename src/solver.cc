@@ -161,13 +161,6 @@ Deal DealDistribution::sample(std::mt19937& rng) const {
 
 namespace {
 
-void FillUniform(std::span<float> probabilities) {
-  if (!probabilities.empty()) {
-    std::fill(probabilities.begin(), probabilities.end(),
-              1.0f / static_cast<float>(probabilities.size()));
-  }
-}
-
 StrategyLookup TableStrategy(InfoSetTable& table, std::vector<float>& values) {
   return [&table, &values](InfoSetKey key, std::span<float> probabilities) {
     const auto row = table.find(key);
@@ -177,6 +170,16 @@ StrategyLookup TableStrategy(InfoSetTable& table, std::vector<float>& values) {
 }
 
 }  // namespace
+
+uint8_t SampleAction(std::span<const float> probabilities, std::mt19937& rng) {
+  float sample = std::uniform_real_distribution<float>{}(rng);
+  uint8_t action = 0;
+  while (action + 1 < probabilities.size() &&
+         sample >= probabilities[action]) {
+    sample -= probabilities[action++];
+  }
+  return action;
+}
 
 void InfoSetTable::add_regret(uint32_t offset, size_t action, double delta) {
   float& regret = regret_sum[offset + action];
@@ -403,14 +406,8 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
             info_sets_.add_strategy(
                 *offset, strategy, static_cast<double>(iteration + 1));
           }
-          float sample = std::uniform_real_distribution<float>{}(rng);
-          uint8_t sampled_action = 0;
-          while (sampled_action + 1 < action_count &&
-                 sample >= probabilities[sampled_action]) {
-            sample -= probabilities[sampled_action];
-            ++sampled_action;
-          }
-          history = history_.children[node.children_begin + sampled_action];
+          const uint8_t action = SampleAction(strategy, rng);
+          history = history_.children[node.children_begin + action];
           continue;
         }
 

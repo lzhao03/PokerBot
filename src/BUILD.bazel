@@ -34,23 +34,11 @@ cc_library(
 )
 
 cc_library(
-    name = "card_canonicalization",
-    srcs = ["card_canonicalization.cc"],
-    hdrs = ["card_canonicalization.h"],
-    copts = CORE_COPTS,
-    deps = [":poker"],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "card_abstraction",
     srcs = ["card_abstraction.cc"],
     hdrs = ["card_abstraction.h"],
     copts = CORE_COPTS,
-    deps = [
-        ":card_canonicalization",
-        ":poker",
-    ],
+    deps = [":poker"],
     visibility = ["//visibility:public"],
 )
 
