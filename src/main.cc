@@ -16,8 +16,10 @@
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <cinttypes>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
@@ -307,37 +309,22 @@ absl::Status RunDeep(poker::SolveSpec spec, uint64_t iterations) {
     response_config.external_sampling = absl::GetFlag(FLAGS_best_response_external_sampling);
     const auto estimate = solver->estimate_exploitability(response_config);
     if (!estimate.ok()) return estimate.status();
-    std::cout
-        << "deep_best_response_a_value="
-        << estimate->player_a_response.value << '\n'
-        << "deep_best_response_a_se="
-        << estimate->player_a_response.standard_error << '\n'
-        << "deep_best_response_b_value="
-        << estimate->player_b_response.value << '\n'
-        << "deep_best_response_b_se="
-        << estimate->player_b_response.standard_error << '\n'
-        << "deep_best_response_a_info_sets="
-        << estimate->player_a_response.response_policy.rows.size() << '\n'
-        << "deep_best_response_b_info_sets="
-        << estimate->player_b_response.response_policy.rows.size() << '\n'
-        << "deep_policy_lookups="
-        << estimate->player_a_response.opponent_policy_lookups +
-               estimate->player_b_response.opponent_policy_lookups
-        << '\n'
-        << "deep_response_policy_lookups="
-        << estimate->player_a_response.response_policy_lookups +
-               estimate->player_b_response.response_policy_lookups
-        << '\n'
-        << "deep_missing_response_lookups="
-        << estimate->player_a_response.missing_response_lookups +
-               estimate->player_b_response.missing_response_lookups
-        << '\n'
-        << "deep_nash_conv=" << estimate->nash_conv << '\n'
-        << "deep_exploitability=" << estimate->exploitability << '\n'
-        << "deep_missing_policy_lookups="
-        << estimate->player_a_response.missing_opponent_lookups +
-               estimate->player_b_response.missing_opponent_lookups
-        << '\n';
+    const auto& a = estimate->player_a_response;
+    const auto& b = estimate->player_b_response;
+    std::printf("deep_best_response_a_value=%g\n", a.value);
+    std::printf("deep_best_response_a_se=%g\n", a.standard_error);
+    std::printf("deep_best_response_b_value=%g\n", b.value);
+    std::printf("deep_best_response_b_se=%g\n", b.standard_error);
+    std::printf("deep_best_response_a_info_sets=%zu\n", a.response_policy.rows.size());
+    std::printf("deep_best_response_b_info_sets=%zu\n", b.response_policy.rows.size());
+    std::printf("deep_policy_lookups=%" PRIu64 "\n", a.opponent_policy_lookups + b.opponent_policy_lookups);
+    std::printf("deep_response_policy_lookups=%" PRIu64 "\n", a.response_policy_lookups + b.response_policy_lookups);
+    std::printf("deep_missing_response_lookups=%" PRIu64 "\n",
+                a.missing_response_lookups + b.missing_response_lookups);
+    std::printf("deep_nash_conv=%g\n", estimate->nash_conv);
+    std::printf("deep_exploitability=%g\n", estimate->exploitability);
+    std::printf("deep_missing_policy_lookups=%" PRIu64 "\n",
+                a.missing_opponent_lookups + b.missing_opponent_lookups);
   }
   if (!model_output.empty() && checkpoint_interval == 0) {
     const absl::Status saved = solver->save_average_model(model_output);
