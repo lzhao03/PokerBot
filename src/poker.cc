@@ -33,39 +33,27 @@ void CommitChips(BettingData& state, Player player, Chips amount) {
 }
 
 void RefundUnmatchedCommitment(BettingData& state) {
-  if (state.street_committed[0] == state.street_committed[1]) {
-    return;
-  }
-  const Player player = state.street_committed[0] > state.street_committed[1]
-                            ? Player::A
-                            : Player::B;
+  if (state.street_committed[0] == state.street_committed[1]) return;
+  const Player player =
+      state.street_committed[0] > state.street_committed[1] ? Player::A : Player::B;
   const size_t index = Index(player);
   const size_t opponent = Index(Opponent(player));
-  const Chips excess =
-      state.street_committed[index] - state.street_committed[opponent];
+  const Chips excess = state.street_committed[index] - state.street_committed[opponent];
   state.street_committed[index] -= excess;
   state.total_committed[index] -= excess;
   state.stack[index] += excess;
 }
 
 bool IsBettingRoundOver(const BettingData& state) noexcept {
-  const bool commitments_match =
-      state.street_committed[0] == state.street_committed[1];
-  if (state.actions_remaining == 0 && commitments_match) {
-    return true;
-  }
-  if (state.stack[0] != 0 && state.stack[1] != 0) {
-    return false;
-  }
-  if (state.stack[0] == 0 && state.stack[1] == 0) {
-    return true;
-  }
+  const bool commitments_match = state.street_committed[0] == state.street_committed[1];
+  if (state.actions_remaining == 0 && commitments_match) return true;
+  if (state.stack[0] != 0 && state.stack[1] != 0) return false;
+  if (state.stack[0] == 0 && state.stack[1] == 0) return true;
   const Player live_player = state.stack[0] > 0 ? Player::A : Player::B;
   return ToCall(state, live_player) == 0;
 }
 
-BettingState ApplyActionUnchecked(const DecisionState& state,
-                                  const GameAction& action) {
+BettingState ApplyActionUnchecked(const DecisionState& state, const GameAction& action) {
   BettingData child = state.data;
   const Player player = state.actor;
   const Player opponent = Opponent(player);
@@ -81,11 +69,8 @@ BettingState ApplyActionUnchecked(const DecisionState& state,
 
   const bool aggressive = action.target_street_commitment > highest_before;
   if (aggressive) {
-    const Chips raise_size =
-        child.street_committed[player_index] - highest_before;
-    if (raise_size >= child.last_full_raise) {
-      child.last_full_raise = raise_size;
-    }
+    const Chips raise_size = child.street_committed[player_index] - highest_before;
+    if (raise_size >= child.last_full_raise) child.last_full_raise = raise_size;
     child.actions_remaining = 1;
   } else {
     assert(child.actions_remaining > 0);
@@ -113,15 +98,12 @@ Board DealCards(Board board, std::span<const Card> cards) noexcept {
     assert(!board.contains(card));
     board.cards_[board.count_++] = card;
   }
-  if (board.count_ == 3) {
-    std::sort(board.cards_.begin(), board.cards_.begin() + 3);
-  }
+  if (board.count_ == 3) std::sort(board.cards_.begin(), board.cards_.begin() + 3);
   return board;
 }
 
 absl::StatusOr<Board> MakeBoard(std::span<const Card> cards) {
-  if (!(cards.empty() || (cards.size() >= 3 &&
-                          cards.size() <= kMaxBoardCards))) {
+  if (!(cards.empty() || (cards.size() >= 3 && cards.size() <= kMaxBoardCards))) {
     return absl::InvalidArgumentError("board must have 0, 3, 4, or 5 cards");
   }
   std::array<Card, kMaxBoardCards> stored = {};
@@ -134,15 +116,11 @@ absl::StatusOr<Board> MakeBoard(std::span<const Card> cards) {
     stored[index] = card;
     mask |= CardBit(card);
   }
-  if (cards.size() >= 3) {
-    std::sort(stored.begin(), stored.begin() + 3);
-  }
+  if (cards.size() >= 3) std::sort(stored.begin(), stored.begin() + 3);
   return Board(stored, static_cast<uint8_t>(cards.size()));
 }
 
-std::array<Card, 2> ComboId::cards() const noexcept {
-  return kComboCards[index()];
-}
+std::array<Card, 2> ComboId::cards() const noexcept { return kComboCards[index()]; }
 
 CardMask ComboId::mask() const noexcept {
   const auto [first, second] = kComboCards[index()];
@@ -150,17 +128,12 @@ CardMask ComboId::mask() const noexcept {
 }
 
 std::optional<ComboId> MaybeCardsToComboId(Card first, Card second) {
-  if (first == second) {
-    return std::nullopt;
-  }
-  if (second < first) {
-    std::swap(first, second);
-  }
+  if (first == second) return std::nullopt;
+  if (second < first) std::swap(first, second);
 
   const size_t first_index = first.index();
-  const size_t combo =
-      first_index * (2 * kDeckCardCount - first_index - 1) / 2 +
-      second.index() - first_index - 1;
+  const size_t combo = first_index * (2 * kDeckCardCount - first_index - 1) / 2 +
+                       second.index() - first_index - 1;
   return ComboId(static_cast<uint16_t>(combo));
 }
 
@@ -176,24 +149,16 @@ size_t CardsForNextStreet(StreetKind street) {
 }
 
 absl::StatusOr<absl::InlinedVector<Card, 3>> SampleStreetCards(
-    StreetKind street,
-    const Board& board,
-    CardMask known_private_cards,
-    std::mt19937& rng) {
-  if (board.street() != street) {
-    return absl::InvalidArgumentError("board does not match street");
-  }
+    StreetKind street, const Board& board, CardMask known_private_cards, std::mt19937& rng) {
+  if (board.street() != street) return absl::InvalidArgumentError("board does not match street");
   const size_t count = CardsForNextStreet(street);
-  if (count == 0) {
-    return absl::InlinedVector<Card, 3>{};
-  }
+  if (count == 0) return absl::InlinedVector<Card, 3>{};
 
   CardMask blocked = known_private_cards | board.mask();
   absl::InlinedVector<Card, 3> sampled;
   sampled.reserve(count);
   std::uniform_int_distribution<uint32_t> card_dist(0, kDeckCardCount - 1);
-  for (size_t attempt = 0;
-       attempt < kDeckCardCount && sampled.size() < count; ++attempt) {
+  for (size_t attempt = 0; attempt < kDeckCardCount && sampled.size() < count; ++attempt) {
     const Card candidate = kDeck[card_dist(rng)];
     const CardMask bit = CardBit(candidate);
     if ((blocked & bit) == 0) {
@@ -206,14 +171,10 @@ absl::StatusOr<absl::InlinedVector<Card, 3>> SampleStreetCards(
   std::array<Card, kDeckCardCount> candidates = {};
   uint32_t candidate_count = 0;
   for (Card candidate : kDeck) {
-    if ((blocked & CardBit(candidate)) == 0) {
-      candidates[candidate_count++] = candidate;
-    }
+    if ((blocked & CardBit(candidate)) == 0) candidates[candidate_count++] = candidate;
   }
   const size_t remaining = count - sampled.size();
-  if (candidate_count < remaining) {
-    return absl::InvalidArgumentError("not enough unblocked cards");
-  }
+  if (candidate_count < remaining) return absl::InvalidArgumentError("not enough unblocked cards");
 
   for (uint32_t i = 0; i < remaining; ++i) {
     std::uniform_int_distribution<uint32_t> card_dist(i, candidate_count - 1);
@@ -225,8 +186,7 @@ absl::StatusOr<absl::InlinedVector<Card, 3>> SampleStreetCards(
 }
 
 ExactPublicState MakeInitialState(
-    const BettingRules& rules,
-    std::array<Chips, kPlayerCount> stacks,
+    const BettingRules& rules, std::array<Chips, kPlayerCount> stacks,
     std::array<Chips, kPlayerCount> blinds) {
   assert(rules.minimum_bet > 0);
   for (size_t player = 0; player < kPlayerCount; ++player) {
@@ -243,20 +203,16 @@ ExactPublicState MakeInitialState(
   return ExactPublicState{DecisionState{betting, Player::A}, Board{}};
 }
 
-bool IsLegalAction(const DecisionState& state,
-                   const GameAction& action) noexcept {
+bool IsLegalAction(const DecisionState& state, const GameAction& action) noexcept {
   const BettingData& data = state.data;
   const size_t player = Index(state.actor);
-  if (data.stack[player] <= 0) {
-    return false;
-  }
+  if (data.stack[player] <= 0) return false;
 
   const Chips current_to = data.street_committed[player];
   const Chips highest_to = CurrentWager(data);
   const Chips to_call = highest_to - current_to;
   const Chips call_to = std::min(highest_to, current_to + data.stack[player]);
-  const Chips all_in_to =
-      current_to + MaxContestableAdditional(data, state.actor);
+  const Chips all_in_to = current_to + MaxContestableAdditional(data, state.actor);
   const Chips min_full_raise_to = highest_to + data.last_full_raise;
   const Chips target = action.target_street_commitment;
   switch (action.kind) {
@@ -267,32 +223,25 @@ bool IsLegalAction(const DecisionState& state,
     case ActionKind::Call:
       return to_call > 0 && target == call_to;
     case ActionKind::Bet:
-      return highest_to == 0 && target >= min_full_raise_to &&
-             target < all_in_to;
+      return highest_to == 0 && target >= min_full_raise_to && target < all_in_to;
     case ActionKind::Raise:
-      return highest_to > 0 && target >= min_full_raise_to &&
-             target < all_in_to;
+      return highest_to > 0 && target >= min_full_raise_to && target < all_in_to;
     case ActionKind::AllIn:
       return all_in_to > call_to && target == all_in_to;
   }
 }
 
-absl::StatusOr<BettingState> ApplyAction(const DecisionState& state,
-                                         const GameAction& action) {
-  if (!IsLegalAction(state, action)) {
-    return absl::InvalidArgumentError("illegal poker action");
-  }
+absl::StatusOr<BettingState> ApplyAction(const DecisionState& state, const GameAction& action) {
+  if (!IsLegalAction(state, action)) return absl::InvalidArgumentError("illegal poker action");
   return ApplyActionUnchecked(state, action);
 }
 
-BettingState AdvanceBettingStreet(const ChanceState& state,
-                                  const BettingRules& rules) {
+BettingState AdvanceBettingStreet(const ChanceState& state, const BettingRules& rules) {
   assert(rules.minimum_bet > 0);
   assert(state.data.street != StreetKind::River);
 
   BettingData child = state.data;
-  child.street = static_cast<StreetKind>(
-      std::to_underlying(state.data.street) + 1);
+  child.street = static_cast<StreetKind>(std::to_underlying(state.data.street) + 1);
   child.street_committed = {0, 0};
   child.last_full_raise = rules.minimum_bet;
   child.actions_remaining = 2;
@@ -307,38 +256,29 @@ BettingState AdvanceBettingStreet(const ChanceState& state,
 }
 
 absl::StatusOr<ExactPublicState> TryApplyChance(
-    const ExactPublicState& state,
-    std::span<const Card> cards,
+    const ExactPublicState& state, std::span<const Card> cards,
     const BettingRules& rules) {
   const auto* chance = std::get_if<ChanceState>(&state.betting);
-  if (chance == nullptr) {
-    return absl::InvalidArgumentError("state is not a chance node");
-  }
+  if (chance == nullptr) return absl::InvalidArgumentError("state is not a chance node");
   if (rules.minimum_bet <= 0 || state.board.street() != chance->data.street ||
       cards.size() != CardsForNextStreet(chance->data.street)) {
     return absl::InvalidArgumentError("invalid chance transition");
   }
   CardMask mask = state.board.mask();
   for (Card card : cards) {
-    if ((mask & CardBit(card)) != 0) {
-      return absl::InvalidArgumentError("duplicate board card");
-    }
+    if ((mask & CardBit(card)) != 0) return absl::InvalidArgumentError("duplicate board card");
     mask |= CardBit(card);
   }
-  return ExactPublicState{
-      AdvanceBettingStreet(*chance, rules), DealCards(state.board, cards)};
+  return ExactPublicState{AdvanceBettingStreet(*chance, rules), DealCards(state.board, cards)};
 }
 
-double TerminalEvaluator::operator()(const BettingState& state,
-                                     const Board& board,
+double TerminalEvaluator::operator()(const BettingState& state, const Board& board,
                                      Player evaluated_player) noexcept {
   assert(IsTerminal(state));
   double player_a_utility;
   if (const auto* fold = std::get_if<FoldTerminalState>(&state)) {
     const double committed = fold->data.total_committed[0];
-    player_a_utility = fold->folded == Player::A
-                           ? -committed
-                           : Pot(fold->data) - committed;
+    player_a_utility = fold->folded == Player::A ? -committed : Pot(fold->data) - committed;
   } else {
     const ShowdownState& showdown = std::get<ShowdownState>(state);
     const double committed = showdown.data.total_committed[0];
@@ -352,14 +292,11 @@ double TerminalEvaluator::operator()(const BettingState& state,
                                  ? -committed
                                  : Pot(showdown.data) / 2.0 - committed;
   }
-  return evaluated_player == Player::A ? player_a_utility
-                                        : -player_a_utility;
+  return evaluated_player == Player::A ? player_a_utility : -player_a_utility;
 }
 
 double TerminalUtility(
-    const BettingState& state,
-    const Board& board,
-    const std::array<ComboId, kPlayerCount>& hands,
+    const BettingState& state, const Board& board, const std::array<ComboId, kPlayerCount>& hands,
     Player evaluated_player) noexcept {
   return TerminalEvaluator(hands)(state, board, evaluated_player);
 }
