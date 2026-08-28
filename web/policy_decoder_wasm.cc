@@ -16,7 +16,6 @@
 
 #include "src/bet_abstraction.h"
 #include "src/card_abstraction.h"
-#include "src/hand_evaluator.h"
 #include "src/history.h"
 #include "src/neural_features.h"
 #include "src/poker.h"

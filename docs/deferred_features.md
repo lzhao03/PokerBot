@@ -161,7 +161,7 @@ git show dcbadfc^:<path>
   five-card scoring model in `tests/card_utils_test.cc`.
 - **Restore when:** A UI, hand-history inspector, debugging tool, or public API
   needs names, kickers, or stable raw values.
-- **Recovery locations:** `src/hand_evaluator.*` and the removed generator
+- **Recovery locations:** `src/poker.cc` and the removed generator
   tooling from `dcbadfc^`.
 
 ### Direct history-edge action metadata

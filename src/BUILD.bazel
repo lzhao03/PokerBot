@@ -10,14 +10,8 @@ CORE_COPTS = [
 
 cc_library(
     name = "poker",
-    srcs = [
-        "hand_evaluator.cc",
-        "poker.cc",
-    ],
-    hdrs = [
-        "hand_evaluator.h",
-        "poker.h",
-    ],
+    srcs = ["poker.cc"],
+    hdrs = ["poker.h"],
     copts = CORE_COPTS,
     deps = [
         "@abseil-cpp//absl/container:inlined_vector",

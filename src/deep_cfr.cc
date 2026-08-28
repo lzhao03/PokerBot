@@ -14,7 +14,6 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
-#include "src/hand_evaluator.h"
 #include "src/neural_policy.h"
 
 namespace poker {

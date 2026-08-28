@@ -265,6 +265,7 @@ inline bool IsValidBettingData(const BettingData& state) noexcept {
 
 std::optional<ComboId> MaybeCardsToComboId(Card first, Card second);
 ComboId CardsToComboId(Card first, Card second) noexcept;
+int CompareHands(ComboId first, ComboId second, const Board& board);
 
 size_t CardsForNextStreet(StreetKind street);
 absl::StatusOr<absl::InlinedVector<Card, 3>> SampleStreetCards(

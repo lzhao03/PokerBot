@@ -19,7 +19,6 @@
 #include <vector>
 
 #include "absl/status/status.h"
-#include "src/hand_evaluator.h"
 
 namespace poker {
 namespace {
