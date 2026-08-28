@@ -542,25 +542,8 @@ double TabularCfrSolver::evaluate_deals(int samples, EvaluationMode mode) {
   return value / samples;
 }
 
-double TabularCfrSolver::evaluate_current(ComboId player_a,
-                                          ComboId player_b) {
-  const Deal deal{{player_a, player_b}};
-  return evaluate_deal(deal, EvaluationMode::Current);
-}
-
 double TabularCfrSolver::evaluate_current(int samples) {
   return evaluate_deals(samples, EvaluationMode::Current);
-}
-
-absl::StatusOr<double> TabularCfrSolver::evaluate_average(
-    ComboId player_a,
-    ComboId player_b) {
-  if (!config_.accumulate_average_strategy) {
-    return absl::FailedPreconditionError(
-        "average strategy accumulation is disabled");
-  }
-  const Deal deal{{player_a, player_b}};
-  return evaluate_deal(deal, EvaluationMode::Average);
 }
 
 absl::StatusOr<double> TabularCfrSolver::evaluate_average(int samples) {

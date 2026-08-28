@@ -250,9 +250,9 @@ TEST_CASE("private abstraction cannot change terminal utility") {
   auto exact = MakeSolver(Config(), R(kA), R(kB), terminal);
   auto handcrafted = MakeSolver(
       SolverConfig{}, R(kA), R(kB), terminal);
-  const double expected = exact->evaluate_current(kA, kB);
+  const double expected = exact->evaluate_current(1);
   CHECK(expected == doctest::Approx(4.0));
-  CHECK(handcrafted->evaluate_current(kA, kB) == expected);
+  CHECK(handcrafted->evaluate_current(1) == expected);
 }
 
 TEST_CASE("history tree stores direct rule transitions") {
@@ -301,7 +301,7 @@ TEST_CASE("training mutates only CFR state") {
 
   const CfrState before = TabularCfrSolverTestAccess::state(*solver);
   const uint64_t updates = solver->stats().decision_visits;
-  const auto value = solver->evaluate_average(kA, kB);
+  const auto value = solver->evaluate_average(1);
   REQUIRE(value.ok());
   CHECK(std::isfinite(*value));
   CHECK(solver->history_count() == history_count);
@@ -410,8 +410,8 @@ TEST_CASE("average strategy storage is optional") {
   solver->run(2);
 
   CHECK(TabularCfrSolverTestAccess::state(*solver).strategy_sum.empty());
-  CHECK(std::isfinite(solver->evaluate_current(kA, kB)));
-  CHECK_FALSE(solver->evaluate_average(kA, kB).ok());
+  CHECK(std::isfinite(solver->evaluate_current(1)));
+  CHECK_FALSE(solver->evaluate_average(1).ok());
 }
 
 TEST_CASE("average policies are normalized and evaluate reproducibly") {

@@ -204,10 +204,7 @@ class TabularCfrSolver {
 
   void run(uint64_t iterations, int threads = 1);
 
-  double evaluate_current(ComboId player_a, ComboId player_b);
   double evaluate_current(int samples);
-  absl::StatusOr<double> evaluate_average(ComboId player_a,
-                                          ComboId player_b);
   absl::StatusOr<double> evaluate_average(int samples);
   absl::StatusOr<Policy> extract_average_policy() const;
 
