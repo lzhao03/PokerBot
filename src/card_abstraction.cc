@@ -14,8 +14,7 @@ namespace {
 inline constexpr int kSuitBucketCount = 4;
 inline constexpr int kStraightBucketCount = 3;
 inline constexpr int kHighBucketCount = 3;
-inline constexpr uint64_t kTextureBucketCount =
-    3 * kSuitBucketCount * kStraightBucketCount * kHighBucketCount;
+inline constexpr uint64_t kTextureBucketCount = 3 * kSuitBucketCount * kStraightBucketCount * kHighBucketCount;
 inline constexpr std::array<uint64_t, 3> kTextureBuckets = {108, 108, 108};
 
 struct BoardFeatures {
@@ -32,8 +31,7 @@ const auto kStraightCardsByRankMask = [] {
     constexpr uint16_t kWheel = (uint16_t{1} << 12) | 0x0F;
     int best = std::popcount(static_cast<uint16_t>(rank_mask & kWheel));
     for (int start = 0; start <= 8; ++start) {
-      best = std::max(best, std::popcount(static_cast<uint16_t>(
-                                (rank_mask >> start) & 0x1F)));
+      best = std::max(best, std::popcount(static_cast<uint16_t>((rank_mask >> start) & 0x1F)));
     }
     values[rank_mask] = static_cast<uint8_t>(best);
   }
@@ -45,10 +43,8 @@ void AddCard(BoardFeatures& features, Card card) noexcept {
   const size_t suit = std::to_underlying(card.suit());
   ++features.rank_counts[rank];
   ++features.suit_counts[suit];
-  features.max_rank_count =
-      std::max(features.max_rank_count, features.rank_counts[rank]);
-  features.max_suit_count =
-      std::max(features.max_suit_count, features.suit_counts[suit]);
+  features.max_rank_count = std::max(features.max_rank_count, features.rank_counts[rank]);
+  features.max_suit_count = std::max(features.max_suit_count, features.suit_counts[suit]);
   features.rank_mask |= static_cast<uint16_t>(1u << rank);
 }
 
@@ -59,20 +55,11 @@ BoardFeatures BoardFeaturesFor(const Board& board) noexcept {
 }
 
 uint64_t BoardTextureBucket(const BoardFeatures& features) noexcept {
-  if (features.rank_mask == 0) {
-    return 0;
-  }
-  const int pair_bucket = features.max_rank_count >= 3
-                              ? 2
-                              : (features.max_rank_count == 2 ? 1 : 0);
-  const int suit_bucket = features.max_suit_count >= 4
-                              ? 3
-                              : (features.max_suit_count >= 3
-                                     ? 2
-                                     : (features.max_suit_count == 2 ? 1 : 0));
+  if (features.rank_mask == 0) return 0;
+  const int pair_bucket = std::min<int>(features.max_rank_count - 1, 2);
+  const int suit_bucket = std::min<int>(features.max_suit_count - 1, 3);
   const int straight_cards = kStraightCardsByRankMask[features.rank_mask];
-  const int straight_bucket =
-      straight_cards >= 4 ? 2 : (straight_cards >= 3 ? 1 : 0);
+  const int straight_bucket = straight_cards >= 4 ? 2 : (straight_cards >= 3 ? 1 : 0);
   const int high_rank = std::bit_width(features.rank_mask) + 1;
   const int high_bucket = high_rank >= 14 ? 0 : (high_rank >= 11 ? 1 : 2);
   int bucket = pair_bucket;
@@ -81,9 +68,7 @@ uint64_t BoardTextureBucket(const BoardFeatures& features) noexcept {
   return static_cast<uint64_t>(bucket * kHighBucketCount + high_bucket);
 }
 
-uint16_t Handcrafted36Bucket(
-    ComboId hand,
-    const BoardFeatures& features) noexcept {
+uint16_t Handcrafted36Bucket(ComboId hand, const BoardFeatures& features) noexcept {
   const auto hole_cards = hand.cards();
   const size_t rank_index0 = std::to_underlying(hole_cards[0].rank());
   const size_t rank_index1 = std::to_underlying(hole_cards[1].rank());
@@ -95,22 +80,18 @@ uint16_t Handcrafted36Bucket(
   const bool suited = hole_cards[0].suit() == hole_cards[1].suit();
   if (features.rank_mask == 0) {
     const int shape_bucket = pair ? 0 : (suited ? 1 : 2);
-    const int high_bucket =
-        high >= 14 ? 0 : (high >= 12 ? 1 : (high >= 9 ? 2 : 3));
+    const int high_bucket = high >= 14 ? 0 : (high >= 12 ? 1 : (high >= 9 ? 2 : 3));
     const int low_bucket = low >= 10 ? 0 : (low >= 7 ? 1 : 2);
-    return static_cast<uint16_t>(
-        shape_bucket * 12 + high_bucket * 3 + low_bucket);
+    return static_cast<uint16_t>(shape_bucket * 12 + high_bucket * 3 + low_bucket);
   }
 
   int pairs = static_cast<int>(std::ranges::count_if(
-      features.rank_counts,
-      [](uint8_t count) { return count >= 2; }));
+      features.rank_counts, [](uint8_t count) { return count >= 2; }));
   uint8_t max_count = features.max_rank_count;
   auto add_hole_rank = [&](size_t rank, uint8_t count) {
     const uint8_t board_count = features.rank_counts[rank];
     if (board_count < 2 && board_count + count >= 2) ++pairs;
-    max_count = std::max(
-        max_count, static_cast<uint8_t>(board_count + count));
+    max_count = std::max(max_count, static_cast<uint8_t>(board_count + count));
   };
   if (pair) {
     add_hole_rank(rank_index0, 2);
@@ -118,26 +99,22 @@ uint16_t Handcrafted36Bucket(
     add_hole_rank(rank_index0, 1);
     add_hole_rank(rank_index1, 1);
   }
-  const int made_bucket =
-      max_count >= 3 ? 3 : (pairs >= 2 ? 2 : (pairs == 1 ? 1 : 0));
+  const int made_bucket = max_count >= 3 ? 3 : (pairs >= 2 ? 2 : (pairs == 1 ? 1 : 0));
 
   const size_t suit0 = std::to_underlying(hole_cards[0].suit());
   const size_t suit1 = std::to_underlying(hole_cards[1].suit());
-  const bool flush_draw = features.max_suit_count >= 4 ||
+  const bool flush_draw =
+      features.max_suit_count >= 4 ||
       features.suit_counts[suit0] + 1 + (suit0 == suit1) >= 4 ||
       features.suit_counts[suit1] + 1 >= 4;
-  const uint16_t rank_mask = static_cast<uint16_t>(
-      features.rank_mask | (1u << rank_index0) | (1u << rank_index1));
-  const int draw_bucket =
-      flush_draw ? 2 : (kStraightCardsByRankMask[rank_mask] >= 4 ? 1 : 0);
+  const uint16_t rank_mask = static_cast<uint16_t>(features.rank_mask | (1u << rank_index0) | (1u << rank_index1));
+  const int draw_bucket = flush_draw ? 2 : (kStraightCardsByRankMask[rank_mask] >= 4 ? 1 : 0);
 
   const int gap = high - low;
-  const int strength_bucket =
-      pair || high == 14 || (high >= 13 && low >= 10)
-          ? 0
-          : ((high >= 11 && low >= 8) || (suited && gap <= 2) ? 1 : 2);
-  return static_cast<uint16_t>(
-      made_bucket * 9 + draw_bucket * 3 + strength_bucket);
+  const bool strong = pair || high == 14 || (high >= 13 && low >= 10);
+  const bool medium = (high >= 11 && low >= 8) || (suited && gap <= 2);
+  const int strength_bucket = strong ? 0 : (medium ? 1 : 2);
+  return static_cast<uint16_t>(made_bucket * 9 + draw_bucket * 3 + strength_bucket);
 }
 
 PublicObservationId EncodeBoardTextureHistory(
@@ -150,19 +127,15 @@ PublicObservationId EncodeBoardTextureHistory(
   for (size_t index = 0; index < cards.size(); ++index) {
     AddCard(features, cards[index]);
     if (index >= 2) {
-      const uint64_t bucket = BoardTextureBucket(features) *
-                              buckets_per_street[index - 2] /
-                              kTextureBucketCount;
-      observation |= (bucket + 1)
-                     << ((index - 2) * kPublicObservationBitsPerStreet);
+      const uint64_t bucket = BoardTextureBucket(features) * buckets_per_street[index - 2] / kTextureBucketCount;
+      observation |= (bucket + 1) << ((index - 2) * kPublicObservationBitsPerStreet);
     }
   }
   final_features = features;
   return PublicObservationId(observation);
 }
 
-PublicObservationId ObservePublicImpl(const CardAbstractionConfig& config,
-                                      const Board& board,
+PublicObservationId ObservePublicImpl(const CardAbstractionConfig& config, const Board& board,
                                       BoardFeatures& features) noexcept {
   switch (config.public_mode) {
     case PublicCardMode::ExactCanonical:
@@ -171,38 +144,30 @@ PublicObservationId ObservePublicImpl(const CardAbstractionConfig& config,
     case PublicCardMode::Texture:
       return EncodeBoardTextureHistory(board, kTextureBuckets, features);
     case PublicCardMode::CompactTexture:
-      return EncodeBoardTextureHistory(board, kCompactPublicBuckets,
-                                       features);
+      return EncodeBoardTextureHistory(board, kCompactPublicBuckets, features);
   }
 }
 
 PrivateObservationId HandcraftedObservation(
-    RecallMode recall_mode,
-    ComboId hand,
-    const Board& board,
-    PrivateObservationId previous,
+    RecallMode recall_mode, ComboId hand, const Board& board, PrivateObservationId previous,
     const BoardFeatures& board_features) noexcept {
   if (recall_mode == RecallMode::CurrentBucketOnly) {
-    return PrivateObservationId(
-        Handcrafted36Bucket(hand, board_features) + 1);
+    return PrivateObservationId(Handcrafted36Bucket(hand, board_features) + 1);
   }
   if (previous != PrivateObservationId{} && board.count() >= 3) {
-    return PrivateObservationId(
-        std::to_underlying(previous) +
-        (uint32_t{Handcrafted36Bucket(hand, board_features)} + 1)
-            * kPrivateObservationPlaces[board.count() - 2]);
+    const uint32_t bucket = uint32_t{Handcrafted36Bucket(hand, board_features)} + 1;
+    return PrivateObservationId(std::to_underlying(previous) +
+                                bucket * kPrivateObservationPlaces[board.count() - 2]);
   }
 
-  uint32_t observation =
-      uint32_t{Handcrafted36Bucket(hand, BoardFeatures{})} + 1;
+  uint32_t observation = uint32_t{Handcrafted36Bucket(hand, BoardFeatures{})} + 1;
   BoardFeatures features;
   const auto cards = board.cards();
   for (size_t index = 0; index < cards.size(); ++index) {
     AddCard(features, cards[index]);
     if (index >= 2) {
-      observation +=
-          (uint32_t{Handcrafted36Bucket(hand, features)} + 1)
-          * kPrivateObservationPlaces[index - 1];
+      observation += (uint32_t{Handcrafted36Bucket(hand, features)} + 1) *
+                     kPrivateObservationPlaces[index - 1];
     }
   }
   return PrivateObservationId(observation);
@@ -210,8 +175,7 @@ PrivateObservationId HandcraftedObservation(
 
 }  // namespace
 
-PrivateObservationId ObservePrivate(ComboId hand,
-                                    const PublicPosition& position,
+PrivateObservationId ObservePrivate(ComboId hand, const PublicPosition& position,
                                     PrivateObservationId previous) noexcept {
   switch (position.private_kind_) {
     case PrivateAbstractionKind::ExactCanonical:
@@ -224,8 +188,7 @@ PrivateObservationId ObservePrivate(ComboId hand,
   }
 }
 
-PublicPosition::PublicPosition(const CardAbstractionConfig& config,
-                               const Board& board)
+PublicPosition::PublicPosition(const CardAbstractionConfig& config, const Board& board)
     : board_(board),
       private_kind_(config.private_kind),
       recall_mode_(config.recall_mode) {

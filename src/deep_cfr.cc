@@ -2,12 +2,10 @@
 
 #include <algorithm>
 #include <array>
-#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
-#include <limits>
 #include <optional>
 #include <random>
 #include <span>
@@ -24,9 +22,7 @@ namespace {
 
 class Reservoir {
  public:
-  explicit Reservoir(size_t capacity) : capacity_(capacity) {
-    samples_.reserve(capacity);
-  }
+  explicit Reservoir(size_t capacity) : capacity_(capacity) { samples_.reserve(capacity); }
 
   void add(NeuralSample sample, std::mt19937& rng) {
     const uint64_t index = seen_++;
@@ -34,17 +30,14 @@ class Reservoir {
       samples_.push_back(std::move(sample));
       return;
     }
-    const uint64_t replacement =
-        std::uniform_int_distribution<uint64_t>(0, index)(rng);
+    const uint64_t replacement = std::uniform_int_distribution<uint64_t>(0, index)(rng);
     if (replacement < capacity_) {
       samples_[static_cast<size_t>(replacement)] = std::move(sample);
     }
   }
 
   size_t size() const noexcept { return samples_.size(); }
-  std::span<const NeuralSample> samples() const noexcept {
-    return samples_;
-  }
+  std::span<const NeuralSample> samples() const noexcept { return samples_; }
 
  private:
   size_t capacity_;
@@ -52,9 +45,7 @@ class Reservoir {
   std::vector<NeuralSample> samples_;
 };
 
-uint64_t NetworkSeed(uint64_t base,
-                     uint64_t iteration,
-                     uint64_t network) {
+uint64_t NetworkSeed(uint64_t base, uint64_t iteration, uint64_t network) {
   return base + iteration * 0x9e3779b97f4a7c15ULL + network;
 }
 
@@ -76,15 +67,12 @@ absl::Status ValidateConfig(const DeepCfrConfig& config) {
     return absl::InvalidArgumentError("Deep CFR sizes must be positive");
   }
   if (!std::isfinite(config.learning_rate) || config.learning_rate <= 0.0) {
-    return absl::InvalidArgumentError(
-        "Deep CFR learning rate must be finite and positive");
+    return absl::InvalidArgumentError("Deep CFR learning rate must be finite and positive");
   }
   return absl::OkStatus();
 }
 
-absl::Status TorchError(const std::exception& error) {
-  return absl::InternalError(error.what());
-}
+absl::Status TorchError(const std::exception& error) { return absl::InternalError(error.what()); }
 
 }  // namespace
 
@@ -101,27 +89,19 @@ struct DeepCfrSolver::Impl {
         initial_public(std::move(root_public)),
         model(fingerprint),
         config(deep_config),
-        advantage_memory{
-            Reservoir(config.advantage_memory_capacity),
-            Reservoir(config.advantage_memory_capacity)},
+        advantage_memory{Reservoir(config.advantage_memory_capacity),
+                         Reservoir(config.advantage_memory_capacity)},
         strategy_memory(config.strategy_memory_capacity),
-        advantage_network{
-            NeuralNetwork(config.hidden_size),
-            NeuralNetwork(config.hidden_size)},
+        advantage_network{NeuralNetwork(config.hidden_size), NeuralNetwork(config.hidden_size)},
         inference_hidden{
             std::vector<float>(static_cast<size_t>(config.hidden_size)),
             std::vector<float>(static_cast<size_t>(config.hidden_size))},
         game_rng(MakeRng(config.seed)),
         reservoir_rng(MakeRng(config.seed + 1)) {
-    for (auto& cache : advantage_cache) {
-      cache.reserve(config.inference_cache_capacity);
-    }
+    for (auto& cache : advantage_cache) cache.reserve(config.inference_cache_capacity);
   }
 
-  void fill_current_strategy(
-      Player actor,
-      InfoSetKey key,
-      std::span<float> probabilities) {
+  void fill_current_strategy(Player actor, InfoSetKey key, std::span<float> probabilities) {
     const size_t player = Index(actor);
     if (!advantage_trained[player]) {
       FillUniform(probabilities);
@@ -134,11 +114,8 @@ struct DeepCfrSolver::Impl {
     }
   }
 
-  bool policy_strategy(InfoSetKey key,
-                       std::span<float> probabilities) {
-    return policy_strategy(
-        key, probabilities, policy_cache,
-        stats.network_evaluations, stats.cache_hits);
+  bool policy_strategy(InfoSetKey key, std::span<float> probabilities) {
+    return policy_strategy(key, probabilities, policy_cache, stats.network_evaluations, stats.cache_hits);
   }
 
   bool policy_strategy(
@@ -154,8 +131,7 @@ struct DeepCfrSolver::Impl {
     const auto found = cache.find(key);
     if (found != cache.end()) {
       ++cache_hits;
-      std::copy_n(found->second.begin(), probabilities.size(),
-                  probabilities.begin());
+      std::copy_n(found->second.begin(), probabilities.size(), probabilities.begin());
       return true;
     }
     ++network_evaluations;
@@ -164,21 +140,15 @@ struct DeepCfrSolver::Impl {
         history, solver_config.card_abstraction, model, key,
         std::span<float>(values.data(), probabilities.size()));
     std::copy_n(values.begin(), probabilities.size(), probabilities.begin());
-    if (available && cache.size() < config.policy_cache_capacity) {
-      cache.emplace(key, values);
-    }
+    if (available && cache.size() < config.policy_cache_capacity) cache.emplace(key, values);
     return available;
   }
 
   StrategyLookup strategy_lookup(DeepCfrStrategy strategy) {
-    return [this, strategy](InfoSetKey key,
-                            std::span<float> probabilities) {
-      if (strategy == DeepCfrStrategy::Average) {
-        return policy_strategy(key, probabilities);
-      }
+    return [this, strategy](InfoSetKey key, std::span<float> probabilities) {
+      if (strategy == DeepCfrStrategy::Average) return policy_strategy(key, probabilities);
       const HistoryNode& node = history.nodes[Index(key.history)];
-      fill_current_strategy(
-          std::get<DecisionState>(node.state).actor, key, probabilities);
+      fill_current_strategy(std::get<DecisionState>(node.state).actor, key, probabilities);
       return true;
     };
   }
@@ -187,14 +157,9 @@ struct DeepCfrSolver::Impl {
       const StrategyLookup& player_a,
       const StrategyLookup& player_b,
       int samples) {
-    if (samples <= 0) {
-      return absl::InvalidArgumentError(
-          "evaluation samples must be positive");
-    }
-    return EstimateExpectedValue(
-        solver_config, deals, history, initial_public, player_a, player_b,
-        static_cast<uint64_t>(samples),
-        config.seed + 3, false, true);
+    if (samples <= 0) return absl::InvalidArgumentError("evaluation samples must be positive");
+    return EstimateExpectedValue(solver_config, deals, history, initial_public, player_a, player_b,
+                                 static_cast<uint64_t>(samples), config.seed + 3, false, true);
   }
 
   NeuralActionVector cached_prediction(
@@ -212,19 +177,13 @@ struct DeepCfrSolver::Impl {
     }
     ++network_evaluations;
     const NeuralActionVector values =
-        PredictNeuralNetwork(
-            network, history, solver_config.card_abstraction, key, hidden);
-    if (cache.size() < capacity) {
-      cache.emplace(key, values);
-    }
+        PredictNeuralNetwork(network, history, solver_config.card_abstraction, key, hidden);
+    if (cache.size() < capacity) cache.emplace(key, values);
     return values;
   }
 
-  float train_network(NeuralNetwork& network,
-                      const Reservoir& memory,
-                      uint64_t seed,
-                      NeuralTarget target_kind,
-                      int training_steps) {
+  float train_network(NeuralNetwork& network, const Reservoir& memory, uint64_t seed,
+                      NeuralTarget target_kind, int training_steps) {
     return FitNeuralNetwork(
         network, history, solver_config.card_abstraction, memory.samples(),
         {.seed = seed,
@@ -235,15 +194,11 @@ struct DeepCfrSolver::Impl {
         target_kind);
   }
 
-  double traverse(const Deal& deal,
-                  Player update_player,
-                  uint64_t iteration) {
+  double traverse(const Deal& deal, Player update_player, uint64_t iteration) {
     TerminalEvaluator terminal_utility(deal.hands);
-    const ObservedPosition initial_position =
-        ObservedPosition::Observe(initial_public, deal);
+    const ObservedPosition initial_position = ObservedPosition::Observe(initial_public, deal);
     ChanceSampler sample_chance{solver_config.card_abstraction, deal, game_rng};
-    auto cfr = [&](auto&& self,
-                   HistoryId history_id,
+    auto cfr = [&](auto&& self, HistoryId history_id,
                    const ObservedPosition& position) -> double {
       while (true) {
         const HistoryNode& node = history.nodes[Index(history_id)];
@@ -252,8 +207,7 @@ struct DeepCfrSolver::Impl {
           return terminal_utility(node.state, position.board(), update_player);
         }
         if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
-          stats.traversal.chance_samples +=
-              static_cast<uint64_t>(solver_config.chance_samples);
+          stats.traversal.chance_samples += static_cast<uint64_t>(solver_config.chance_samples);
           const HistoryId child = history.children[node.children_begin];
           const auto& child_state = history.nodes[Index(child)].state;
           double value = 0.0;
@@ -275,16 +229,13 @@ struct DeepCfrSolver::Impl {
 
         if (player != update_player) {
           NeuralSample strategy_sample{key};
-          std::copy(strategy.begin(), strategy.end(),
-                    strategy_sample.target.begin());
+          std::copy(strategy.begin(), strategy.end(), strategy_sample.target.begin());
           strategy_sample.weight = static_cast<float>(iteration + 1);
-          strategy_memory.add(
-              std::move(strategy_sample), reservoir_rng);
+          strategy_memory.add(std::move(strategy_sample), reservoir_rng);
 
           float sample = std::uniform_real_distribution<float>{}(game_rng);
           uint8_t sampled_action = 0;
-          while (sampled_action + 1 < action_count &&
-                 sample >= probabilities[sampled_action]) {
+          while (sampled_action + 1 < action_count && sample >= probabilities[sampled_action]) {
             sample -= probabilities[sampled_action];
             ++sampled_action;
           }
@@ -295,8 +246,7 @@ struct DeepCfrSolver::Impl {
         std::array<double, kMaxActionsPerNode> action_values;
         double node_value = 0.0;
         for (uint8_t action = 0; action < action_count; ++action) {
-          const HistoryId child =
-              history.children[node.children_begin + action];
+          const HistoryId child = history.children[node.children_begin + action];
           action_values[action] = self(self, child, position);
           node_value += probabilities[action] * action_values[action];
         }
@@ -304,14 +254,11 @@ struct DeepCfrSolver::Impl {
         NeuralSample advantage_sample{key};
         advantage_sample.weight = static_cast<float>(iteration + 1);
         const BettingData& betting = decision.data;
-        const float scale = 1.0f / static_cast<float>(
-            Pot(betting) + betting.stack[0] + betting.stack[1]);
+        const float scale = 1.0f / static_cast<float>(Pot(betting) + betting.stack[0] + betting.stack[1]);
         for (uint8_t action = 0; action < action_count; ++action) {
-          advantage_sample.target[action] = static_cast<float>(
-              action_values[action] - node_value) * scale;
+          advantage_sample.target[action] = static_cast<float>(action_values[action] - node_value) * scale;
         }
-        advantage_memory[Index(player)].add(
-            std::move(advantage_sample), reservoir_rng);
+        advantage_memory[Index(player)].add(std::move(advantage_sample), reservoir_rng);
         return node_value;
       }
     };
@@ -325,8 +272,7 @@ struct DeepCfrSolver::Impl {
     for (uint64_t outer = 0; outer < iterations; ++outer) {
       const uint64_t iteration = stats.iterations;
       for (Player player : {Player::A, Player::B}) {
-        for (int traversal = 0; traversal < config.traversals_per_player;
-             ++traversal) {
+        for (int traversal = 0; traversal < config.traversals_per_player; ++traversal) {
           traverse(deals.sample(game_rng), player, iteration);
           ++stats.traversals;
         }
@@ -343,10 +289,8 @@ struct DeepCfrSolver::Impl {
 
     NeuralNetwork trained_policy(config.hidden_size);
     stats.strategy_loss = train_network(
-        trained_policy, strategy_memory,
-        NetworkSeed(config.seed, stats.iterations, kPlayerCount),
-        NeuralTarget::AveragePolicy,
-        config.policy_training_steps);
+        trained_policy, strategy_memory, NetworkSeed(config.seed, stats.iterations, kPlayerCount),
+        NeuralTarget::AveragePolicy, config.policy_training_steps);
     if (strategy_memory.size() > 0) {
       policy.emplace(std::move(trained_policy), model);
       stats.policy_parameter_bytes = policy->parameter_bytes();
@@ -370,24 +314,20 @@ struct DeepCfrSolver::Impl {
   std::optional<NeuralPolicy> policy;
   std::array<std::vector<float>, 2> inference_hidden;
   std::array<bool, kPlayerCount> advantage_trained = {};
-  std::array<absl::flat_hash_map<InfoSetKey, NeuralActionVector>, kPlayerCount>
-      advantage_cache;
+  std::array<absl::flat_hash_map<InfoSetKey, NeuralActionVector>, kPlayerCount> advantage_cache;
   absl::flat_hash_map<InfoSetKey, NeuralActionVector> policy_cache;
   std::mt19937 game_rng;
   std::mt19937 reservoir_rng;
   DeepCfrStats stats;
 };
 
-DeepCfrSolver::DeepCfrSolver(std::unique_ptr<Impl> impl)
-    : impl_(std::move(impl)) {}
+DeepCfrSolver::DeepCfrSolver(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 
 DeepCfrSolver::~DeepCfrSolver() = default;
 DeepCfrSolver::DeepCfrSolver(DeepCfrSolver&&) noexcept = default;
 DeepCfrSolver& DeepCfrSolver::operator=(DeepCfrSolver&&) noexcept = default;
 
-absl::StatusOr<DeepCfrSolver> DeepCfrSolver::Create(
-    SolveSpec spec,
-    DeepCfrConfig config) {
+absl::StatusOr<DeepCfrSolver> DeepCfrSolver::Create(SolveSpec spec, DeepCfrConfig config) {
   const absl::Status deep_status = ValidateConfig(config);
   if (!deep_status.ok()) return deep_status;
   const absl::Status solver_status = ValidateSolverConfig(spec.config);
@@ -399,19 +339,15 @@ absl::StatusOr<DeepCfrSolver> DeepCfrSolver::Create(
           PrivateAbstractionKind::Handcrafted36 &&
       spec.config.card_abstraction.recall_mode !=
           RecallMode::BucketHistory) {
-    return absl::InvalidArgumentError(
-        "Deep CFR requires private bucket history recall");
+    return absl::InvalidArgumentError("Deep CFR requires private bucket history recall");
   }
   auto deals = DealDistribution::Create(spec.ranges[Index(Player::A)],
                                         spec.ranges[Index(Player::B)]);
   if (!deals.ok()) return deals.status();
-  PublicPosition initial_public(
-      spec.config.card_abstraction, spec.root.board);
-  const ModelFingerprint model =
-      ModelFingerprintFor(spec.config, spec.root, spec.ranges);
+  PublicPosition initial_public(spec.config.card_abstraction, spec.root.board);
+  const ModelFingerprint model = ModelFingerprintFor(spec.config, spec.root, spec.ranges);
   HistoryTree history = BuildHistoryTree(
-      spec.root.betting, spec.config.betting_rules,
-      spec.config.bet_abstraction);
+      spec.root.betting, spec.config.betting_rules, spec.config.bet_abstraction);
   try {
     UseSingleThreadedNeuralRuntime();
     SetNeuralSeed(config.seed);
@@ -436,8 +372,7 @@ absl::Status DeepCfrSolver::run(uint64_t iterations) {
 
 absl::StatusOr<double> DeepCfrSolver::evaluate_current(int samples) {
   try {
-    const StrategyLookup lookup =
-        impl_->strategy_lookup(DeepCfrStrategy::Current);
+    const StrategyLookup lookup = impl_->strategy_lookup(DeepCfrStrategy::Current);
     auto result = impl_->evaluate(lookup, lookup, samples);
     if (!result.ok()) return result.status();
     return result->mean;
@@ -448,8 +383,7 @@ absl::StatusOr<double> DeepCfrSolver::evaluate_current(int samples) {
 
 absl::StatusOr<double> DeepCfrSolver::evaluate_average(int samples) {
   try {
-    const StrategyLookup lookup =
-        impl_->strategy_lookup(DeepCfrStrategy::Average);
+    const StrategyLookup lookup = impl_->strategy_lookup(DeepCfrStrategy::Average);
     auto result = impl_->evaluate(lookup, lookup, samples);
     if (!result.ok()) return result.status();
     return result->mean;
@@ -458,14 +392,10 @@ absl::StatusOr<double> DeepCfrSolver::evaluate_average(int samples) {
   }
 }
 
-absl::StatusOr<double> DeepCfrSolver::evaluate_average_against_uniform(
-    Player policy_player,
-    int samples) {
+absl::StatusOr<double> DeepCfrSolver::evaluate_average_against_uniform(Player policy_player, int samples) {
   try {
-    const StrategyLookup policy =
-        impl_->strategy_lookup(DeepCfrStrategy::Average);
-    const StrategyLookup uniform =
-        [](InfoSetKey, std::span<float>) { return false; };
+    const StrategyLookup policy = impl_->strategy_lookup(DeepCfrStrategy::Average);
+    const StrategyLookup uniform = [](InfoSetKey, std::span<float>) { return false; };
     auto result = policy_player == Player::A
                       ? impl_->evaluate(policy, uniform, samples)
                       : impl_->evaluate(uniform, policy, samples);
@@ -477,10 +407,7 @@ absl::StatusOr<double> DeepCfrSolver::evaluate_average_against_uniform(
 }
 
 absl::StatusOr<DeepCfrMatchResult> DeepCfrSolver::evaluate_against_policy(
-    Player policy_player,
-    const Policy& opponent,
-    DeepCfrStrategy strategy,
-    int samples) {
+    Player policy_player, const Policy& opponent, DeepCfrStrategy strategy, int samples) {
   if (opponent.model != impl_->model) {
     return absl::FailedPreconditionError("policy model does not match game");
   }
@@ -501,20 +428,17 @@ absl::StatusOr<DeepCfrMatchResult> DeepCfrSolver::evaluate_against_policy(
                       : impl_->evaluate(opponent_lookup, policy, samples);
     if (!result.ok()) return result.status();
     const double sign = policy_player == Player::A ? 1.0 : -1.0;
-    return DeepCfrMatchResult{
-        sign * result->mean, result->standard_error,
-        opponent_lookups, missing_opponent_lookups};
+    return DeepCfrMatchResult{sign * result->mean, result->standard_error, opponent_lookups,
+                              missing_opponent_lookups};
   } catch (const std::exception& error) {
     return TorchError(error);
   }
 }
 
-absl::StatusOr<ExploitabilityEstimate>
-DeepCfrSolver::estimate_exploitability(
+absl::StatusOr<ExploitabilityEstimate> DeepCfrSolver::estimate_exploitability(
     const BestResponseConfig& config) {
   if (!impl_->policy) {
-    return absl::FailedPreconditionError(
-        "average policy has not been trained");
+    return absl::FailedPreconditionError("average policy has not been trained");
   }
   try {
     std::array<absl::flat_hash_map<InfoSetKey, NeuralActionVector>,
@@ -537,8 +461,7 @@ DeepCfrSolver::estimate_exploitability(
           };
         },
         config);
-    impl_->stats.network_evaluations +=
-        network_evaluations[0] + network_evaluations[1];
+    impl_->stats.network_evaluations += network_evaluations[0] + network_evaluations[1];
     impl_->stats.cache_hits += cache_hits[0] + cache_hits[1];
     return result;
   } catch (const std::exception& error) {
@@ -546,8 +469,7 @@ DeepCfrSolver::estimate_exploitability(
   }
 }
 
-absl::Status DeepCfrSolver::load_average_model(
-    const std::filesystem::path& path) {
+absl::Status DeepCfrSolver::load_average_model(const std::filesystem::path& path) {
   auto loaded = LoadNeuralPolicy(path, impl_->model);
   if (!loaded.ok()) return loaded.status();
   impl_->policy.emplace(std::move(*loaded));
@@ -556,37 +478,24 @@ absl::Status DeepCfrSolver::load_average_model(
   return absl::OkStatus();
 }
 
-absl::Status DeepCfrSolver::save_average_model(
-    const std::filesystem::path& path) const {
+absl::Status DeepCfrSolver::save_average_model(const std::filesystem::path& path) const {
   if (!impl_->policy) {
     return absl::FailedPreconditionError("average policy has not been trained");
   }
   return SaveNeuralPolicy(*impl_->policy, path);
 }
 
-const DeepCfrStats& DeepCfrSolver::stats() const noexcept {
-  return impl_->stats;
-}
+const DeepCfrStats& DeepCfrSolver::stats() const noexcept { return impl_->stats; }
 
-const SolverConfig& DeepCfrSolver::solver_config() const noexcept {
-  return impl_->solver_config;
-}
+const SolverConfig& DeepCfrSolver::solver_config() const noexcept { return impl_->solver_config; }
 
-const DealDistribution& DeepCfrSolver::deals() const noexcept {
-  return impl_->deals;
-}
+const DealDistribution& DeepCfrSolver::deals() const noexcept { return impl_->deals; }
 
-const HistoryTree& DeepCfrSolver::history() const noexcept {
-  return impl_->history;
-}
+const HistoryTree& DeepCfrSolver::history() const noexcept { return impl_->history; }
 
-const PublicPosition& DeepCfrSolver::initial_public() const noexcept {
-  return impl_->initial_public;
-}
+const PublicPosition& DeepCfrSolver::initial_public() const noexcept { return impl_->initial_public; }
 
-ModelFingerprint DeepCfrSolver::model() const noexcept {
-  return impl_->model;
-}
+ModelFingerprint DeepCfrSolver::model() const noexcept { return impl_->model; }
 
 const NeuralPolicy* DeepCfrSolver::average_policy() const noexcept {
   return impl_->policy ? &*impl_->policy : nullptr;
