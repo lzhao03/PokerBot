@@ -410,10 +410,4 @@ double TerminalEvaluator::operator()(const BettingState& state, const Board& boa
   return evaluated_player == Player::A ? player_a_utility : -player_a_utility;
 }
 
-double TerminalUtility(
-    const BettingState& state, const Board& board, const std::array<ComboId, kPlayerCount>& hands,
-    Player evaluated_player) noexcept {
-  return TerminalEvaluator(hands)(state, board, evaluated_player);
-}
-
 }  // namespace poker

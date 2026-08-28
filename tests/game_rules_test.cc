@@ -580,8 +580,8 @@ TEST_CASE("folds are terminal on every street") {
     ExactPublicState state = ClosedState(street);
     state.betting = FoldTerminalState{B(state), Player::A};
     CHECK(IsTerminal(state));
-    CHECK(TerminalUtility(
-              state.betting, state.board, {}, Player::A) ==
+    CHECK(TerminalEvaluator({})(
+              state.betting, state.board, Player::A) ==
           doctest::Approx(-10.0));
   }
 }
@@ -597,10 +597,10 @@ TEST_CASE("river terminal utility handles win, loss, and tie") {
       C(3, S::Diamonds),
   });
   REQUIRE(B(win).total_committed[0] == B(win).total_committed[1]);
-  const double win_utility = TerminalUtility(
-      win.betting, win.board, {player0, player1}, Player::A);
-  const double loss_utility = TerminalUtility(
-      win.betting, win.board, {player1, player0}, Player::A);
+  const double win_utility = TerminalEvaluator({player0, player1})(
+      win.betting, win.board, Player::A);
+  const double loss_utility = TerminalEvaluator({player1, player0})(
+      win.betting, win.board, Player::A);
   CHECK(win_utility == doctest::Approx(10.0));
   CHECK(loss_utility == doctest::Approx(-10.0));
   CHECK(win_utility + loss_utility == doctest::Approx(0.0));
@@ -618,11 +618,10 @@ TEST_CASE("river terminal utility handles win, loss, and tie") {
   REQUIRE(B(tie).total_committed[0] == B(tie).total_committed[1]);
   CHECK(evaluator(tie.betting, tie.board, Player::A) ==
         doctest::Approx(0.0));
-  CHECK(TerminalUtility(
-            tie.betting, tie.board,
+  CHECK(TerminalEvaluator(
             {H(14, S::Clubs, 13, S::Diamonds),
-             H(12, S::Clubs, 11, S::Diamonds)},
-            Player::A) == doctest::Approx(0.0));
+             H(12, S::Clubs, 11, S::Diamonds)})(
+            tie.betting, tie.board, Player::A) == doctest::Approx(0.0));
 }
 
 TEST_CASE("a complete normal hand preserves exact state") {
@@ -699,8 +698,8 @@ TEST_CASE("a complete normal hand preserves exact state") {
 
   const ComboId aces = H(14, S::Clubs, 14, S::Diamonds);
   const ComboId kings = H(13, S::Clubs, 13, S::Diamonds);
-  CHECK(TerminalUtility(state.betting, state.board, {aces, kings},
-                        Player::A) == doctest::Approx(6.0));
+  CHECK(TerminalEvaluator({aces, kings})(
+            state.betting, state.board, Player::A) == doctest::Approx(6.0));
 }
 
 TEST_CASE("full raises update the minimum re-raise increment") {

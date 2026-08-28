@@ -308,10 +308,4 @@ class TerminalEvaluator {
   std::optional<Board> compared_board_;
   int hand_comparison_ = 0;
 };
-
-double TerminalUtility(
-    const BettingState& state,
-    const Board& board,
-    const std::array<ComboId, kPlayerCount>& hands,
-    Player evaluated_player) noexcept;
 }  // namespace poker
