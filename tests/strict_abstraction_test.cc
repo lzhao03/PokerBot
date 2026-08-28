@@ -4,37 +4,12 @@
 
 #include <array>
 #include <cmath>
-#include <span>
-#include <stdexcept>
-#include <string>
 
 namespace poker {
 namespace {
 
 Card C(int rank, Suit suit) {
   return Card(static_cast<Rank>(rank - 2), suit);
-}
-
-BettingState Apply(const BettingState& state, GameAction action) {
-  const auto* decision = std::get_if<DecisionState>(&state);
-  if (decision == nullptr) {
-    throw std::invalid_argument("expected decision state");
-  }
-  const auto child = ApplyAction(*decision, action);
-  if (!child.ok()) {
-    throw std::invalid_argument(std::string(child.status().message()));
-  }
-  return *child;
-}
-
-ExactPublicState DealChance(const ExactPublicState& state,
-                            std::span<const Card> cards,
-                            const BettingRules& rules) {
-  const auto child = TryApplyChance(state, cards, rules);
-  if (!child.ok()) {
-    throw std::invalid_argument(std::string(child.status().message()));
-  }
-  return *child;
 }
 
 ComboRange Range(int first_rank, int second_rank, Suit suit) {
@@ -65,21 +40,10 @@ TEST_CASE("all card abstraction combinations support history traversal") {
       fractions = {1.0};
     }
     config.max_info_sets = 500000;
-
-    const BettingRules& rules = config.betting_rules;
-    ExactPublicState state = MakeInitialState(rules, {8, 8}, {1, 2});
-    state.betting = Apply(state.betting, {ActionKind::Call, 2});
-    state.betting = Apply(state.betting, {ActionKind::Check, 0});
-    const std::array<Card, 3> flop = {
-        C(2, Suit::Diamonds), C(7, Suit::Spades),
-        C(9, Suit::Diamonds),
-    };
-    state = DealChance(state, flop, rules);
+    config.starting_stacks = {8, 8};
 
     auto solver = TabularCfrSolver::Create(
-        {config, state,
-         {Range(14, 13, Suit::Hearts),
-          Range(12, 11, Suit::Clubs)}});
+        config, {Range(14, 13, Suit::Hearts), Range(12, 11, Suit::Clubs)});
     REQUIRE(solver.ok());
     solver->run(2);
 

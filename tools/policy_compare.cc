@@ -32,7 +32,7 @@ namespace {
 constexpr uint64_t kEvaluationSamples = 100'000;
 constexpr uint64_t kSeed = 1;
 
-absl::StatusOr<poker::SolveSpec> ComparisonSpec() {
+absl::StatusOr<poker::SolverConfig> ComparisonConfig() {
   poker::SolverConfig config;
   config.bet_abstraction = poker::SmallBettingConfig();
   config.card_abstraction.public_mode =
@@ -49,12 +49,8 @@ absl::StatusOr<poker::SolveSpec> ComparisonSpec() {
     return absl::InvalidArgumentError(
         "private_recall must be current or history");
   }
-  const poker::ComboRange range = poker::UniformComboRange();
-  return poker::SolveSpec{
-      config,
-      poker::MakeInitialState(config.betting_rules, {200, 200}, {1, 2}),
-      {range, range},
-  };
+  config.starting_stacks = {200, 200};
+  return config;
 }
 
 struct Candidate {
@@ -79,25 +75,27 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  auto spec = ComparisonSpec();
-  if (!spec.ok()) {
-    std::cerr << "Error: " << spec.status() << '\n';
+  auto parsed_config = ComparisonConfig();
+  if (!parsed_config.ok()) {
+    std::cerr << "Error: " << parsed_config.status() << '\n';
     return 1;
   }
-  const poker::SolverConfig& config = spec->config;
-  auto deals = poker::DealDistribution::Create(
-      spec->ranges[poker::Index(poker::Player::A)],
-      spec->ranges[poker::Index(poker::Player::B)]);
+  const poker::SolverConfig config = std::move(*parsed_config);
+  const poker::ComboRange range = poker::UniformComboRange();
+  const poker::ExactPublicState initial_state = poker::MakeInitialState(
+      config.betting_rules, config.starting_stacks,
+      {config.small_blind, config.betting_rules.minimum_bet});
+  auto deals = poker::DealDistribution::Create(range, range);
   if (!deals.ok()) {
     std::cerr << "Error: " << deals.status() << '\n';
     return 1;
   }
   const poker::HistoryTree history = poker::BuildHistoryTree(
-      spec->root.betting, config.betting_rules, config.bet_abstraction);
+      initial_state.betting, config.betting_rules, config.bet_abstraction);
   const poker::PublicPosition initial_public(
-      config.card_abstraction, spec->root.board);
+      config.card_abstraction, initial_state.board);
   const poker::ModelFingerprint model = poker::ModelFingerprintFor(
-      config, spec->root, spec->ranges);
+      config, {range, range});
   auto tabular = poker::LoadPolicy(tabular_path);
   if (!tabular.ok()) {
     std::cerr << "Error loading --tabular: " << tabular.status() << '\n';

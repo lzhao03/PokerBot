@@ -81,10 +81,11 @@ void AddRange(std::vector<uint8_t>& bytes, const ComboRange& range) noexcept {
 
 }  // namespace
 
-ModelFingerprint ModelFingerprintFor(
-    const SolverConfig& config,
-    const ExactPublicState& root,
+ModelFingerprint ModelFingerprintFor(const SolverConfig& config,
     const std::array<ComboRange, kPlayerCount>& ranges) noexcept {
+  const ExactPublicState initial_state = MakeInitialState(
+      config.betting_rules, config.starting_stacks,
+      {config.small_blind, config.betting_rules.minimum_bet});
   std::vector<uint8_t> bytes;
   const uint32_t schema = kModelFingerprintSchemaVersion |
       (static_cast<uint32_t>(kBetAbstractionSchemaVersion) << 8) |
@@ -104,8 +105,8 @@ ModelFingerprint ModelFingerprintFor(
     }
   }
 
-  AddBettingState(bytes, root.betting);
-  AddBoard(bytes, root.board);
+  AddBettingState(bytes, initial_state.betting);
+  AddBoard(bytes, initial_state.board);
   for (const ComboRange& range : ranges) AddRange(bytes, range);
   return Fingerprint(bytes);
 }
@@ -257,6 +258,14 @@ absl::Status ValidateSolverConfig(const SolverConfig& config) {
   if (config.betting_rules.minimum_bet <= 0) {
     return absl::InvalidArgumentError("minimum bet must be positive");
   }
+  if (config.small_blind <= 0 ||
+      config.small_blind > config.betting_rules.minimum_bet) {
+    return absl::InvalidArgumentError("invalid blinds");
+  }
+  if (config.starting_stacks[0] <= config.small_blind ||
+      config.starting_stacks[1] < config.betting_rules.minimum_bet) {
+    return absl::InvalidArgumentError("invalid starting stacks");
+  }
   if (config.chance_samples <= 0) {
     return absl::InvalidArgumentError("chance_samples must be positive");
   }
@@ -304,24 +313,22 @@ TabularCfrSolver::TabularCfrSolver(SolverConfig config,
       rng_(12345),
       info_sets_(config_) {}
 
-absl::StatusOr<TabularCfrSolver> TabularCfrSolver::Create(SolveSpec spec) {
-  const absl::Status config_status = ValidateSolverConfig(spec.config);
+absl::StatusOr<TabularCfrSolver> TabularCfrSolver::Create(SolverConfig config,
+    const std::array<ComboRange, kPlayerCount>& ranges) {
+  const absl::Status config_status = ValidateSolverConfig(config);
   if (!config_status.ok()) return config_status;
-  if (!IsValidBettingData(Data(spec.root.betting))) {
-    return absl::InvalidArgumentError("invalid root betting state");
-  }
-  auto deals = DealDistribution::Create(spec.ranges[Index(Player::A)],
-                                        spec.ranges[Index(Player::B)]);
+  const ExactPublicState initial_state = MakeInitialState(
+      config.betting_rules, config.starting_stacks,
+      {config.small_blind, config.betting_rules.minimum_bet});
+  auto deals = DealDistribution::Create(ranges[Index(Player::A)],
+                                        ranges[Index(Player::B)]);
   if (!deals.ok()) return deals.status();
-  PublicPosition initial_public(
-      spec.config.card_abstraction, spec.root.board);
-  const ModelFingerprint model =
-      ModelFingerprintFor(spec.config, spec.root, spec.ranges);
+  PublicPosition initial_public(config.card_abstraction, initial_state.board);
+  const ModelFingerprint model = ModelFingerprintFor(config, ranges);
   HistoryTree history = BuildHistoryTree(
-      spec.root.betting, spec.config.betting_rules,
-      spec.config.bet_abstraction);
+      initial_state.betting, config.betting_rules, config.bet_abstraction);
   return TabularCfrSolver(
-      std::move(spec.config), std::move(*deals), std::move(history),
+      std::move(config), std::move(*deals), std::move(history),
       std::move(initial_public), model);
 }
 

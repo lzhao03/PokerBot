@@ -54,9 +54,9 @@ enum class DeepCfrStrategy : uint8_t {
 
 class DeepCfrSolver {
  public:
-  static absl::StatusOr<DeepCfrSolver> Create(
-      SolveSpec spec,
-      DeepCfrConfig config = {});
+  static absl::StatusOr<DeepCfrSolver> Create(SolverConfig config,
+      const std::array<ComboRange, kPlayerCount>& ranges,
+      DeepCfrConfig deep = {});
 
   ~DeepCfrSolver();
   DeepCfrSolver(DeepCfrSolver&&) noexcept;

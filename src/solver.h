@@ -24,6 +24,8 @@ struct SolverConfig {
   BetAbstractionConfig bet_abstraction;
   CardAbstractionConfig card_abstraction;
   BettingRules betting_rules = {2};
+  std::array<Chips, kPlayerCount> starting_stacks = {100, 100};
+  Chips small_blind = 1;
   int chance_samples = 1;
   bool external_sampling = false;
   int max_info_sets = 500000;
@@ -47,18 +49,10 @@ struct ComboRange {
   float weight(ComboId combo) const { return weights[combo.index()]; }
 };
 
-struct SolveSpec {
-  SolverConfig config;
-  ExactPublicState root;
-  std::array<ComboRange, kPlayerCount> ranges;
-};
-
 enum class ModelFingerprint : uint64_t {};
 
 ComboRange UniformComboRange();
-ModelFingerprint ModelFingerprintFor(
-    const SolverConfig& config,
-    const ExactPublicState& root,
+ModelFingerprint ModelFingerprintFor(const SolverConfig& config,
     const std::array<ComboRange, kPlayerCount>& ranges) noexcept;
 
 struct InfoSetKey {
@@ -196,7 +190,8 @@ struct TabularCfrSolverTestAccess;
 
 class TabularCfrSolver {
  public:
-  static absl::StatusOr<TabularCfrSolver> Create(SolveSpec spec);
+  static absl::StatusOr<TabularCfrSolver> Create(SolverConfig config,
+      const std::array<ComboRange, kPlayerCount>& ranges);
 
   void run(uint64_t iterations, int threads = 1);
 

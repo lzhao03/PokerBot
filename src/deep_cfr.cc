@@ -326,34 +326,36 @@ DeepCfrSolver::~DeepCfrSolver() = default;
 DeepCfrSolver::DeepCfrSolver(DeepCfrSolver&&) noexcept = default;
 DeepCfrSolver& DeepCfrSolver::operator=(DeepCfrSolver&&) noexcept = default;
 
-absl::StatusOr<DeepCfrSolver> DeepCfrSolver::Create(SolveSpec spec, DeepCfrConfig config) {
-  const absl::Status deep_status = ValidateConfig(config);
+absl::StatusOr<DeepCfrSolver> DeepCfrSolver::Create(SolverConfig config,
+    const std::array<ComboRange, kPlayerCount>& ranges,
+    DeepCfrConfig deep) {
+  const absl::Status deep_status = ValidateConfig(deep);
   if (!deep_status.ok()) return deep_status;
-  const absl::Status solver_status = ValidateSolverConfig(spec.config);
+  const absl::Status solver_status = ValidateSolverConfig(config);
   if (!solver_status.ok()) return solver_status;
-  if (!IsValidBettingData(Data(spec.root.betting))) {
-    return absl::InvalidArgumentError("invalid root betting state");
-  }
-  if (spec.config.card_abstraction.private_kind ==
+  const ExactPublicState initial_state = MakeInitialState(
+      config.betting_rules, config.starting_stacks,
+      {config.small_blind, config.betting_rules.minimum_bet});
+  if (config.card_abstraction.private_kind ==
           PrivateAbstractionKind::Handcrafted36 &&
-      spec.config.card_abstraction.recall_mode !=
+      config.card_abstraction.recall_mode !=
           RecallMode::BucketHistory) {
     return absl::InvalidArgumentError("Deep CFR requires private bucket history recall");
   }
-  auto deals = DealDistribution::Create(spec.ranges[Index(Player::A)],
-                                        spec.ranges[Index(Player::B)]);
+  auto deals = DealDistribution::Create(ranges[Index(Player::A)],
+                                        ranges[Index(Player::B)]);
   if (!deals.ok()) return deals.status();
-  PublicPosition initial_public(spec.config.card_abstraction, spec.root.board);
-  const ModelFingerprint model = ModelFingerprintFor(spec.config, spec.root, spec.ranges);
+  PublicPosition initial_public(config.card_abstraction, initial_state.board);
+  const ModelFingerprint model = ModelFingerprintFor(config, ranges);
   HistoryTree history = BuildHistoryTree(
-      spec.root.betting, spec.config.betting_rules, spec.config.bet_abstraction);
+      initial_state.betting, config.betting_rules, config.bet_abstraction);
   try {
     UseSingleThreadedNeuralRuntime();
-    SetNeuralSeed(config.seed);
+    SetNeuralSeed(deep.seed);
     return DeepCfrSolver(
         std::make_unique<Impl>(
-            std::move(spec.config), std::move(*deals), std::move(history),
-            std::move(initial_public), model, config));
+            std::move(config), std::move(*deals), std::move(history),
+            std::move(initial_public), model, deep));
   } catch (const std::exception& error) {
     return TorchError(error);
   }

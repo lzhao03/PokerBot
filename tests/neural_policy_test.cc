@@ -16,28 +16,24 @@
 namespace poker {
 namespace {
 
-SolveSpec TinySpec() {
+SolverConfig TinySolverConfig() {
   SolverConfig config;
   config.bet_abstraction = SmallBettingConfig();
   config.card_abstraction.public_mode = PublicCardMode::CompactTexture;
   config.card_abstraction.recall_mode = RecallMode::CurrentBucketOnly;
-  const ComboRange range = UniformComboRange();
-  return {config,
-          MakeInitialState(config.betting_rules, {8, 8}, {1, 2}),
-          {range, range}};
+  config.starting_stacks = {8, 8};
+  config.max_info_sets = 1;
+  return config;
 }
 
 TEST_CASE("tabular policies fit the shared neural policy format") {
-  const SolveSpec spec = TinySpec();
-  const SolverConfig& config = spec.config;
-  auto deals = DealDistribution::Create(spec.ranges[0], spec.ranges[1]);
-  REQUIRE(deals.ok());
-  const HistoryTree history = BuildHistoryTree(
-      spec.root.betting, config.betting_rules, config.bet_abstraction);
-  const PublicPosition initial_public(
-      config.card_abstraction, spec.root.board);
-  const ModelFingerprint model =
-      ModelFingerprintFor(config, spec.root, spec.ranges);
+  const SolverConfig config = TinySolverConfig();
+  const ComboRange range = UniformComboRange();
+  auto game = TabularCfrSolver::Create(config, {range, range});
+  REQUIRE(game.ok());
+  const HistoryTree& history = game->history();
+  const PublicPosition& initial_public = game->initial_public();
+  const ModelFingerprint model = game->model();
   const HistoryNode& root = history.nodes.front();
   const InfoSetKey key{
       initial_public.observation(), HistoryId{},
@@ -79,17 +75,17 @@ TEST_CASE("tabular policies fit the shared neural policy format") {
     CHECK(probability == doctest::Approx(1.0f / root.child_count));
   }
   const auto value = EstimateExpectedValue(
-      config, *deals, history, initial_public, model, fitted->policy,
+      config, game->deals(), history, initial_public, model, fitted->policy,
       fitted->policy, 2, 11);
   REQUIRE(value.ok());
   CHECK(std::isfinite(value->mean));
   const auto sampled_value = EstimateExpectedValue(
-      config, *deals, history, initial_public, model, fitted->policy,
+      config, game->deals(), history, initial_public, model, fitted->policy,
       fitted->policy, 2, 11, false, true);
   REQUIRE(sampled_value.ok());
   CHECK(std::isfinite(sampled_value->mean));
   const auto exploitability = EstimateExploitability(
-      config, *deals, history, initial_public, model, fitted->policy,
+      config, game->deals(), history, initial_public, model, fitted->policy,
       {2, 2, 11});
   REQUIRE(exploitability.ok());
   CHECK(std::isfinite(exploitability->exploitability));
@@ -121,16 +117,14 @@ TEST_CASE("tabular policies fit the shared neural policy format") {
 }
 
 TEST_CASE("neural fitting rejects a policy for another game") {
-  const SolveSpec spec = TinySpec();
-  const SolverConfig& config = spec.config;
-  const HistoryTree history = BuildHistoryTree(
-      spec.root.betting, config.betting_rules, config.bet_abstraction);
-  const ModelFingerprint model =
-      ModelFingerprintFor(config, spec.root, spec.ranges);
-  Policy policy;
-  policy.model = ModelFingerprint{1};
+  const SolverConfig config = TinySolverConfig();
+  const ComboRange range = UniformComboRange();
+  auto game = TabularCfrSolver::Create(config, {range, range});
+  REQUIRE(game.ok());
+  Policy wrong;
+  wrong.model = ModelFingerprint{1};
   CHECK_FALSE(FitNeuralPolicy(
-      history, config.card_abstraction, model, policy, {}).ok());
+      game->history(), config.card_abstraction, game->model(), wrong, {}).ok());
 }
 
 }  // namespace

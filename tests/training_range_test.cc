@@ -23,6 +23,7 @@ TEST_CASE("uniform combo range includes every combo equally") {
 
 TEST_CASE("deal sampling rejects incompatible ranges") {
   SolverConfig config;
+  config.starting_stacks = {8, 8};
   for (auto& fractions : config.bet_abstraction.pot_fractions) {
     fractions = {1.0};
   }
@@ -32,13 +33,11 @@ TEST_CASE("deal sampling rejects incompatible ranges") {
   ComboRange b;
   b.add(CardsToComboId(kDeck[0], kDeck[2]));
   b.add(CardsToComboId(kDeck[1], kDeck[3]));
-  const ExactPublicState root = MakeInitialState(
-      config.betting_rules, {8, 8}, {1, 2});
-  CHECK_FALSE(TabularCfrSolver::Create({config, root, {a, b}}).ok());
+  CHECK_FALSE(TabularCfrSolver::Create(config, {a, b}).ok());
 
   ComboRange compatible;
   compatible.add(H(12, S::Clubs, 12, S::Diamonds));
-  auto solver = TabularCfrSolver::Create({config, root, {a, compatible}});
+  auto solver = TabularCfrSolver::Create(config, {a, compatible});
   REQUIRE(solver.ok());
   solver->run(1);
   CHECK(std::isfinite(solver->expected_value(Player::A)));

@@ -270,7 +270,7 @@ git show dcbadfc^:<path>
 - **Status:** Deferred while one CLI is simpler to operate.
 - **Current behavior:** `//src:poker_solver` selects tabular or Deep CFR with
   `--algorithm` and therefore links LibTorch even for tabular runs.
-- **Desired endpoint:** Keep the shared CLI parsing and solve-spec construction,
+- **Desired endpoint:** Keep shared CLI parsing and solver-input construction,
   but offer a lightweight tabular target that does not fetch or link LibTorch.
 - **Restore when:** LibTorch download size, link time, or deployment size becomes
   a practical problem for tabular-only use.

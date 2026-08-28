@@ -88,10 +88,11 @@ double Rate(uint64_t count, double seconds) {
 
 absl::StatusOr<poker::SolverConfig> BenchmarkConfig() {
   poker::SolverConfig options;
-  if (absl::GetFlag(FLAGS_starting_stack) <
-      options.betting_rules.minimum_bet) {
+  const poker::Chips stack = absl::GetFlag(FLAGS_starting_stack);
+  if (stack < options.betting_rules.minimum_bet) {
     return absl::InvalidArgumentError("starting stack is too small");
   }
+  options.starting_stacks = {stack, stack};
   options.max_info_sets = absl::GetFlag(FLAGS_max_info_sets);
   options.chance_samples = absl::GetFlag(FLAGS_chance_samples);
   options.external_sampling = absl::GetFlag(FLAGS_external_sampling);
@@ -178,10 +179,6 @@ int main(int argc, char** argv) {
   }
   const poker::ComboRange a_range = *parsed_range;
   const poker::ComboRange b_range = *parsed_range;
-  const poker::Chips stack = absl::GetFlag(FLAGS_starting_stack);
-  const poker::ExactPublicState root = poker::MakeInitialState(
-      config.betting_rules, {stack, stack},
-      {1, config.betting_rules.minimum_bet});
 
   std::cout << "case\tseconds\tresult\n";
   Measure("range_expand", [&] { return a_range.count(); });
@@ -198,7 +195,7 @@ int main(int argc, char** argv) {
   if (progress_interval > 0) std::cerr << "building_history\n";
   Measure("build_history", [&] {
     auto result = poker::TabularCfrSolver::Create(
-        {config, root, {a_range, b_range}});
+        config, {a_range, b_range});
     if (!result.ok()) {
       build_error = result.status().ToString();
       return size_t{0};

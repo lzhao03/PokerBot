@@ -59,8 +59,7 @@ training.
 
 ```mermaid
 flowchart LR
-  A[CLI / benchmark] --> B[SolveSpec]
-  B --> C[CompileGame]
+  A[CLI / benchmark] --> C[CompileGame]
   C --> D[Deal distribution]
   C --> E[History tree]
   C --> F[Model fingerprint]

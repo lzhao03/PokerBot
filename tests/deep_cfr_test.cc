@@ -24,19 +24,25 @@ DeepCfrConfig TinyDeepConfig() {
   return config;
 }
 
-SolveSpec TinySolveSpec() {
+SolverConfig TinySolverConfig() {
   SolverConfig config;
   config.bet_abstraction = SmallBettingConfig();
   config.card_abstraction.public_mode = PublicCardMode::CompactTexture;
   config.card_abstraction.recall_mode = RecallMode::BucketHistory;
+  config.starting_stacks = {8, 8};
+  return config;
+}
+
+absl::StatusOr<DeepCfrSolver> MakeTinySolver(
+    SolverConfig solver_config = TinySolverConfig(),
+    DeepCfrConfig deep_config = TinyDeepConfig()) {
   const ComboRange range = UniformComboRange();
-  const ExactPublicState root = MakeInitialState(
-      config.betting_rules, {8, 8}, {1, 2});
-  return {config, root, {range, range}};
+  return DeepCfrSolver::Create(
+      std::move(solver_config), {range, range}, std::move(deep_config));
 }
 
 TEST_CASE("Deep CFR trains bounded neural memories") {
-  auto solver = DeepCfrSolver::Create(TinySolveSpec(), TinyDeepConfig());
+  auto solver = MakeTinySolver();
   REQUIRE(solver.ok());
   CHECK_FALSE(solver->solver_config().external_sampling);
   REQUIRE(solver->run(2).ok());
@@ -76,7 +82,7 @@ TEST_CASE("Deep CFR trains bounded neural memories") {
   REQUIRE(solver->save_average_model(path).ok());
   CHECK(std::filesystem::file_size(path) > 0);
 
-  auto loaded = DeepCfrSolver::Create(TinySolveSpec(), TinyDeepConfig());
+  auto loaded = MakeTinySolver();
   REQUIRE(loaded.ok());
   REQUIRE(loaded->load_average_model(path).ok());
   const auto loaded_value = loaded->evaluate_average(4);
@@ -93,11 +99,9 @@ TEST_CASE("Deep CFR trains bounded neural memories") {
   CHECK(match->opponent_policy_lookups > 0);
   CHECK(match->missing_opponent_lookups == match->opponent_policy_lookups);
 
-  SolveSpec mismatched_spec = TinySolveSpec();
-  mismatched_spec.root = MakeInitialState(
-      mismatched_spec.config.betting_rules, {9, 9}, {1, 2});
-  auto mismatched =
-      DeepCfrSolver::Create(std::move(mismatched_spec), TinyDeepConfig());
+  SolverConfig mismatched_config = TinySolverConfig();
+  mismatched_config.starting_stacks = {9, 9};
+  auto mismatched = MakeTinySolver(mismatched_config);
   REQUIRE(mismatched.ok());
   CHECK_FALSE(mismatched->load_average_model(path).ok());
   std::filesystem::remove(path);
@@ -106,13 +110,13 @@ TEST_CASE("Deep CFR trains bounded neural memories") {
 TEST_CASE("Deep CFR rejects an empty reservoir") {
   DeepCfrConfig config = TinyDeepConfig();
   config.advantage_memory_capacity = 0;
-  CHECK_FALSE(DeepCfrSolver::Create(TinySolveSpec(), config).ok());
+  CHECK_FALSE(MakeTinySolver(TinySolverConfig(), config).ok());
 }
 
 TEST_CASE("Deep CFR rejects invalid solver configuration") {
-  SolveSpec spec = TinySolveSpec();
-  spec.config.max_info_sets = 0;
-  CHECK_FALSE(DeepCfrSolver::Create(std::move(spec), TinyDeepConfig()).ok());
+  SolverConfig config = TinySolverConfig();
+  config.max_info_sets = 0;
+  CHECK_FALSE(MakeTinySolver(config).ok());
 }
 
 TEST_CASE("neural features preserve private bucket history") {
@@ -141,14 +145,14 @@ TEST_CASE("neural features preserve private bucket history") {
 }
 
 TEST_CASE("Deep CFR rejects current-bucket imperfect recall") {
-  SolveSpec spec = TinySolveSpec();
-  spec.config.card_abstraction.recall_mode = RecallMode::CurrentBucketOnly;
-  CHECK_FALSE(DeepCfrSolver::Create(std::move(spec), TinyDeepConfig()).ok());
+  SolverConfig config = TinySolverConfig();
+  config.card_abstraction.recall_mode = RecallMode::CurrentBucketOnly;
+  CHECK_FALSE(MakeTinySolver(config).ok());
 }
 
 TEST_CASE("Deep CFR run boundaries do not change training") {
-  auto whole = DeepCfrSolver::Create(TinySolveSpec(), TinyDeepConfig());
-  auto split = DeepCfrSolver::Create(TinySolveSpec(), TinyDeepConfig());
+  auto whole = MakeTinySolver();
+  auto split = MakeTinySolver();
   REQUIRE(whole.ok());
   REQUIRE(split.ok());
   REQUIRE(whole->run(2).ok());

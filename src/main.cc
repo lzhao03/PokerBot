@@ -109,11 +109,13 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
   const poker::Chips stack = absl::GetFlag(FLAGS_starting_stack);
   const poker::Chips small_blind = absl::GetFlag(FLAGS_small_blind);
   const poker::Chips big_blind = absl::GetFlag(FLAGS_big_blind);
-  if (stack <= 0 || small_blind <= 0 || big_blind < small_blind ||
-      stack < big_blind) {
+  if (small_blind <= 0 || big_blind < small_blind ||
+      stack <= small_blind || stack < big_blind) {
     return absl::InvalidArgumentError("invalid stack or blind configuration");
   }
   config.betting_rules.minimum_bet = big_blind;
+  config.starting_stacks = {stack, stack};
+  config.small_blind = small_blind;
   config.chance_samples = absl::GetFlag(FLAGS_chance_samples);
   config.max_info_sets = absl::GetFlag(FLAGS_max_info_sets);
   config.external_sampling = absl::GetFlag(FLAGS_external_sampling);
@@ -188,8 +190,10 @@ void PrintRunSummary(const poker::TabularCfrSolver& solver, const poker::SolverC
   if (seconds > 0.0) std::printf("decision_visits_per_second=%g\n", visits / seconds);
 }
 
-absl::Status RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads) {
-  auto solver = poker::TabularCfrSolver::Create(std::move(spec));
+absl::Status RunTabular(poker::SolverConfig config,
+    const std::array<poker::ComboRange, poker::kPlayerCount>& ranges,
+    uint64_t iterations, int threads) {
+  auto solver = poker::TabularCfrSolver::Create(std::move(config), ranges);
   if (!solver.ok()) return solver.status();
   const auto start = std::chrono::steady_clock::now();
   solver->run(iterations, threads);
@@ -247,21 +251,23 @@ absl::Status RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads)
   return absl::OkStatus();
 }
 
-absl::Status RunDeep(poker::SolveSpec spec, uint64_t iterations) {
-  poker::DeepCfrConfig config;
-  config.seed = absl::GetFlag(FLAGS_neural_seed);
-  config.advantage_memory_capacity = absl::GetFlag(FLAGS_deep_memory_capacity);
-  config.strategy_memory_capacity = absl::GetFlag(FLAGS_deep_memory_capacity);
-  config.inference_cache_capacity = absl::GetFlag(FLAGS_deep_cache_capacity);
-  config.policy_cache_capacity = absl::GetFlag(FLAGS_deep_policy_cache_capacity);
-  config.traversals_per_player = absl::GetFlag(FLAGS_deep_traversals_per_player);
-  config.training_steps = absl::GetFlag(FLAGS_deep_training_steps);
-  config.policy_training_steps = absl::GetFlag(FLAGS_neural_steps);
-  config.batch_size = absl::GetFlag(FLAGS_neural_batch_size);
-  config.hidden_size = absl::GetFlag(FLAGS_neural_hidden_size);
-  config.learning_rate = absl::GetFlag(FLAGS_neural_learning_rate);
+absl::Status RunDeep(poker::SolverConfig config,
+    const std::array<poker::ComboRange, poker::kPlayerCount>& ranges,
+    uint64_t iterations) {
+  poker::DeepCfrConfig deep;
+  deep.seed = absl::GetFlag(FLAGS_neural_seed);
+  deep.advantage_memory_capacity = absl::GetFlag(FLAGS_deep_memory_capacity);
+  deep.strategy_memory_capacity = absl::GetFlag(FLAGS_deep_memory_capacity);
+  deep.inference_cache_capacity = absl::GetFlag(FLAGS_deep_cache_capacity);
+  deep.policy_cache_capacity = absl::GetFlag(FLAGS_deep_policy_cache_capacity);
+  deep.traversals_per_player = absl::GetFlag(FLAGS_deep_traversals_per_player);
+  deep.training_steps = absl::GetFlag(FLAGS_deep_training_steps);
+  deep.policy_training_steps = absl::GetFlag(FLAGS_neural_steps);
+  deep.batch_size = absl::GetFlag(FLAGS_neural_batch_size);
+  deep.hidden_size = absl::GetFlag(FLAGS_neural_hidden_size);
+  deep.learning_rate = absl::GetFlag(FLAGS_neural_learning_rate);
 
-  auto solver = poker::DeepCfrSolver::Create(std::move(spec), config);
+  auto solver = poker::DeepCfrSolver::Create(std::move(config), ranges, deep);
   if (!solver.ok()) return solver.status();
   const std::string model_input = absl::GetFlag(FLAGS_neural_policy_input);
   if (!model_input.empty()) {
@@ -450,15 +456,11 @@ absl::Status RunFromFlags() {
   const auto config = ConfigFromFlags();
   if (!config.ok()) return config.status();
   const poker::ComboRange range = poker::UniformComboRange();
-  const poker::Chips stack = absl::GetFlag(FLAGS_starting_stack);
-  const poker::Chips small_blind = absl::GetFlag(FLAGS_small_blind);
-  const poker::ExactPublicState root = poker::MakeInitialState(
-      config->betting_rules, {stack, stack}, {small_blind, config->betting_rules.minimum_bet});
   SetMemoryLimit(memory_limit_mb);
-  poker::SolveSpec spec{*config, root, {range, range}};
   return algorithm == "deep"
-      ? RunDeep(std::move(spec), static_cast<uint64_t>(iterations))
-      : RunTabular(std::move(spec), static_cast<uint64_t>(iterations), threads);
+      ? RunDeep(*config, {range, range}, static_cast<uint64_t>(iterations))
+      : RunTabular(*config, {range, range},
+                   static_cast<uint64_t>(iterations), threads);
 }
 
 }  // namespace
