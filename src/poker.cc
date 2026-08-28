@@ -278,7 +278,8 @@ double TerminalEvaluator::operator()(const BettingState& state, const Board& boa
   double player_a_utility;
   if (const auto* fold = std::get_if<FoldTerminalState>(&state)) {
     const double committed = fold->data.total_committed[0];
-    player_a_utility = fold->folded == Player::A ? -committed : Pot(fold->data) - committed;
+    player_a_utility =
+        fold->folded == Player::A ? -committed : Pot(fold->data) - committed;
   } else {
     const ShowdownState& showdown = std::get<ShowdownState>(state);
     const double committed = showdown.data.total_committed[0];
@@ -286,11 +287,10 @@ double TerminalEvaluator::operator()(const BettingState& state, const Board& boa
       compared_board_ = board;
       hand_comparison_ = CompareHands(hands_[0], hands_[1], board);
     }
-    player_a_utility = hand_comparison_ > 0
-                           ? Pot(showdown.data) - committed
-                           : hand_comparison_ < 0
-                                 ? -committed
-                                 : Pot(showdown.data) / 2.0 - committed;
+    double pot_share = 0.5;
+    if (hand_comparison_ > 0) pot_share = 1.0;
+    if (hand_comparison_ < 0) pot_share = 0.0;
+    player_a_utility = pot_share * Pot(showdown.data) - committed;
   }
   return evaluated_player == Player::A ? player_a_utility : -player_a_utility;
 }
