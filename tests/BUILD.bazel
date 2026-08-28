@@ -78,7 +78,7 @@ cc_test(
     srcs = ["neural_policy_test.cc"],
     deps = DOCTEST_DEPS + [
         "//src:bet_abstraction",
-        "//src:neural_evaluation",
+        "//src:evaluation",
         "//src:neural_policy",
     ],
 )

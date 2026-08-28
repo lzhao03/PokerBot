@@ -18,6 +18,7 @@
 #include <Accelerate/Accelerate.h>
 #include <torch/torch.h>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 
 namespace poker {
@@ -268,6 +269,32 @@ size_t NeuralPolicy::parameter_bytes() const {
     bytes += static_cast<size_t>(parameter.numel()) * static_cast<size_t>(parameter.element_size());
   }
   return bytes;
+}
+
+StrategyLookup MakeStrategyLookup(
+    const HistoryTree& history, const CardAbstractionConfig& card_abstraction,
+    ModelFingerprint model, const NeuralPolicy& policy) {
+  constexpr size_t kCacheCapacity = 1'000'000;
+  auto cache = std::make_shared<
+      absl::flat_hash_map<InfoSetKey, NeuralActionVector>>();
+  cache->reserve(100'000);
+  return [&history, card_abstraction, model, &policy, cache](
+             InfoSetKey key, std::span<float> output) {
+    const auto found = cache->find(key);
+    if (found != cache->end()) {
+      std::copy_n(found->second.begin(), output.size(), output.begin());
+      return true;
+    }
+    NeuralActionVector probabilities = {};
+    const bool available = policy.strategy(
+        history, card_abstraction, model, key,
+        std::span<float>(probabilities.data(), output.size()));
+    std::copy_n(probabilities.begin(), output.size(), output.begin());
+    if (available && cache->size() < kCacheCapacity) {
+      cache->emplace(key, probabilities);
+    }
+    return available;
+  };
 }
 
 absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(

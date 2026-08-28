@@ -146,6 +146,22 @@ class NeuralPolicy {
       const std::filesystem::path& path);
 };
 
+StrategyLookup MakeStrategyLookup(
+    const HistoryTree& history,
+    const CardAbstractionConfig& card_abstraction,
+    ModelFingerprint model,
+    const NeuralPolicy& policy);
+StrategyLookup MakeStrategyLookup(
+    HistoryTree&& history,
+    const CardAbstractionConfig& card_abstraction,
+    ModelFingerprint model,
+    const NeuralPolicy& policy) = delete;
+StrategyLookup MakeStrategyLookup(
+    const HistoryTree& history,
+    const CardAbstractionConfig& card_abstraction,
+    ModelFingerprint model,
+    NeuralPolicy&& policy) = delete;
+
 struct NeuralPolicyFitResult {
   NeuralPolicy policy;
   float loss = 0.0f;

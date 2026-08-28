@@ -21,7 +21,6 @@ cc_binary(
     deps = [
         "//src:bet_abstraction",
         "//src:evaluation",
-        "//src:neural_evaluation",
         "//src:neural_policy",
         "//src:policy_codec",
         "//src:solver",

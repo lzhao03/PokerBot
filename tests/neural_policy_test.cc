@@ -11,7 +11,7 @@
 
 #include "doctest/doctest.h"
 #include "src/bet_abstraction.h"
-#include "src/neural_evaluation.h"
+#include "src/evaluation.h"
 
 namespace poker {
 namespace {
@@ -75,17 +75,29 @@ TEST_CASE("tabular policies fit the shared neural policy format") {
     CHECK(probability == doctest::Approx(1.0f / root.child_count));
   }
   const auto value = EstimateExpectedValue(
-      config, game->deals(), history, initial_public, model, fitted->policy,
-      fitted->policy, 2, 11);
+      config, game->deals(), history, initial_public,
+      MakeStrategyLookup(
+          history, config.card_abstraction, model, fitted->policy),
+      MakeStrategyLookup(
+          history, config.card_abstraction, model, fitted->policy),
+      2, 11);
   REQUIRE(value.ok());
   CHECK(std::isfinite(value->mean));
   const auto sampled_value = EstimateExpectedValue(
-      config, game->deals(), history, initial_public, model, fitted->policy,
-      fitted->policy, 2, 11, false, true);
+      config, game->deals(), history, initial_public,
+      MakeStrategyLookup(
+          history, config.card_abstraction, model, fitted->policy),
+      MakeStrategyLookup(
+          history, config.card_abstraction, model, fitted->policy),
+      2, 11, false, true);
   REQUIRE(sampled_value.ok());
   CHECK(std::isfinite(sampled_value->mean));
-  const auto exploitability = EstimateExploitability(
-      config, game->deals(), history, initial_public, model, fitted->policy,
+  const auto exploitability = EstimateExploitabilityParallel(
+      config, game->deals(), history, initial_public, model,
+      [&] {
+        return MakeStrategyLookup(
+            history, config.card_abstraction, model, fitted->policy);
+      },
       {2, 2, 11});
   REQUIRE(exploitability.ok());
   CHECK(std::isfinite(exploitability->exploitability));

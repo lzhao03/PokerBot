@@ -83,20 +83,6 @@ cc_library(
 )
 
 cc_library(
-    name = "neural_evaluation",
-    srcs = ["neural_evaluation.cc"],
-    hdrs = ["neural_evaluation.h"],
-    deps = [
-        ":evaluation",
-        ":neural_policy",
-        "@abseil-cpp//absl/container:flat_hash_map",
-        "@abseil-cpp//absl/status:status",
-        "@abseil-cpp//absl/status:statusor",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-cc_library(
     name = "policy_codec",
     srcs = ["policy_codec.cc"],
     hdrs = ["policy_codec.h"],
@@ -124,6 +110,7 @@ cc_library(
     deps = [
         ":neural_features",
         ":solver",
+        "@abseil-cpp//absl/container:flat_hash_map",
         "@libtorch_macos_arm64//:torch",
     ],
     linkopts = ["-framework Accelerate"],
@@ -170,7 +157,6 @@ cc_binary(
     deps = [
         ":deep_cfr",
         ":evaluation",
-        ":neural_evaluation",
         ":neural_policy",
         ":policy_codec",
         ":solver",

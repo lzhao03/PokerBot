@@ -16,7 +16,6 @@
 #include "absl/status/statusor.h"
 #include "src/bet_abstraction.h"
 #include "src/evaluation.h"
-#include "src/neural_evaluation.h"
 #include "src/neural_policy.h"
 #include "src/policy_codec.h"
 #include "src/solver.h"

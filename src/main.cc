@@ -1,6 +1,5 @@
 #include "src/deep_cfr.h"
 #include "src/evaluation.h"
-#include "src/neural_evaluation.h"
 #include "src/neural_policy.h"
 #include "src/policy_codec.h"
 #include "src/solver.h"
@@ -226,8 +225,14 @@ absl::Status RunTabular(poker::SolverConfig config,
     std::printf("neural_policy_loss=%g\n", fitted->loss);
     std::printf("neural_policy_parameter_bytes=%zu\n", fitted->policy.parameter_bytes());
     const auto value = poker::EstimateExpectedValue(
-        solver->config(), solver->deals(), solver->history(), solver->initial_public(), solver->model(),
-        fitted->policy, fitted->policy,
+        solver->config(), solver->deals(), solver->history(),
+        solver->initial_public(),
+        poker::MakeStrategyLookup(
+            solver->history(), solver->config().card_abstraction,
+            solver->model(), fitted->policy),
+        poker::MakeStrategyLookup(
+            solver->history(), solver->config().card_abstraction,
+            solver->model(), fitted->policy),
         static_cast<uint64_t>(absl::GetFlag(FLAGS_evaluation_samples)),
         absl::GetFlag(FLAGS_neural_seed));
     if (!value.ok()) return value.status();
@@ -240,9 +245,15 @@ absl::Status RunTabular(poker::SolverConfig config,
           static_cast<uint64_t>(absl::GetFlag(FLAGS_evaluation_samples)),
           absl::GetFlag(FLAGS_neural_seed)};
       response_config.external_sampling = absl::GetFlag(FLAGS_best_response_external_sampling);
-      const auto exploitability = poker::EstimateExploitability(
-          solver->config(), solver->deals(), solver->history(), solver->initial_public(), solver->model(),
-          fitted->policy, response_config);
+      const auto exploitability = poker::EstimateExploitabilityParallel(
+          solver->config(), solver->deals(), solver->history(),
+          solver->initial_public(), solver->model(),
+          [&] {
+            return poker::MakeStrategyLookup(
+                solver->history(), solver->config().card_abstraction,
+                solver->model(), fitted->policy);
+          },
+          response_config);
       if (!exploitability.ok()) return exploitability.status();
       std::printf("neural_nash_conv=%g\n", exploitability->nash_conv);
       std::printf("neural_exploitability=%g\n", exploitability->exploitability);
@@ -390,13 +401,25 @@ absl::Status RunDeep(poker::SolverConfig config,
     const uint64_t seed = absl::GetFlag(FLAGS_neural_seed);
     const auto as_a = poker::EstimateExpectedValue(
         solver->solver_config(), solver->deals(), solver->history(),
-        solver->initial_public(), solver->model(), *solver->average_policy(),
-        *opponent, samples, seed, false, true);
+        solver->initial_public(),
+        poker::MakeStrategyLookup(
+            solver->history(), solver->solver_config().card_abstraction,
+            solver->model(), *solver->average_policy()),
+        poker::MakeStrategyLookup(
+            solver->history(), solver->solver_config().card_abstraction,
+            solver->model(), *opponent),
+        samples, seed, false, true);
     if (!as_a.ok()) return as_a.status();
     const auto as_b = poker::EstimateExpectedValue(
         solver->solver_config(), solver->deals(), solver->history(),
-        solver->initial_public(), solver->model(), *opponent,
-        *solver->average_policy(), samples, seed, false, true);
+        solver->initial_public(),
+        poker::MakeStrategyLookup(
+            solver->history(), solver->solver_config().card_abstraction,
+            solver->model(), *opponent),
+        poker::MakeStrategyLookup(
+            solver->history(), solver->solver_config().card_abstraction,
+            solver->model(), *solver->average_policy()),
+        samples, seed, false, true);
     if (!as_b.ok()) return as_b.status();
     std::printf("neural_vs_neural_as_a=%g\n", as_a->mean);
     std::printf("neural_vs_neural_as_a_se=%g\n", as_a->standard_error);

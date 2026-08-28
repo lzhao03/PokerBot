@@ -43,8 +43,7 @@ Model artifacts under `models/` are local inputs and are not tracked by Git.
 | `src/solver.*` | Game compilation, infoset storage, tabular CFR training, and policy extraction |
 | `src/evaluation.*` | Policy-independent value and approximate best-response evaluation |
 | `src/neural_features.*` | Portable neural input schema and feature encoding |
-| `src/neural_policy.*` | LibTorch network training, inference, and serialization |
-| `src/neural_evaluation.*` | Adapts neural policies to the core evaluation API |
+| `src/neural_policy.*` | LibTorch training, cached evaluation lookup, inference, and serialization |
 | `src/deep_cfr.*` | Deep CFR memories and training schedule |
 | `src/policy_codec.*` | Compact quantized tabular policy format |
 | `web/policy_decoder_wasm.*` | Browser policy loading, C++ state reconstruction, and inference |
