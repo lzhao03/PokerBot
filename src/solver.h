@@ -79,8 +79,7 @@ struct InfoSetKey {
 static_assert(sizeof(InfoSetKey) == 16);
 
 struct CfrState {
-  CfrState(const SolverConfig& config,
-           bool accumulate_average_strategy);
+  CfrState(const SolverConfig& config, bool accumulate_average_strategy);
 
   std::vector<float> regret_sum;
   std::vector<float> strategy_sum;
@@ -89,23 +88,16 @@ struct CfrState {
 
   void strategy(std::span<float> values,
                 std::optional<uint32_t> offset,
-                std::span<float> probabilities,
-                bool concurrent = false) const;
-  void add_regret(uint32_t offset,
-                  size_t action,
-                  double delta,
-                  bool concurrent = false);
+                std::span<float> probabilities) const;
+  void add_regret(uint32_t offset, size_t action, double delta);
   void add_strategy(uint32_t offset,
                     std::span<const float> probabilities,
-                    double weight,
-                    bool concurrent = false);
-  size_t row_count() const;
+                    double weight);
+  size_t row_count() const { return rows_.size(); }
   std::optional<uint32_t> find(InfoSetKey key) const;
   std::vector<std::pair<InfoSetKey, uint32_t>> row_entries() const;
   bool at_capacity() const { return row_count() >= max_info_sets_; }
-  std::optional<uint32_t> find_or_create(
-      InfoSetKey key,
-      uint8_t action_count);
+  std::optional<uint32_t> find_or_create(InfoSetKey key, uint8_t action_count);
 
  private:
   absl::flat_hash_map<InfoSetKey, uint32_t> rows_;

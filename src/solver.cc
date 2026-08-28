@@ -174,28 +174,11 @@ void FillUniform(std::span<float> probabilities) {
   }
 }
 
-float LoadValue(float& value, bool concurrent) {
-  if (!concurrent) return value;
-  return std::atomic_ref<float>(value).load(std::memory_order_relaxed);
-}
-
-void AtomicAdd(float& target, float delta) {
-  std::atomic_ref<float>(target).fetch_add(delta, std::memory_order_relaxed);
-}
-
 }  // namespace
 
-void CfrState::add_regret(uint32_t offset,
-                          size_t action,
-                          double delta,
-                          bool concurrent) {
-  const size_t index = offset + action;
-  float& regret = regret_sum[index];
+void CfrState::add_regret(uint32_t offset, size_t action, double delta) {
+  float& regret = regret_sum[offset + action];
   const float update = static_cast<float>(delta);
-  if (!concurrent) {
-    regret = std::max(0.0f, regret + update);
-    return;
-  }
   std::atomic_ref<float> atomic(regret);
   float old = atomic.load(std::memory_order_relaxed);
   while (!atomic.compare_exchange_weak(
@@ -204,24 +187,18 @@ void CfrState::add_regret(uint32_t offset,
 
 void CfrState::add_strategy(uint32_t offset,
                             std::span<const float> probabilities,
-                            double weight,
-                            bool concurrent) {
+                            double weight) {
   if (!accumulate_average_strategy_) return;
   for (float probability : probabilities) {
     float& sum = strategy_sum[offset++];
     const float delta = static_cast<float>(weight * probability);
-    if (concurrent) {
-      AtomicAdd(sum, delta);
-    } else {
-      sum += delta;
-    }
+    std::atomic_ref<float>(sum).fetch_add(delta, std::memory_order_relaxed);
   }
 }
 
 void CfrState::strategy(std::span<float> values,
                         std::optional<uint32_t> offset,
-                        std::span<float> probabilities,
-                        bool concurrent) const {
+                        std::span<float> probabilities) const {
   if (!offset) {
     FillUniform(probabilities);
     return;
@@ -229,7 +206,7 @@ void CfrState::strategy(std::span<float> values,
   float sum = 0.0f;
   float* value = values.data() + *offset;
   for (float& probability : probabilities) {
-    probability = LoadValue(*value++, concurrent);
+    probability = std::atomic_ref(*value++).load(std::memory_order_relaxed);
     sum += probability;
   }
   if (sum <= 0.0) {
@@ -240,8 +217,7 @@ void CfrState::strategy(std::span<float> values,
   }
 }
 
-CfrState::CfrState(const SolverConfig& config,
-                   bool accumulate_average_strategy)
+CfrState::CfrState(const SolverConfig& config, bool accumulate_average_strategy)
     : max_info_sets_(static_cast<size_t>(config.max_info_sets)),
       accumulate_average_strategy_(accumulate_average_strategy) {
   size_t max_actions = 3;
@@ -255,52 +231,36 @@ CfrState::CfrState(const SolverConfig& config,
   }
 }
 
-size_t CfrState::row_count() const { return rows_.size(); }
-
 std::optional<uint32_t> CfrState::find(InfoSetKey key) const {
-  const auto found = rows_.find(key);
-  return found == rows_.end() ? std::nullopt
-                              : std::optional(found->second);
+  const auto row = rows_.find(key);
+  return row == rows_.end() ? std::nullopt : std::optional(row->second);
 }
 
 std::vector<std::pair<InfoSetKey, uint32_t>> CfrState::row_entries() const {
-  std::vector<std::pair<InfoSetKey, uint32_t>> entries(rows_.begin(),
-                                                       rows_.end());
-  std::ranges::sort(entries);
-  return entries;
+  std::vector<std::pair<InfoSetKey, uint32_t>> rows(rows_.begin(), rows_.end());
+  std::ranges::sort(rows);
+  return rows;
 }
 
 std::optional<uint32_t> CfrState::find_or_create(
-    InfoSetKey key,
-    uint8_t action_count) {
-  if (rows_.size() >= max_info_sets_) {
-    const auto found = rows_.find(key);
-    return found == rows_.end() ? std::nullopt
-                                : std::optional(found->second);
-  }
+    InfoSetKey key, uint8_t action_count) {
+  if (at_capacity()) return find(key);
   const uint32_t offset = static_cast<uint32_t>(regret_sum.size());
   const auto [row, inserted] = rows_.try_emplace(key, offset);
   if (!inserted) return row->second;
-  regret_sum.resize(offset + action_count, 0.0f);
-  if (accumulate_average_strategy_) {
-    strategy_sum.resize(offset + action_count, 0.0f);
-  }
+  regret_sum.resize(offset + action_count);
+  if (accumulate_average_strategy_) strategy_sum.resize(offset + action_count);
   return offset;
 }
 
 bool Policy::strategy(InfoSetKey key, std::span<float> output) const {
-  const auto found = rows.find(key);
-  if (found == rows.end() ||
-      found->second + output.size() > probabilities.size()) {
-    if (!output.empty()) {
-      std::fill(output.begin(), output.end(),
-                1.0f / static_cast<float>(output.size()));
-    }
+  const auto row = rows.find(key);
+  const size_t count = output.size();
+  if (row == rows.end() || row->second + count > probabilities.size()) {
+    FillUniform(output);
     return false;
   }
-  const size_t offset = found->second;
-  std::copy_n(probabilities.data() + offset,
-              output.size(), output.begin());
+  std::copy_n(probabilities.data() + row->second, count, output.data());
   return true;
 }
 
@@ -395,7 +355,7 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
   if (iterations == 0) return;
 
   auto run_one = [&](uint64_t iteration, std::mt19937& rng,
-                     SolverStats& stats, bool concurrent) {
+                     SolverStats& stats) {
     const Deal deal = deals_.sample(rng);
     const Player update_player = iteration % 2 ? Player::B : Player::A;
     TerminalEvaluator terminal_utility(deal.hands);
@@ -432,14 +392,13 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
             ? state_.find_or_create(key, action_count) : state_.find(key);
         std::array<float, kMaxActionsPerNode> probabilities;
         const std::span<float> strategy(probabilities.data(), action_count);
-        state_.strategy(state_.regret_sum, offset, strategy, concurrent);
+        state_.strategy(state_.regret_sum, offset, strategy);
         ++stats.decision_visits;
 
         if (config_.external_sampling && !traverser) {
           if (offset) {
             state_.add_strategy(
-                *offset, strategy, static_cast<double>(iteration + 1),
-                concurrent);
+                *offset, strategy, static_cast<double>(iteration + 1));
           }
           float sample = std::uniform_real_distribution<float>{}(rng);
           uint8_t sampled_action = 0;
@@ -471,12 +430,12 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
           if (!config_.external_sampling) {
             regret *= reach[Index(Opponent(player))];
           }
-          state_.add_regret(*offset, action, regret, concurrent);
+          state_.add_regret(*offset, action, regret);
         }
         if (!config_.external_sampling) {
           const double weight =
               reach[Index(player)] * static_cast<double>(iteration + 1);
-          state_.add_strategy(*offset, strategy, weight, concurrent);
+          state_.add_strategy(*offset, strategy, weight);
         }
         return node_value;
       }
@@ -490,7 +449,7 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
   uint64_t remaining = iterations;
   // Fill the infoset map serially; workers only update it at capacity.
   while (remaining > 0 && (threads <= 1 || !state_.at_capacity())) {
-    state_.root_value_sum += run_one(state_.iterations, rng_, stats_, false);
+    state_.root_value_sum += run_one(state_.iterations, rng_, stats_);
     ++state_.iterations;
     --remaining;
   }
@@ -513,7 +472,7 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
       std::mt19937 rng(seed);
       WorkerResult& output = worker_results[worker];
       for (uint64_t offset = worker; offset < remaining; offset += pool_size) {
-        output.value_sum += run_one(start + offset, rng, output.stats, true);
+        output.value_sum += run_one(start + offset, rng, output.stats);
       }
     });
   }
