@@ -177,17 +177,15 @@ void PrintRunSummary(const poker::TabularCfrSolver& solver, const poker::SolverC
   const size_t history_nodes = solver.history_count();
   const uint64_t visits = solver.stats().decision_visits;
 
-  std::cout << "iterations=" << solver.iterations() << "\n";
-  std::cout << "info_sets=" << info_sets << "\n";
-  std::cout << "max_info_sets=" << config.max_info_sets << "\n";
-  std::cout << "info_set_cap_hit=" << (info_sets >= static_cast<size_t>(config.max_info_sets)) << "\n";
-  std::cout << "player_a_ev=" << solver.expected_value(poker::Player::A) << "\n";
-  std::cout << "seconds=" << seconds << "\n";
-  std::cout << "history_nodes=" << history_nodes << "\n";
-  std::cout << "decision_visits=" << visits << "\n";
-  if (seconds > 0.0) {
-    std::cout << "decision_visits_per_second=" << visits / seconds << "\n";
-  }
+  std::printf("iterations=%" PRIu64 "\n", solver.iterations());
+  std::printf("info_sets=%zu\n", info_sets);
+  std::printf("max_info_sets=%d\n", config.max_info_sets);
+  std::printf("info_set_cap_hit=%d\n", info_sets >= static_cast<size_t>(config.max_info_sets));
+  std::printf("player_a_ev=%g\n", solver.expected_value(poker::Player::A));
+  std::printf("seconds=%g\n", seconds);
+  std::printf("history_nodes=%zu\n", history_nodes);
+  std::printf("decision_visits=%" PRIu64 "\n", visits);
+  if (seconds > 0.0) std::printf("decision_visits_per_second=%g\n", visits / seconds);
 }
 
 absl::Status RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads) {
@@ -198,7 +196,7 @@ absl::Status RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads)
   const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
 
   PrintRunSummary(*solver, solver->config(), elapsed.count());
-  std::cout << "threads=" << threads << "\n";
+  std::printf("threads=%d\n", threads);
 
   const std::string policy_output = absl::GetFlag(FLAGS_policy_output);
   const std::string neural_output = absl::GetFlag(FLAGS_neural_policy_output);
@@ -220,18 +218,17 @@ absl::Status RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads)
     if (!fitted.ok()) return fitted.status();
     const absl::Status saved = poker::SaveNeuralPolicy(fitted->policy, neural_output);
     if (!saved.ok()) return saved;
-    std::cout << "neural_policy_samples=" << fitted->samples << '\n'
-              << "neural_policy_loss=" << fitted->loss << '\n'
-              << "neural_policy_parameter_bytes="
-              << fitted->policy.parameter_bytes() << '\n';
+    std::printf("neural_policy_samples=%zu\n", fitted->samples);
+    std::printf("neural_policy_loss=%g\n", fitted->loss);
+    std::printf("neural_policy_parameter_bytes=%zu\n", fitted->policy.parameter_bytes());
     const auto value = poker::EstimateExpectedValue(
         solver->config(), solver->deals(), solver->history(), solver->initial_public(), solver->model(),
         fitted->policy, fitted->policy,
         static_cast<uint64_t>(absl::GetFlag(FLAGS_evaluation_samples)),
         absl::GetFlag(FLAGS_neural_seed));
     if (!value.ok()) return value.status();
-    std::cout << "neural_policy_value=" << value->mean << '\n'
-              << "neural_policy_value_se=" << value->standard_error << '\n';
+    std::printf("neural_policy_value=%g\n", value->mean);
+    std::printf("neural_policy_value_se=%g\n", value->standard_error);
     const uint64_t response_iterations = absl::GetFlag(FLAGS_best_response_iterations);
     if (response_iterations > 0) {
       poker::BestResponseConfig response_config{
@@ -243,8 +240,8 @@ absl::Status RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads)
           solver->config(), solver->deals(), solver->history(), solver->initial_public(), solver->model(),
           fitted->policy, response_config);
       if (!exploitability.ok()) return exploitability.status();
-      std::cout << "neural_nash_conv=" << exploitability->nash_conv << '\n'
-                << "neural_exploitability=" << exploitability->exploitability << '\n';
+      std::printf("neural_nash_conv=%g\n", exploitability->nash_conv);
+      std::printf("neural_exploitability=%g\n", exploitability->exploitability);
     }
   }
   return absl::OkStatus();
@@ -289,7 +286,8 @@ absl::Status RunDeep(poker::SolveSpec spec, uint64_t iterations) {
       const auto path = CheckpointPath(model_output, trained_iterations);
       const absl::Status saved = solver->save_average_model(path);
       if (!saved.ok()) return saved;
-      std::cout << "deep_checkpoint=" << path.string() << '\n' << std::flush;
+      std::printf("deep_checkpoint=%s\n", path.string().c_str());
+      std::fflush(stdout);
     }
   }
   const auto value = solver->evaluate_average(absl::GetFlag(FLAGS_evaluation_samples));
@@ -350,17 +348,18 @@ absl::Status RunDeep(poker::SolveSpec spec, uint64_t iterations) {
         poker::Player::B, *opponent, poker::DeepCfrStrategy::Average,
         absl::GetFlag(FLAGS_evaluation_samples));
     if (!as_b.ok()) return as_b.status();
-    std::cout << "average_vs_tabular_as_a=" << as_a->policy_player_value << '\n'
-              << "average_vs_tabular_as_a_se=" << as_a->standard_error << '\n'
-              << "average_vs_tabular_as_b=" << as_b->policy_player_value << '\n'
-              << "average_vs_tabular_as_b_se=" << as_b->standard_error << '\n'
-              << "tabular_policy_lookups=" << as_a->opponent_policy_lookups + as_b->opponent_policy_lookups << '\n'
-              << "missing_tabular_policy_lookups="
-              << as_a->missing_opponent_lookups + as_b->missing_opponent_lookups << '\n'
-              << "tabular_policy_lookups_when_deep_is_a=" << as_a->opponent_policy_lookups << '\n'
-              << "missing_tabular_lookups_when_deep_is_a=" << as_a->missing_opponent_lookups << '\n'
-              << "tabular_policy_lookups_when_deep_is_b=" << as_b->opponent_policy_lookups << '\n'
-              << "missing_tabular_lookups_when_deep_is_b=" << as_b->missing_opponent_lookups << '\n';
+    std::printf("average_vs_tabular_as_a=%g\n", as_a->policy_player_value);
+    std::printf("average_vs_tabular_as_a_se=%g\n", as_a->standard_error);
+    std::printf("average_vs_tabular_as_b=%g\n", as_b->policy_player_value);
+    std::printf("average_vs_tabular_as_b_se=%g\n", as_b->standard_error);
+    std::printf("tabular_policy_lookups=%" PRIu64 "\n",
+                as_a->opponent_policy_lookups + as_b->opponent_policy_lookups);
+    std::printf("missing_tabular_policy_lookups=%" PRIu64 "\n",
+                as_a->missing_opponent_lookups + as_b->missing_opponent_lookups);
+    std::printf("tabular_policy_lookups_when_deep_is_a=%" PRIu64 "\n", as_a->opponent_policy_lookups);
+    std::printf("missing_tabular_lookups_when_deep_is_a=%" PRIu64 "\n", as_a->missing_opponent_lookups);
+    std::printf("tabular_policy_lookups_when_deep_is_b=%" PRIu64 "\n", as_b->opponent_policy_lookups);
+    std::printf("missing_tabular_lookups_when_deep_is_b=%" PRIu64 "\n", as_b->missing_opponent_lookups);
     if (iterations > 0) {
       const auto current_as_a = solver->evaluate_against_policy(
           poker::Player::A, *opponent, poker::DeepCfrStrategy::Current,
@@ -369,10 +368,8 @@ absl::Status RunDeep(poker::SolveSpec spec, uint64_t iterations) {
           poker::Player::B, *opponent, poker::DeepCfrStrategy::Current,
           absl::GetFlag(FLAGS_evaluation_samples));
       if (current_as_a.ok() && current_as_b.ok()) {
-        std::cout << "current_vs_tabular_as_a="
-                  << current_as_a->policy_player_value << '\n'
-                  << "current_vs_tabular_as_b="
-                  << current_as_b->policy_player_value << '\n';
+        std::printf("current_vs_tabular_as_a=%g\n", current_as_a->policy_player_value);
+        std::printf("current_vs_tabular_as_b=%g\n", current_as_b->policy_player_value);
       }
     }
   }
@@ -395,29 +392,29 @@ absl::Status RunDeep(poker::SolveSpec spec, uint64_t iterations) {
         solver->initial_public(), solver->model(), *opponent,
         *solver->average_policy(), samples, seed, false, true);
     if (!as_b.ok()) return as_b.status();
-    std::cout << "neural_vs_neural_as_a=" << as_a->mean << '\n'
-              << "neural_vs_neural_as_a_se=" << as_a->standard_error << '\n'
-              << "neural_vs_neural_as_b=" << -as_b->mean << '\n'
-              << "neural_vs_neural_as_b_se=" << as_b->standard_error << '\n';
+    std::printf("neural_vs_neural_as_a=%g\n", as_a->mean);
+    std::printf("neural_vs_neural_as_a_se=%g\n", as_a->standard_error);
+    std::printf("neural_vs_neural_as_b=%g\n", -as_b->mean);
+    std::printf("neural_vs_neural_as_b_se=%g\n", as_b->standard_error);
   }
   const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
 
   const poker::DeepCfrStats& stats = solver->stats();
-  std::cout << "iterations=" << stats.iterations << '\n'
-            << "traversals=" << stats.traversals << '\n'
-            << "advantage_samples_a=" << stats.advantage_samples[0] << '\n'
-            << "advantage_samples_b=" << stats.advantage_samples[1] << '\n'
-            << "strategy_samples=" << stats.strategy_samples << '\n'
-            << "advantage_loss_a=" << stats.advantage_loss[0] << '\n'
-            << "advantage_loss_b=" << stats.advantage_loss[1] << '\n'
-            << "strategy_loss=" << stats.strategy_loss << '\n'
-            << "network_evaluations=" << stats.network_evaluations << '\n'
-            << "cache_hits=" << stats.cache_hits << '\n'
-            << "policy_parameter_bytes=" << stats.policy_parameter_bytes << '\n'
-            << "average_value=" << *value << '\n'
-            << "average_vs_uniform_as_a=" << *value_as_a << '\n'
-            << "average_vs_uniform_as_b=" << *value_as_b << '\n'
-            << "seconds=" << elapsed.count() << '\n';
+  std::printf("iterations=%" PRIu64 "\n", stats.iterations);
+  std::printf("traversals=%" PRIu64 "\n", stats.traversals);
+  std::printf("advantage_samples_a=%zu\n", stats.advantage_samples[0]);
+  std::printf("advantage_samples_b=%zu\n", stats.advantage_samples[1]);
+  std::printf("strategy_samples=%zu\n", stats.strategy_samples);
+  std::printf("advantage_loss_a=%g\n", stats.advantage_loss[0]);
+  std::printf("advantage_loss_b=%g\n", stats.advantage_loss[1]);
+  std::printf("strategy_loss=%g\n", stats.strategy_loss);
+  std::printf("network_evaluations=%" PRIu64 "\n", stats.network_evaluations);
+  std::printf("cache_hits=%" PRIu64 "\n", stats.cache_hits);
+  std::printf("policy_parameter_bytes=%zu\n", stats.policy_parameter_bytes);
+  std::printf("average_value=%g\n", *value);
+  std::printf("average_vs_uniform_as_a=%g\n", *value_as_a);
+  std::printf("average_vs_uniform_as_b=%g\n", *value_as_b);
+  std::printf("seconds=%g\n", elapsed.count());
   return std::isfinite(*value)
              ? absl::OkStatus()
              : absl::InternalError("Deep CFR evaluation was not finite");
