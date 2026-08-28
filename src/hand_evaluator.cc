@@ -40,8 +40,7 @@ int HighestStraight(uint16_t rank_mask) noexcept {
 }
 
 uint16_t HighestRanks(uint16_t rank_mask, int count) noexcept {
-  for (int excess = std::popcount(rank_mask) - count;
-       excess > 0; --excess) {
+  for (int excess = std::popcount(rank_mask) - count; excess > 0; --excess) {
     rank_mask &= static_cast<uint16_t>(rank_mask - 1);
   }
   return rank_mask;
@@ -59,8 +58,7 @@ enum class HandCategory : uint32_t {
   StraightFlush,
 };
 
-constexpr uint32_t PackHand(HandCategory category,
-                            uint16_t primary,
+constexpr uint32_t PackHand(HandCategory category, uint16_t primary,
                             uint16_t kickers = 0) noexcept {
   return (std::to_underlying(category) << 26) |
       (static_cast<uint32_t>(primary) << 13) | kickers;
@@ -79,27 +77,23 @@ uint32_t EvaluateSeven(const HandFeatures& features) noexcept {
   }
   if (flush_mask != 0) {
     if (const int straight = HighestStraight(flush_mask); straight >= 0) {
-      return PackHand(HandCategory::StraightFlush,
-                      static_cast<uint16_t>(straight));
+      return PackHand(HandCategory::StraightFlush, static_cast<uint16_t>(straight));
     }
   }
 
   if (features.quad_mask != 0) {
     const int four = std::bit_width(features.quad_mask) - 1;
-    const uint16_t remaining = static_cast<uint16_t>(
-        rank_mask & ~(1U << four));
+    const uint16_t remaining = static_cast<uint16_t>(rank_mask & ~(1U << four));
     const int kicker = std::bit_width(remaining) - 1;
-    return PackHand(HandCategory::FourOfAKind,
-                    static_cast<uint16_t>(four),
+    return PackHand(HandCategory::FourOfAKind, static_cast<uint16_t>(four),
                     static_cast<uint16_t>(kicker));
   }
 
   if (features.trip_mask != 0 && std::popcount(features.pair_mask) > 1) {
     const int three = std::bit_width(features.trip_mask) - 1;
-    const int pair = std::bit_width(static_cast<uint16_t>(
-        features.pair_mask & ~(1U << three))) - 1;
-    return PackHand(HandCategory::FullHouse,
-                    static_cast<uint16_t>(three),
+    const int pair =
+        std::bit_width(static_cast<uint16_t>(features.pair_mask & ~(1U << three))) - 1;
+    return PackHand(HandCategory::FullHouse, static_cast<uint16_t>(three),
                     static_cast<uint16_t>(pair));
   }
 
@@ -108,14 +102,12 @@ uint32_t EvaluateSeven(const HandFeatures& features) noexcept {
   }
 
   if (const int straight = HighestStraight(rank_mask); straight >= 0) {
-    return PackHand(HandCategory::Straight,
-                    static_cast<uint16_t>(straight));
+    return PackHand(HandCategory::Straight, static_cast<uint16_t>(straight));
   }
 
   if (features.trip_mask != 0) {
     const int three = std::bit_width(features.trip_mask) - 1;
-    return PackHand(HandCategory::ThreeOfAKind,
-                    static_cast<uint16_t>(three),
+    return PackHand(HandCategory::ThreeOfAKind, static_cast<uint16_t>(three),
                     HighestRanks(static_cast<uint16_t>(
                         rank_mask & ~(1U << three)), 2));
   }
@@ -126,8 +118,7 @@ uint32_t EvaluateSeven(const HandFeatures& features) noexcept {
   }
   if (features.pair_mask != 0) {
     const int pair = std::bit_width(features.pair_mask) - 1;
-    return PackHand(HandCategory::Pair,
-                    static_cast<uint16_t>(pair),
+    return PackHand(HandCategory::Pair, static_cast<uint16_t>(pair),
                     HighestRanks(static_cast<uint16_t>(
                         rank_mask & ~(1U << pair)), 3));
   }
@@ -141,9 +132,7 @@ uint32_t EvaluateHand(ComboId hand, HandFeatures features) noexcept {
 
 }  // namespace
 
-int CompareHands(ComboId first,
-                 ComboId second,
-                 const Board& board) {
+int CompareHands(ComboId first, ComboId second, const Board& board) {
   assert(board.count() == kMaxBoardCards);
   HandFeatures board_features;
   for (Card card : board.cards()) AddCard(board_features, card);
