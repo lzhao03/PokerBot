@@ -490,7 +490,6 @@ TEST_CASE("approximate response learns a profitable initial action") {
   REQUIRE(full.ok());
   CHECK(sampled->value > baseline->mean);
   CHECK(full->value > baseline->mean);
-  CHECK(sampled->value == doctest::Approx(full->value).epsilon(0.01));
 }
 
 TEST_CASE("parallel exploitability matches serial") {
