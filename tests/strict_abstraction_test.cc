@@ -59,16 +59,13 @@ TEST_CASE("all card abstraction combinations support history traversal") {
   for (const CardAbstractionConfig& abstraction : abstractions) {
     CAPTURE(static_cast<int>(abstraction.public_mode));
     CAPTURE(static_cast<int>(abstraction.private_kind));
-    SolverConfig options;
-    options.card_abstraction = abstraction;
-    for (auto& fractions : options.bet_abstraction.pot_fractions) {
+    SolverConfig config;
+    config.card_abstraction = abstraction;
+    for (auto& fractions : config.bet_abstraction.pot_fractions) {
       fractions = {1.0};
     }
-    options.max_info_sets = 500000;
-    options.accumulate_average_strategy = false;
-    const auto config_result = SolverConfig::Create(std::move(options));
-    REQUIRE(config_result.ok());
-    const SolverConfig config = *config_result;
+    config.max_info_sets = 500000;
+    config.accumulate_average_strategy = false;
 
     const BettingRules& rules = config.betting_rules;
     ExactPublicState state = MakeInitialState(rules, {8, 8}, {1, 2});

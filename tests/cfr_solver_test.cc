@@ -76,11 +76,7 @@ SolverConfig Config(bool accumulate_average = true,
   options.chance_samples = 1;
   options.max_info_sets = max_info_sets;
   options.accumulate_average_strategy = accumulate_average;
-  const auto config = SolverConfig::Create(std::move(options));
-  if (!config.ok()) {
-    throw std::invalid_argument(std::string(config.status().message()));
-  }
-  return *config;
+  return options;
 }
 
 ExactPublicState Root(const SolverConfig& config) {
@@ -115,28 +111,40 @@ std::unique_ptr<TabularCfrSolver> MakeSolver(
 }
 
 TEST_CASE("solver configuration rejects invalid boundary values") {
+  const SolverConfig defaults;
+  const ExactPublicState root = Root(defaults);
+  const ComboRange range = UniformComboRange();
+  const auto create = [&](SolverConfig config) {
+    return TabularCfrSolver::Create(
+        {std::move(config), root, {range, range}});
+  };
   SolverConfig options;
   options.max_info_sets = 0;
-  CHECK_FALSE(SolverConfig::Create(options).ok());
+  CHECK_FALSE(create(options).ok());
 
   options.max_info_sets = 10;
   options.bet_abstraction.pot_fractions[0] = {-0.5};
-  CHECK_FALSE(SolverConfig::Create(options).ok());
+  CHECK_FALSE(create(options).ok());
 
   options.bet_abstraction.pot_fractions[0] = {0.0};
-  CHECK_FALSE(SolverConfig::Create(options).ok());
+  CHECK_FALSE(create(options).ok());
 
-  options.bet_abstraction.pot_fractions[0] = {1.0, 0.25, 0.5, 0.5};
-  const auto normalized = SolverConfig::Create(options);
-  REQUIRE(normalized.ok());
-  CHECK(normalized->bet_abstraction.pot_fractions[0] ==
+  options.bet_abstraction.pot_fractions[0] = {1.0, 0.25, 0.5};
+  CHECK_FALSE(create(options).ok());
+
+  options.bet_abstraction.pot_fractions[0] = {0.25, 0.5, 0.5, 1.0};
+  CHECK_FALSE(create(options).ok());
+
+  options.bet_abstraction.pot_fractions[0] = {0.25, 0.5, 1.0};
+  const auto valid = create(options);
+  REQUIRE(valid.ok());
+  CHECK(valid->config().bet_abstraction.pot_fractions[0] ==
         std::vector<double>{0.25, 0.5, 1.0});
 
   options.bet_abstraction.pot_fractions[0] = {0.1, 0.2, 0.3,
                                                0.4, 0.5, 0.6};
-  CHECK_FALSE(SolverConfig::Create(options).ok());
+  CHECK_FALSE(create(options).ok());
 
-  const SolverConfig defaults;
   CHECK(defaults.card_abstraction.public_mode == PublicCardMode::Texture);
   CHECK(defaults.card_abstraction.private_kind ==
         PrivateAbstractionKind::Handcrafted36);

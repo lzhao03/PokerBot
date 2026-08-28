@@ -139,7 +139,7 @@ absl::StatusOr<poker::SolverConfig> BenchmarkConfig() {
   } else {
     return absl::InvalidArgumentError("invalid private recall mode");
   }
-  return poker::SolverConfig::Create(std::move(options));
+  return options;
 }
 
 template <typename Function>

@@ -208,7 +208,7 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
     if (!override.ok()) return override.status();
     config.bet_abstraction.pot_fractions[street] = *override;
   }
-  return poker::SolverConfig::Create(std::move(config));
+  return config;
 }
 
 void PrintRunSummary(const poker::TabularCfrSolver& solver,

@@ -84,11 +84,7 @@ int main(int argc, char** argv) {
     std::cerr << "Error: " << spec.status() << '\n';
     return 1;
   }
-  auto config = poker::SolverConfig::Create(std::move(spec->config));
-  if (!config.ok()) {
-    std::cerr << "Error: " << config.status() << '\n';
-    return 1;
-  }
+  const poker::SolverConfig& config = spec->config;
   auto deals = poker::DealDistribution::Create(
       spec->ranges[poker::Index(poker::Player::A)],
       spec->ranges[poker::Index(poker::Player::B)]);
@@ -97,11 +93,11 @@ int main(int argc, char** argv) {
     return 1;
   }
   const poker::HistoryTree history = poker::BuildHistoryTree(
-      spec->root.betting, config->betting_rules, config->bet_abstraction);
+      spec->root.betting, config.betting_rules, config.bet_abstraction);
   const poker::PublicPosition initial_public(
-      config->card_abstraction, spec->root.board);
+      config.card_abstraction, spec->root.board);
   const poker::ModelFingerprint model = poker::ModelFingerprintFor(
-      *config, spec->root, spec->ranges);
+      config, spec->root, spec->ranges);
   auto tabular = poker::LoadPolicy(tabular_path);
   if (!tabular.ok()) {
     std::cerr << "Error loading --tabular: " << tabular.status() << '\n';
@@ -126,10 +122,10 @@ int main(int argc, char** argv) {
       {"tabular", tabular_path, poker::MakeStrategyLookup(*tabular)},
       {"deep", deep_path,
        poker::MakeStrategyLookup(
-           history, config->card_abstraction, model, *deep)},
+           history, config.card_abstraction, model, *deep)},
       {"distilled", distilled_path,
        poker::MakeStrategyLookup(
-           history, config->card_abstraction, model, *distilled)},
+           history, config.card_abstraction, model, *distilled)},
   }};
 
   std::cout << std::setprecision(8)
@@ -137,13 +133,13 @@ int main(int argc, char** argv) {
             << '\n'
             << "evaluation_samples\t" << kEvaluationSamples << '\n'
             << "best_response_info_set_cap_per_player\t"
-            << config->max_info_sets << '\n'
+            << config.max_info_sets << '\n'
             << "policy\tbytes\tapprox_exploitability\tstandard_error"
                "\tresponse_rows_total\topponent_misses\tresponse_misses\n";
   for (const Candidate& candidate : candidates) {
     const auto estimate =
         poker::EstimateExploitability(
-            *config, *deals, history, initial_public, model,
+            config, *deals, history, initial_public, model,
             candidate.strategy);
     if (!estimate.ok()) {
       std::cerr << "Error evaluating " << candidate.name << ": "
@@ -174,10 +170,10 @@ int main(int argc, char** argv) {
   for (size_t left = 0; left < candidates.size(); ++left) {
     for (size_t right = left + 1; right < candidates.size(); ++right) {
       const auto as_a = poker::EstimateExpectedValue(
-          *config, *deals, history, initial_public, candidates[left].strategy,
+          config, *deals, history, initial_public, candidates[left].strategy,
           candidates[right].strategy, kEvaluationSamples, kSeed, false, true);
       const auto as_b = poker::EstimateExpectedValue(
-          *config, *deals, history, initial_public, candidates[right].strategy,
+          config, *deals, history, initial_public, candidates[right].strategy,
           candidates[left].strategy, kEvaluationSamples, kSeed, false, true);
       if (!as_a.ok() || !as_b.ok()) {
         std::cerr << "Error evaluating " << candidates[left].name << " vs "

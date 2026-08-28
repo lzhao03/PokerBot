@@ -388,16 +388,16 @@ DeepCfrSolver& DeepCfrSolver::operator=(DeepCfrSolver&&) noexcept = default;
 absl::StatusOr<DeepCfrSolver> DeepCfrSolver::Create(
     SolveSpec spec,
     DeepCfrConfig config) {
-  const absl::Status config_status = ValidateConfig(config);
-  if (!config_status.ok()) return config_status;
-  auto solver_config = SolverConfig::Create(std::move(spec.config));
-  if (!solver_config.ok()) return solver_config.status();
+  const absl::Status deep_status = ValidateConfig(config);
+  if (!deep_status.ok()) return deep_status;
+  const absl::Status solver_status = ValidateSolverConfig(spec.config);
+  if (!solver_status.ok()) return solver_status;
   if (!IsValidBettingData(Data(spec.root.betting))) {
     return absl::InvalidArgumentError("invalid root betting state");
   }
-  if (solver_config->card_abstraction.private_kind ==
+  if (spec.config.card_abstraction.private_kind ==
           PrivateAbstractionKind::Handcrafted36 &&
-      solver_config->card_abstraction.recall_mode !=
+      spec.config.card_abstraction.recall_mode !=
           RecallMode::BucketHistory) {
     return absl::InvalidArgumentError(
         "Deep CFR requires private bucket history recall");
@@ -406,18 +406,18 @@ absl::StatusOr<DeepCfrSolver> DeepCfrSolver::Create(
                                         spec.ranges[Index(Player::B)]);
   if (!deals.ok()) return deals.status();
   PublicPosition initial_public(
-      solver_config->card_abstraction, spec.root.board);
+      spec.config.card_abstraction, spec.root.board);
   const ModelFingerprint model =
-      ModelFingerprintFor(*solver_config, spec.root, spec.ranges);
+      ModelFingerprintFor(spec.config, spec.root, spec.ranges);
   HistoryTree history = BuildHistoryTree(
-      spec.root.betting, solver_config->betting_rules,
-      solver_config->bet_abstraction);
+      spec.root.betting, spec.config.betting_rules,
+      spec.config.bet_abstraction);
   try {
     UseSingleThreadedNeuralRuntime();
     SetNeuralSeed(config.seed);
     return DeepCfrSolver(
         std::make_unique<Impl>(
-            std::move(*solver_config), std::move(*deals), std::move(history),
+            std::move(spec.config), std::move(*deals), std::move(history),
             std::move(initial_public), model, config));
   } catch (const std::exception& error) {
     return TorchError(error);

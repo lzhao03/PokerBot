@@ -22,13 +22,10 @@ TEST_CASE("uniform combo range includes every combo equally") {
 }
 
 TEST_CASE("deal sampling rejects incompatible ranges") {
-  SolverConfig options;
-  for (auto& fractions : options.bet_abstraction.pot_fractions) {
+  SolverConfig config;
+  for (auto& fractions : config.bet_abstraction.pot_fractions) {
     fractions = {1.0};
   }
-  const auto config_result = SolverConfig::Create(std::move(options));
-  REQUIRE(config_result.ok());
-  const SolverConfig config = *config_result;
 
   ComboRange a;
   a.add(CardsToComboId(kDeck[0], kDeck[1]));

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "src/bet_abstraction.h"
 #include "src/card_abstraction.h"
@@ -27,9 +28,9 @@ struct SolverConfig {
   bool accumulate_average_strategy = true;
   bool external_sampling = false;
   int max_info_sets = 500000;
-
-  static absl::StatusOr<SolverConfig> Create(SolverConfig config);
 };
+
+absl::Status ValidateSolverConfig(const SolverConfig& config);
 
 struct ComboRange {
   std::array<float, kComboCount> weights = {};

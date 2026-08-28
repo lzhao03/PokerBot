@@ -304,7 +304,7 @@ bool Policy::strategy(InfoSetKey key, std::span<float> output) const {
   return true;
 }
 
-absl::StatusOr<SolverConfig> SolverConfig::Create(SolverConfig config) {
+absl::Status ValidateSolverConfig(const SolverConfig& config) {
   if (config.betting_rules.minimum_bet <= 0) {
     return absl::InvalidArgumentError("minimum bet must be positive");
   }
@@ -319,21 +319,23 @@ absl::StatusOr<SolverConfig> SolverConfig::Create(SolverConfig config) {
                        kMaxActionsPerNode)) {
     return absl::InvalidArgumentError("max_info_sets is too large");
   }
-  for (auto& fractions : config.bet_abstraction.pot_fractions) {
-    for (double fraction : fractions) {
+  for (const auto& fractions : config.bet_abstraction.pot_fractions) {
+    if (fractions.size() > kMaxActionsPerNode - size_t{3}) {
+      return absl::InvalidArgumentError("too many pot fractions");
+    }
+    for (size_t index = 0; index < fractions.size(); ++index) {
+      const double fraction = fractions[index];
       if (!std::isfinite(fraction) || fraction <= 0.0) {
         return absl::InvalidArgumentError(
             "pot fractions must be finite and positive");
       }
-    }
-    std::sort(fractions.begin(), fractions.end());
-    fractions.erase(std::unique(fractions.begin(), fractions.end()),
-                    fractions.end());
-    if (fractions.size() > kMaxActionsPerNode - size_t{3}) {
-      return absl::InvalidArgumentError("too many pot fractions");
+      if (index > 0 && fractions[index - 1] >= fraction) {
+        return absl::InvalidArgumentError(
+            "pot fractions must be strictly increasing");
+      }
     }
   }
-  return config;
+  return absl::OkStatus();
 }
 
 ComboRange UniformComboRange() {
@@ -356,21 +358,23 @@ TabularCfrSolver::TabularCfrSolver(SolverConfig config,
       state_(config_, config_.accumulate_average_strategy) {}
 
 absl::StatusOr<TabularCfrSolver> TabularCfrSolver::Create(SolveSpec spec) {
-  auto config = SolverConfig::Create(std::move(spec.config));
-  if (!config.ok()) return config.status();
+  const absl::Status config_status = ValidateSolverConfig(spec.config);
+  if (!config_status.ok()) return config_status;
   if (!IsValidBettingData(Data(spec.root.betting))) {
     return absl::InvalidArgumentError("invalid root betting state");
   }
   auto deals = DealDistribution::Create(spec.ranges[Index(Player::A)],
                                         spec.ranges[Index(Player::B)]);
   if (!deals.ok()) return deals.status();
-  PublicPosition initial_public(config->card_abstraction, spec.root.board);
+  PublicPosition initial_public(
+      spec.config.card_abstraction, spec.root.board);
   const ModelFingerprint model =
-      ModelFingerprintFor(*config, spec.root, spec.ranges);
+      ModelFingerprintFor(spec.config, spec.root, spec.ranges);
   HistoryTree history = BuildHistoryTree(
-      spec.root.betting, config->betting_rules, config->bet_abstraction);
+      spec.root.betting, spec.config.betting_rules,
+      spec.config.bet_abstraction);
   return TabularCfrSolver(
-      std::move(*config), std::move(*deals), std::move(history),
+      std::move(spec.config), std::move(*deals), std::move(history),
       std::move(initial_public), model);
 }
 

@@ -110,6 +110,12 @@ TEST_CASE("Deep CFR rejects an empty reservoir") {
   CHECK_FALSE(DeepCfrSolver::Create(TinySolveSpec(), config).ok());
 }
 
+TEST_CASE("Deep CFR rejects invalid solver configuration") {
+  SolveSpec spec = TinySolveSpec();
+  spec.config.max_info_sets = 0;
+  CHECK_FALSE(DeepCfrSolver::Create(std::move(spec), TinyDeepConfig()).ok());
+}
+
 TEST_CASE("neural features preserve private bucket history") {
   SolverConfig config;
   config.card_abstraction.public_mode = PublicCardMode::CompactTexture;
