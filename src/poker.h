@@ -211,9 +211,7 @@ class Board {
     return (mask() & CardBit(card)) != 0;
   }
   StreetKind street() const noexcept {
-    return count_ == 0
-               ? StreetKind::Preflop
-               : static_cast<StreetKind>(count_ - 2);
+    return count_ == 0 ? StreetKind::Preflop : static_cast<StreetKind>(count_ - 2);
   }
 
   friend bool operator==(const Board&, const Board&) = default;
@@ -256,15 +254,13 @@ inline Chips MaxContestableAdditional(const BettingData& state,
 }
 
 inline bool IsValidBettingData(const BettingData& state) noexcept {
-  return state.stack[0] >= 0 && state.stack[1] >= 0 &&
-         state.total_committed[0] >= 0 &&
-         state.total_committed[1] >= 0 &&
-         state.street_committed[0] >= 0 &&
-         state.street_committed[1] >= 0 &&
-         state.street_committed[0] <= state.total_committed[0] &&
-         state.street_committed[1] <= state.total_committed[1] &&
-         state.last_full_raise > 0 &&
-         state.actions_remaining <= 2;
+  for (size_t player = 0; player < kPlayerCount; ++player) {
+    if (state.stack[player] < 0 || state.total_committed[player] < 0 ||
+        state.street_committed[player] < 0 ||
+        state.street_committed[player] > state.total_committed[player])
+      return false;
+  }
+  return state.last_full_raise > 0 && state.actions_remaining <= 2;
 }
 
 std::optional<ComboId> MaybeCardsToComboId(Card first, Card second);
