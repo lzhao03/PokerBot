@@ -25,14 +25,10 @@ namespace {
 
 struct CfrNetImpl : torch::nn::Module {
   explicit CfrNetImpl(int hidden_size)
-      : hidden1(register_module(
-            "hidden1", torch::nn::Linear(kNeuralFeatureCount, hidden_size))),
-        hidden2(register_module(
-            "hidden2", torch::nn::Linear(hidden_size, hidden_size))),
-        hidden3(register_module(
-            "hidden3", torch::nn::Linear(hidden_size, hidden_size))),
-        output(register_module(
-            "output", torch::nn::Linear(hidden_size, kMaxActionsPerNode))) {
+      : hidden1(register_module("hidden1", torch::nn::Linear(kNeuralFeatureCount, hidden_size))),
+        hidden2(register_module("hidden2", torch::nn::Linear(hidden_size, hidden_size))),
+        hidden3(register_module("hidden3", torch::nn::Linear(hidden_size, hidden_size))),
+        output(register_module("output", torch::nn::Linear(hidden_size, kMaxActionsPerNode))) {
     torch::nn::init::zeros_(output->weight);
     torch::nn::init::zeros_(output->bias);
   }
@@ -51,9 +47,7 @@ struct CfrNetImpl : torch::nn::Module {
 };
 TORCH_MODULE(CfrNet);
 
-void Linear(const torch::nn::Linear& layer,
-            std::span<const float> input,
-            std::span<float> output) {
+void Linear(const torch::nn::Linear& layer, std::span<const float> input, std::span<float> output) {
   assert(layer->weight.size(0) == static_cast<int64_t>(output.size()));
   assert(layer->weight.size(1) == static_cast<int64_t>(input.size()));
   std::copy_n(layer->bias.data_ptr<float>(), output.size(), output.begin());
@@ -63,9 +57,7 @@ void Linear(const torch::nn::Linear& layer,
               input.data(), 1, 1.0f, output.data(), 1);
 }
 
-void SparseLinear(const torch::nn::Linear& layer,
-                  const torch::Tensor& columns,
-                  std::span<const float> input,
+void SparseLinear(const torch::nn::Linear& layer, const torch::Tensor& columns, std::span<const float> input,
                   std::span<float> output) {
   assert(layer->weight.size(0) == static_cast<int64_t>(output.size()));
   assert(layer->weight.size(1) == static_cast<int64_t>(input.size()));
@@ -95,9 +87,7 @@ std::mt19937 MakeRng(uint64_t seed) {
   return std::mt19937(sequence);
 }
 
-absl::Status TorchError(const std::exception& error) {
-  return absl::InternalError(error.what());
-}
+absl::Status TorchError(const std::exception& error) { return absl::InternalError(error.what()); }
 
 void AppendU32(std::vector<uint8_t>& bytes, uint32_t value) {
   for (int shift = 0; shift < 32; shift += 8) {
@@ -125,10 +115,7 @@ struct NeuralNetwork::Impl {
     RefreshInputWeights();
   }
 
-  void RefreshInputWeights() {
-    input_weights =
-        network->hidden1->weight.detach().transpose(0, 1).contiguous();
-  }
+  void RefreshInputWeights() { input_weights = network->hidden1->weight.detach().transpose(0, 1).contiguous(); }
   int hidden_size;
   CfrNet network;
   torch::Tensor input_weights;
@@ -141,37 +128,25 @@ NeuralNetwork::~NeuralNetwork() = default;
 NeuralNetwork::NeuralNetwork(NeuralNetwork&&) noexcept = default;
 NeuralNetwork& NeuralNetwork::operator=(NeuralNetwork&&) noexcept = default;
 
-int NeuralNetwork::hidden_size() const noexcept {
-  return impl_->hidden_size;
-}
+int NeuralNetwork::hidden_size() const noexcept { return impl_->hidden_size; }
 
-void SetNeuralSeed(uint64_t seed) {
-  torch::manual_seed(seed);
-}
+void SetNeuralSeed(uint64_t seed) { torch::manual_seed(seed); }
 
 void UseSingleThreadedNeuralRuntime() {
-  if (std::getenv("OMP_NUM_THREADS") == nullptr) {
-    torch::set_num_threads(1);
-  }
+  if (std::getenv("OMP_NUM_THREADS") == nullptr) torch::set_num_threads(1);
   setenv("VECLIB_MAXIMUM_THREADS", "1", 0);
 }
 
-NeuralFeatureVector EncodeNeuralFeatures(InfoSetKey key,
-                                         const HistoryNode& node,
-                                         const CardAbstractionConfig&
-                                             card_abstraction) {
-  return EncodeNeuralFeatures(
-      key.history, key.public_observation, key.private_observation,
-      node, card_abstraction);
+NeuralFeatureVector EncodeNeuralFeatures(InfoSetKey key, const HistoryNode& node,
+                                         const CardAbstractionConfig& card_abstraction) {
+  return EncodeNeuralFeatures(key.history, key.public_observation, key.private_observation, node, card_abstraction);
 }
 
 void FillUniform(std::span<float> probabilities) {
-  std::fill(probabilities.begin(), probabilities.end(),
-            1.0f / static_cast<float>(probabilities.size()));
+  std::fill(probabilities.begin(), probabilities.end(), 1.0f / static_cast<float>(probabilities.size()));
 }
 
-void RegretMatch(std::span<const float> advantages,
-                 std::span<float> probabilities) {
+void RegretMatch(std::span<const float> advantages, std::span<float> probabilities) {
   float sum = 0.0f;
   for (size_t action = 0; action < probabilities.size(); ++action) {
     probabilities[action] = std::max(0.0f, advantages[action]);
@@ -184,8 +159,7 @@ void RegretMatch(std::span<const float> advantages,
   for (float& probability : probabilities) probability /= sum;
 }
 
-void Softmax(std::span<const float> logits,
-             std::span<float> probabilities) {
+void Softmax(std::span<const float> logits, std::span<float> probabilities) {
   const float maximum = std::ranges::max(logits.first(probabilities.size()));
   float sum = 0.0f;
   for (size_t action = 0; action < probabilities.size(); ++action) {
@@ -199,16 +173,12 @@ void Softmax(std::span<const float> logits,
   for (float& probability : probabilities) probability /= sum;
 }
 
-NeuralActionVector PredictNeuralNetwork(
-    const NeuralNetwork& network,
-    const HistoryTree& history,
-    const CardAbstractionConfig& card_abstraction,
-    InfoSetKey key,
-    std::array<std::vector<float>, 2>& hidden) {
+NeuralActionVector PredictNeuralNetwork(const NeuralNetwork& network, const HistoryTree& history,
+                                        const CardAbstractionConfig& card_abstraction, InfoSetKey key,
+                                        std::array<std::vector<float>, 2>& hidden) {
   const NeuralFeatureVector features = EncodeNeuralFeatures(
       key, history.nodes[Index(key.history)], card_abstraction);
-  SparseLinear(network.impl_->network->hidden1,
-               network.impl_->input_weights, features, hidden[0]);
+  SparseLinear(network.impl_->network->hidden1, network.impl_->input_weights, features, hidden[0]);
   Relu(hidden[0]);
   Linear(network.impl_->network->hidden2, hidden[0], hidden[1]);
   Relu(hidden[1]);
@@ -219,24 +189,17 @@ NeuralActionVector PredictNeuralNetwork(
   return values;
 }
 
-float FitNeuralNetwork(
-    NeuralNetwork& network,
-    const HistoryTree& history,
-    const CardAbstractionConfig& card_abstraction,
-    std::span<const NeuralSample> samples,
-    const NeuralTrainingConfig& config,
-    NeuralTarget target_kind) {
+float FitNeuralNetwork(NeuralNetwork& network, const HistoryTree& history,
+                       const CardAbstractionConfig& card_abstraction, std::span<const NeuralSample> samples,
+                       const NeuralTrainingConfig& config, NeuralTarget target_kind) {
   if (samples.empty()) return 0.0f;
 
   torch::manual_seed(config.seed);
   network.impl_->network = CfrNet(network.impl_->hidden_size);
   network.impl_->network->train();
-  torch::optim::Adam optimizer(
-      network.impl_->network->parameters(),
-      torch::optim::AdamOptions(config.learning_rate));
+  torch::optim::Adam optimizer(network.impl_->network->parameters(), torch::optim::AdamOptions(config.learning_rate));
 
-  const size_t batch_size =
-      std::min(static_cast<size_t>(config.batch_size), samples.size());
+  const size_t batch_size = std::min(static_cast<size_t>(config.batch_size), samples.size());
   std::vector<float> inputs(batch_size * kNeuralFeatureCount);
   std::vector<float> targets(batch_size * kMaxActionsPerNode);
   std::vector<float> masks(batch_size * kMaxActionsPerNode);
@@ -251,28 +214,20 @@ float FitNeuralNetwork(
     for (size_t row = 0; row < batch_size; ++row) {
       const NeuralSample& sample = samples[sample_index(batch_rng)];
       const HistoryNode& node = history.nodes[Index(sample.key.history)];
-      const NeuralFeatureVector features =
-          EncodeNeuralFeatures(sample.key, node, card_abstraction);
-      std::copy(features.begin(), features.end(),
-                inputs.data() + row * kNeuralFeatureCount);
-      std::copy(sample.target.begin(), sample.target.end(),
-                targets.data() + row * kMaxActionsPerNode);
-      std::fill_n(masks.data() + row * kMaxActionsPerNode,
-                  node.child_count, 1.0f);
+      const NeuralFeatureVector features = EncodeNeuralFeatures(sample.key, node, card_abstraction);
+      std::copy(features.begin(), features.end(), inputs.data() + row * kNeuralFeatureCount);
+      std::copy(sample.target.begin(), sample.target.end(), targets.data() + row * kMaxActionsPerNode);
+      std::fill_n(masks.data() + row * kMaxActionsPerNode, node.child_count, 1.0f);
       weights[row] = sample.weight;
     }
 
     const torch::Tensor input = torch::from_blob(
-        inputs.data(),
-        {static_cast<int64_t>(batch_size), kNeuralFeatureCount}, options);
+        inputs.data(), {static_cast<int64_t>(batch_size), kNeuralFeatureCount}, options);
     torch::Tensor target = torch::from_blob(
-        targets.data(),
-        {static_cast<int64_t>(batch_size), kMaxActionsPerNode}, options);
+        targets.data(), {static_cast<int64_t>(batch_size), kMaxActionsPerNode}, options);
     const torch::Tensor mask = torch::from_blob(
-        masks.data(),
-        {static_cast<int64_t>(batch_size), kMaxActionsPerNode}, options);
-    const torch::Tensor weight = torch::from_blob(
-        weights.data(), {static_cast<int64_t>(batch_size)}, options);
+        masks.data(), {static_cast<int64_t>(batch_size), kMaxActionsPerNode}, options);
+    const torch::Tensor weight = torch::from_blob(weights.data(), {static_cast<int64_t>(batch_size)}, options);
 
     optimizer.zero_grad();
     torch::Tensor prediction = network.impl_->network->forward(input);
@@ -280,8 +235,7 @@ float FitNeuralNetwork(
       prediction = torch::softmax(prediction + (mask - 1.0f) * 1e9f, 1);
     }
     const torch::Tensor squared_error = (prediction - target).square() * mask;
-    const torch::Tensor loss =
-        (squared_error.sum(1) * weight).sum() / weight.sum();
+    const torch::Tensor loss = (squared_error.sum(1) * weight).sum() / weight.sum();
     loss.backward();
     optimizer.step();
     final_loss = loss.item<float>();
@@ -299,42 +253,32 @@ NeuralPolicy& NeuralPolicy::operator=(NeuralPolicy&&) noexcept = default;
 
 bool NeuralPolicy::strategy(const HistoryTree& history,
                             const CardAbstractionConfig& card_abstraction,
-                            ModelFingerprint model,
-                            InfoSetKey key,
+                            ModelFingerprint model, InfoSetKey key,
                             std::span<float> probabilities) const {
   if (model != model_) {
     FillUniform(probabilities);
     return false;
   }
   thread_local std::array<std::vector<float>, 2> hidden;
-  for (auto& values : hidden) {
-    values.resize(static_cast<size_t>(network_.hidden_size()));
-  }
-  const NeuralActionVector logits =
-      PredictNeuralNetwork(network_, history, card_abstraction, key, hidden);
+  for (auto& values : hidden) values.resize(static_cast<size_t>(network_.hidden_size()));
+  const NeuralActionVector logits = PredictNeuralNetwork(network_, history, card_abstraction, key, hidden);
   Softmax(logits, probabilities);
   return true;
 }
 
 size_t NeuralPolicy::parameter_bytes() const {
   size_t bytes = 0;
-  for (const torch::Tensor& parameter :
-       network_.impl_->network->parameters()) {
-    bytes += static_cast<size_t>(parameter.numel()) *
-             static_cast<size_t>(parameter.element_size());
+  for (const torch::Tensor& parameter : network_.impl_->network->parameters()) {
+    bytes += static_cast<size_t>(parameter.numel()) * static_cast<size_t>(parameter.element_size());
   }
   return bytes;
 }
 
 absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(
-    const HistoryTree& history,
-    const CardAbstractionConfig& card_abstraction,
-    ModelFingerprint model,
-    const Policy& teacher,
-    const NeuralTrainingConfig& config) {
+    const HistoryTree& history, const CardAbstractionConfig& card_abstraction, ModelFingerprint model,
+    const Policy& teacher, const NeuralTrainingConfig& config) {
   if (teacher.model != model) {
-    return absl::FailedPreconditionError(
-        "policy model does not match compiled game");
+    return absl::FailedPreconditionError("policy model does not match compiled game");
   }
   if (teacher.rows.empty()) {
     return absl::InvalidArgumentError("policy has no explicit rows");
@@ -345,8 +289,7 @@ absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(
     return absl::InvalidArgumentError("invalid neural training config");
   }
 
-  std::vector<std::pair<InfoSetKey, uint32_t>> rows(
-      teacher.rows.begin(), teacher.rows.end());
+  std::vector<std::pair<InfoSetKey, uint32_t>> rows(teacher.rows.begin(), teacher.rows.end());
   std::ranges::sort(rows, {}, &std::pair<InfoSetKey, uint32_t>::first);
   std::vector<NeuralSample> samples;
   samples.reserve(rows.size());
@@ -355,8 +298,7 @@ absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(
       return absl::InvalidArgumentError("policy history is out of range");
     }
     const HistoryNode& node = history.nodes[Index(key.history)];
-    if (!std::holds_alternative<DecisionState>(node.state) ||
-        node.child_count == 0 ||
+    if (!std::holds_alternative<DecisionState>(node.state) || node.child_count == 0 ||
         offset + node.child_count > teacher.probabilities.size()) {
       return absl::InvalidArgumentError("invalid policy row");
     }
@@ -371,26 +313,20 @@ absl::StatusOr<NeuralPolicyFitResult> FitNeuralPolicy(
   try {
     SetNeuralSeed(config.seed);
     NeuralNetwork network(config.hidden_size);
-    const float loss = FitNeuralNetwork(
-        network, history, card_abstraction, samples, config,
-        NeuralTarget::AveragePolicy);
-    return NeuralPolicyFitResult{
-        NeuralPolicy(std::move(network), model), loss, samples.size()};
+    const float loss = FitNeuralNetwork(network, history, card_abstraction, samples, config,
+                                        NeuralTarget::AveragePolicy);
+    return NeuralPolicyFitResult{NeuralPolicy(std::move(network), model), loss, samples.size()};
   } catch (const std::exception& error) {
     return TorchError(error);
   }
 }
 
-absl::Status SaveNeuralPolicy(const NeuralPolicy& policy,
-                              const std::filesystem::path& path) {
+absl::Status SaveNeuralPolicy(const NeuralPolicy& policy, const std::filesystem::path& path) {
   try {
     torch::serialize::OutputArchive archive;
-    archive.write("feature_schema", torch::tensor(
-        static_cast<int64_t>(kNeuralFeatureSchemaVersion)));
-    archive.write("hidden_size", torch::tensor(
-        static_cast<int64_t>(policy.network_.impl_->hidden_size)));
-    archive.write("model", torch::tensor(
-        std::bit_cast<int64_t>(std::to_underlying(policy.model_))));
+    archive.write("feature_schema", torch::tensor(static_cast<int64_t>(kNeuralFeatureSchemaVersion)));
+    archive.write("hidden_size", torch::tensor(static_cast<int64_t>(policy.network_.impl_->hidden_size)));
+    archive.write("model", torch::tensor(std::bit_cast<int64_t>(std::to_underlying(policy.model_))));
     policy.network_.impl_->network->save(archive);
     archive.save_to(path.string());
     return absl::OkStatus();
@@ -399,9 +335,7 @@ absl::Status SaveNeuralPolicy(const NeuralPolicy& policy,
   }
 }
 
-absl::StatusOr<NeuralPolicy> LoadNeuralPolicy(
-    const std::filesystem::path& path,
-    ModelFingerprint expected_model) {
+absl::StatusOr<NeuralPolicy> LoadNeuralPolicy(const std::filesystem::path& path, ModelFingerprint expected_model) {
   try {
     torch::serialize::InputArchive archive;
     archive.load_from(path.string());
@@ -412,13 +346,11 @@ absl::StatusOr<NeuralPolicy> LoadNeuralPolicy(
     archive.read("hidden_size", hidden_size);
     archive.read("model", model);
     if (schema.item<int64_t>() != kNeuralFeatureSchemaVersion) {
-      return absl::FailedPreconditionError(
-          "neural feature schema does not match");
+      return absl::FailedPreconditionError("neural feature schema does not match");
     }
     if (model.item<int64_t>() !=
         std::bit_cast<int64_t>(std::to_underlying(expected_model))) {
-      return absl::FailedPreconditionError(
-          "neural model fingerprint does not match");
+      return absl::FailedPreconditionError("neural model fingerprint does not match");
     }
     NeuralNetwork network(static_cast<int>(hidden_size.item<int64_t>()));
     network.impl_->network->load(archive);
@@ -430,9 +362,7 @@ absl::StatusOr<NeuralPolicy> LoadNeuralPolicy(
   }
 }
 
-absl::Status SavePortableNeuralPolicy(
-    const NeuralPolicy& policy,
-    const std::filesystem::path& path) {
+absl::Status SavePortableNeuralPolicy(const NeuralPolicy& policy, const std::filesystem::path& path) {
   try {
     const CfrNet& network = policy.network_.impl_->network;
     std::vector<uint8_t> bytes;
@@ -454,8 +384,7 @@ absl::Status SavePortableNeuralPolicy(
     AppendTensor(bytes, network->output->bias);
 
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
-    output.write(reinterpret_cast<const char*>(bytes.data()),
-                 static_cast<std::streamsize>(bytes.size()));
+    output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     if (!output) {
       return absl::InternalError("could not write portable neural policy");
     }

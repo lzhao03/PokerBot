@@ -22,8 +22,7 @@ namespace poker {
 namespace {
 
 inline constexpr uint16_t kMaxProbabilityUnits = 256;
-inline constexpr std::array<uint8_t, 8> kPolicyCodecMagic = {
-    'P', 'K', 'C', 'O', 'D', 'E', 'C', '1'};
+inline constexpr std::array<uint8_t, 8> kPolicyCodecMagic = {'P', 'K', 'C', 'O', 'D', 'E', 'C', '1'};
 
 uint64_t Binomial(size_t n, size_t k) noexcept {
   if (k > n) return 0;
@@ -39,8 +38,7 @@ uint64_t CompositionCount(size_t units, size_t parts) noexcept {
   return Binomial(units + parts - 1, parts - 1);
 }
 
-uint64_t DistributionCount(size_t action_count,
-                           PolicyCodecConfig config) noexcept {
+uint64_t DistributionCount(size_t action_count, PolicyCodecConfig config) noexcept {
   if (action_count == 0 || action_count > config.max_actions ||
       config.max_actions > kMaxActionsPerNode || config.total_units == 0 ||
       config.total_units > kMaxProbabilityUnits) {
@@ -50,8 +48,7 @@ uint64_t DistributionCount(size_t action_count,
 }
 
 bool ValidConfig(PolicyCodecConfig config) noexcept {
-  return config.total_units > 0 &&
-         config.total_units <= kMaxProbabilityUnits && config.max_actions > 0 &&
+  return config.total_units > 0 && config.total_units <= kMaxProbabilityUnits && config.max_actions > 0 &&
          config.max_actions <= kMaxActionsPerNode;
 }
 
@@ -118,21 +115,17 @@ struct EncodedRow {
   uint8_t action_count;
 };
 
-absl::StatusOr<std::vector<EncodedRow>> QuantizedRows(
-    const Policy& policy,
-    PolicyCodecConfig config) {
+absl::StatusOr<std::vector<EncodedRow>> QuantizedRows(const Policy& policy, PolicyCodecConfig config) {
   std::array<uint64_t, kMaxActionsPerNode + 1> default_codes = {};
   std::array<float, kMaxActionsPerNode> uniform;
   uniform.fill(1.0f);
   for (size_t actions = 1; actions <= config.max_actions; ++actions) {
-    const auto code = EncodeActionProbabilities(
-        std::span<const float>(uniform.data(), actions), config);
+    const auto code = EncodeActionProbabilities(std::span<const float>(uniform.data(), actions), config);
     if (!code.ok()) return code.status();
     default_codes[actions] = *code;
   }
 
-  std::vector<std::pair<InfoSetKey, uint32_t>> rows(policy.rows.begin(),
-                                                    policy.rows.end());
+  std::vector<std::pair<InfoSetKey, uint32_t>> rows(policy.rows.begin(), policy.rows.end());
   std::ranges::sort(rows, {}, &std::pair<InfoSetKey, uint32_t>::second);
   if (rows.empty()) {
     if (policy.probabilities.empty()) return std::vector<EncodedRow>{};
@@ -146,14 +139,12 @@ absl::StatusOr<std::vector<EncodedRow>> QuantizedRows(
   encoded.reserve(rows.size());
   for (size_t index = 0; index < rows.size(); ++index) {
     const size_t begin = rows[index].second;
-    const size_t end = index + 1 < rows.size() ? rows[index + 1].second
-                                               : policy.probabilities.size();
+    const size_t end = index + 1 < rows.size() ? rows[index + 1].second : policy.probabilities.size();
     if (begin >= end || end > policy.probabilities.size() ||
         end - begin > config.max_actions) {
       return absl::InvalidArgumentError("invalid policy row span");
     }
-    const std::span<const float> probabilities(
-        policy.probabilities.data() + begin, end - begin);
+    const std::span<const float> probabilities(policy.probabilities.data() + begin, end - begin);
     double total = 0.0;
     for (float probability : probabilities) {
       if (!std::isfinite(probability) || probability < 0.0f ||
@@ -168,21 +159,18 @@ absl::StatusOr<std::vector<EncodedRow>> QuantizedRows(
     const auto code = EncodeActionProbabilities(probabilities, config);
     if (!code.ok()) return code.status();
     if (*code != default_codes[probabilities.size()]) {
-      encoded.push_back({rows[index].first, *code,
-                         static_cast<uint8_t>(probabilities.size())});
+      encoded.push_back({rows[index].first, *code, static_cast<uint8_t>(probabilities.size())});
     }
   }
   return encoded;
 }
 
-absl::Status WriteBytes(const std::filesystem::path& path,
-                        std::span<const uint8_t> bytes) {
+absl::Status WriteBytes(const std::filesystem::path& path, std::span<const uint8_t> bytes) {
   std::filesystem::path temporary = path;
   temporary += ".tmp";
   std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
   if (!output) return absl::UnavailableError("could not open output file");
-  output.write(reinterpret_cast<const char*>(bytes.data()),
-               static_cast<std::streamsize>(bytes.size()));
+  output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
   output.close();
   if (!output) {
     std::error_code ignored;
@@ -200,19 +188,15 @@ absl::Status WriteBytes(const std::filesystem::path& path,
 
 }  // namespace
 
-size_t ActionProbabilityCodeBits(size_t action_count,
-                                 PolicyCodecConfig config) noexcept {
+size_t ActionProbabilityCodeBits(size_t action_count, PolicyCodecConfig config) noexcept {
   const uint64_t count = DistributionCount(action_count, config);
   return count == 0 ? 0 : static_cast<size_t>(std::bit_width(count - 1));
 }
 
-absl::StatusOr<uint64_t> EncodeActionProbabilities(
-    std::span<const float> probabilities,
-    PolicyCodecConfig config) {
+absl::StatusOr<uint64_t> EncodeActionProbabilities(std::span<const float> probabilities, PolicyCodecConfig config) {
   const size_t action_count = probabilities.size();
   if (DistributionCount(action_count, config) == 0) {
-    return absl::InvalidArgumentError(
-        "invalid action count or probability units");
+    return absl::InvalidArgumentError("invalid action count or probability units");
   }
 
   double total = 0.0;
@@ -237,8 +221,7 @@ absl::StatusOr<uint64_t> EncodeActionProbabilities(
     remainders[action] = scaled - units[action];
   }
   for (; assigned < config.total_units; ++assigned) {
-    const auto best =
-        std::max_element(remainders.begin(), remainders.begin() + action_count);
+    const auto best = std::max_element(remainders.begin(), remainders.begin() + action_count);
     ++units[static_cast<size_t>(best - remainders.begin())];
     *best = -1.0;
   }
@@ -256,15 +239,11 @@ absl::StatusOr<uint64_t> EncodeActionProbabilities(
   return code;
 }
 
-absl::Status DecodeActionProbabilities(
-    uint64_t code,
-    std::span<float> probabilities,
-    PolicyCodecConfig config) {
+absl::Status DecodeActionProbabilities(uint64_t code, std::span<float> probabilities, PolicyCodecConfig config) {
   const size_t action_count = probabilities.size();
   const uint64_t count = DistributionCount(action_count, config);
   if (count == 0) {
-    return absl::InvalidArgumentError(
-        "invalid action count or probability units");
+    return absl::InvalidArgumentError("invalid action count or probability units");
   }
   if (code >= count) return absl::DataLossError("invalid probability code");
 
@@ -273,8 +252,7 @@ absl::Status DecodeActionProbabilities(
     const size_t remaining_actions = action_count - action - 1;
     size_t units = 0;
     while (units < remaining) {
-      const uint64_t skipped =
-          CompositionCount(remaining - units, remaining_actions);
+      const uint64_t skipped = CompositionCount(remaining - units, remaining_actions);
       if (code < skipped) break;
       code -= skipped;
       ++units;
@@ -286,9 +264,7 @@ absl::Status DecodeActionProbabilities(
   return absl::OkStatus();
 }
 
-absl::StatusOr<std::vector<uint8_t>> EncodePolicy(
-    const Policy& policy,
-    PolicyCodecConfig config) {
+absl::StatusOr<std::vector<uint8_t>> EncodePolicy(const Policy& policy, PolicyCodecConfig config) {
   if (!ValidConfig(config)) {
     return absl::InvalidArgumentError("invalid policy codec configuration");
   }
@@ -305,8 +281,7 @@ absl::StatusOr<std::vector<uint8_t>> EncodePolicy(
                       std::to_underlying(right.key.private_observation));
   });
 
-  std::vector<uint8_t> bytes(kPolicyCodecMagic.begin(),
-                             kPolicyCodecMagic.end());
+  std::vector<uint8_t> bytes(kPolicyCodecMagic.begin(), kPolicyCodecMagic.end());
   AppendInteger(bytes, std::to_underlying(policy.model));
   AppendInteger(bytes, config.total_units);
   bytes.push_back(static_cast<uint8_t>(config.max_actions));
@@ -314,8 +289,7 @@ absl::StatusOr<std::vector<uint8_t>> EncodePolicy(
   // Each arity stores sorted (history, public, private, probability) varints.
   // A changed key prefix resets its lower fields; uniform rows are implicit.
   size_t row_begin = 0;
-  for (size_t action_count = 2; action_count <= config.max_actions;
-       ++action_count) {
+  for (size_t action_count = 2; action_count <= config.max_actions; ++action_count) {
     size_t row_end = row_begin;
     while (row_end < rows->size() &&
            (*rows)[row_end].action_count == action_count) {
@@ -331,10 +305,8 @@ absl::StatusOr<std::vector<uint8_t>> EncodePolicy(
     for (size_t index = row_begin; index < row_end; ++index) {
       const EncodedRow& row = (*rows)[index];
       const uint32_t history = std::to_underlying(row.key.history);
-      const uint64_t public_observation =
-          std::to_underlying(row.key.public_observation);
-      const uint32_t private_observation =
-          std::to_underlying(row.key.private_observation);
+      const uint64_t public_observation = std::to_underlying(row.key.public_observation);
+      const uint32_t private_observation = std::to_underlying(row.key.private_observation);
       const uint32_t history_delta = history - previous_history;
       if (history_delta != 0) previous_public = previous_private = 0;
       const uint64_t public_delta = public_observation - previous_public;
@@ -362,8 +334,7 @@ absl::StatusOr<Policy> DecodePolicy(std::span<const uint8_t> bytes) {
       !total_units || !max_actions) {
     return absl::DataLossError("invalid compact policy header");
   }
-  const PolicyCodecConfig config{.total_units = *total_units,
-                                 .max_actions = *max_actions};
+  const PolicyCodecConfig config{.total_units = *total_units, .max_actions = *max_actions};
   if (!ValidConfig(config)) {
     return absl::DataLossError("invalid compact policy configuration");
   }
@@ -371,8 +342,7 @@ absl::StatusOr<Policy> DecodePolicy(std::span<const uint8_t> bytes) {
   Policy policy;
   policy.model = ModelFingerprint{*model};
   std::array<float, kMaxActionsPerNode> probabilities;
-  for (size_t action_count = 2; action_count <= config.max_actions;
-       ++action_count) {
+  for (size_t action_count = 2; action_count <= config.max_actions; ++action_count) {
     const auto row_count = reader.read<uint32_t>();
     if (!row_count || *row_count > reader.remaining() / 4) {
       return absl::DataLossError("invalid compact policy row count");
@@ -404,25 +374,19 @@ absl::StatusOr<Policy> DecodePolicy(std::span<const uint8_t> bytes) {
         return absl::DataLossError("invalid compact policy row");
       }
       private_observation += *private_delta;
-      const InfoSetKey key{
-          PublicObservationId(public_observation),
-          HistoryId(static_cast<uint32_t>(history)),
-          PrivateObservationId(static_cast<uint32_t>(private_observation))};
+      const InfoSetKey key{PublicObservationId(public_observation), HistoryId(static_cast<uint32_t>(history)),
+                           PrivateObservationId(static_cast<uint32_t>(private_observation))};
       const std::span<float> output(probabilities.data(), action_count);
-      const absl::Status decoded =
-          DecodeActionProbabilities(*code, output, config);
+      const absl::Status decoded = DecodeActionProbabilities(*code, output, config);
       if (!decoded.ok()) return decoded;
-      if (policy.probabilities.size() >
-          std::numeric_limits<uint32_t>::max()) {
+      if (policy.probabilities.size() > std::numeric_limits<uint32_t>::max()) {
         return absl::ResourceExhaustedError("compact policy is too large");
       }
-      const uint32_t offset =
-          static_cast<uint32_t>(policy.probabilities.size());
+      const uint32_t offset = static_cast<uint32_t>(policy.probabilities.size());
       if (!policy.rows.try_emplace(key, offset).second) {
         return absl::DataLossError("duplicate compact policy row");
       }
-      policy.probabilities.insert(policy.probabilities.end(), output.begin(),
-                                  output.end());
+      policy.probabilities.insert(policy.probabilities.end(), output.begin(), output.end());
     }
   }
   if (reader.remaining() != 0) {
@@ -431,8 +395,7 @@ absl::StatusOr<Policy> DecodePolicy(std::span<const uint8_t> bytes) {
   return policy;
 }
 
-absl::Status SavePolicy(const Policy& policy,
-                        const std::filesystem::path& path) {
+absl::Status SavePolicy(const Policy& policy, const std::filesystem::path& path) {
   const auto bytes = EncodePolicy(policy, {.max_actions = kMaxActionsPerNode});
   return bytes.ok() ? WriteBytes(path, *bytes) : bytes.status();
 }
@@ -446,8 +409,7 @@ absl::StatusOr<Policy> LoadPolicy(const std::filesystem::path& path) {
   }
   std::vector<uint8_t> bytes(static_cast<size_t>(end));
   input.seekg(0);
-  if (!input.read(reinterpret_cast<char*>(bytes.data()),
-                  static_cast<std::streamsize>(bytes.size()))) {
+  if (!input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) {
     return absl::DataLossError("failed to read policy file");
   }
   return DecodePolicy(bytes);
