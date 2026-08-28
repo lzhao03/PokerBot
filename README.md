@@ -41,7 +41,7 @@ Model artifacts under `models/` are local inputs and are not tracked by Git.
 | `src/card_abstraction.*` | Public and private observations used in infoset keys |
 | `src/history.*` | Builds the complete abstract betting-history tree |
 | `src/cfr_traversal.h` | Shared recursive CFR traversal; backends own storage only |
-| `src/solver.*` | Game compilation, tabular CFR state, training, and policy extraction |
+| `src/solver.*` | Game compilation, infoset storage, tabular CFR training, and policy extraction |
 | `src/evaluation.*` | Policy-independent value and approximate best-response evaluation |
 | `src/neural_features.*` | Portable neural input schema and feature encoding |
 | `src/neural_policy.*` | LibTorch network training, inference, and serialization |
@@ -66,7 +66,7 @@ flowchart LR
   C --> F[Model fingerprint]
   D --> G[CFR traversal]
   E --> G
-  G <--> H[CfrState]
+  G <--> H[InfoSetTable]
   H --> I[Average Policy]
   I --> J[Compact codec or neural fit]
 ```

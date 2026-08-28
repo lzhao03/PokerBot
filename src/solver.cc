@@ -173,7 +173,7 @@ void FillUniform(std::span<float> probabilities) {
 
 }  // namespace
 
-void CfrState::add_regret(uint32_t offset, size_t action, double delta) {
+void InfoSetTable::add_regret(uint32_t offset, size_t action, double delta) {
   float& regret = regret_sum[offset + action];
   const float update = static_cast<float>(delta);
   std::atomic_ref<float> atomic(regret);
@@ -182,9 +182,9 @@ void CfrState::add_regret(uint32_t offset, size_t action, double delta) {
       old, std::max(0.0f, old + update), std::memory_order_relaxed)) {}
 }
 
-void CfrState::add_strategy(uint32_t offset,
-                            std::span<const float> probabilities,
-                            double weight) {
+void InfoSetTable::add_strategy(uint32_t offset,
+                                std::span<const float> probabilities,
+                                double weight) {
   for (float probability : probabilities) {
     float& sum = strategy_sum[offset++];
     const float delta = static_cast<float>(weight * probability);
@@ -192,9 +192,9 @@ void CfrState::add_strategy(uint32_t offset,
   }
 }
 
-void CfrState::strategy(std::span<float> values,
-                        std::optional<uint32_t> offset,
-                        std::span<float> probabilities) const {
+void InfoSetTable::strategy(std::span<float> values,
+                            std::optional<uint32_t> offset,
+                            std::span<float> probabilities) const {
   if (!offset) {
     FillUniform(probabilities);
     return;
@@ -213,7 +213,7 @@ void CfrState::strategy(std::span<float> values,
   }
 }
 
-CfrState::CfrState(const SolverConfig& config)
+InfoSetTable::InfoSetTable(const SolverConfig& config)
     : max_info_sets_(static_cast<size_t>(config.max_info_sets)) {
   size_t max_actions = 3;
   for (const auto& fractions : config.bet_abstraction.pot_fractions) {
@@ -224,18 +224,18 @@ CfrState::CfrState(const SolverConfig& config)
   strategy_sum.reserve(max_info_sets_ * max_actions);
 }
 
-std::optional<uint32_t> CfrState::find(InfoSetKey key) const {
+std::optional<uint32_t> InfoSetTable::find(InfoSetKey key) const {
   const auto row = rows_.find(key);
   return row == rows_.end() ? std::nullopt : std::optional(row->second);
 }
 
-std::vector<std::pair<InfoSetKey, uint32_t>> CfrState::row_entries() const {
+std::vector<std::pair<InfoSetKey, uint32_t>> InfoSetTable::row_entries() const {
   std::vector<std::pair<InfoSetKey, uint32_t>> rows(rows_.begin(), rows_.end());
   std::ranges::sort(rows);
   return rows;
 }
 
-std::optional<uint32_t> CfrState::find_or_create(
+std::optional<uint32_t> InfoSetTable::find_or_create(
     InfoSetKey key, uint8_t action_count) {
   if (at_capacity()) return find(key);
   const uint32_t offset = static_cast<uint32_t>(regret_sum.size());
@@ -306,7 +306,7 @@ TabularCfrSolver::TabularCfrSolver(SolverConfig config,
       initial_public_(std::move(initial_public)),
       model_(model),
       rng_(12345),
-      state_(config_) {}
+      info_sets_(config_) {}
 
 absl::StatusOr<TabularCfrSolver> TabularCfrSolver::Create(SolveSpec spec) {
   const absl::Status config_status = ValidateSolverConfig(spec.config);
@@ -380,15 +380,16 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
         const bool traverser = update_player == player;
         const InfoSetKey key = position.info_set_key(history, player);
         const auto offset = traverser || config_.external_sampling
-            ? state_.find_or_create(key, action_count) : state_.find(key);
+            ? info_sets_.find_or_create(key, action_count)
+            : info_sets_.find(key);
         std::array<float, kMaxActionsPerNode> probabilities;
         const std::span<float> strategy(probabilities.data(), action_count);
-        state_.strategy(state_.regret_sum, offset, strategy);
+        info_sets_.strategy(info_sets_.regret_sum, offset, strategy);
         ++stats.decision_visits;
 
         if (config_.external_sampling && !traverser) {
           if (offset) {
-            state_.add_strategy(
+            info_sets_.add_strategy(
                 *offset, strategy, static_cast<double>(iteration + 1));
           }
           float sample = std::uniform_real_distribution<float>{}(rng);
@@ -421,12 +422,12 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
           if (!config_.external_sampling) {
             regret *= reach[Index(Opponent(player))];
           }
-          state_.add_regret(*offset, action, regret);
+          info_sets_.add_regret(*offset, action, regret);
         }
         if (!config_.external_sampling) {
           const double weight =
               reach[Index(player)] * static_cast<double>(iteration + 1);
-          state_.add_strategy(*offset, strategy, weight);
+          info_sets_.add_strategy(*offset, strategy, weight);
         }
         return node_value;
       }
@@ -439,9 +440,9 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
 
   uint64_t remaining = iterations;
   // Fill the infoset map serially; workers only update it at capacity.
-  while (remaining > 0 && (threads <= 1 || !state_.at_capacity())) {
-    state_.root_value_sum += run_one(state_.iterations, rng_, stats_);
-    ++state_.iterations;
+  while (remaining > 0 && (threads <= 1 || !info_sets_.at_capacity())) {
+    root_value_sum_ += run_one(iterations_, rng_, stats_);
+    ++iterations_;
     --remaining;
   }
   if (remaining == 0) return;
@@ -455,7 +456,7 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
   std::vector<WorkerResult> worker_results(pool_size);
   std::vector<std::thread> workers;
   workers.reserve(pool_size);
-  const uint64_t start = state_.iterations;
+  const uint64_t start = iterations_;
   for (size_t worker = 0; worker < pool_size; ++worker) {
     const uint32_t worker_seed = static_cast<uint32_t>(rng_());
     workers.emplace_back([&, worker, worker_seed] {
@@ -469,12 +470,12 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
   }
   for (std::thread& worker : workers) worker.join();
   for (const WorkerResult& worker : worker_results) {
-    state_.root_value_sum += worker.value_sum;
+    root_value_sum_ += worker.value_sum;
     stats_.decision_visits += worker.stats.decision_visits;
     stats_.chance_samples += worker.stats.chance_samples;
     stats_.terminal_visits += worker.stats.terminal_visits;
   }
-  state_.iterations += remaining;
+  iterations_ += remaining;
 }
 
 double TabularCfrSolver::evaluate_deal(const Deal& deal,
@@ -509,9 +510,9 @@ double TabularCfrSolver::evaluate_deal(const Deal& deal,
     std::array<float, kMaxActionsPerNode> probabilities;
     const std::span<float> strategy(probabilities.data(), action_count);
     std::span<float> values = mode == EvaluationMode::Average
-                                  ? std::span<float>(state_.strategy_sum)
-                                  : std::span<float>(state_.regret_sum);
-    state_.strategy(values, state_.find(key), strategy);
+                                  ? std::span<float>(info_sets_.strategy_sum)
+                                  : std::span<float>(info_sets_.regret_sum);
+    info_sets_.strategy(values, info_sets_.find(key), strategy);
 
     double value = 0.0;
     for (uint8_t action = 0; action < action_count; ++action) {
@@ -541,20 +542,20 @@ double TabularCfrSolver::evaluate_average(int samples) {
   return evaluate_deals(samples, EvaluationMode::Average);
 }
 
-Policy ExtractAveragePolicy(const CfrState& state, const HistoryTree& history,
+Policy ExtractAveragePolicy(const InfoSetTable& table, const HistoryTree& tree,
                             ModelFingerprint model) {
   Policy policy;
   policy.model = model;
-  for (const auto& [key, offset] : state.row_entries()) {
-    assert(Index(key.history) < history.nodes.size());
-    const HistoryNode& node = history.nodes[Index(key.history)];
+  for (const auto& [key, offset] : table.row_entries()) {
+    assert(Index(key.history) < tree.nodes.size());
+    const HistoryNode& node = tree.nodes[Index(key.history)];
     assert(std::holds_alternative<DecisionState>(node.state));
-    assert(offset + node.child_count <= state.strategy_sum.size());
+    assert(offset + node.child_count <= table.strategy_sum.size());
 
     const auto out = static_cast<uint32_t>(policy.probabilities.size());
     double mass = 0.0;
     for (size_t action = 0; action < node.child_count; ++action) {
-      const float value = state.strategy_sum[offset + action];
+      const float value = table.strategy_sum[offset + action];
       assert(std::isfinite(value));
       policy.probabilities.push_back(std::max(0.0f, value));
       mass += policy.probabilities.back();
@@ -572,13 +573,12 @@ Policy ExtractAveragePolicy(const CfrState& state, const HistoryTree& history,
 }
 
 Policy TabularCfrSolver::extract_average_policy() const {
-  return ExtractAveragePolicy(state_, history_, model_);
+  return ExtractAveragePolicy(info_sets_, history_, model_);
 }
 
 double TabularCfrSolver::expected_value(Player player) const {
-  if (state_.iterations == 0) return 0.0;
-  const double player_a_ev =
-      state_.root_value_sum / static_cast<double>(state_.iterations);
+  if (iterations_ == 0) return 0.0;
+  const double player_a_ev = root_value_sum_ / static_cast<double>(iterations_);
   return player == Player::A ? player_a_ev : -player_a_ev;
 }
 

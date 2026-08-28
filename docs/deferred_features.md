@@ -19,7 +19,7 @@ git show dcbadfc^:<path>
 ### Compact infoset keys
 
 - **Status:** Deferred until infoset-map memory is a demonstrated constraint.
-- **Current behavior:** `CfrState` uses one
+- **Current behavior:** `InfoSetTable` uses one
   `flat_hash_map<InfoSetKey, uint32_t>` with a structural 16-byte key.
 - **Potential design:** Losslessly encode the current 33-bit public observation,
   32-bit history, and 21-bit private observation into a fixed 96-bit key.

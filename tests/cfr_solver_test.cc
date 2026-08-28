@@ -16,10 +16,10 @@
 namespace poker {
 
 struct TabularCfrSolverTestAccess {
-  static const CfrState& state(const TabularCfrSolver& solver) {
-    return solver.state_;
+  static const InfoSetTable& table(const TabularCfrSolver& solver) {
+    return solver.info_sets_;
   }
-  static CfrState& state(TabularCfrSolver& solver) { return solver.state_; }
+  static InfoSetTable& table(TabularCfrSolver& s) { return s.info_sets_; }
 };
 
 namespace {
@@ -217,15 +217,15 @@ TEST_CASE("external sampling linearly weights average strategies") {
   auto solver = MakeSolver(config, R(kA), R(kB), WinningRiverRoot());
   solver->run(2);
 
-  const CfrState& state = TabularCfrSolverTestAccess::state(*solver);
+  const InfoSetTable& table = TabularCfrSolverTestAccess::table(*solver);
   const InfoSetKey root_key{
       solver->initial_public().observation(), HistoryId{},
       ObservePrivate(kA, solver->initial_public())};
-  const std::optional<uint32_t> offset = state.find(root_key);
+  const std::optional<uint32_t> offset = table.find(root_key);
   REQUIRE(offset.has_value());
   const uint8_t action_count = solver->history().nodes[0].child_count;
-  CHECK(std::accumulate(state.strategy_sum.begin() + *offset,
-                        state.strategy_sum.begin() + *offset + action_count,
+  CHECK(std::accumulate(table.strategy_sum.begin() + *offset,
+                        table.strategy_sum.begin() + *offset + action_count,
                         0.0f) == doctest::Approx(2.0f));
 }
 
@@ -287,7 +287,7 @@ TEST_CASE("history tree stores direct rule transitions") {
         tree.children[root.children_begin + 1]);
 }
 
-TEST_CASE("training mutates only CFR state") {
+TEST_CASE("evaluation does not mutate the infoset table") {
   auto solver = MakeSolver(Config(), R(kA), R(kB));
   const size_t history_count = solver->history_count();
   solver->run(4);
@@ -297,28 +297,28 @@ TEST_CASE("training mutates only CFR state") {
   CHECK(std::isfinite(solver->expected_value(Player::A)));
   CHECK(solver->history_count() == history_count);
 
-  const CfrState before = TabularCfrSolverTestAccess::state(*solver);
+  const InfoSetTable before = TabularCfrSolverTestAccess::table(*solver);
   const uint64_t updates = solver->stats().decision_visits;
   CHECK(std::isfinite(solver->evaluate_average(1)));
   CHECK(solver->history_count() == history_count);
   CHECK(solver->stats().decision_visits == updates);
-  CHECK(TabularCfrSolverTestAccess::state(*solver).row_entries() ==
+  CHECK(TabularCfrSolverTestAccess::table(*solver).row_entries() ==
         before.row_entries());
-  CHECK(TabularCfrSolverTestAccess::state(*solver).regret_sum ==
+  CHECK(TabularCfrSolverTestAccess::table(*solver).regret_sum ==
         before.regret_sum);
-  CHECK(TabularCfrSolverTestAccess::state(*solver).strategy_sum ==
+  CHECK(TabularCfrSolverTestAccess::table(*solver).strategy_sum ==
         before.strategy_sum);
 }
 
 TEST_CASE("training uses preallocated action arrays") {
   auto solver = MakeSolver(Config(), R(kA), R(kB));
-  const CfrState& before = TabularCfrSolverTestAccess::state(*solver);
+  const InfoSetTable& before = TabularCfrSolverTestAccess::table(*solver);
   const size_t regret_capacity = before.regret_sum.capacity();
   const size_t strategy_capacity = before.strategy_sum.capacity();
 
   solver->run(4);
 
-  const CfrState& after = TabularCfrSolverTestAccess::state(*solver);
+  const InfoSetTable& after = TabularCfrSolverTestAccess::table(*solver);
   CHECK(after.regret_sum.capacity() == regret_capacity);
   CHECK(after.strategy_sum.capacity() == strategy_capacity);
 }
@@ -326,14 +326,14 @@ TEST_CASE("training uses preallocated action arrays") {
 TEST_CASE("infoset action rows are contiguous") {
   auto solver = MakeSolver(Config(), R(kA), R(kB));
   solver->run(4);
-  const CfrState& state = TabularCfrSolverTestAccess::state(*solver);
+  const InfoSetTable& table = TabularCfrSolverTestAccess::table(*solver);
 
   struct RowSize {
     size_t offset;
     uint8_t action_count;
   };
   std::vector<RowSize> rows;
-  const auto entries = state.row_entries();
+  const auto entries = table.row_entries();
   rows.reserve(entries.size());
   for (const auto& entry : entries) {
     const HistoryNode& node =
@@ -350,8 +350,8 @@ TEST_CASE("infoset action rows are contiguous") {
     CHECK(item.offset == offset);
     offset += item.action_count;
   }
-  CHECK(offset == state.regret_sum.size());
-  CHECK(state.strategy_sum.size() == state.regret_sum.size());
+  CHECK(offset == table.regret_sum.size());
+  CHECK(table.strategy_sum.size() == table.regret_sum.size());
 }
 
 TEST_CASE("postflop roots use full observation identity") {
@@ -373,7 +373,7 @@ TEST_CASE("postflop roots use full observation identity") {
   const CardAbstractionConfig& cards = solver->config().card_abstraction;
   const PublicPosition public_state(cards, root.board);
   const PrivateObservationId private_id = ObservePrivate(hand, public_state);
-  CHECK(TabularCfrSolverTestAccess::state(*solver)
+  CHECK(TabularCfrSolverTestAccess::table(*solver)
             .find({public_state.observation(), HistoryId{}, private_id})
             .has_value());
 }
@@ -391,11 +391,11 @@ TEST_CASE("parallel training updates a fixed-capacity table") {
   CHECK(solver->iterations() == 20);
   CHECK(solver->info_set_count() == 1);
   CHECK(solver->stats().decision_visits > 0);
-  const CfrState& state = TabularCfrSolverTestAccess::state(*solver);
-  CHECK(std::ranges::all_of(state.regret_sum, [](float value) {
+  const InfoSetTable& table = TabularCfrSolverTestAccess::table(*solver);
+  CHECK(std::ranges::all_of(table.regret_sum, [](float value) {
     return std::isfinite(value) && value >= 0.0f;
   }));
-  CHECK(std::ranges::all_of(state.strategy_sum, [](float value) {
+  CHECK(std::ranges::all_of(table.strategy_sum, [](float value) {
     return std::isfinite(value) && value >= 0.0f;
   }));
 }
@@ -482,8 +482,8 @@ TEST_CASE("average policies are normalized and evaluate reproducibly") {
 TEST_CASE("zero average mass extracts as uniform policy") {
   auto solver = MakeSolver(Config(), R(kA), R(kB));
   solver->run(1);
-  CfrState& state = TabularCfrSolverTestAccess::state(*solver);
-  std::fill(state.strategy_sum.begin(), state.strategy_sum.end(), 0.0f);
+  InfoSetTable& table = TabularCfrSolverTestAccess::table(*solver);
+  std::fill(table.strategy_sum.begin(), table.strategy_sum.end(), 0.0f);
   const Policy extracted = solver->extract_average_policy();
   for (const auto& [key, offset] : extracted.rows) {
     (void)offset;

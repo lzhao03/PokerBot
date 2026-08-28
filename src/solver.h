@@ -77,13 +77,11 @@ struct InfoSetKey {
 };
 static_assert(sizeof(InfoSetKey) == 16);
 
-struct CfrState {
-  explicit CfrState(const SolverConfig& config);
+struct InfoSetTable {
+  explicit InfoSetTable(const SolverConfig& config);
 
   std::vector<float> regret_sum;
   std::vector<float> strategy_sum;
-  uint64_t iterations = 0;
-  double root_value_sum = 0.0;
 
   void strategy(std::span<float> values,
                 std::optional<uint32_t> offset,
@@ -111,7 +109,7 @@ struct Policy {
   bool strategy(InfoSetKey key, std::span<float> output) const;
 };
 
-Policy ExtractAveragePolicy(const CfrState& state, const HistoryTree& history,
+Policy ExtractAveragePolicy(const InfoSetTable& table, const HistoryTree& tree,
                             ModelFingerprint model);
 
 struct SolverStats {
@@ -207,14 +205,14 @@ class TabularCfrSolver {
   Policy extract_average_policy() const;
 
   double expected_value(Player player) const;
-  uint64_t iterations() const noexcept { return state_.iterations; }
-  size_t info_set_count() const { return state_.row_count(); }
+  uint64_t iterations() const noexcept { return iterations_; }
+  size_t info_set_count() const { return info_sets_.row_count(); }
   size_t history_count() const noexcept { return history_.nodes.size(); }
   size_t regret_bytes() const noexcept {
-    return state_.regret_sum.size() * sizeof(float);
+    return info_sets_.regret_sum.size() * sizeof(float);
   }
   size_t strategy_bytes() const noexcept {
-    return state_.strategy_sum.size() * sizeof(float);
+    return info_sets_.strategy_sum.size() * sizeof(float);
   }
   const SolverConfig& config() const noexcept { return config_; }
   const DealDistribution& deals() const noexcept { return deals_; }
@@ -248,7 +246,9 @@ class TabularCfrSolver {
   PublicPosition initial_public_;
   ModelFingerprint model_;
   std::mt19937 rng_;
-  CfrState state_;
+  InfoSetTable info_sets_;
+  uint64_t iterations_ = 0;
+  double root_value_sum_ = 0.0;
   SolverStats stats_;
 };
 

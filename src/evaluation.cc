@@ -189,12 +189,13 @@ absl::StatusOr<BestResponseResult> TrainResponse(
   if (config.training_iterations == 0 || config.evaluation_samples == 0) {
     return absl::InvalidArgumentError("best-response iteration counts must be positive");
   }
-  CfrState response_state(solver_config);
+  InfoSetTable table(solver_config);
   std::mt19937 rng = MakeEvaluationRng(config.seed);
   uint64_t opponent_lookups = 0;
   uint64_t missing_opponent_lookups = 0;
   BestResponseResult result;
-  while (response_state.iterations < config.training_iterations) {
+  for (uint64_t iteration = 0; iteration < config.training_iterations;
+       ++iteration) {
     const Deal deal = deals.sample(rng);
     TerminalEvaluator terminal_utility(deal.hands);
     const ObservedPosition initial_position = ObservedPosition::Observe(initial_public, deal);
@@ -225,9 +226,9 @@ absl::StatusOr<BestResponseResult> TrainResponse(
         const std::span<float> strategy(probabilities.data(), action_count);
         std::optional<uint32_t> offset;
         if (player == responder) {
-          offset = response_state.find_or_create(key, action_count);
+          offset = table.find_or_create(key, action_count);
           if (offset || responder_fallback == nullptr) {
-            response_state.strategy(response_state.regret_sum, offset, strategy);
+            table.strategy(table.regret_sum, offset, strategy);
           } else {
             LookupOrUniform(*responder_fallback, key, strategy);
           }
@@ -261,20 +262,18 @@ absl::StatusOr<BestResponseResult> TrainResponse(
         for (uint8_t action = 0; action < action_count; ++action) {
           double regret = action_values[action] - node_value;
           if (!config.external_sampling) regret *= reach[Index(Opponent(player))];
-          response_state.add_regret(*offset, action, regret);
+          table.add_regret(*offset, action, regret);
         }
-        response_state.add_strategy(
+        table.add_strategy(
             *offset, strategy,
-            reach[Index(player)] * static_cast<double>(response_state.iterations + 1));
+            reach[Index(player)] * static_cast<double>(iteration + 1));
         return node_value;
       }
     };
-    const double value = cfr(cfr, HistoryId{}, initial_position, {1.0, 1.0});
-    response_state.root_value_sum += responder == Player::A ? value : -value;
-    ++response_state.iterations;
+    cfr(cfr, HistoryId{}, initial_position, {1.0, 1.0});
   }
 
-  result.response_policy = ExtractAveragePolicy(response_state, history, model);
+  result.response_policy = ExtractAveragePolicy(table, history, model);
   const uint64_t evaluation_seed = config.seed ^ 0x9e3779b97f4a7c15ULL;
   const StrategyLookup response_lookup = [&result, responder_fallback](InfoSetKey key,
                                                                        std::span<float> output) {
