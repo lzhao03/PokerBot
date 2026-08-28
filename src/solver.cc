@@ -571,56 +571,43 @@ absl::StatusOr<double> TabularCfrSolver::evaluate_average(int samples) {
   return evaluate_deals(samples, EvaluationMode::Average);
 }
 
-absl::StatusOr<Policy> ExtractAveragePolicy(
-    const CfrState& state,
-    const HistoryTree& history,
-    ModelFingerprint model) {
-  std::vector<std::pair<InfoSetKey, uint32_t>> rows = state.row_entries();
-
+absl::StatusOr<Policy> ExtractAveragePolicy(const CfrState& state,
+    const HistoryTree& history, ModelFingerprint model) {
   Policy policy;
   policy.model = model;
-  for (const auto& [key, offset] : rows) {
-    if (Index(key.history) >= history.nodes.size()) {
+  for (const auto& [key, offset] : state.row_entries()) {
+    if (Index(key.history) >= history.nodes.size())
       return absl::DataLossError("infoset references an invalid history");
-    }
     const HistoryNode& node = history.nodes[Index(key.history)];
     if (!std::holds_alternative<DecisionState>(node.state) ||
-        offset + node.child_count > state.strategy_sum.size()) {
+        offset + node.child_count > state.strategy_sum.size())
       return absl::DataLossError("infoset strategy span is invalid");
-    }
 
-    const uint32_t output_offset =
-        static_cast<uint32_t>(policy.probabilities.size());
+    const auto out = static_cast<uint32_t>(policy.probabilities.size());
     double mass = 0.0;
     for (size_t action = 0; action < node.child_count; ++action) {
       const float value = state.strategy_sum[offset + action];
-      if (!std::isfinite(value)) {
+      if (!std::isfinite(value))
         return absl::DataLossError("nonfinite average strategy value");
-      }
       policy.probabilities.push_back(std::max(0.0f, value));
       mass += policy.probabilities.back();
     }
 
-    policy.rows.try_emplace(key, output_offset);
-    std::span<float> probabilities(
-        policy.probabilities.data() + output_offset, node.child_count);
+    policy.rows.try_emplace(key, out);
+    std::span<float> row(policy.probabilities.data() + out, node.child_count);
     if (mass > 0.0) {
-      for (float& probability : probabilities) {
-        probability = static_cast<float>(probability / mass);
-      }
+      for (float& value : row) value = static_cast<float>(value / mass);
     } else {
-      std::fill(probabilities.begin(), probabilities.end(),
-                1.0f / node.child_count);
+      FillUniform(row);
     }
   }
   return policy;
 }
 
 absl::StatusOr<Policy> TabularCfrSolver::extract_average_policy() const {
-  if (!config_.accumulate_average_strategy) {
+  if (!config_.accumulate_average_strategy)
     return absl::FailedPreconditionError(
         "average strategy accumulation is disabled");
-  }
   return ExtractAveragePolicy(state_, history_, model_);
 }
 

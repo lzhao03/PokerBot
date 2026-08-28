@@ -113,10 +113,8 @@ struct Policy {
   bool strategy(InfoSetKey key, std::span<float> output) const;
 };
 
-absl::StatusOr<Policy> ExtractAveragePolicy(
-    const CfrState& state,
-    const HistoryTree& history,
-    ModelFingerprint model);
+absl::StatusOr<Policy> ExtractAveragePolicy(const CfrState& state,
+    const HistoryTree& history, ModelFingerprint model);
 
 struct SolverStats {
   uint64_t decision_visits = 0;
