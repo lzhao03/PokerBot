@@ -38,7 +38,6 @@ void AppendInteger(std::vector<uint8_t>& bytes, Integer value) {
   }
 }
 
-// ponytail: Use a library hash if fingerprints ever cross a hostile boundary.
 ModelFingerprint Fingerprint(std::span<const uint8_t> bytes) noexcept {
   uint64_t hash = 14695981039346656037ULL;
   for (uint8_t byte : bytes) {
@@ -157,8 +156,6 @@ Deal DealDistribution::sample(std::mt19937& rng) const {
   do {
     deal.hands = {sample_player(0), sample_player(1)};
   } while ((deal.hands[0].mask() & deal.hands[1].mask()) != 0);
-  // ponytail: precompute conditional ranges only if near-total overlap is
-  // measured as a sampling bottleneck.
   return deal;
 }
 
