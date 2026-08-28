@@ -39,8 +39,6 @@ ABSL_FLAG(uint64_t, best_response_iterations, 0,
 ABSL_FLAG(int, starting_stack, 100, "starting stack in chips");
 ABSL_FLAG(int, max_info_sets, 500000, "maximum infosets");
 ABSL_FLAG(int, chance_samples, 1, "chance samples per chance node");
-ABSL_FLAG(bool, accumulate_average_strategy, true,
-          "accumulate average-strategy values during training");
 ABSL_FLAG(bool, external_sampling, false,
           "sample opponent actions during training");
 ABSL_FLAG(int, threads, 1, "training worker threads");
@@ -96,8 +94,6 @@ absl::StatusOr<poker::SolverConfig> BenchmarkConfig() {
   }
   options.max_info_sets = absl::GetFlag(FLAGS_max_info_sets);
   options.chance_samples = absl::GetFlag(FLAGS_chance_samples);
-  options.accumulate_average_strategy =
-      absl::GetFlag(FLAGS_accumulate_average_strategy);
   options.external_sampling = absl::GetFlag(FLAGS_external_sampling);
   const std::string public_mode = absl::GetFlag(FLAGS_public_abstraction);
   if (public_mode == "exact") {
@@ -162,8 +158,8 @@ int main(int argc, char** argv) {
     std::cerr << "Error: --iterations must be non-negative\n";
     return 1;
   }
-  const int eval_samples = absl::GetFlag(FLAGS_eval_samples);
-  if (absl::GetFlag(FLAGS_evaluate) && eval_samples <= 0) {
+  const int samples = absl::GetFlag(FLAGS_eval_samples);
+  if (absl::GetFlag(FLAGS_evaluate) && samples <= 0) {
     std::cerr << "Error: --eval_samples must be positive\n";
     return 1;
   }
@@ -272,75 +268,65 @@ int main(int argc, char** argv) {
   if (!absl::GetFlag(FLAGS_evaluate)) return 0;
 
   solver->reset_stats();
-  Measure("evaluate_range", [&] {
-    if (!config.accumulate_average_strategy) {
-      return solver->evaluate_current(
-          eval_samples);
-    }
-    const auto value = solver->evaluate_average(
-        eval_samples);
-    return value.ok() ? *value : 0.0;
-  });
+  Measure("evaluate_range", [&] { return solver->evaluate_average(samples); });
 
   const auto policy = solver->extract_average_policy();
-  if (policy.ok()) {
-    std::cout << "policy_rows\t" << policy->rows.size() << '\n'
-              << "policy_probability_bytes\t"
-              << policy->probabilities.size() * sizeof(float) << '\n';
-    const std::string output = absl::GetFlag(FLAGS_policy_output);
-    if (!output.empty()) {
-      const absl::Status saved = poker::SavePolicy(*policy, output);
-      if (!saved.ok()) {
-        std::cerr << "Error: " << saved << '\n';
-        return 1;
-      }
-      std::cout << "policy_file_bytes\t"
-                << std::filesystem::file_size(output) << '\n';
+  std::cout << "policy_rows\t" << policy.rows.size() << '\n'
+            << "policy_probability_bytes\t"
+            << policy.probabilities.size() * sizeof(float) << '\n';
+  const std::string output = absl::GetFlag(FLAGS_policy_output);
+  if (!output.empty()) {
+    const absl::Status saved = poker::SavePolicy(policy, output);
+    if (!saved.ok()) {
+      std::cerr << "Error: " << saved << '\n';
+      return 1;
     }
-    const auto profile = poker::EstimateExpectedValue(
+    std::cout << "policy_file_bytes\t"
+              << std::filesystem::file_size(output) << '\n';
+  }
+  const auto profile = poker::EstimateExpectedValue(
+      solver->config(), solver->deals(), solver->history(),
+      solver->initial_public(), solver->model(), policy, policy,
+      static_cast<uint64_t>(samples),
+      absl::GetFlag(FLAGS_evaluation_seed),
+      absl::GetFlag(FLAGS_reach_coverage));
+  if (profile.ok()) {
+    std::cout << "policy_ev\t" << profile->mean << '\n'
+              << "policy_standard_error\t" << profile->standard_error
+              << '\n'
+              << "policy_lookups\t" << profile->policy_lookups << '\n'
+              << "missing_policy_lookups\t"
+              << profile->missing_policy_lookups << '\n'
+              << "weighted_policy_lookups\t"
+              << profile->weighted_policy_lookups << '\n'
+              << "weighted_missing_policy_lookups\t"
+              << profile->weighted_missing_policy_lookups << '\n';
+    if (absl::GetFlag(FLAGS_reach_coverage)) {
+      std::cout << "observed_info_sets\t"
+                << profile->observed_info_sets << '\n'
+                << "info_sets_for_99_percent_reach\t"
+                << profile->info_sets_for_99_percent_reach << '\n';
+    }
+  }
+  const uint64_t response_iterations =
+      absl::GetFlag(FLAGS_best_response_iterations);
+  if (response_iterations > 0) {
+    const auto exploitability = poker::EstimateExploitability(
         solver->config(), solver->deals(), solver->history(),
-        solver->initial_public(), solver->model(), *policy, *policy,
-        static_cast<uint64_t>(eval_samples),
-        absl::GetFlag(FLAGS_evaluation_seed),
-        absl::GetFlag(FLAGS_reach_coverage));
-    if (profile.ok()) {
-      std::cout << "policy_ev\t" << profile->mean << '\n'
-                << "policy_standard_error\t" << profile->standard_error
+        solver->initial_public(), solver->model(), policy,
+        {response_iterations,
+         static_cast<uint64_t>(samples),
+         absl::GetFlag(FLAGS_evaluation_seed)});
+    if (exploitability.ok()) {
+      std::cout << "nash_conv\t" << exploitability->nash_conv << '\n'
+                << "exploitability\t" << exploitability->exploitability
                 << '\n'
-                << "policy_lookups\t" << profile->policy_lookups << '\n'
-                << "missing_policy_lookups\t"
-                << profile->missing_policy_lookups << '\n'
-                << "weighted_policy_lookups\t"
-                << profile->weighted_policy_lookups << '\n'
-                << "weighted_missing_policy_lookups\t"
-                << profile->weighted_missing_policy_lookups << '\n';
-      if (absl::GetFlag(FLAGS_reach_coverage)) {
-        std::cout << "observed_info_sets\t"
-                  << profile->observed_info_sets << '\n'
-                  << "info_sets_for_99_percent_reach\t"
-                  << profile->info_sets_for_99_percent_reach << '\n';
-      }
-    }
-    const uint64_t response_iterations =
-        absl::GetFlag(FLAGS_best_response_iterations);
-    if (response_iterations > 0) {
-      const auto exploitability = poker::EstimateExploitability(
-          solver->config(), solver->deals(), solver->history(),
-          solver->initial_public(), solver->model(), *policy,
-          {response_iterations,
-           static_cast<uint64_t>(eval_samples),
-           absl::GetFlag(FLAGS_evaluation_seed)});
-      if (exploitability.ok()) {
-        std::cout << "nash_conv\t" << exploitability->nash_conv << '\n'
-                  << "exploitability\t" << exploitability->exploitability
-                  << '\n'
-                  << "missing_response_lookups\t"
-                  << exploitability->player_a_response
-                             .missing_opponent_lookups +
-                         exploitability->player_b_response
-                             .missing_opponent_lookups
-                  << '\n';
-      }
+                << "missing_response_lookups\t"
+                << exploitability->player_a_response
+                           .missing_opponent_lookups +
+                       exploitability->player_b_response
+                           .missing_opponent_lookups
+                << '\n';
     }
   }
   return 0;

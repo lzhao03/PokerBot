@@ -65,7 +65,6 @@ TEST_CASE("all card abstraction combinations support history traversal") {
       fractions = {1.0};
     }
     config.max_info_sets = 500000;
-    config.accumulate_average_strategy = false;
 
     const BettingRules& rules = config.betting_rules;
     ExactPublicState state = MakeInitialState(rules, {8, 8}, {1, 2});

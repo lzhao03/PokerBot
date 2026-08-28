@@ -25,7 +25,6 @@ struct SolverConfig {
   CardAbstractionConfig card_abstraction;
   BettingRules betting_rules = {2};
   int chance_samples = 1;
-  bool accumulate_average_strategy = true;
   bool external_sampling = false;
   int max_info_sets = 500000;
 };
@@ -79,7 +78,7 @@ struct InfoSetKey {
 static_assert(sizeof(InfoSetKey) == 16);
 
 struct CfrState {
-  CfrState(const SolverConfig& config, bool accumulate_average_strategy);
+  explicit CfrState(const SolverConfig& config);
 
   std::vector<float> regret_sum;
   std::vector<float> strategy_sum;
@@ -102,7 +101,6 @@ struct CfrState {
  private:
   absl::flat_hash_map<InfoSetKey, uint32_t> rows_;
   size_t max_info_sets_;
-  bool accumulate_average_strategy_;
 };
 
 struct Policy {
@@ -113,8 +111,8 @@ struct Policy {
   bool strategy(InfoSetKey key, std::span<float> output) const;
 };
 
-absl::StatusOr<Policy> ExtractAveragePolicy(const CfrState& state,
-    const HistoryTree& history, ModelFingerprint model);
+Policy ExtractAveragePolicy(const CfrState& state, const HistoryTree& history,
+                            ModelFingerprint model);
 
 struct SolverStats {
   uint64_t decision_visits = 0;
@@ -205,8 +203,8 @@ class TabularCfrSolver {
   void run(uint64_t iterations, int threads = 1);
 
   double evaluate_current(int samples);
-  absl::StatusOr<double> evaluate_average(int samples);
-  absl::StatusOr<Policy> extract_average_policy() const;
+  double evaluate_average(int samples);
+  Policy extract_average_policy() const;
 
   double expected_value(Player player) const;
   uint64_t iterations() const noexcept { return state_.iterations; }

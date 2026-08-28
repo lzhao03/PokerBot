@@ -63,8 +63,7 @@ ExactPublicState DealChance(const ExactPublicState& state,
   return *child;
 }
 
-SolverConfig Config(bool accumulate_average = true,
-                    int max_info_sets = 500000) {
+SolverConfig Config(int max_info_sets = 500000) {
   SolverConfig options;
   options.card_abstraction = {
       PublicCardMode::ExactCanonical,
@@ -75,7 +74,6 @@ SolverConfig Config(bool accumulate_average = true,
   }
   options.chance_samples = 1;
   options.max_info_sets = max_info_sets;
-  options.accumulate_average_strategy = accumulate_average;
   return options;
 }
 
@@ -210,7 +208,7 @@ TEST_CASE("external sampling visits only traverser action branches") {
         full->stats().decision_visits);
   CHECK(sampled->model() == full->model());
   CHECK(sampled->iterations() == 2);
-  CHECK(sampled->extract_average_policy().ok());
+  CHECK_FALSE(sampled->extract_average_policy().rows.empty());
 }
 
 TEST_CASE("external sampling linearly weights average strategies") {
@@ -234,7 +232,7 @@ TEST_CASE("external sampling linearly weights average strategies") {
 TEST_CASE("model fingerprints are stable and cover solve ranges") {
   auto first = MakeSolver(Config(), R(kA), R(kB));
   auto second = MakeSolver(Config(), R(kA), R(kB));
-  auto different_training = MakeSolver(Config(false, 10), R(kA), R(kB));
+  auto different_training = MakeSolver(Config(10), R(kA), R(kB));
   auto changed = MakeSolver(Config(), R(kB), R(kA));
   CHECK(first->model() == second->model());
   CHECK(first->model() == different_training->model());
@@ -301,9 +299,7 @@ TEST_CASE("training mutates only CFR state") {
 
   const CfrState before = TabularCfrSolverTestAccess::state(*solver);
   const uint64_t updates = solver->stats().decision_visits;
-  const auto value = solver->evaluate_average(1);
-  REQUIRE(value.ok());
-  CHECK(std::isfinite(*value));
+  CHECK(std::isfinite(solver->evaluate_average(1)));
   CHECK(solver->history_count() == history_count);
   CHECK(solver->stats().decision_visits == updates);
   CHECK(TabularCfrSolverTestAccess::state(*solver).row_entries() ==
@@ -383,14 +379,14 @@ TEST_CASE("postflop roots use full observation identity") {
 }
 
 TEST_CASE("training continues after the infoset cap is reached") {
-  auto solver = MakeSolver(Config(true, 1), R(kA), R(kB));
+  auto solver = MakeSolver(Config(1), R(kA), R(kB));
   solver->run(2);
   CHECK(solver->iterations() == 2);
   CHECK(solver->info_set_count() == 1);
 }
 
 TEST_CASE("parallel training updates a fixed-capacity table") {
-  auto solver = MakeSolver(Config(true, 1), R(kA), R(kB));
+  auto solver = MakeSolver(Config(1), R(kA), R(kB));
   solver->run(20, 4);
   CHECK(solver->iterations() == 20);
   CHECK(solver->info_set_count() == 1);
@@ -404,22 +400,10 @@ TEST_CASE("parallel training updates a fixed-capacity table") {
   }));
 }
 
-TEST_CASE("average strategy storage is optional") {
-  const SolverConfig config = Config(false);
-  auto solver = MakeSolver(config, R(kA), R(kB));
-  solver->run(2);
-
-  CHECK(TabularCfrSolverTestAccess::state(*solver).strategy_sum.empty());
-  CHECK(std::isfinite(solver->evaluate_current(1)));
-  CHECK_FALSE(solver->evaluate_average(1).ok());
-}
-
 TEST_CASE("average policies are normalized and evaluate reproducibly") {
   auto solver = MakeSolver(Config(), R(kA), R(kB));
   solver->run(4);
-  const auto extracted = solver->extract_average_policy();
-  REQUIRE(extracted.ok());
-  const Policy policy = *extracted;
+  const Policy policy = solver->extract_average_policy();
   REQUIRE_FALSE(policy.rows.empty());
   for (const auto& [key, offset] : policy.rows) {
     (void)offset;
@@ -500,13 +484,12 @@ TEST_CASE("zero average mass extracts as uniform policy") {
   solver->run(1);
   CfrState& state = TabularCfrSolverTestAccess::state(*solver);
   std::fill(state.strategy_sum.begin(), state.strategy_sum.end(), 0.0f);
-  const auto extracted = solver->extract_average_policy();
-  REQUIRE(extracted.ok());
-  for (const auto& [key, offset] : extracted->rows) {
+  const Policy extracted = solver->extract_average_policy();
+  for (const auto& [key, offset] : extracted.rows) {
     (void)offset;
     const HistoryNode& node = solver->history().nodes[Index(key.history)];
     std::vector<float> probabilities(node.child_count);
-    REQUIRE(extracted->strategy(key, absl::MakeSpan(probabilities)));
+    REQUIRE(extracted.strategy(key, absl::MakeSpan(probabilities)));
     for (float probability : probabilities) {
       CHECK(probability == doctest::Approx(1.0 / node.child_count));
     }
@@ -519,19 +502,18 @@ TEST_CASE("approximate responses are reproducible and respect infosets") {
   opponent_range.add(kC);
   auto game = MakeSolver(Config(), R(kA), opponent_range);
   game->run(20);
-  const auto opponent = game->extract_average_policy();
-  REQUIRE(opponent.ok());
+  const Policy opponent = game->extract_average_policy();
 
   const BestResponseConfig config{30, 20, 91};
   const auto first = TrainApproximateBestResponse(
       game->config(), game->deals(), game->history(), game->initial_public(),
-      game->model(), Player::A, *opponent, config);
+      game->model(), Player::A, opponent, config);
   const auto second = TrainApproximateBestResponse(
       game->config(), game->deals(), game->history(), game->initial_public(),
-      game->model(), Player::A, *opponent, config);
+      game->model(), Player::A, opponent, config);
   const StrategyLookup lookup = [&opponent](
       InfoSetKey key, std::span<float> output) {
-    return opponent->strategy(key, output);
+    return opponent.strategy(key, output);
   };
   const auto generic = TrainApproximateBestResponse(
       game->config(), game->deals(), game->history(), game->initial_public(),
@@ -563,13 +545,12 @@ TEST_CASE("approximate responses are reproducible and respect infosets") {
 }
 
 TEST_CASE("approximate response continues after infoset capacity") {
-  auto game = MakeSolver(Config(true, 1), R(kA), R(kB));
+  auto game = MakeSolver(Config(1), R(kA), R(kB));
   game->run(1);
-  const auto opponent = game->extract_average_policy();
-  REQUIRE(opponent.ok());
+  const Policy opponent = game->extract_average_policy();
   const auto response = TrainApproximateBestResponse(
       game->config(), game->deals(), game->history(), game->initial_public(),
-      game->model(), Player::A, *opponent, BestResponseConfig{10, 2, 7});
+      game->model(), Player::A, opponent, BestResponseConfig{10, 2, 7});
   REQUIRE(response.ok());
   CHECK(response->response_policy.rows.size() == 1);
 }
@@ -622,22 +603,20 @@ TEST_CASE("approximate response learns a profitable shared action") {
 
 TEST_CASE("exploitability reports both responder perspectives") {
   auto game = MakeSolver(Config(), R(kA), R(kB), WinningRiverRoot());
-  const auto initial_policy = game->extract_average_policy();
-  REQUIRE(initial_policy.ok());
+  const Policy initial_policy = game->extract_average_policy();
   const auto initial = EstimateExploitability(
       game->config(), game->deals(), game->history(), game->initial_public(),
-      game->model(), *initial_policy, BestResponseConfig{200, 2, 23});
+      game->model(), initial_policy, BestResponseConfig{200, 2, 23});
   REQUIRE(initial.ok());
 
   game->run(200);
-  const auto policy = game->extract_average_policy();
-  REQUIRE(policy.ok());
+  const Policy policy = game->extract_average_policy();
   const auto estimate = EstimateExploitability(
       game->config(), game->deals(), game->history(), game->initial_public(),
-      game->model(), *policy, BestResponseConfig{200, 2, 23});
+      game->model(), policy, BestResponseConfig{200, 2, 23});
   const StrategyLookup lookup = [&policy](
       InfoSetKey key, std::span<float> output) {
-    return policy->strategy(key, output);
+    return policy.strategy(key, output);
   };
   size_t factory_calls = 0;
   const auto parallel = EstimateExploitabilityParallel(

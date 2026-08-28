@@ -137,10 +137,7 @@ absl::StatusOr<DealDistribution> DealDistribution::Create(
               return (a.mask() & b.mask()) == 0;
             });
       });
-  if (!compatible) {
-    return absl::InvalidArgumentError(
-        "ranges contain no non-overlapping hands");
-  }
+  if (!compatible) return absl::InvalidArgumentError("no compatible deals");
   return distribution;
 }
 
@@ -188,7 +185,6 @@ void CfrState::add_regret(uint32_t offset, size_t action, double delta) {
 void CfrState::add_strategy(uint32_t offset,
                             std::span<const float> probabilities,
                             double weight) {
-  if (!accumulate_average_strategy_) return;
   for (float probability : probabilities) {
     float& sum = strategy_sum[offset++];
     const float delta = static_cast<float>(weight * probability);
@@ -217,18 +213,15 @@ void CfrState::strategy(std::span<float> values,
   }
 }
 
-CfrState::CfrState(const SolverConfig& config, bool accumulate_average_strategy)
-    : max_info_sets_(static_cast<size_t>(config.max_info_sets)),
-      accumulate_average_strategy_(accumulate_average_strategy) {
+CfrState::CfrState(const SolverConfig& config)
+    : max_info_sets_(static_cast<size_t>(config.max_info_sets)) {
   size_t max_actions = 3;
   for (const auto& fractions : config.bet_abstraction.pot_fractions) {
     max_actions = std::max(max_actions, fractions.size() + 3);
   }
   rows_.reserve(max_info_sets_);
   regret_sum.reserve(max_info_sets_ * max_actions);
-  if (accumulate_average_strategy) {
-    strategy_sum.reserve(max_info_sets_ * max_actions);
-  }
+  strategy_sum.reserve(max_info_sets_ * max_actions);
 }
 
 std::optional<uint32_t> CfrState::find(InfoSetKey key) const {
@@ -249,7 +242,7 @@ std::optional<uint32_t> CfrState::find_or_create(
   const auto [row, inserted] = rows_.try_emplace(key, offset);
   if (!inserted) return row->second;
   regret_sum.resize(offset + action_count);
-  if (accumulate_average_strategy_) strategy_sum.resize(offset + action_count);
+  strategy_sum.resize(offset + action_count);
   return offset;
 }
 
@@ -286,12 +279,10 @@ absl::Status ValidateSolverConfig(const SolverConfig& config) {
     for (size_t index = 0; index < fractions.size(); ++index) {
       const double fraction = fractions[index];
       if (!std::isfinite(fraction) || fraction <= 0.0) {
-        return absl::InvalidArgumentError(
-            "pot fractions must be finite and positive");
+        return absl::InvalidArgumentError("invalid pot fraction");
       }
       if (index > 0 && fractions[index - 1] >= fraction) {
-        return absl::InvalidArgumentError(
-            "pot fractions must be strictly increasing");
+        return absl::InvalidArgumentError("pot fractions not increasing");
       }
     }
   }
@@ -315,7 +306,7 @@ TabularCfrSolver::TabularCfrSolver(SolverConfig config,
       initial_public_(std::move(initial_public)),
       model_(model),
       rng_(12345),
-      state_(config_, config_.accumulate_average_strategy) {}
+      state_(config_) {}
 
 absl::StatusOr<TabularCfrSolver> TabularCfrSolver::Create(SolveSpec spec) {
   const absl::Status config_status = ValidateSolverConfig(spec.config);
@@ -546,32 +537,25 @@ double TabularCfrSolver::evaluate_current(int samples) {
   return evaluate_deals(samples, EvaluationMode::Current);
 }
 
-absl::StatusOr<double> TabularCfrSolver::evaluate_average(int samples) {
-  if (!config_.accumulate_average_strategy) {
-    return absl::FailedPreconditionError(
-        "average strategy accumulation is disabled");
-  }
+double TabularCfrSolver::evaluate_average(int samples) {
   return evaluate_deals(samples, EvaluationMode::Average);
 }
 
-absl::StatusOr<Policy> ExtractAveragePolicy(const CfrState& state,
-    const HistoryTree& history, ModelFingerprint model) {
+Policy ExtractAveragePolicy(const CfrState& state, const HistoryTree& history,
+                            ModelFingerprint model) {
   Policy policy;
   policy.model = model;
   for (const auto& [key, offset] : state.row_entries()) {
-    if (Index(key.history) >= history.nodes.size())
-      return absl::DataLossError("infoset references an invalid history");
+    assert(Index(key.history) < history.nodes.size());
     const HistoryNode& node = history.nodes[Index(key.history)];
-    if (!std::holds_alternative<DecisionState>(node.state) ||
-        offset + node.child_count > state.strategy_sum.size())
-      return absl::DataLossError("infoset strategy span is invalid");
+    assert(std::holds_alternative<DecisionState>(node.state));
+    assert(offset + node.child_count <= state.strategy_sum.size());
 
     const auto out = static_cast<uint32_t>(policy.probabilities.size());
     double mass = 0.0;
     for (size_t action = 0; action < node.child_count; ++action) {
       const float value = state.strategy_sum[offset + action];
-      if (!std::isfinite(value))
-        return absl::DataLossError("nonfinite average strategy value");
+      assert(std::isfinite(value));
       policy.probabilities.push_back(std::max(0.0f, value));
       mass += policy.probabilities.back();
     }
@@ -587,10 +571,7 @@ absl::StatusOr<Policy> ExtractAveragePolicy(const CfrState& state,
   return policy;
 }
 
-absl::StatusOr<Policy> TabularCfrSolver::extract_average_policy() const {
-  if (!config_.accumulate_average_strategy)
-    return absl::FailedPreconditionError(
-        "average strategy accumulation is disabled");
+Policy TabularCfrSolver::extract_average_policy() const {
   return ExtractAveragePolicy(state_, history_, model_);
 }
 

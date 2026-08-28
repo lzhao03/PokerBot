@@ -35,7 +35,6 @@ ABSL_FLAG(int, chance_samples, 1, "chance samples per chance node");
 ABSL_FLAG(int, max_info_sets, 500000, "maximum infosets");
 ABSL_FLAG(int, threads, 1, "training worker threads after infoset prefill");
 ABSL_FLAG(int64_t, max_memory_mb, 4096, "hard memory limit in MB; 0 is unlimited");
-ABSL_FLAG(bool, accumulate_average_strategy, true, "store the average strategy");
 ABSL_FLAG(bool, external_sampling, false, "sample opponent actions during training");
 ABSL_FLAG(std::string, public_abstraction, "texture", "exact, texture, or compact_texture");
 ABSL_FLAG(std::string, private_abstraction, "handcrafted36", "exact or handcrafted36");
@@ -115,7 +114,6 @@ absl::StatusOr<poker::SolverConfig> ConfigFromFlags() {
   config.betting_rules.minimum_bet = big_blind;
   config.chance_samples = absl::GetFlag(FLAGS_chance_samples);
   config.max_info_sets = absl::GetFlag(FLAGS_max_info_sets);
-  config.accumulate_average_strategy = absl::GetFlag(FLAGS_accumulate_average_strategy);
   config.external_sampling = absl::GetFlag(FLAGS_external_sampling);
 
   const std::string public_abstraction = absl::GetFlag(FLAGS_public_abstraction);
@@ -205,14 +203,13 @@ absl::Status RunTabular(poker::SolveSpec spec, uint64_t iterations, int threads)
   if (policy_output.empty() && neural_output.empty()) return absl::OkStatus();
 
   const auto policy = solver->extract_average_policy();
-  if (!policy.ok()) return policy.status();
   if (!policy_output.empty()) {
-    const absl::Status saved = poker::SavePolicy(*policy, policy_output);
+    const absl::Status saved = poker::SavePolicy(policy, policy_output);
     if (!saved.ok()) return saved;
   }
   if (!neural_output.empty()) {
     const auto fitted = poker::FitNeuralPolicy(
-        solver->history(), solver->config().card_abstraction, solver->model(), *policy,
+        solver->history(), solver->config().card_abstraction, solver->model(), policy,
         {.seed = absl::GetFlag(FLAGS_neural_seed),
          .steps = absl::GetFlag(FLAGS_neural_steps),
          .batch_size = absl::GetFlag(FLAGS_neural_batch_size),

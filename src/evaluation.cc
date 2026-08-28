@@ -189,7 +189,7 @@ absl::StatusOr<BestResponseResult> TrainResponse(
   if (config.training_iterations == 0 || config.evaluation_samples == 0) {
     return absl::InvalidArgumentError("best-response iteration counts must be positive");
   }
-  CfrState response_state(solver_config, true);
+  CfrState response_state(solver_config);
   std::mt19937 rng = MakeEvaluationRng(config.seed);
   uint64_t opponent_lookups = 0;
   uint64_t missing_opponent_lookups = 0;
@@ -274,9 +274,7 @@ absl::StatusOr<BestResponseResult> TrainResponse(
     ++response_state.iterations;
   }
 
-  auto response = ExtractAveragePolicy(response_state, history, model);
-  if (!response.ok()) return response.status();
-  result.response_policy = std::move(*response);
+  result.response_policy = ExtractAveragePolicy(response_state, history, model);
   const uint64_t evaluation_seed = config.seed ^ 0x9e3779b97f4a7c15ULL;
   const StrategyLookup response_lookup = [&result, responder_fallback](InfoSetKey key,
                                                                        std::span<float> output) {
