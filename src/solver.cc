@@ -168,6 +168,14 @@ void FillUniform(std::span<float> probabilities) {
   }
 }
 
+StrategyLookup TableStrategy(InfoSetTable& table, std::vector<float>& values) {
+  return [&table, &values](InfoSetKey key, std::span<float> probabilities) {
+    const auto row = table.find(key);
+    table.strategy(values, row, probabilities);
+    return row.has_value();
+  };
+}
+
 }  // namespace
 
 void InfoSetTable::add_regret(uint32_t offset, size_t action, double delta) {
@@ -481,68 +489,12 @@ void TabularCfrSolver::run(uint64_t iterations, int threads) {
   iterations_ += remaining;
 }
 
-double TabularCfrSolver::evaluate_deal(const Deal& deal,
-                                       EvaluationMode mode) {
-  TerminalEvaluator terminal_utility(deal.hands);
-  const ObservedPosition initial_position =
-      ObservedPosition::Observe(initial_public_, deal);
-  ChanceSampler sample_chance{config_.card_abstraction, deal, rng_};
-  auto evaluate = [&](auto&& self,
-                      HistoryId history,
-                      const ObservedPosition& position) -> double {
-    const HistoryNode& node = history_.nodes[Index(history)];
-    if (IsTerminal(node.state)) {
-      ++stats_.terminal_visits;
-      return terminal_utility(node.state, position.board(), Player::A);
-    }
-    if (const auto* chance = std::get_if<ChanceState>(&node.state)) {
-      stats_.chance_samples += static_cast<uint64_t>(config_.chance_samples);
-      const HistoryId child = history_.children[node.children_begin];
-      const auto& child_state = history_.nodes[Index(child)].state;
-      double value = 0.0;
-      for (int draw = 0; draw < config_.chance_samples; ++draw) {
-        const auto next = sample_chance(position, *chance, child_state);
-        value += self(self, child, next);
-      }
-      return value / config_.chance_samples;
-    }
-
-    const Player player = std::get<DecisionState>(node.state).actor;
-    const uint8_t action_count = node.child_count;
-    const InfoSetKey key = position.info_set_key(history, player);
-    std::array<float, kMaxActionsPerNode> probabilities;
-    const std::span<float> strategy(probabilities.data(), action_count);
-    std::span<float> values = mode == EvaluationMode::Average
-                                  ? std::span<float>(info_sets_.strategy_sum)
-                                  : std::span<float>(info_sets_.regret_sum);
-    info_sets_.strategy(values, info_sets_.find(key), strategy);
-
-    double value = 0.0;
-    for (uint8_t action = 0; action < action_count; ++action) {
-      const HistoryId child = history_.children[node.children_begin + action];
-      value += probabilities[action] * self(self, child, position);
-    }
-    return value;
-  };
-
-  return evaluate(evaluate, HistoryId{}, initial_position);
+StrategyLookup TabularCfrSolver::current_strategy() {
+  return TableStrategy(info_sets_, info_sets_.regret_sum);
 }
 
-double TabularCfrSolver::evaluate_deals(int samples, EvaluationMode mode) {
-  if (samples <= 0) return 0.0;
-  double value = 0.0;
-  for (int sample = 0; sample < samples; ++sample) {
-    value += evaluate_deal(deals_.sample(rng_), mode);
-  }
-  return value / samples;
-}
-
-double TabularCfrSolver::evaluate_current(int samples) {
-  return evaluate_deals(samples, EvaluationMode::Current);
-}
-
-double TabularCfrSolver::evaluate_average(int samples) {
-  return evaluate_deals(samples, EvaluationMode::Average);
+StrategyLookup TabularCfrSolver::average_strategy() {
+  return TableStrategy(info_sets_, info_sets_.strategy_sum);
 }
 
 Policy ExtractAveragePolicy(const InfoSetTable& table, const HistoryTree& tree,

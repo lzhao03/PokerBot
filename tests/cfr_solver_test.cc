@@ -230,7 +230,12 @@ TEST_CASE("evaluation does not mutate the infoset table") {
 
   const InfoSetTable before = TabularCfrSolverTestAccess::table(*solver);
   const uint64_t updates = solver->stats().decision_visits;
-  CHECK(std::isfinite(solver->evaluate_average(1)));
+  const StrategyLookup average = solver->average_strategy();
+  const auto value = EstimateExpectedValue(
+      solver->config(), solver->deals(), solver->history(),
+      solver->initial_public(), average, average, 1, 17);
+  REQUIRE(value.ok());
+  CHECK(std::isfinite(value->mean));
   CHECK(solver->history_count() == history_count);
   CHECK(solver->stats().decision_visits == updates);
   CHECK(TabularCfrSolverTestAccess::table(*solver).row_entries() ==

@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <random>
 #include <span>
@@ -70,6 +71,9 @@ struct InfoSetKey {
   }
 };
 static_assert(sizeof(InfoSetKey) == 16);
+
+// Returning false requests uniform fallback; callers always initialize output.
+using StrategyLookup = std::function<bool(InfoSetKey, std::span<float>)>;
 
 struct InfoSetTable {
   explicit InfoSetTable(const SolverConfig& config);
@@ -195,8 +199,8 @@ class TabularCfrSolver {
 
   void run(uint64_t iterations, int threads = 1);
 
-  double evaluate_current(int samples);
-  double evaluate_average(int samples);
+  StrategyLookup current_strategy();
+  StrategyLookup average_strategy();
   Policy extract_average_policy() const;
 
   double expected_value(Player player) const;
@@ -228,13 +232,6 @@ class TabularCfrSolver {
                    PublicPosition initial_public,
                    ModelFingerprint model);
 
-  enum class EvaluationMode : uint8_t {
-    Current,
-    Average,
-  };
-
-  double evaluate_deal(const Deal& deal, EvaluationMode mode);
-  double evaluate_deals(int samples, EvaluationMode mode);
   SolverConfig config_;
   DealDistribution deals_;
   HistoryTree history_;

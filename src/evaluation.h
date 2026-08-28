@@ -10,8 +10,6 @@
 
 namespace poker {
 
-// Returning false requests uniform fallback; callers always initialize output.
-using StrategyLookup = std::function<bool(InfoSetKey, std::span<float>)>;
 using StrategyLookupFactory = std::function<StrategyLookup()>;
 
 StrategyLookup MakeStrategyLookup(const Policy& policy);

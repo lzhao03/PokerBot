@@ -264,8 +264,14 @@ int main(int argc, char** argv) {
 
   if (!absl::GetFlag(FLAGS_evaluate)) return 0;
 
-  solver->reset_stats();
-  Measure("evaluate_range", [&] { return solver->evaluate_average(samples); });
+  const poker::StrategyLookup average = solver->average_strategy();
+  const uint64_t evaluation_seed = absl::GetFlag(FLAGS_evaluation_seed);
+  Measure("evaluate_range", [&] {
+    return poker::EstimateExpectedValue(
+        solver->config(), solver->deals(), solver->history(),
+        solver->initial_public(), average, average,
+        static_cast<uint64_t>(samples), evaluation_seed)->mean;
+  });
 
   const auto policy = solver->extract_average_policy();
   std::cout << "policy_rows\t" << policy.rows.size() << '\n'
@@ -285,7 +291,7 @@ int main(int argc, char** argv) {
       solver->config(), solver->deals(), solver->history(),
       solver->initial_public(), solver->model(), policy, policy,
       static_cast<uint64_t>(samples),
-      absl::GetFlag(FLAGS_evaluation_seed),
+      evaluation_seed,
       absl::GetFlag(FLAGS_reach_coverage));
   if (profile.ok()) {
     std::cout << "policy_ev\t" << profile->mean << '\n'
